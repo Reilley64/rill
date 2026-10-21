@@ -15,7 +15,7 @@ Later tickets changed some of these. The ticket behind each change is in parenth
 - `guard <condition> else { ... }` and `guard let x = <Result> else (error) { ... }`. `(error)` binds the `Err` value. `guard` also takes a `Result` or `Option` directly, as in `guard send(&jobs, n) else { return; }`. The `else` block must leave its scope with `return`, `break`, `continue`, or a `never` call. (#11)
 - Postfix `?` returns an `Err` or `none` early. An unused `Result` is a compile error; `let _ = x;` drops one on purpose. (#11)
 - No semicolon after a block, as in TypeScript.
-- `let x = 1;` binds a name. There is no mutation at all, so there is no `const` and no `mut`. Mutable variables are deferred.
+- `let x = 1;` binds a name. #2 had no mutation at all. Mutation is now in scope, and its design is an open ticket on the map.
 - A plain `T` parameter takes ownership and `&T` borrows. Callers write `&x` to borrow, except for types that copy implicitly, such as `int` and `Point`. `copy(x)` copies, and `Shared<T>` gives a value several owners. (#7)
 - A name needs an overload declaration before it can have overloads: a body-less signature such as `function show<T>(value: &T): string;`. Each overload is that signature with more specific types. (#10)
 - The most specific overload wins. `show(items: &List<Point>)` beats `show<T>(items: &List<T>)`, so a generic overload is the default for types without their own overload.
@@ -24,8 +24,8 @@ Later tickets changed some of these. The ticket behind each change is in parenth
 - A generic overload states what it needs with `where show(T)`. (#10)
 - If no overload is the most specific, the call is a compile error.
 - `go f(x);` runs `f`, which must return `void`, in the background. It returns a `Routine`, and `stop(&routine)` stops it at its next suspend point. (#8)
-- `channel<int>(10)` returns a `Sender<int>` and a `Receiver<int>`. The channel closes when its last `Sender` is freed. `first([tag(...), ...])` takes exactly one value from several receivers, and `after(ms)` is a receiver for timeouts. (#8)
-- `std::routine` runs functions at the same time and waits, like TypeScript's `Promise` helpers: `all`, `allSettled`, `race`, and `any`. When `race` or `any` has a winner, or `all` fails early, the other functions stop at their next suspend point. A `race` of receives can lose a message; use `first`.
+- `channel<int>(10)` returns a `Sender<int>` and a `Receiver<int>`. The channel closes when its last `Sender` is freed. `select([tag(...), ...])` takes exactly one value from several receivers. It was called `first` in #8 and was renamed so it doesn't share a name with `std::list`'s `first`, and `after(ms)` is a receiver for timeouts. (#8)
+- `std::routine` runs functions at the same time and waits, like TypeScript's `Promise` helpers: `all`, `allSettled`, `race`, and `any`. When `race` or `any` has a winner, or `all` fails early, the other functions stop at their next suspend point. A `race` of receives can lose a message; use `select`.
 - When the top-level code ends, the program exits, as in Go. Running goroutines stop. A batch job or queue keeps the program alive by waiting on a channel.
 - `for (let x of &list)` loops over a list. `for (let x of &receiver)` receives until the channel is closed.
 - Arrow functions (`(x) => f(x)`), tuples (`[int, int]`), and destructuring (`let [a, b] = ...`) work as in TypeScript.
