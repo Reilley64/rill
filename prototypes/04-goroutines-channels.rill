@@ -1,0 +1,129 @@
+import std::log;
+import std::list::{List, first, sum, length};
+import std::channel::{Sender, Receiver, channel, send, receive, after};
+import std::shared::{Shared, shared};
+import std::routine::{Routine, all, allSettled, race, any, tag, stop};
+import std::result::{Result, Ok, Err};
+import std::time::sleep;
+
+// Background work: a queue of jobs shared by two workers.
+
+function produce(jobs: Sender<int>, numbers: List<int>): void {
+  for (let n of &numbers) {
+    guard let _ = send(&jobs, n) else {
+      return;
+    }
+  }
+}
+
+function square(inbox: Shared<Receiver<int>>, results: Sender<string>, worker: int): void {
+  for (let n of &inbox) {
+    sleep(10);
+    guard let _ = send(&results, `worker ${worker}: ${n} squared is ${n * n}`) else {
+      return;
+    }
+  }
+}
+
+let numbers = [1, 2, 3, 4];
+let [jobs, inbox] = channel<int>();
+let [results, resultInbox] = channel<string>();
+let queue = shared(inbox);
+
+go produce(jobs, copy(numbers));
+go square(copy(queue), copy(results), 1);
+go square(queue, results, 2);
+
+for (let line of &resultInbox) {
+  log(line);
+}
+
+// Waiting on several channels: first takes exactly one value.
+
+function heartbeat(beats: Sender<string>): void {
+  sleep(5);
+  guard let _ = send(&beats, "beat") else {
+    return;
+  }
+  heartbeat(beats);
+}
+
+let [beats, beatInbox] = channel<string>();
+let pulse: Routine = go heartbeat(beats);
+
+let next = first([
+  tag("beat", &beatInbox),
+  tag("idle", after(50)),
+]);
+log(match (next) {
+  { kind: "beat" } => "got a beat",
+  { kind: "idle" } => "idle",
+});
+stop(&pulse);
+
+// Waiting for results: run functions at the same time and wait.
+
+function slowSum(numbers: &List<int>): int {
+  sleep(20);
+  return numbers |> sum;
+}
+
+function slowLength(numbers: &List<int>): int {
+  sleep(10);
+  return numbers |> length;
+}
+
+function quote(shop: string, delay: int): Result<int>;
+
+function quote(shop: "closed", delay: int): Result<int> {
+  sleep(delay);
+  return Err("shop is closed");
+}
+
+function quote(shop: string, delay: int): Result<int> {
+  sleep(delay);
+  return Ok(delay * 10);
+}
+
+function describe<T>(result: &Result<T>): string;
+
+function describe(result: &Result<int>): string {
+  guard let price = result else (error) {
+    return `error: ${error}`;
+  }
+  return `price ${price}`;
+}
+
+function describe(result: &Result<[int, int]>): string {
+  guard let [one, two] = result else (error) {
+    return `error: ${error}`;
+  }
+  return `prices ${one} and ${two}`;
+}
+
+let [total, count] = all(() => slowSum(&numbers), () => slowLength(&numbers));
+log(`average ${total / count}`);
+
+let quotes = all(() => quote("north", 30), () => quote("closed", 10));
+log(`all: ${describe(&quotes)}`);
+
+let fastest = race(() => quote("north", 30), () => quote("south", 20));
+log(`race: ${describe(&fastest)}`);
+
+let firstOk = any(() => quote("closed", 10), () => quote("south", 20));
+log(`any: ${describe(&firstOk)}`);
+
+let [a, b] = allSettled(() => quote("closed", 10), () => quote("south", 20));
+log(`allSettled: ${describe(&a)}, ${describe(&b)}`);
+
+// Output (the first four lines come in any order):
+// worker 1: 1 squared is 1
+// worker 2: 2 squared is 4
+// worker 1: 3 squared is 9
+// worker 2: 4 squared is 16
+// got a beat
+// average 2
+// all: error: shop is closed
+// race: price 200
+// any: price 200
+// allSettled: error: shop is closed, price 200
