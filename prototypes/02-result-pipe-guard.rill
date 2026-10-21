@@ -1,0 +1,48 @@
+import std::log;
+import std::result::{Result, Ok, Err, andThen, map};
+import std::string::parseInt;
+
+function parsePort(text: string): Result<int> {
+  guard let port = parseInt(text) else (error) {
+    return Err(`not a port: ${text}`, error);
+  }
+  guard port > 0 && port < 65536 else {
+    return Err(`out of range: ${port}`);
+  }
+  return Ok(port);
+}
+
+function rejectReserved(port: int): Result<int> {
+  guard port >= 1024 else {
+    return Err(`reserved port: ${port}`);
+  }
+  return Ok(port);
+}
+
+function toAddress(port: int): string {
+  return `localhost:${port}`;
+}
+
+function start(text: string): string {
+  let address = text
+    |> parsePort
+    |> andThen(rejectReserved)
+    |> map(toAddress);
+
+  guard let listening = address else (error) {
+    return `error: ${error}`;
+  }
+  return `listening on ${listening}`;
+}
+
+log(start("8080"));
+log(start("80x0"));
+
+// Output:
+// listening on localhost:8080
+// error: not a port: 80x0
+//   at parsePort (02-result-pipe-guard.rill:7)
+//   at start (02-result-pipe-guard.rill:27)
+// caused by: invalid digit "x" at index 2
+//   at parseInt (std/string.rill:41)
+//   at parsePort (02-result-pipe-guard.rill:6)

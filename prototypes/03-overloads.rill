@@ -1,0 +1,75 @@
+import std::log;
+import std::list::{List, map, join};
+
+type Point = { x: int; y: int };
+
+function show(value: int): string {
+  return `${value}`;
+}
+
+function show(value: true): string {
+  return "yes";
+}
+
+function show(value: false): string {
+  return "no";
+}
+
+function show(point: Point): string {
+  return `(${show(point.x)}, ${show(point.y)})`;
+}
+
+function show<T>(items: List<T>): string {
+  let parts = items |> map(show) |> join(", ");
+  return `[${parts}]`;
+}
+
+function show(points: List<Point>): string {
+  let parts = points |> map(show) |> join(" -> ");
+  return `path ${parts}`;
+}
+
+function greeting(language: "fr"): string {
+  return "bonjour";
+}
+
+function greeting(language: "es"): string {
+  return "hola";
+}
+
+function greeting(language: string): string {
+  return "hello";
+}
+
+function fib(n: 0): int {
+  return 0;
+}
+
+function fib(n: 1): int {
+  return 1;
+}
+
+function fib(n: int): int {
+  return fib(n - 1) + fib(n - 2);
+}
+
+let origin: Point = { x: 0, y: 0 };
+
+log(show(42));
+log(show(true));
+log(show(origin));
+log(show([1, 2, 3]));
+log(show([origin, { x: 3, y: 4 }]));
+log(greeting("fr"));
+log(greeting("de"));
+log(show(fib(10)));
+
+// Output:
+// 42
+// yes
+// (0, 0)
+// [1, 2, 3]
+// path (0, 0) -> (3, 4)
+// bonjour
+// hello
+// 55
