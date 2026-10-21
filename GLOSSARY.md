@@ -13,7 +13,7 @@ A lightweight concurrent unit of execution, started with `go f(x)`.
 _Avoid_: thread, task, fiber, green thread
 
 **Guard**:
-A statement of the form `guard <condition> else { ... }` whose `else` block must leave the enclosing function. It can also unwrap a value, as in `guard const user = findUser(id) else { ... }`.
+A statement of the form `guard <condition> else { ... }` whose `else` block must leave the enclosing function. It can also unwrap a value, as in `guard let user = findUser(id) else { ... }`.
 _Avoid_: precondition, assert, early return
 
 **Overload**:

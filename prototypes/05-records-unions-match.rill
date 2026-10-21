@@ -1,0 +1,55 @@
+import std::log;
+import std::list::{List, map, sum};
+
+type Point = { x: float; y: float };
+
+type Shape =
+  | { kind: "circle"; center: Point; radius: float }
+  | { kind: "rect"; corner: Point; width: float; height: float }
+  | { kind: "empty" };
+
+function area(shape: Shape): float {
+  return match (shape) {
+    { kind: "circle", radius } => 3.14 * radius * radius,
+    { kind: "rect", width, height } => width * height,
+    { kind: "empty" } => 0.0,
+  };
+}
+
+function describe(shape: Shape): string {
+  return match (shape) {
+    { kind: "circle", center: { x: 0.0, y: 0.0 } } => "a circle at the origin",
+    { kind: "circle", radius } if radius > 10.0 => "a big circle",
+    { kind: "circle" } => "a circle",
+    { kind: "rect", width, height } if width == height => "a square",
+    { kind: "rect" } => "a rectangle",
+    _ => "nothing",
+  };
+}
+
+function grow(shape: Shape, by: float): Shape {
+  return match (shape) {
+    { kind: "circle", radius } => { ...shape, radius: radius * by },
+    { kind: "rect", width, height } => { ...shape, width: width * by, height: height * by },
+    { kind: "empty" } => shape,
+  };
+}
+
+let shapes: List<Shape> = [
+  { kind: "circle", center: { x: 5.0, y: 5.0 }, radius: 12.0 },
+  { kind: "rect", corner: { x: 1.0, y: 1.0 }, width: 2.0, height: 2.0 },
+  { kind: "empty" },
+];
+
+for (let shape of shapes) {
+  log(`${describe(shape)} with area ${area(shape)}`);
+}
+
+let bigger = shapes |> map((shape) => grow(shape, 2.0));
+log(`total area after growing: ${bigger |> map(area) |> sum}`);
+
+// Output:
+// a big circle with area 452.16
+// a square with area 4
+// nothing with area 0
+// total area after growing: 1824.64
