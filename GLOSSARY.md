@@ -4,6 +4,14 @@ Rill is a functional-first programming language with TypeScript-style syntax. It
 
 ## Language
 
+**Borrow**:
+Access to a value through a reference (`&T`) without owning it. The compiler works out what each borrow points into, so a reference type never names a lifetime.
+_Avoid_: lifetime, pointer
+
+**Dispose**:
+The `dispose` overload for a type: a function the compiler calls when a value of that type is freed. Calling it directly ends the value early.
+_Avoid_: drop, destructor, deinit, finalizer
+
 **Function**:
 A named or anonymous piece of code that takes arguments and returns a value. Every Rill function can suspend, and callers wait for it without any extra syntax, so Rill has only one kind of function.
 _Avoid_: async function, sync function, method
@@ -19,3 +27,7 @@ _Avoid_: precondition, assert, early return
 **Overload**:
 One of several functions that share a name and differ in their parameter types. Overloads are how Rill gives one operation different behavior for different types.
 _Avoid_: method, trait implementation, instance
+
+**Shared**:
+A `Shared<T>` handle gives a value more than one owner by counting its owners. It is the only counted value in Rill.
+_Avoid_: Arc, Rc
