@@ -3,7 +3,7 @@ import std::result::{Result, Ok, Err, andThen, map};
 import std::string::parseInt;
 
 function parsePort(text: string): Result<int> {
-  guard let port = parseInt(text) else (error) {
+  guard let port = parseInt(&text) else (error) {
     return Err(`not a port: ${text}`, error);
   }
   guard port > 0 && port < 65536 else {
@@ -42,7 +42,7 @@ log(start("80x0"));
 // listening on localhost:8080
 // error: not a port: 80x0
 //   at parsePort (02-result-pipe-guard.rill:7)
-//   at start (02-result-pipe-guard.rill:27)
+//   at start (02-result-pipe-guard.rill:28)
 // caused by: invalid digit "x" at index 2
 //   at parseInt (std/string.rill:41)
 //   at parsePort (02-result-pipe-guard.rill:6)
