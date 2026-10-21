@@ -1,6 +1,6 @@
 import std::log;
-import std::list::{List, first, sum, length};
-import std::channel::{Sender, Receiver, channel, send, receive, after};
+import std::list::{List, sum, length};
+import std::channel::{Sender, Receiver, channel, send, receive, after, select};
 import std::shared::{Shared, shared};
 import std::routine::{Routine, all, allSettled, race, any, tag, stop};
 import std::result::{Result, Ok, Err};
@@ -38,7 +38,7 @@ for (let line of &resultInbox) {
   log(line);
 }
 
-// Waiting on several channels: first takes exactly one value.
+// Waiting on several channels: select takes exactly one value.
 
 function heartbeat(beats: Sender<string>): void {
   sleep(5);
@@ -51,7 +51,7 @@ function heartbeat(beats: Sender<string>): void {
 let [beats, beatInbox] = channel<string>();
 let pulse: Routine = go heartbeat(beats);
 
-let next = first([
+let next = select([
   tag("beat", &beatInbox),
   tag("idle", after(50)),
 ]);
