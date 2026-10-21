@@ -8,7 +8,7 @@ type Shape =
   | { kind: "rect"; corner: Point; width: float; height: float }
   | { kind: "empty" };
 
-function area(shape: Shape): float {
+function area(shape: &Shape): float {
   return match (shape) {
     { kind: "circle", radius } => 3.14 * radius * radius,
     { kind: "rect", width, height } => width * height,
@@ -16,7 +16,7 @@ function area(shape: Shape): float {
   };
 }
 
-function describe(shape: Shape): string {
+function describe(shape: &Shape): string {
   return match (shape) {
     { kind: "circle", center: { x: 0.0, y: 0.0 } } => "a circle at the origin",
     { kind: "circle", radius } if radius > 10.0 => "a big circle",
@@ -41,12 +41,13 @@ let shapes: List<Shape> = [
   { kind: "empty" },
 ];
 
-for (let shape of shapes) {
+for (let shape of &shapes) {
   log(`${describe(shape)} with area ${area(shape)}`);
 }
 
+// shapes moves into map, so grow owns each shape and rebuilds it in place.
 let bigger = shapes |> map((shape) => grow(shape, 2.0));
-log(`total area after growing: ${bigger |> map(area) |> sum}`);
+log(`total area after growing: ${&bigger |> map(area) |> sum}`);
 
 // Output:
 // a big circle with area 452.16
