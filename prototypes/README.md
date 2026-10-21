@@ -9,7 +9,9 @@ Later tickets changed some of these. The ticket behind each change is in parenth
 - Statements end with a semicolon. Semicolons are required.
 - `import std::log;` imports one name. `::` separates path segments.
 - Top-level code runs only in the file you run. There is no `main` function. Top-level code in an imported file is ignored.
-- `x |> f(y)` means `f(x, y)`. `x |> f` means `f(x)`.
+- `x |> f(y)` means `f(x, y)`. `x |> f` means `f(x)`. `x |> pad(10, _)` means `pad(10, x)`. The right side is a name, a call, or a parenthesized arrow function. `|>` binds looser than arithmetic, comparison, and logical operators, groups left to right, and unary `&` binds tighter. (#12)
+- `?` after a pipe step applies to that step's result: `text |> parsePort? |> toAddress` means `toAddress(parsePort(text)?)`. (#12)
+- There is no ternary. `if (c) a else b` is an expression that always needs `else`. On its own line, `if` is a TypeScript-style statement with blocks and `else if`. (#12)
 - `guard <condition> else { ... }` and `guard let x = <Result> else (error) { ... }`. `(error)` binds the `Err` value. `guard` also takes a `Result` or `Option` directly, as in `guard send(&jobs, n) else { return; }`. The `else` block must leave its scope with `return`, `break`, `continue`, or a `never` call. (#11)
 - Postfix `?` returns an `Err` or `none` early. An unused `Result` is a compile error; `let _ = x;` drops one on purpose. (#11)
 - No semicolon after a block, as in TypeScript.
