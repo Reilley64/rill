@@ -10,7 +10,7 @@ import std::time::sleep;
 
 function produce(jobs: Sender<int>, numbers: List<int>): void {
   for (let n of &numbers) {
-    guard let _ = send(&jobs, n) else {
+    guard send(&jobs, n) else {
       return;
     }
   }
@@ -19,7 +19,7 @@ function produce(jobs: Sender<int>, numbers: List<int>): void {
 function square(inbox: Shared<Receiver<int>>, results: Sender<string>, worker: int): void {
   for (let n of &inbox) {
     sleep(10);
-    guard let _ = send(&results, `worker ${worker}: ${n} squared is ${n * n}`) else {
+    guard send(&results, `worker ${worker}: ${n} squared is ${n * n}`) else {
       return;
     }
   }
@@ -42,7 +42,7 @@ for (let line of &resultInbox) {
 
 function heartbeat(beats: Sender<string>): void {
   sleep(5);
-  guard let _ = send(&beats, "beat") else {
+  guard send(&beats, "beat") else {
     return;
   }
   heartbeat(beats);
