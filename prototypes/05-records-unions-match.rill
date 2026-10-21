@@ -29,8 +29,8 @@ function describe(shape: &Shape): string {
 
 function grow(shape: Shape, by: float): Shape {
   return match (shape) {
-    { kind: "circle", radius } => { ...shape, radius: radius * by },
-    { kind: "rect", width, height } => { ...shape, width: width * by, height: height * by },
+    { kind: "circle", radius } => ({ ...shape, radius: radius * by }),
+    { kind: "rect", width, height } => ({ ...shape, width: width * by, height: height * by }),
     { kind: "empty" } => shape,
   };
 }
