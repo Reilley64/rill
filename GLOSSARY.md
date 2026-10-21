@@ -25,8 +25,12 @@ A statement of the form `guard <condition> else { ... }` whose `else` block must
 _Avoid_: precondition, assert, early return
 
 **Overload**:
-One of several functions that share a name and differ in their parameter types. Overloads are how Rill gives one operation different behavior for different types.
+One of several functions that share a name and fit that name's overload declaration, each with more specific parameter types. Overloads are how Rill gives one operation different behavior for different types.
 _Avoid_: method, trait implementation, instance
+
+**Overload declaration**:
+A body-less `function` signature, ending in `;`, that declares a name as overloaded and fixes the shape every overload of it must fit.
+_Avoid_: trait, interface, protocol, type class
 
 **Routine**:
 The handle `go f(x)` returns for the goroutine it starts. `stop(&routine)` stops that goroutine at its next suspend point, and freeing the handle does not.
