@@ -28,6 +28,10 @@ _Avoid_: precondition, assert, early return
 One of several functions that share a name and differ in their parameter types. Overloads are how Rill gives one operation different behavior for different types.
 _Avoid_: method, trait implementation, instance
 
+**Routine**:
+The handle `go f(x)` returns for the goroutine it starts. `stop(&routine)` stops that goroutine at its next suspend point, and freeing the handle does not.
+_Avoid_: task, future, promise, join handle
+
 **Shared**:
 A `Shared<T>` handle gives a value more than one owner by counting its owners. It is the only counted value in Rill.
 _Avoid_: Arc, Rc
