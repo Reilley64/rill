@@ -46,3 +46,8 @@ log(start("80x0"));
 // caused by: invalid digit "x" at index 2
 //   at parseInt (std/string.rill:41)
 //   at parsePort (02-result-pipe-guard.rill:6)
+
+// Test-only expectations; no dependence on the top-level log calls.
+expect start("8080") == "listening on localhost:8080";
+expect start("1024") == "listening on localhost:1024";
+expect start("65535") == "listening on localhost:65535";

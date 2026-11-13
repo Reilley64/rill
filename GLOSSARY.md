@@ -12,12 +12,16 @@ _Avoid_: lifetime, pointer
 The `dispose` overload for a type: a function the compiler calls when a value of that type is freed. Calling it directly ends the value early.
 _Avoid_: drop, destructor, deinit, finalizer
 
+**Expectation**:
+A top-level test declaration written `expect <expression>;`, whose boolean result determines whether it passes. Expectations run only under `rill test`, not as production assertions.
+_Avoid_: runtime assertion, precondition
+
 **Function**:
 A named or anonymous piece of code that takes arguments and returns a value. Every Rill function can suspend, and callers wait for it without any extra syntax, so Rill has only one kind of function.
 _Avoid_: async function, sync function, method
 
 **Goroutine**:
-A lightweight concurrent unit of execution, started with `go f(x)`.
+A lightweight concurrent unit of execution, started with `spawn(() => f(x))`.
 _Avoid_: thread, task, fiber, green thread
 
 **Guard**:
@@ -33,7 +37,7 @@ A body-less `function` signature, ending in `;`, that declares a name as overloa
 _Avoid_: trait, interface, protocol, type class
 
 **Routine**:
-The handle `go f(x)` returns for the goroutine it starts. `stop(&routine)` stops that goroutine at its next suspend point, and freeing the handle does not.
+The handle `spawn(() => f(x))` returns for the goroutine it starts. `stop(&routine)` stops that goroutine at its next suspend point, and freeing the handle does not.
 _Avoid_: task, future, promise, join handle
 
 **Shared**:

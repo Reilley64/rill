@@ -72,3 +72,12 @@ log(show(fib(10)));
 // bonjour
 // hello
 // 55
+
+// Test-only expectations for overload selection and recursion.
+expect show(42) == "42";
+expect show(true) == "yes";
+expect greeting("fr") == "bonjour";
+expect greeting("de") == "hello";
+expect fib(0) == 0;
+expect fib(1) == 1;
+expect fib(10) == 55;

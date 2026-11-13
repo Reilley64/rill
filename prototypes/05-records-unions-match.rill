@@ -54,3 +54,15 @@ log(`total area after growing: ${&bigger |> map(area) |> sum}`);
 // a square with area 4
 // nothing with area 0
 // total area after growing: 1824.64
+
+// Test-only expectations construct their own values, independent of startup code.
+expect area(&{ kind: "empty" }) == 0.0;
+expect area(&{
+  kind: "rect", corner: { x: 0.0, y: 0.0 }, width: 2.0, height: 3.0,
+}) == 6.0;
+expect describe(&{
+  kind: "circle", center: { x: 0.0, y: 0.0 }, radius: 1.0,
+}) == "a circle at the origin";
+expect area(&grow({
+  kind: "rect", corner: { x: 0.0, y: 0.0 }, width: 2.0, height: 3.0,
+}, 2.0)) == 24.0;

@@ -1,8 +1,8 @@
-import std::log;
+import std::{log, spawn, stop};
 import std::list::{List, sum, length};
 import std::channel::{Sender, Receiver, channel, send, receive, after, select};
 import std::shared::{Shared, shared};
-import std::routine::{Routine, all, allSettled, race, any, tag, stop};
+import std::routine::{Routine, all, allSettled, race, any, tag};
 import std::result::{Result, Ok, Err};
 import std::time::sleep;
 
@@ -30,9 +30,13 @@ let [jobs, inbox] = channel<int>();
 let [results, resultInbox] = channel<string>();
 let queue = shared(inbox);
 
-go produce(jobs, copy(numbers));
-go square(copy(queue), copy(results), 1);
-go square(queue, results, 2);
+// Copy before creating the closures: spawn moves their captures.
+let producerNumbers = copy(numbers);
+spawn(() => produce(jobs, producerNumbers));
+let firstQueue = copy(queue);
+let firstResults = copy(results);
+spawn(() => square(firstQueue, firstResults, 1));
+spawn(() => square(queue, results, 2));
 
 for (let line of &resultInbox) {
   log(line);
@@ -49,7 +53,7 @@ function heartbeat(beats: Sender<string>): void {
 }
 
 let [beats, beatInbox] = channel<string>();
-let pulse: Routine = go heartbeat(beats);
+let pulse: Routine = spawn(() => heartbeat(beats));
 
 let next = select([
   tag("beat", &beatInbox),
