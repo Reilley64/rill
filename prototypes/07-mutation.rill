@@ -1,0 +1,148 @@
+import std::log;
+import std::list::List;
+
+// Design prototype for #15, not an executable compiler test yet.
+
+type Point = { x: int; y: int };
+
+function increment(value: &mut int): void {
+  *value += 1;
+}
+
+function shiftRight(point: &mut Point): void {
+  point.x += 1;
+}
+
+function shiftUp(point: &mut Point): void {
+  point.y += 1;
+}
+
+function adjust(point: &mut Point): void {
+  // Each call reborrows point; the first does not consume it.
+  shiftRight(point);
+  shiftUp(point);
+}
+
+function shifted(point: Point): Point {
+  // Owned parameters are immutable bindings, so use a mutable local.
+  let mut moved = point;
+  adjust(&mut moved);
+  return moved;
+}
+
+function total(numbers: &List<int>): int {
+  let mut result = 0;
+  for (let n of numbers) {
+    result += n;
+  }
+  return result;
+}
+
+function incremented(start: int): int {
+  let mut value = start;
+  increment(&mut value);
+  return value;
+}
+
+function independentCopies(): bool {
+  let mut original: Point = { x: 1, y: 2 };
+  let mut changed = original; // Point still copies implicitly.
+  changed.x = 9;
+  return original.x == 1 && changed.x == 9;
+}
+
+function separateFields(): int {
+  let mut point: Point = { x: 1, y: 2 };
+  let x = &mut point.x;
+  let y = &mut point.y; // Disjoint named-field storage.
+  *x += 1;
+  *y += 2;
+  // Both borrows have reached their last use.
+  return point.x + point.y;
+}
+
+function invokeRead(work: &(() => int)): int {
+  return work();
+}
+
+function invokeMut(work: &mut (mut () => int)): int {
+  return work();
+}
+
+function invokeOnce(work: once () => string): string {
+  return work();
+}
+
+function readExample(): int {
+  let read: () => int = () => 42;
+  return invokeRead(&read);
+}
+
+function counterExample(): int {
+  let mut count = 0;
+  // A stored closure captures by value: this owns its own copied counter.
+  let mut next: mut () => int = () => {
+    count += 1;
+    return count;
+  };
+  let first = invokeMut(&mut next);
+  let second = invokeMut(&mut next);
+  return first * 10 + second;
+}
+
+function takeExample(text: string): string {
+  // Returning the non-copying captured string makes this a consuming callable.
+  let take: once () => string = () => text;
+  return invokeOnce(take);
+}
+
+function identity<T>(value: T): T {
+  return value;
+}
+
+function carriedBorrow(): int {
+  let owner = 42;
+  let view = identity(&owner);
+  // Passing a reference through an owned generic parameter preserves its borrow.
+  return *view;
+}
+
+function remember(slot: &mut &Point, point: &Point): void {
+  *slot = point;
+}
+
+function retainedInput(): int {
+  let first: Point = { x: 1, y: 2 };
+  let second: Point = { x: 9, y: 10 };
+  let mut selected = &first;
+  remember(&mut selected, &second);
+  // The access loan ends at the call, but selected retains source dependencies.
+  return selected.x;
+}
+
+// Illustrates the intrinsic contract; ordinary identity needs no such constraint.
+function requireNoBorrow<T>(value: T): T where noBorrow(T) {
+  return value;
+}
+
+log(`sum ${total(&[1, 2, 3, 4])}`);
+log(`counter ${counterExample()}`);
+
+// Output:
+// sum 10
+// counter 12
+
+// Independent, top-level expectations: none rely on the startup log calls.
+expect total(&[1, 2, 3, 4]) == 10;
+expect total(&[]) == 0;
+expect incremented(4) == 5;
+expect shifted({ x: 1, y: 2 }).x == 2;
+expect shifted({ x: 1, y: 2 }).y == 3;
+expect independentCopies();
+expect separateFields() == 6;
+expect readExample() == 42;
+expect counterExample() == 12;
+expect takeExample("hello") == "hello";
+expect carriedBorrow() == 42;
+expect retainedInput() == 9;
+expect requireNoBorrow(42) == 42;
