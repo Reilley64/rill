@@ -3,10 +3,11 @@ import std::list::{List, map, sum};
 
 type Point = { x: float; y: float };
 
-type Shape =
-  | { kind: "circle"; center: Point; radius: float }
-  | { kind: "rect"; corner: Point; width: float; height: float }
-  | { kind: "empty" };
+type Circle = { kind: "circle"; center: Point; radius: float };
+type Rect = { kind: "rect"; corner: Point; width: float; height: float };
+type Empty = { kind: "empty" };
+
+type Shape = Circle | Rect | Empty;
 
 function area(shape: &Shape): float {
   return match (shape) {
@@ -29,16 +30,16 @@ function describe(shape: &Shape): string {
 
 function grow(shape: Shape, by: float): Shape {
   return match (shape) {
-    { kind: "circle", radius } => ({ ...shape, radius: radius * by }),
-    { kind: "rect", width, height } => ({ ...shape, width: width * by, height: height * by }),
+    { kind: "circle", radius } => Circle { ...shape, radius: radius * by },
+    { kind: "rect", width, height } => Rect { ...shape, width: width * by, height: height * by },
     { kind: "empty" } => shape,
   };
 }
 
 let shapes: List<Shape> = [
-  { kind: "circle", center: { x: 5.0, y: 5.0 }, radius: 12.0 },
-  { kind: "rect", corner: { x: 1.0, y: 1.0 }, width: 2.0, height: 2.0 },
-  { kind: "empty" },
+  Circle { kind: "circle", center: Point { x: 5.0, y: 5.0 }, radius: 12.0 },
+  Rect { kind: "rect", corner: Point { x: 1.0, y: 1.0 }, width: 2.0, height: 2.0 },
+  Empty { kind: "empty" },
 ];
 
 for (let shape of &shapes) {
@@ -56,13 +57,13 @@ log(`total area after growing: ${&bigger |> map(area) |> sum}`);
 // total area after growing: 1824.64
 
 // Test-only expectations construct their own values, independent of startup code.
-expect area(&{ kind: "empty" }) == 0.0;
-expect area(&{
-  kind: "rect", corner: { x: 0.0, y: 0.0 }, width: 2.0, height: 3.0,
+expect area(&Empty { kind: "empty" }) == 0.0;
+expect area(&Rect {
+  kind: "rect", corner: Point { x: 0.0, y: 0.0 }, width: 2.0, height: 3.0,
 }) == 6.0;
-expect describe(&{
-  kind: "circle", center: { x: 0.0, y: 0.0 }, radius: 1.0,
+expect describe(&Circle {
+  kind: "circle", center: Point { x: 0.0, y: 0.0 }, radius: 1.0,
 }) == "a circle at the origin";
-expect area(&grow({
-  kind: "rect", corner: { x: 0.0, y: 0.0 }, width: 2.0, height: 3.0,
+expect area(&grow(Rect {
+  kind: "rect", corner: Point { x: 0.0, y: 0.0 }, width: 2.0, height: 3.0,
 }, 2.0)) == 24.0;

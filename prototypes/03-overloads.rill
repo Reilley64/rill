@@ -52,13 +52,13 @@ function fib(n: int): int {
   };
 }
 
-let origin: Point = { x: 0, y: 0 };
+let origin = Point { x: 0, y: 0 };
 
 log(show(42));
 log(show(true));
 log(show(origin));
 log(show(&[1, 2, 3]));
-log(show(&[origin, { x: 3, y: 4 }]));
+log(show(&[origin, Point { x: 3, y: 4 }]));
 log(greeting("fr"));
 log(greeting("de"));
 log(show(fib(10)));

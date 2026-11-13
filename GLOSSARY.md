@@ -52,6 +52,10 @@ _Avoid_: method, trait implementation, instance
 A body-less `function` signature, ending in `;`, that declares a name as overloaded and fixes the shape every overload of it must fit.
 _Avoid_: trait, interface, protocol, type class
 
+**Record**:
+A value of a declared nominal type with named fields, constructed with its type name as in `Point { x: 0, y: 0 }`. Matching fields do not make different record types interchangeable; anonymous structural records do not exist.
+_Avoid_: object literal, structural record
+
 **Reborrow**:
 A temporary loan of existing borrowed access, restricting conflicting use of the original access until the loan is no longer needed.
 _Avoid_: copy, new owner

@@ -45,14 +45,14 @@ function incremented(start: int): int {
 }
 
 function independentCopies(): bool {
-  let mut original: Point = { x: 1, y: 2 };
+  let mut original = Point { x: 1, y: 2 };
   let mut changed = original; // Point still copies implicitly.
   changed.x = 9;
   return original.x == 1 && changed.x == 9;
 }
 
 function separateFields(): int {
-  let mut point: Point = { x: 1, y: 2 };
+  let mut point = Point { x: 1, y: 2 };
   let x = &mut point.x;
   let y = &mut point.y; // Disjoint named-field storage.
   *x += 1;
@@ -112,8 +112,8 @@ function remember(slot: &mut &Point, point: &Point): void {
 }
 
 function retainedInput(): int {
-  let first: Point = { x: 1, y: 2 };
-  let second: Point = { x: 9, y: 10 };
+  let first = Point { x: 1, y: 2 };
+  let second = Point { x: 9, y: 10 };
   let mut selected = &first;
   remember(&mut selected, &second);
   // The access loan ends at the call, but selected retains source dependencies.
@@ -136,8 +136,8 @@ log(`counter ${counterExample()}`);
 expect total(&[1, 2, 3, 4]) == 10;
 expect total(&[]) == 0;
 expect incremented(4) == 5;
-expect shifted({ x: 1, y: 2 }).x == 2;
-expect shifted({ x: 1, y: 2 }).y == 3;
+expect shifted(Point { x: 1, y: 2 }).x == 2;
+expect shifted(Point { x: 1, y: 2 }).y == 3;
 expect independentCopies();
 expect separateFields() == 6;
 expect readExample() == 42;

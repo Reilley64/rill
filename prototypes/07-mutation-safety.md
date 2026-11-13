@@ -9,12 +9,12 @@ Design cases for [#15](https://github.com/Reilley64/rill/issues/15) and [ADR 000
 The mutation prototype intends to accept mutable accumulators, scalar dereferencing, owned mutable locals, repeated forwarding of `&mut`, and simultaneous borrows of distinct named fields. It intends to reject:
 
 ```ts
-let fixed: Point = { x: 1, y: 2 };
+let fixed = Point { x: 1, y: 2 };
 fixed.x = 3; // Rejected: the owned binding is immutable.
 ```
 
 ```ts
-let mut point: Point = { x: 1, y: 2 };
+let mut point = Point { x: 1, y: 2 };
 let whole = &point;
 let x = &mut point.x; // Rejected: whole-record read access is still needed.
 log(`${whole.x}`);
@@ -30,14 +30,14 @@ With `type User = { name: string };`, both cases below must be rejected:
 
 ```ts
 function poison(dst: &mut List<&User>): void {
-  let local: User = { name: "short-lived" };
+  let local = User { name: "short-lived" };
   remember(dst, &local);
 } // Rejected: the caller's destination would retain a local source.
 ```
 
 ```ts
 function overwrite(slot: &mut &User): void {
-  let local: User = { name: "short-lived" };
+  let local = User { name: "short-lived" };
   *slot = &local;
 } // Rejected: nested mutable access cannot bypass the exit contract.
 ```
@@ -49,7 +49,7 @@ The prototype's complete `remember(slot: &mut &Point, point: &Point)` and `retai
 - **Accept:** `carriedBorrow` in the prototype, where `identity<T>(value: T): T` preserves a reference dependency through its owned generic parameter.
 - **Accept when checked against the inputs' dependencies:** returning an existing `&User` from an owned `List<&User>`. Moving/freeing the list storage must not erase the users' source dependencies.
 - **Reject:** returning `&local` from a function owning `local`, or returning a reference into locally owned list storage that will be freed.
-- **Reject:** `let view = identity(&shifted({ x: 1, y: 2 }));` followed by a later statement using `view`; the borrowed temporary cannot escape its statement. Borrowing the same temporary entirely within an expectation can be valid.
+- **Reject:** `let view = identity(&shifted(Point { x: 1, y: 2 }));` followed by a later statement using `view`; the borrowed temporary cannot escape its statement. Borrowing the same temporary entirely within an expectation can be valid.
 - **Reject:** reading or mutating a whole value while a result retaining an exclusive dependency on that value is still needed. For example, after a schematic `editAndView(items: &mut List<int>): &int`, the returned read-only element reference does not automatically downgrade access to `items`.
 
 ## Callable capabilities and copying

@@ -1,0 +1,64 @@
+// Named record construction for #21. No anonymous structural records.
+// These are design examples, not executed compiler tests yet.
+
+type Point = { x: int; y: int };
+type ScreenPoint = { x: int; y: int };
+type Box<T> = { value: T };
+
+function origin(): Point {
+  return Point { x: 0, y: 0 };
+}
+
+function xOf(point: &Point): int {
+  return point.x;
+}
+
+function inferredX(): int {
+  // Infer from an already typed expression, not from later uses.
+  let point = origin();
+  return point.x;
+}
+
+function annotatedX(): int {
+  // The annotation checks the constructor's type; it does not create identity.
+  let point: Point = Point { x: 4, y: 5 };
+  return point.x;
+}
+
+function rebuiltX(): int {
+  let point = Point { x: 1, y: 2 };
+  let rebuilt = Point { ...point, x: 3 };
+  return rebuilt.x;
+}
+
+function boxedValue(): int {
+  let box = Box<int> { value: 7 };
+  return box.value;
+}
+
+expect xOf(&Point { x: 2, y: 3 }) == 2;
+expect inferredX() == 0;
+expect annotatedX() == 4;
+expect rebuiltX() == 3;
+expect boxedValue() == 7;
+
+// Rejected: no anonymous record values, even with an expected type.
+// let anonymous = { x: 0, y: 0 };
+// let contextual: Point = { x: 0, y: 0 };
+// xOf(&{ x: 0, y: 0 });
+
+// Rejected: matching fields do not make distinct nominal records interchangeable.
+// let wrong: Point = ScreenPoint { x: 0, y: 0 };
+
+// Rejected: anonymous structural record types must be declared and named.
+// function anonymousParameter(point: { x: int; y: int }): int {
+//   return point.x;
+// }
+
+// Rejected: a spread rebuild still needs its record type name.
+// let point = Point { x: 0, y: 0 };
+// let rebuilt = { ...point, x: 1 };
+
+// Tagged unions use named variants; see prototype 5 for construction and patterns.
+// Rejected: inline anonymous record variants.
+// type BadShape = { kind: "circle"; radius: float } | { kind: "empty" };
