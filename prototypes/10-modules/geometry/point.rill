@@ -1,0 +1,20 @@
+import formatting::show;
+
+export type Point = { x: int; y: int };
+
+// Type and function share a spelling in separate namespaces.
+export function Point(x: int, y: int): Point {
+  return Point { x: x, y: y };
+}
+
+export function origin(): Point {
+  return Point { x: 0, y: 0 };
+}
+
+// Extends formatting's family because this module owns Point.
+// The body participates in the family; the private import is not re-exported.
+function show(point: &Point): string {
+  return `(${point.x}, ${point.y})`;
+}
+
+expect show(&Point { x: 1, y: 2 }) == "(1, 2)";

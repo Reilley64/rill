@@ -1,0 +1,63 @@
+// Multi-file design prototype for #17; no compiler exists to execute it yet.
+// This entry file fixes the application source root at this directory.
+
+import std::log;
+import api::{Position, origin, offset, Ticket, issue, ticketCode, rename, hidden, readHidden, makeState, isOn, Shape, Square, empty, render};
+import api::points as points;
+import geometry::point::Point as OriginalPoint;
+
+function aliasIdentity(): int {
+  let constructed: OriginalPoint = Position { x: 2, y: 3 };
+  let fromFunction = Position(4, 5);
+  return constructed.x + fromFunction.x;
+}
+
+function resourceCode(): int {
+  let ticket: Ticket = issue("first");
+  return ticketCode(&ticket);
+}
+
+function renamedLabel(): string {
+  let ticket = issue("first");
+  let changed = rename(ticket, "second");
+  return copy(changed.label); // Canonical copy is available in the fixed prelude.
+}
+
+function opaqueValue(): int {
+  let value = hidden(9); // Infer the private canonical type, not a new public type.
+  return readHidden(&value);
+}
+
+function opaqueState(): bool {
+  let state = makeState(true);
+  return isOn(&state); // Representation inspection stays in resources.rill.
+}
+
+function area(shape: &Shape): int {
+  // Empty is public at its origin, although no local Empty type name was imported.
+  return match (shape) {
+    { kind: "square", size } => size * size,
+    { kind: "empty" } => 0,
+  };
+}
+
+let start = origin();
+log(render(&start));
+log(render(&hidden(9))); // Selects resources' private-type implementation by metadata.
+
+// Normal main-file output only; resources.rill's demonstration is not executed:
+// (0, 0)
+// hidden 9
+
+// No expectation captures start or another ordinary startup binding.
+expect aliasIdentity() == 6;
+expect render(&Position { x: 1, y: 2 }) == "(1, 2)";
+expect render(&offset(&origin(), 3, 4)) == "(3, 4)";
+expect render(&points::origin()) == "(0, 0)";
+expect resourceCode() == 7;
+expect renamedLabel() == "second";
+expect opaqueValue() == 9;
+expect render(&hidden(9)) == "hidden 9";
+expect opaqueState();
+expect area(&Square { kind: "square", size: 3 }) == 9;
+expect area(&empty()) == 0;

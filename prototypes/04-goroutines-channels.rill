@@ -1,5 +1,5 @@
 import std::{log, spawn, stop};
-import std::list::{List, sum, length};
+import std::collection::{List, sum, length};
 import std::channel::{Sender, Receiver, channel, send, receive, after, select};
 import std::shared::{Shared, shared};
 import std::routine::{Routine, all, allSettled, race, any, tag};
@@ -63,9 +63,11 @@ log(match (next) {
   { kind: "beat" } => "got a beat",
   { kind: "idle" } => "idle",
 });
-stop(&pulse);
+stop(&pulse); // Requests cancellation, then waits for termination and cleanup.
 
 // Waiting for results: run functions at the same time and wait.
+// A winner/early error selects the result, but return waits for every child and
+// its cleanup, including canceled losers. This is not a hard timeout guarantee.
 
 function slowSum(numbers: &List<int>): int {
   sleep(20);

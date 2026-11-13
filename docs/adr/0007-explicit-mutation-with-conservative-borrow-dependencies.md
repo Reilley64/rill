@@ -2,7 +2,7 @@
 
 [Issue #15](https://github.com/Reilley64/rill/issues/15) adds explicit mutation while retaining visible ownership, references inside values, and no programmer-written lifetime annotations. Use `let mut`, exclusive mutable borrows, and conservative dependency contracts rather than hidden shared mutable cells or runtime borrow checks. This supersedes ADR 0002's borrow-dependency rules and its immutable-only assumptions; ownership, explicit copies, `dispose`, and owned-value rebuilding remain.
 
-**Status:** the design direction is approved. The combined checker is a proposal, not an implemented or demonstrated-sound system. The ownership/mutation RFC in #28 must supply explicit checking rules and adversarial accepted/rejected examples before it is implementation-ready; #16 must resolve cancellation during replacement.
+**Status:** the design direction is approved. The combined checker is a proposal, not an implemented or demonstrated-sound system. The ownership/mutation RFC in #28 must supply explicit checking rules and adversarial accepted/rejected examples before it is implementation-ready. [ADR 0009](0009-concurrency-safety-and-cooperative-cancellation.md) now resolves #16's cancellation/replacement policy and specifies transfer, sharing, and lock-guard contracts.
 
 ## Mutation and access
 
@@ -17,7 +17,7 @@
 
 Mutability does not change copy classification. Existing implicitly copied scalar, record, and tuple values still copy; other owned values move unless explicitly copied. Values carrying exclusive borrows cannot implicitly copy. Existing owned-record rebuilding guarantees remain. Loops can update mutable accumulators instead of requiring recursive accumulation.
 
-Replacement evaluates the destination and right-hand side once, keeping the old value alive while the replacement is computed; it then frees/disposes the old value and installs the replacement. Reject a replacement leaving references into freed old storage. The replacement remains owned while disposal runs, and cleanup must track initialization/disposal state. Because `dispose` can suspend, #16 must specify cancellation in this interval without leaks, double disposal, or cleanup of an uninitialized slot. This ADR does not choose cancellation masking. ADR 0005's non-unwinding panic policy is unchanged.
+Replacement evaluates the destination and right-hand side once, keeping the old value alive while the replacement is computed; it then frees/disposes the old value and installs the replacement. Reject a replacement leaving references into freed old storage. The replacement remains owned while disposal runs, and cleanup must track initialization/disposal state. ADR 0009 now defers cancellation delivery from old-value disposal through replacement installation, while permitting suspension/scheduling and retaining the replacement's ownership. Deliver pending cancellation only after a valid destination is installed, then clean it up exactly once; destination/RHS evaluation remains normally cancellable. Track initialized/disposed states and retain all dependencies needed through disposal. ADR 0005's non-unwinding panic policy is unchanged.
 
 ## Dependencies and escaping references
 
@@ -57,4 +57,4 @@ Add `where noBorrow(T)` as a compiler-recognized intrinsic, not a user-implement
 
 `prototypes/07-mutation.rill` illustrates the approved syntax and `prototypes/07-mutation-safety.md` records hand-checked expectations and remaining validation obligations. These are design artifacts, not executed compiler tests or a proof.
 
-#16 owns synchronization, cross-goroutine requirements, cancellation/join rules, and replacement/disposal cancellation. #23 owns standard-library signatures, including callable contracts that preserve the evidence required by `spawn` and waiting helpers. #28 owns the explicit checking rules, safety rationale, and adversarial cases in the feature RFCs. The approved direction does not automatically accept those RFCs.
+ADR 0009 records #16's approved synchronization, cross-goroutine, guard, and cancellation/join policies. ADR 0010 records #17's module/scoping and privacy rules, including non-capturing named functions, canonical ownership-hook identity, and protection of required built-in ownership mechanics. #23 owns standard-library signatures and callable contracts preserving the evidence required by `spawn` and waiting helpers. #28 owns explicit checking/cleanup rules, safety rationale, and adversarial cases in the feature RFCs. The approved direction does not automatically accept those RFCs.

@@ -1,0 +1,55 @@
+import std::log;
+import formatting::show;
+
+export type Ticket = { private code: int; label: string };
+
+export function issue(label: string): Ticket {
+  return Ticket { code: 7, label: label };
+}
+
+export function ticketCode(ticket: &Ticket): int {
+  return ticket.code;
+}
+
+export function rename(ticket: Ticket, label: string): Ticket {
+  // Named rebuilding with a private field is permitted in its defining module.
+  return Ticket { ...ticket, label: label };
+}
+
+type Hidden = { value: int };
+
+export function hidden(value: int): Hidden {
+  return Hidden { value: value };
+}
+
+export function readHidden(value: &Hidden): int {
+  return value.value;
+}
+
+// A private type can participate in a visible family without exposing its fields.
+function show(value: &Hidden): string {
+  return `hidden ${value.value}`;
+}
+
+type On = { kind: "on" };
+type Off = { kind: "off" };
+type HiddenState = On | Off;
+
+export function makeState(on: bool): HiddenState {
+  return if (on) On { kind: "on" } else Off { kind: "off" };
+}
+
+export function isOn(state: &HiddenState): bool {
+  return match (state) {
+    { kind: "on" } => true,
+    { kind: "off" } => false,
+  };
+}
+
+// Ordinary demonstration code: ignored when imported or under rill test.
+// resources.rill can also be the entry file, with this same directory as its root.
+let demo = hidden(99);
+log(show(&demo));
+
+// Independent test input, never a capture of demo.
+expect readHidden(&hidden(8)) == 8;

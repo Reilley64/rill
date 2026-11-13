@@ -1,5 +1,5 @@
 import std::log;
-import std::list::List;
+import std::collection::List;
 
 // Design prototype for #15, not an executable compiler test yet.
 

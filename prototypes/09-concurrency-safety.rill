@@ -1,0 +1,120 @@
+// Design prototype for #16, not an executed compiler/runtime test.
+// std::mutex placement and mutex(...) factory are provisional spellings for #23.
+// #17 supplies canonical dispose in the fixed prelude, without an import.
+
+import std::{spawn, stop};
+import std::mutex::{Mutex, LockGuard, mutex, lock};
+import std::shared::{Shared, shared};
+import std::routine::all;
+import std::channel::{Sender, channel, send, receive};
+import std::time::sleep;
+
+type Counts = { first: int; second: int };
+
+// Named functions receive runtime state explicitly; they do not capture it.
+function add(counter: &Shared<Mutex<int>>, amount: int): void {
+  let mut held = lock(counter);
+  *held += amount;
+} // held is disposed here, releasing the lock rather than the payload.
+
+function read(counter: &Shared<Mutex<int>>): int {
+  let held = lock(counter);
+  return *held; // int copies; no protected reference escapes the guard.
+}
+
+function increment(value: &mut int): void {
+  *value += 1;
+}
+
+function readGuard(held: &LockGuard<int>): int {
+  return *(*held); // Dereference the reference, then the standard lock guard.
+}
+
+function scopedTotal(): int {
+  let counter = shared(mutex<int>(0));
+  all(() => add(&counter, 1), () => add(&counter, 2));
+  // All child execution and cleanup finished before all returned.
+  return read(&counter);
+}
+
+function earlyUnlock(): int {
+  let counter = shared(mutex<int>(0));
+  let mut held = lock(&counter);
+  *held = 5;
+  dispose(held); // No later automatic disposal of the same guard.
+  add(&counter, 1);
+  return read(&counter);
+}
+
+function borrowEndsBeforeUnlock(): int {
+  let counter = shared(mutex<int>(2));
+  let mut held = lock(&counter);
+  let value = &mut *held;
+  *value += 3;
+  dispose(held); // value has reached its last use, so this is allowed.
+  return read(&counter);
+}
+
+function sharedGuardReads(): int {
+  let counter = shared(mutex<int>(2));
+  let held = lock(&counter);
+  // Read-only scoped sharing is allowed because int is shareable.
+  let [one, two] = all(() => readGuard(&held), () => readGuard(&held));
+  return one + two;
+}
+
+function scopedPayloadWrites(): int {
+  let counter = shared(mutex<Counts>(Counts { first: 0, second: 0 }));
+  let mut held = lock(&counter);
+  let payload = &mut *held;
+  let first = &mut payload.first;
+  let second = &mut payload.second;
+  // Disjoint payload loans can transfer to scoped children; the guard does not.
+  // #23 must give all the mutable-callback access contracts needed here.
+  all(() => increment(first), () => increment(second));
+  let total = (*held).first + (*held).second;
+  dispose(held); // Children and all uses of their protected loans have finished.
+  return total;
+}
+
+function addAfterPause(counter: &Shared<Mutex<int>>): void {
+  let mut held = lock(counter);
+  sleep(1); // The goroutine can suspend/migrate while retaining the lock.
+  *held += 1;
+}
+
+function suspendedScope(): int {
+  let counter = shared(mutex<int>(0));
+  addAfterPause(&counter);
+  return read(&counter);
+}
+
+function addAndSignal(counter: Shared<Mutex<int>>, done: Sender<int>): void {
+  add(&counter, 3);
+  guard send(&done, 1) else {
+    return;
+  }
+}
+
+function backgroundCompletion(): int {
+  let counter = shared(mutex<int>(0));
+  let workerCounter = copy(counter); // Copy before creating the owned closure.
+  let [done, doneInbox] = channel<int>();
+  let worker = spawn(() => addAndSignal(workerCounter, done));
+  // Synchronize on a message, not an assumed scheduling order or timer delay.
+  guard receive(&doneInbox) else {
+    stop(&worker);
+    return -1;
+  }
+  stop(&worker); // Waits for termination and cleanup, not just a cancel request.
+  return read(&counter);
+}
+
+// Independent top-level expectations; no timing-dependent winner assertions.
+expect scopedTotal() == 3;
+expect earlyUnlock() == 6;
+expect borrowEndsBeforeUnlock() == 5;
+expect sharedGuardReads() == 4;
+expect scopedPayloadWrites() == 2;
+expect suspendedScope() == 1;
+expect backgroundCompletion() == 3;

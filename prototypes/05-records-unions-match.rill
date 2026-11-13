@@ -1,5 +1,5 @@
 import std::log;
-import std::list::{List, map, sum};
+import std::collection::{List, map, sum};
 
 type Point = { x: float; y: float };
 

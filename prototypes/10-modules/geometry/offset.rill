@@ -1,0 +1,8 @@
+import self::point::Point;
+import super::formatting::show;
+
+export function offset(point: &Point, dx: int, dy: int): Point {
+  return Point { x: point.x + dx, y: point.y + dy };
+}
+
+expect show(&offset(&Point { x: 1, y: 2 }, 3, 4)) == "(4, 6)";

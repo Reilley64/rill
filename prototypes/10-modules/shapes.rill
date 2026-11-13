@@ -1,0 +1,7 @@
+export type Square = { kind: "square"; size: int };
+export type Empty = { kind: "empty" };
+export type Shape = Square | Empty;
+
+export function empty(): Shape {
+  return Empty { kind: "empty" };
+}

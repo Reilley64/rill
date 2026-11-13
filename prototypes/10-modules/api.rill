@@ -1,0 +1,9 @@
+// Exports are marked on items; there is no bottom export list.
+export import geometry::point::{Point as Position, origin};
+export import geometry::point as points;
+export import geometry::offset::offset;
+export import resources::{Ticket, issue, ticketCode, rename, hidden, readHidden, makeState, isOn};
+export import shapes::{Shape, Square, empty};
+export import formatting::render;
+
+// Empty need not be re-exported: its public identity remains available at shapes::Empty.
