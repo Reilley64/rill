@@ -1,7 +1,7 @@
 // The exported declaration owns this family's identity and visibility.
 export function show<T>(value: &T): string;
 
-function show(value: &int): string {
+function show(value: &i32): string {
   return `${value}`;
 }
 
@@ -10,4 +10,5 @@ export function render<T>(value: &T): string where show(T) {
   return show(value);
 }
 
-expect render(42) == "42";
+// This is a separate family from canonical template show, not its primitive implementation.
+expect render(42i32) == "42";

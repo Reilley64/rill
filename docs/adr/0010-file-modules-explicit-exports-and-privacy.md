@@ -16,7 +16,7 @@ Declarations are private to the defining module unless exported directly on the 
 
 ```ts
 // geometry/point.rill
-export type Point = { x: int; y: int };
+export type Point = { x: i32; y: i32 };
 export function origin(): Point {
   return Point { x: 0, y: 0 };
 }
@@ -45,7 +45,7 @@ No exported runtime `let` bindings or implicit module initializers in v0. Named 
 Record fields are public by default. `private` fields are accessible only in the defining module:
 
 ```ts
-export type Ticket = { private code: int; label: string };
+export type Ticket = { private code: i32; label: string };
 ```
 
 Outside it, private fields cannot be read, changed, or bound by patterns. Any private field prevents direct whole-record construction or spread rebuilding, even if a valid old value exists; use exported factories/updaters. Public field access still follows ordinary ownership/borrowing rules. An alias or a visible overload does not grant implementation-module field privileges.

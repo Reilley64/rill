@@ -16,6 +16,8 @@ Rill has no traits, so overloading carries per-type behavior. To keep that check
 
 Public generic requirements must name exported family declarations. Required built-in ownership mechanics are separately protected against replacement; the blanket outermost-type restriction proposed for all copy/dispose overloads was rejected. Ordinary defaults remain specializable under the existing orphan rule, subject to duplicate and protected-operation checks.
 
+[ADR 0011](0011-explicit-numeric-widths-and-utf8-string-views.md) adds closed compiler-known numeric conversions: from/into and try_from/try_into are two canonical operations with alias names and destination/source type arguments, not ordinary bodies distinguished by return types. Generic availability requirements are checked before monomorphization. Canonical template show uses the ordinary public family/orphan rules; same-spelled unrelated families do not affect interpolation. #19 still owns literal-overload policy.
+
 ## Considered options
 
 - **Undeclared overloads, checked per instantiation (C++ templates, Zig).** No new syntax, but a generic signature doesn't say what it needs, and errors appear inside generic bodies. #5 found that inferring the requirements is NP-hard.

@@ -1,25 +1,32 @@
 import std::log;
 import std::result::{Result, Ok, Err, andThen, map};
-import std::string::parseInt;
+// Typed parser spelling/error interface is illustrative pending #23.
+import std::string::parse;
+// Canonical error display's module path remains provisional for #23.
+import std::error::display;
 
-function parsePort(text: string): Result<int> {
-  guard let port = parseInt(&text) else (error) {
-    return Err(`not a port: ${text}`, error);
-  }
+type PortError = { detail: string };
+
+function display(error: &PortError): string {
+  return `${error.detail}`;
+}
+
+function parsePort(text: string): Result<i32, PortError> {
+  let port = parse<i32>(&text) ? PortError { detail: `not a port: ${text}` };
   guard port > 0 && port < 65536 else {
-    return Err(`out of range: ${port}`);
+    return Err(PortError { detail: `out of range: ${port}` });
   }
   return Ok(port);
 }
 
-function rejectReserved(port: int): Result<int> {
+function rejectReserved(port: i32): Result<i32, PortError> {
   guard port >= 1024 else {
-    return Err(`reserved port: ${port}`);
+    return Err(PortError { detail: `reserved port: ${port}` });
   }
   return Ok(port);
 }
 
-function toAddress(port: int): string {
+function toAddress(port: i32): string {
   return `localhost:${port}`;
 }
 
@@ -38,14 +45,15 @@ function start(text: string): string {
 log(start("8080"));
 log(start("80x0"));
 
-// Output:
+// Output (runtime formatting is illustrative for #23):
 // listening on localhost:8080
 // error: not a port: 80x0
-//   at parsePort (02-result-pipe-guard.rill:7)
-//   at start (02-result-pipe-guard.rill:28)
+//   at parsePort (the infix ? construction location in this file)
 // caused by: invalid digit "x" at index 2
-//   at parseInt (std/string.rill:41)
-//   at parsePort (02-result-pipe-guard.rill:6)
+//   at parse (its construction location in std/string.rill)
+// Only construction locations appear: start/andThen/map add no propagation entries.
+// The RHS is an error value, not a handler; it is skipped when parsing succeeds.
+// ADR 0013 defines caused-by semantics; #28 still owes complete operator grammar.
 
 // Test-only expectations; no dependence on the top-level log calls.
 expect start("8080") == "listening on localhost:8080";

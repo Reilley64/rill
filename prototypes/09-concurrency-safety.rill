@@ -9,36 +9,36 @@ import std::routine::all;
 import std::channel::{Sender, channel, send, receive};
 import std::time::sleep;
 
-type Counts = { first: int; second: int };
+type Counts = { first: i32; second: i32 };
 
 // Named functions receive runtime state explicitly; they do not capture it.
-function add(counter: &Shared<Mutex<int>>, amount: int): void {
+function add(counter: &Shared<Mutex<i32>>, amount: i32): void {
   let mut held = lock(counter);
   *held += amount;
 } // held is disposed here, releasing the lock rather than the payload.
 
-function read(counter: &Shared<Mutex<int>>): int {
+function read(counter: &Shared<Mutex<i32>>): i32 {
   let held = lock(counter);
-  return *held; // int copies; no protected reference escapes the guard.
+  return *held; // i32 copies; no protected reference escapes the guard.
 }
 
-function increment(value: &mut int): void {
+function increment(value: &mut i32): void {
   *value += 1;
 }
 
-function readGuard(held: &LockGuard<int>): int {
+function readGuard(held: &LockGuard<i32>): i32 {
   return *(*held); // Dereference the reference, then the standard lock guard.
 }
 
-function scopedTotal(): int {
-  let counter = shared(mutex<int>(0));
+function scopedTotal(): i32 {
+  let counter = shared(mutex<i32>(0));
   all(() => add(&counter, 1), () => add(&counter, 2));
   // All child execution and cleanup finished before all returned.
   return read(&counter);
 }
 
-function earlyUnlock(): int {
-  let counter = shared(mutex<int>(0));
+function earlyUnlock(): i32 {
+  let counter = shared(mutex<i32>(0));
   let mut held = lock(&counter);
   *held = 5;
   dispose(held); // No later automatic disposal of the same guard.
@@ -46,8 +46,8 @@ function earlyUnlock(): int {
   return read(&counter);
 }
 
-function borrowEndsBeforeUnlock(): int {
-  let counter = shared(mutex<int>(2));
+function borrowEndsBeforeUnlock(): i32 {
+  let counter = shared(mutex<i32>(2));
   let mut held = lock(&counter);
   let value = &mut *held;
   *value += 3;
@@ -55,15 +55,15 @@ function borrowEndsBeforeUnlock(): int {
   return read(&counter);
 }
 
-function sharedGuardReads(): int {
-  let counter = shared(mutex<int>(2));
+function sharedGuardReads(): i32 {
+  let counter = shared(mutex<i32>(2));
   let held = lock(&counter);
-  // Read-only scoped sharing is allowed because int is shareable.
+  // Read-only scoped sharing is allowed because i32 is shareable.
   let [one, two] = all(() => readGuard(&held), () => readGuard(&held));
   return one + two;
 }
 
-function scopedPayloadWrites(): int {
+function scopedPayloadWrites(): i32 {
   let counter = shared(mutex<Counts>(Counts { first: 0, second: 0 }));
   let mut held = lock(&counter);
   let payload = &mut *held;
@@ -77,29 +77,29 @@ function scopedPayloadWrites(): int {
   return total;
 }
 
-function addAfterPause(counter: &Shared<Mutex<int>>): void {
+function addAfterPause(counter: &Shared<Mutex<i32>>): void {
   let mut held = lock(counter);
   sleep(1); // The goroutine can suspend/migrate while retaining the lock.
   *held += 1;
 }
 
-function suspendedScope(): int {
-  let counter = shared(mutex<int>(0));
+function suspendedScope(): i32 {
+  let counter = shared(mutex<i32>(0));
   addAfterPause(&counter);
   return read(&counter);
 }
 
-function addAndSignal(counter: Shared<Mutex<int>>, done: Sender<int>): void {
+function addAndSignal(counter: Shared<Mutex<i32>>, done: Sender<i32>): void {
   add(&counter, 3);
   guard send(&done, 1) else {
     return;
   }
 }
 
-function backgroundCompletion(): int {
-  let counter = shared(mutex<int>(0));
+function backgroundCompletion(): i32 {
+  let counter = shared(mutex<i32>(0));
   let workerCounter = copy(counter); // Copy before creating the owned closure.
-  let [done, doneInbox] = channel<int>();
+  let [done, doneInbox] = channel<i32>();
   let worker = spawn(() => addAndSignal(workerCounter, done));
   // Synchronize on a message, not an assumed scheduling order or timer delay.
   guard receive(&doneInbox) else {

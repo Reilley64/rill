@@ -1,2 +1,2 @@
 # Preserve the CRLF input case exactly; do not normalize this fixture.
-south.tsv -text
+south.tsv -text whitespace=cr-at-eol

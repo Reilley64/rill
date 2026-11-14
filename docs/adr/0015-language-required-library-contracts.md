@@ -2,7 +2,7 @@
 
 [Issue #23](https://github.com/Reilley64/rill/issues/23) confirms the language-required standard-library surface in [the public contract catalogue](../standard-library-contracts.md). Use owned collections, explicit access/copying, generic callable evidence and canonical protected ownership actions rather than persistent snapshots, erased capture assumptions, return-only dispatch or a broad implicit prelude. The complete interview (Q1–Q53) and consolidated summary were explicitly confirmed; this records design input, not an implemented library, accepted feature RFC or checker/backend proof.
 
-ADRs 0013/0014 are reserved by #29's error and #22's stack decisions prepared in separate sessions. This decision follows both, regardless of which draft files are present in a checkout.
+ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separate sessions. This decision follows both, including when a separately prepared artifact is not yet present in a checkout.
 
 ## Decisions and consequences
 

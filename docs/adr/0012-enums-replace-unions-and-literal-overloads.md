@@ -2,7 +2,7 @@
 
 [Issue #19](https://github.com/Reilley64/rill/issues/19) replaces primitive-literal types/overloads and `A | B` union types with nominal, closed enums. Enums support unit, tuple, and record variants, with variant-specific overloads selected only from static types. This provides one sum-type mechanism without making runtime arguments fail merely because a narrower overload exists.
 
-This is a confirmed language-design direction, not a compiler implementation, safety proof, or acceptance of the future feature RFCs. ADR 0011 is reserved by #18's separately prepared numbers/strings decision; this decision follows it.
+This is a confirmed language-design direction, not a compiler implementation, safety proof, or acceptance of the future feature RFCs. ADR 0011 records #18's numbers/strings decision; this decision follows it.
 
 ## Later library refinement (#23)
 

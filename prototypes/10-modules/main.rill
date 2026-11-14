@@ -6,13 +6,13 @@ import api::{Position, origin, offset, Ticket, issue, ticketCode, rename, hidden
 import api::points as points;
 import geometry::point::Point as OriginalPoint;
 
-function aliasIdentity(): int {
+function aliasIdentity(): i32 {
   let constructed: OriginalPoint = Position { x: 2, y: 3 };
   let fromFunction = Position(4, 5);
   return constructed.x + fromFunction.x;
 }
 
-function resourceCode(): int {
+function resourceCode(): i32 {
   let ticket: Ticket = issue("first");
   return ticketCode(&ticket);
 }
@@ -23,7 +23,7 @@ function renamedLabel(): string {
   return copy(changed.label); // Canonical copy is available in the fixed prelude.
 }
 
-function opaqueValue(): int {
+function opaqueValue(): i32 {
   let value = hidden(9); // Infer the private canonical type, not a new public type.
   return readHidden(&value);
 }
@@ -33,7 +33,7 @@ function opaqueState(): bool {
   return isOn(&state); // Representation inspection stays in resources.rill.
 }
 
-function area(shape: &Shape): int {
+function area(shape: &Shape): i32 {
   // Empty is public at its origin, although no local Empty type name was imported.
   return match (shape) {
     { kind: "square", size } => size * size,

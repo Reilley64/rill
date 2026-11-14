@@ -32,6 +32,14 @@ _Avoid_: byte string, contiguous List guarantee, owning view
 A cooperative request to stop a goroutine while completing its required cleanup. It is distinct from panic and may remain pending while cleanup or another protected operation finishes.
 _Avoid_: panic, force kill, immediate termination
 
+**Character**:
+A `char` value representing one Unicode scalar, not necessarily a whole user-perceived character. Its code point is distinct from its UTF-8 byte encoding.
+_Avoid_: byte, grapheme, UTF-16 code unit
+
+**Caused-by wrapping**:
+An explicit error-context step written `inner ? outer`: use the successful value, or return the outer error with the original failure as its cause. Merely propagating an error adds no new context.
+_Avoid_: error-mapping callback, propagation report
+
 **Dispose**:
 The `dispose` overload for a type: extra cleanup followed by disposal of its remaining owned fields. Calling it directly consumes the value early; moved or already disposed fields are not disposed again.
 _Avoid_: drop, destructor, deinit, finalizer
@@ -84,6 +92,10 @@ _Avoid_: shared mutable reference, raw pointer
 A synchronization value granting exclusive access to a protected payload through a lock guard.
 _Avoid_: mutable Shared, runtime borrow checker
 
+**Numeric conversion**:
+A conversion between explicitly sized numeric types. `from`/`into` are infallible, while `try_from`/`try_into` return a Result; infallibility does not promise losslessness.
+_Avoid_: as cast, type assertion, implicit coercion
+
 **Opaque value**:
 A value whose canonical nominal type is private outside its defining module. Clients may hold, pass, and dispose it through visible operations, but cannot name or inspect its representation.
 _Avoid_: anonymous record, structural value, erased identity
@@ -131,3 +143,11 @@ _Avoid_: shared owner, mutable, copyable
 **Shared**:
 A `Shared<T>` handle gives a value more than one owner by explicitly counting its owners. Ordinary values are not implicitly counted, and shared ownership alone grants no mutable access to the payload.
 _Avoid_: Arc, Rc
+
+**String**:
+An owned value of valid UTF-8 text, written `string`. Named string bindings move unless explicitly copied.
+_Avoid_: String class, byte buffer, implicitly shared string
+
+**String view**:
+Read-only borrowed text written `&string`, which may cover a whole string or substring. Duplicating its descriptor retains the backing-source dependencies rather than producing owned text.
+_Avoid_: str type, owned substring, shared owner

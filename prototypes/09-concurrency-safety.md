@@ -18,8 +18,8 @@ dispose(held); // Rejected: value retains the guard's protected-access obligatio
 The guard borrows the mutex source; it does not secretly clone a shared owner:
 
 ```ts
-function invalidGuard(): LockGuard<int> {
-  let counter = shared(mutex<int>(0));
+function invalidGuard(): LockGuard<i32> {
+  let counter = shared(mutex<i32>(0));
   return lock(&counter); // Rejected: the source handle is local.
 }
 ```
@@ -27,7 +27,7 @@ function invalidGuard(): LockGuard<int> {
 A payload reference depends on the lock lease, not just on the allocation holding the payload:
 
 ```ts
-function invalidView(counter: &Shared<Mutex<int>>): &int {
+function invalidView(counter: &Shared<Mutex<i32>>): &i32 {
   let held = lock(counter);
   return &*held; // Rejected: held would unlock on return.
 }
@@ -39,7 +39,7 @@ Reject `copy(held)`, moving a non-copying payload out with `*held`, forging a gu
 
 ## Guard ownership versus scoped loans
 
-- **Accept:** `sharedGuardReads`, since `LockGuard<int>` is shareable through read-only scoped access. This does not permit child mutation, unlocking, or ownership transfer.
+- **Accept:** `sharedGuardReads`, since `LockGuard<i32>` is shareable through read-only scoped access. This does not permit child mutation, unlocking, or ownership transfer.
 - **Accept:** `scopedPayloadWrites`, where disjoint exclusive payload loans transfer to children and all execution/cleanup finishes before guard release. The guard itself stays in the parent goroutine.
 - **Reject:** transferring an owned guard to another goroutine, even via a scoped helper or wrapper; it is not sendable. Background spawn also fails its borrow-free capture requirement.
 - **Reject:** a read-only shared view of `&mut T` used to move out/copy that reference or obtain competing mutable access. Q11's sharing rule is not a way to duplicate exclusivity.
@@ -49,7 +49,7 @@ A child waiting for a lock retained by a parent that is joining that child can d
 
 ## Payloads, messages, and generic evidence
 
-Reject `mutex<&int>(&source)` and `channel<&int>()`: v0 payload/message types require noBorrow and sendable. Ordinary reference-containing records and scoped inputs/results remain available. A sendable but non-shareable owned value can be protected by a mutex or transferred as a channel message; synchronized endpoint use does not share access to an individual message.
+Reject `mutex<&i32>(&source)` and `channel<&i32>()`: v0 payload/message types require noBorrow and sendable. Ordinary reference-containing records and scoped inputs/results remain available. A sendable but non-shareable owned value can be protected by a mutex or transferred as a channel message; synchronized endpoint use does not share access to an individual message.
 
 The RFC must include accepted/rejected generic cases establishing `sendable(T)`/`shareable(T)` from structure or explicit requirements, not eventual instantiations. Erased callable annotations cannot invent capture evidence, and noBorrow/copy/invocation mode cannot substitute for transfer or sharing requirements. Test trusted exceptions such as goroutine-affine guards as well as ordinary recursive derivation through records, tuples, lists, unions, and captures.
 
@@ -60,7 +60,7 @@ Scoped helper results may retain valid caller-owned borrows. Reject results borr
 Reject access to outer/top-level runtime bindings from a named function:
 
 ```ts
-let mut counter: int = 0;
+let mut counter: i32 = 0;
 function hiddenMutation(): void {
   counter += 1; // Rejected: named functions do not implicitly capture runtime lets.
 }

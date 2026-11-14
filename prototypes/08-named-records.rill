@@ -1,38 +1,38 @@
 // Named record construction for #21. No anonymous structural records.
 // These are design examples, not executed compiler tests yet.
 
-type Point = { x: int; y: int };
-type ScreenPoint = { x: int; y: int };
+type Point = { x: i32; y: i32 };
+type ScreenPoint = { x: i32; y: i32 };
 type Box<T> = { value: T };
 
 function origin(): Point {
   return Point { x: 0, y: 0 };
 }
 
-function xOf(point: &Point): int {
+function xOf(point: &Point): i32 {
   return point.x;
 }
 
-function inferredX(): int {
+function inferredX(): i32 {
   // Infer from an already typed expression, not from later uses.
   let point = origin();
   return point.x;
 }
 
-function annotatedX(): int {
+function annotatedX(): i32 {
   // The annotation checks the constructor's type; it does not create identity.
   let point: Point = Point { x: 4, y: 5 };
   return point.x;
 }
 
-function rebuiltX(): int {
+function rebuiltX(): i32 {
   let point = Point { x: 1, y: 2 };
   let rebuilt = Point { ...point, x: 3 };
   return rebuilt.x;
 }
 
-function boxedValue(): int {
-  let box = Box<int> { value: 7 };
+function boxedValue(): i32 {
+  let box = Box<i32> { value: 7 };
   return box.value;
 }
 
@@ -51,7 +51,7 @@ expect boxedValue() == 7;
 // let wrong: Point = ScreenPoint { x: 0, y: 0 };
 
 // Rejected: anonymous structural record types must be declared and named.
-// function anonymousParameter(point: { x: int; y: int }): int {
+// function anonymousParameter(point: { x: i32; y: i32 }): i32 {
 //   return point.x;
 // }
 
@@ -61,4 +61,4 @@ expect boxedValue() == 7;
 
 // Tagged unions use named variants; see prototype 5 for construction and patterns.
 // Rejected: inline anonymous record variants.
-// type BadShape = { kind: "circle"; radius: float } | { kind: "empty" };
+// type BadShape = { kind: "circle"; radius: f64 } | { kind: "empty" };
