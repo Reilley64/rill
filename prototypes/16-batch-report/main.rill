@@ -1,0 +1,124 @@
+// #25: two-file report processor; intended-valid design source, not executable yet.
+import std::{log, panic};
+import std::collection::{List, map, length};
+import std::option::Option;
+import std::result::{Result, Ok};
+import std::error::{display, formatError, intoValue};
+import std::fs::{readFile, writeFile};
+import std::string::{viewUtf8, bytes};
+import std::mutex::{Mutex, mutex, lock};
+import std::channel::{Sender, Receiver, channel, send, intoUnsent, after, select};
+import std::routine::{join, all};
+import records::{Row, Counts, parseRows, widen, emptyTotals, addRows, renderReport};
+
+type Config = { left: string; right: string; output: string };
+type Progress = { path: string; rows: u64 };
+
+enum AppError {
+  Read { path: string },
+  Decode { path: string },
+  Rows { path: string },
+  Write { path: string },
+}
+
+enum WatchEvent {
+  Update(Option<Progress>),
+  Idle,
+}
+
+function display(error: &AppError): string {
+  return match (error) {
+    AppError.Read { path } => `cannot read ${path}`,
+    AppError.Decode { path } => `invalid UTF-8 in ${path}`,
+    AppError.Rows { path } => display(error),
+    AppError.Write { path } => `cannot write ${path}`,
+  };
+}
+
+function display(error: &AppError.Rows): string {
+  return `invalid records in ${error.path}`;
+}
+
+function notify(sender: &Sender<Progress>, progress: Progress): void {
+  guard send(sender, progress) else (error) {
+    // Progress is best-effort: recover and dispose the exact undelivered message.
+    dispose(intoUnsent(intoValue(error)));
+    return;
+  }
+}
+
+function load(path: &string, updates: Sender<Progress>, counts: &Mutex<Counts>)
+  : Result<List<Row>, AppError> {
+  let data = readFile(path) ? AppError.Read { path: copy(path) };
+  let text = viewUtf8(&data) ? AppError.Decode { path: copy(path) };
+  let raw = parseRows(text) ? AppError.Rows { path: copy(path) };
+  let rows = map(raw, widen);
+  let count = length(&rows);
+  let mut held = lock(counts);
+  (*held).files += 1u64;
+  (*held).rows += count;
+  dispose(held); // Never hold the guard across a channel send.
+  notify(&updates, Progress { path: copy(path), rows: count });
+  return Ok(rows);
+}
+
+function observe(receiver: &Receiver<Progress>): void {
+  while (true) {
+    let timer = after(250u64);
+    let event: WatchEvent = select([
+      [receiver, (progress) => WatchEvent.Update(progress)],
+      [&timer, (tick) => WatchEvent.Idle],
+    ]);
+    match (event) {
+      WatchEvent.Update(Option.Some(progress)) => {
+        log(`loaded ${progress.rows} rows from ${progress.path}`);
+      },
+      WatchEvent.Update(Option.None) => { return; },
+      WatchEvent.Idle => {
+        log(&"progress timer selected; worker completion is still required");
+        return;
+      },
+    };
+  }
+}
+
+function run(config: &Config): Result<void, AppError> {
+  let counts = mutex(Counts { files: 0u64, rows: 0u64 });
+  let countsView = &counts;
+  let leftPath = &config.left;
+  let rightPath = &config.right;
+  let [sender, receiver] = channel<Progress>(2u64);
+  let leftSender = copy(&sender); // Copy before the closures move both handles.
+  let loadBoth = () => all([
+    () => load(leftPath, leftSender, countsView),
+    () => load(rightPath, sender, countsView),
+  ]);
+  let [loaded, observed] = join([loadBoth, () => observe(&receiver)]);
+  let _ = observed;
+  let [left, right] = loaded?; // Exact AppError forwarding: no new origin/cause.
+  let mut totals = emptyTotals();
+  addRows(&mut totals, left);
+  addRows(&mut totals, right);
+  let held = lock(&counts);
+  let snapshot = *held; // Counts is implicitly copied scalar-only record data.
+  dispose(held);
+  let report = renderReport(totals, snapshot);
+  // Ok takes one argument: the successful void value of the write expression.
+  return Ok((writeFile(&config.output, bytes(&report))
+    ? AppError.Write { path: copy(&config.output) }));
+}
+
+function rowContext(): AppError {
+  return AppError.Rows { path: "bad.tsv" };
+}
+
+expect display(&rowContext()) == "invalid records in bad.tsv";
+expect display(&AppError.Rows { path: "bad.tsv" }) == "invalid records in bad.tsv";
+
+// Only this entry file's ordinary startup runs; rill test skips it.
+let config = Config { left: "north.tsv", right: "south.tsv", output: "report.txt" };
+guard run(&config) else (error) {
+  log(formatError(&error));
+  // No exit-status API is invented; this is an explicit fatal command boundary.
+  panic(&"batch report failed");
+}
