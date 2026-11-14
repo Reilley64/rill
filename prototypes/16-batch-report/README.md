@@ -2,7 +2,7 @@
 
 **Question:** does the current design remain coherent in a normal, non-toy workflow, and what ownership/copying friction becomes visible?
 
-**Status:** explicitly accepted by the user as #25 prototype evidence for the RFCs. The two Rill files are **298 physical lines combined**, including **14 independent top-level expectations**. This is intended-valid source inspected by hand, not a working compiler, executed application/test suite, concurrency proof or backend validation. No JSON/HTTP/CLI API is invented. The confirmed #23 catalogue/ADR 0015 remain uncommitted dependencies in this checkout; their files are preserved, not silently incorporated into a new library implementation.
+**Status:** explicitly accepted by the user as #25 prototype evidence for the RFCs. The two Rill files are **298 physical lines combined**, including **14 independent top-level expectations**. This is intended-valid source inspected by hand, not a working compiler, executed application/test suite, concurrency proof or backend validation. No JSON/HTTP/CLI API is invented. The confirmed #23 catalogue/ADR 0015 are this prototype's repository inputs, not a library implementation. Publishing these design artifacts does not establish compiler or backend support.
 
 - [main.rill](main.rill): native file/UTF-8 work, scoped concurrency, notifications, mutex metrics, error context and entry startup.
 - [records.rill](records.rill): application grammar, owned records, aggregation, generic rendering and pure expectations.
