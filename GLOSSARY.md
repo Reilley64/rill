@@ -28,6 +28,14 @@ _Avoid_: panic, force kill, immediate termination
 The `dispose` overload for a type: a function the compiler calls when a value of that type is freed. Calling it directly ends the value early.
 _Avoid_: drop, destructor, deinit, finalizer
 
+**Enum**:
+A nominal type defining a closed set of unit, tuple, or record variants. Enums are Rill's v0 sum-type mechanism; matching can distinguish their variants at runtime.
+_Avoid_: untagged union, structural union, backing-value list
+
+**Enum variant**:
+One of an enum's named alternatives, optionally carrying payload data. Its qualified name also denotes a distinct variant type, usable in annotations and overload parameters.
+_Avoid_: string tag, singleton payload value, independent record member
+
 **Expectation**:
 A top-level test declaration written `expect <expression>;`, whose boolean result determines whether it passes. Expectations run only under `rill test`, not as production assertions.
 _Avoid_: runtime assertion, precondition

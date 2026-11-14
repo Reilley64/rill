@@ -1,0 +1,114 @@
+// #19 / ADR 0012: hand-checked design examples, not compiler-executed tests.
+// No std interfaces are needed; numeric literals/widths are deliberately avoided.
+
+enum Language {
+  English,
+  French { crazy: string },
+  German(string),
+}
+
+enum Box<T> {
+  Value(T),
+  Empty,
+}
+
+function greeting(language: &Language): string;
+
+function greeting(language: &Language): string {
+  return "Hello";
+}
+
+function greeting(language: &Language.French): string {
+  return "Bonjour";
+}
+
+function fromRuntime(language: &Language): string {
+  // The declared whole-enum parameter selects the general overload.
+  return greeting(language);
+}
+
+function fromMatch(language: &Language): string {
+  return match (language) {
+    Language.English => greeting(language),
+    Language.French { crazy } => greeting(language),
+    Language.German(text) => greeting(language),
+  };
+}
+
+function inferredFrench(): string {
+  let language = Language.French { crazy: "payload" };
+  return greeting(&language);
+}
+
+function annotatedFrench(): string {
+  let language: Language = Language.French { crazy: "payload" };
+  return greeting(&language);
+}
+
+function joined(chooseFrench: bool): string {
+  let language = if (chooseFrench)
+    Language.French { crazy: "payload" }
+  else Language.English;
+  // Different variants join at Language, regardless of the runtime branch.
+  return greeting(&language);
+}
+
+function takeFrench(language: Language.French): string {
+  return language.crazy;
+}
+
+function takeGerman(language: Language.German): string {
+  return match (language) {
+    Language.German(text) => text,
+  };
+}
+
+function unbox(value: Box<string>): string {
+  return match (value) {
+    Box.Value(text) => text,
+    Box.Empty => "empty",
+  };
+}
+
+function emptyBox(): string {
+  let value: Box<string> = Box.Empty;
+  return unbox(value);
+}
+
+function setFrench(language: &mut Language.French): void {
+  language.crazy = "changed";
+}
+
+function replaceLanguage(language: &mut Language): void {
+  *language = Language.English;
+}
+
+function mutatedPayload(): string {
+  let mut language = Language.French { crazy: "original" };
+  setFrench(&mut language);
+  return takeFrench(language);
+}
+
+function replacedVariant(): string {
+  let mut language: Language = Language.French { crazy: "original" };
+  replaceLanguage(&mut language);
+  return fromMatch(&language);
+}
+
+// Test-only expectations use their own inputs, not startup lets.
+expect greeting(&Language.English) == "Hello";
+expect greeting(&Language.French { crazy: "one" }) == "Bonjour";
+expect greeting(&Language.French { crazy: "two" }) == "Bonjour";
+expect greeting(&Language.German("hallo")) == "Hello";
+expect fromRuntime(&Language.French { crazy: "payload" }) == "Hello";
+expect fromMatch(&Language.French { crazy: "payload" }) == "Bonjour";
+expect inferredFrench() == "Bonjour";
+expect annotatedFrench() == "Hello";
+expect joined(true) == "Hello";
+expect joined(false) == "Hello";
+expect takeFrench(Language.French { crazy: "bonjour" }) == "bonjour";
+expect takeGerman(Language.German("hallo")) == "hallo";
+expect unbox(Box.Value("boxed")) == "boxed";
+expect emptyBox() == "empty";
+expect mutatedPayload() == "changed";
+expect replacedVariant() == "Hello";

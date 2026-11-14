@@ -11,7 +11,7 @@
 | Type | `sendable` | `shareable` |
 | --- | --- | --- |
 | Scalars and immutable strings | Yes | Yes |
-| Record, tuple, list, union | Corresponding property of every contained value/member | Corresponding property of every contained value/member |
+| Record, tuple, list, enum | Corresponding property of every contained value/member | Corresponding property of every contained value/member |
 | `&T` | Requires `shareable(T)` | Requires `shareable(T)` |
 | `&mut T` | Requires `sendable(T)` | Requires `shareable(T)` for read-only access to the reference |
 | `Shared<T>` | Requires `sendable(T)` and `shareable(T)` | Requires `sendable(T)` and `shareable(T)` |
