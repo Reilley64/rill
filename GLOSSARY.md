@@ -20,12 +20,20 @@ _Avoid_: owned value, thread-safe value
 A function value with a read-only, mutable, or consuming invocation contract. That contract is separate from purity, borrowed captures, and copyability.
 _Avoid_: Fn trait, async function
 
+**Callable requirement**:
+A compiler-checked invocation contract on a concrete callable type, written with callable, callableMut, or callableOnce. It preserves the callable's argument, result, access and capture evidence without introducing a user-implementable trait.
+_Avoid_: erased callback guarantee, function trait
+
+**Bytes**:
+Rill's owned contiguous byte sequence, distinct from List<u8>. Read-only logical views can denote whole sequences or subranges while retaining their sources.
+_Avoid_: byte string, contiguous List guarantee, owning view
+
 **Cancellation**:
 A cooperative request to stop a goroutine while completing its required cleanup. It is distinct from panic and may remain pending while cleanup or another protected operation finishes.
 _Avoid_: panic, force kill, immediate termination
 
 **Dispose**:
-The `dispose` overload for a type: a function the compiler calls when a value of that type is freed. Calling it directly ends the value early.
+The `dispose` overload for a type: extra cleanup followed by disposal of its remaining owned fields. Calling it directly consumes the value early; moved or already disposed fields are not disposed again.
 _Avoid_: drop, destructor, deinit, finalizer
 
 **Enum**:
@@ -35,6 +43,10 @@ _Avoid_: untagged union, structural union, backing-value list
 **Enum variant**:
 One of an enum's named alternatives, optionally carrying payload data. Its qualified name also denotes a distinct variant type, usable in annotations and overload parameters.
 _Avoid_: string tag, singleton payload value, independent record member
+
+**Error wrapper**:
+An Err<E> value owning a typed error, its construction origin and an optional retained cause. Forwarding preserves it unchanged; explicit wrapping adds a new outer error.
+_Avoid_: Report, propagation trace, mandatory message
 
 **Expectation**:
 A top-level test declaration written `expect <expression>;`, whose boolean result determines whether it passes. Expectations run only under `rill test`, not as production assertions.
@@ -57,7 +69,7 @@ A non-copyable value that borrows a mutex and owns responsibility for releasing 
 _Avoid_: shared lock owner, raw lock, OS-thread-affine guard
 
 **Map**:
-Rill's key/value collection type, written `Map<K, V>`, distinct from the lowercase `map(...)` transformation function.
+Rill's owned hash-based key/value collection, written `Map<K, V>`, with no iteration-order guarantee. It is distinct from the lowercase `map(...)` transformation function.
 _Avoid_: Dictionary, dict
 
 **Module**:
@@ -100,6 +112,10 @@ _Avoid_: object literal, structural record
 A temporary loan of existing borrowed access, restricting conflicting use of the original access until the loan is no longer needed.
 _Avoid_: copy, new owner
 
+**Retained cause**:
+A uniquely owned underlying error preserved with its origin and complete cause chain. Retention requires display, borrow-freedom, sendability and shareability evidence, independently of the outer error.
+_Avoid_: erased unchecked error, stack trace, shared Report
+
 **Routine**:
 The handle `spawn(() => f(x))` returns for the goroutine it starts. `stop(&routine)` requests cancellation and waits for termination and cleanup; freeing the handle does not stop it.
 _Avoid_: task, future, promise, join handle
@@ -113,5 +129,5 @@ Safe for read-only access by concurrently executing goroutines, as required by `
 _Avoid_: shared owner, mutable, copyable
 
 **Shared**:
-A `Shared<T>` handle gives a value more than one owner by counting its owners. It is the only counted value in Rill, and shared ownership alone grants no mutable access to its payload.
+A `Shared<T>` handle gives a value more than one owner by explicitly counting its owners. Ordinary values are not implicitly counted, and shared ownership alone grants no mutable access to the payload.
 _Avoid_: Arc, Rc

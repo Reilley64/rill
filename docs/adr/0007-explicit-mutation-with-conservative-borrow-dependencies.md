@@ -48,6 +48,10 @@ Invocation capability, borrow dependencies, and copyability are separate propert
 
 Add `where noBorrow(T)` as a compiler-recognized intrinsic, not a user-implementable overload. It requires no borrowed dependencies through fields or captures; it does not imply copyability or concurrent-sharing safety. Check generic bodies before monomorphization: unconstrained `T` may carry borrows. Establish the property from known structure/captures or explicit generic requirements. Erased arrow interfaces cannot invent evidence about their environments; reject operations requiring unavailable evidence. Generic copying still requires `where copy(T)`.
 
+## Confirmed library interface refinements (#23)
+
+[ADR 0015](0015-language-required-library-contracts.md) adds explicit compiler callable requirements while retaining concrete F and existing invocation/access/property distinctions. Copy calls use `copy(&value)`. Canonical iterate/next support conservative one-at-a-time exclusive traversal; no arbitrary disjoint-index inference is added. After a custom disposer, remaining initialized owned fields are cleaned up without repeating moved/disposed fields or recursively reinvoking the outer disposer. This additional rule was explicitly confirmed in #23, not assumed from the earlier ownership proposal. See the [catalogue](../standard-library-contracts.md) for signatures and retained-storage/result contracts; #28 still owes their explicit checker validation.
+
 ## Alternatives and follow-through
 
 - **References only in parameters, or no references in mutable positions:** simpler checking, but narrows ADR 0002's expressiveness. Rejected for this design direction.

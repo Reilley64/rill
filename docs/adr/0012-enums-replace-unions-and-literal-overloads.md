@@ -4,6 +4,10 @@
 
 This is a confirmed language-design direction, not a compiler implementation, safety proof, or acceptance of the future feature RFCs. ADR 0011 is reserved by #18's separately prepared numbers/strings decision; this decision follows it.
 
+## Later library refinement (#23)
+
+[ADR 0015](0015-language-required-library-contracts.md) supplies the complete [library contract catalogue](../standard-library-contracts.md), including the metadata-bearing Err<E> payload behind Result.Err, callable/iteration requirements and structural enum implicit-copy eligibility. Error origins/explicit causes follow #29 rather than automatic propagation traces. Heterogeneous retained causes additionally require display/noBorrow/sendable/shareable; they cannot hide a borrowed or affine payload. Earlier illustrative Option/Result forms below are not final library layouts.
+
 ## Declarations, construction, and variant types
 
 ```rill

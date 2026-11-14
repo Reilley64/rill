@@ -6,6 +6,10 @@ Rill has no traits, so overloading carries per-type behavior. To keep that check
 
 [ADR 0012](0012-enums-replace-unions-and-literal-overloads.md) supersedes primitive literal types/overloads and the unknown-runtime-value error rule. A statically known enum variant can select its variant implementation; a parent-enum argument selects an applicable general implementation, never a runtime dispatcher. Existing all-parameter specificity, declarations, generics, family identity, and collection rules remain.
 
+## Library requirements and closed operations (#23)
+
+[ADR 0015](0015-language-required-library-contracts.md) and the [public catalogue](../standard-library-contracts.md) provide callable/callableMut/callableOnce predicates, ordinary canonical iterate/next families, loose collection family shapes, and distinct plain join/fallible all APIs. Fixed tuple arities do not add variadic generics. Closed numeric conversion/parsing operations are not user return-only overloads. Canonical Err construction is an explicitly approved location-capturing one-/two-argument exception, not a general relaxation of ordinary parameter-count rules; adapt it with an arrow for first-class use.
+
 ## Module and conflict rules
 
 [ADR 0010](0010-file-modules-explicit-exports-and-privacy.md) makes imports/re-exports preserve canonical family identity. Implementations inherit declaration-wide visibility, but an extension does not implicitly re-export its local import binding. Collect implementations from the loaded module graph once; reject distinct bodies with identical canonical parameter patterns during collection, and reject incomparable applicable matches at a call. Generic/specific patterns remain distinct and import order never chooses a winner. Orphan placement alone is not a coherence proof.

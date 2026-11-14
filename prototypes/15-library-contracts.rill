@@ -1,0 +1,404 @@
+// #23 / ADR 0015: intended-valid hand-checked design cases, not executed tests.
+import std::{spawnWithStack, stop};
+import std::collection::{List, Map, map, sum, insert, get, remove, length};
+import std::option::{Option, map as mapOption};
+import std::result::{Result, Ok, Err, map as mapResult, mapErr, isOk};
+import std::error::{display, cause, value, intoValue};
+import std::bytes::Bytes;
+import std::string::{viewUtf8, decodeLossy, chars};
+import std::char::{codePoint, fromCodePoint};
+import std::convert::{try_into, ConversionError};
+import std::number::{parseNumber, wrappingAdd, saturatingAdd};
+import std::shared::{shared, view};
+import std::mutex::{Mutex, LockGuard, mutex, lock};
+import std::iter::{iterate, next};
+import std::channel::{channel, send, receive, select, intoUnsent};
+import std::routine::{join, all, allSettled, any, failures};
+
+enum SmallError {
+  Bad,
+  Outer,
+}
+
+enum OtherError {
+  Different,
+}
+
+function display(error: &SmallError): string {
+  return match (error) {
+    SmallError.Bad => "bad",
+    SmallError.Outer => "outer",
+  };
+}
+
+function display(error: &OtherError): string {
+  return "different";
+}
+
+type Counter = { current: u64; end: u64 };
+
+function iterate(counter: Counter): Counter {
+  return counter;
+}
+
+function next(counter: &mut Counter): Option<u64> {
+  if (counter.current == counter.end) {
+    return Option.None;
+  }
+  let number = counter.current;
+  counter.current += 1u64;
+  return Option.Some(number);
+}
+
+function customIteration(): u64 {
+  let mut total = 0u64;
+  for (let number of Counter { current: 0u64, end: 3u64 }) {
+    total += number;
+  }
+  return total;
+}
+
+type WrappedGuard = { held: LockGuard<i32>; flag: &mut bool };
+
+function dispose(wrapper: WrappedGuard): void {
+  *wrapper.flag = true;
+  // Compiler cleanup still releases wrapper.held; no explicit dispose required.
+}
+
+function wrapperCleanup(): bool {
+  let mut flag = false;
+  let cell: Mutex<i32> = mutex(1i32);
+  let wrapper = WrappedGuard { held: lock(&cell), flag: &mut flag };
+  dispose(wrapper);
+  let held = lock(&cell);
+  return flag && *held == 1i32;
+}
+
+function copiedText(): bool {
+  let first: string = "text";
+  let second = copy(&first);
+  return first == second;
+}
+
+function ownedMap(): i32 {
+  let input: List<i32> = [1, 2];
+  let output = map(input, (number) => number + 1i32);
+  return sum(&output);
+}
+
+function borrowedMap(): i32 {
+  let input: List<i32> = [1, 2];
+  let output = map(&input, (number) => *number + 1i32);
+  return sum(&output) + sum(&input);
+}
+
+function reusedCallback(): i32 {
+  let mut total = 0i32;
+  let mut accumulate = (number: i32) => {
+    total += number;
+    return total;
+  };
+  let input: List<i32> = [1, 2, 3];
+  let output = map(input, &mut accumulate);
+  let more: List<i32> = [4];
+  let last = map(more, &mut accumulate);
+  return sum(&output) + sum(&last);
+}
+
+function mutableTraversal(): i32 {
+  let mut input: List<i32> = [1, 2];
+  for (let element of &mut input) {
+    *element += 1i32;
+  }
+  return sum(&input);
+}
+
+function mapReplacement(): i32 {
+  let mut counts = Map<string, i32>();
+  let _ = insert(&mut counts, "key", 7i32);
+  let old = insert(&mut counts, "key", 9i32);
+  return match (old) {
+    Option.Some(number) => number,
+    Option.None => -1i32,
+  };
+}
+
+function mapLookup(): i32 {
+  let mut counts = Map<string, i32>();
+  let _ = insert(&mut counts, "key", 9i32);
+  return match (get(&counts, &"key")) {
+    Option.Some(number) => *number,
+    Option.None => -1i32,
+  };
+}
+
+function mapRemoval(): bool {
+  let mut counts = Map<string, i32>();
+  let _ = insert(&mut counts, "key", 9i32);
+  let _ = remove(&mut counts, &"key");
+  return length(&counts) == 0u64;
+}
+
+function optionMapping(): i32 {
+  let input: Option<i32> = Option.Some(2i32);
+  return match (mapOption(input, (number) => number + 3i32)) {
+    Option.Some(number) => number,
+    Option.None => -1i32,
+  };
+}
+
+function succeed(number: i32): Result<i32, SmallError> {
+  return Ok(number);
+}
+
+function fail(): Result<i32, SmallError> {
+  return Err(SmallError.Bad);
+}
+
+function failOther(): Result<i32, OtherError> {
+  return Err(OtherError.Different);
+}
+
+function wrapped(): Result<i32, SmallError> {
+  let number = fail() ? SmallError.Outer;
+  return Ok(number);
+}
+
+function resultMapping(): bool {
+  let output: Result<i32, SmallError> = mapResult(succeed(2i32), (number) => number + 3i32);
+  guard let number = output else (error) {
+    return false;
+  }
+  return number == 5i32;
+}
+
+function retainedCause(): bool {
+  guard let number = wrapped() else (error) {
+    return match (cause(&error)) {
+      Option.Some(inner) => match (cause(inner)) {
+        Option.Some(deeper) => false,
+        Option.None => true,
+      },
+      Option.None => false,
+    };
+  }
+  return false;
+}
+
+function mappedCause(): bool {
+  let changed = mapErr(wrapped(), (error) => SmallError.Bad);
+  guard let number = changed else (error) {
+    return match (cause(&error)) {
+      Option.Some(inner) => true,
+      Option.None => false,
+    };
+  }
+  return false;
+}
+
+function borrowedUtf8(): bool {
+  let data = Bytes([65u8, 66u8]);
+  guard let text = viewUtf8(&data) else (error) {
+    return false;
+  }
+  return *text == "AB";
+}
+
+function invalidUtf8(): bool {
+  let data = Bytes([255u8]);
+  guard let text = viewUtf8(&data) else (error) {
+    return value(&error).validUpTo == 0u64;
+  }
+  return false;
+}
+
+function lossyUtf8(): bool {
+  let data = Bytes([255u8, 65u8]);
+  return decodeLossy(&data) == "\u{fffd}A";
+}
+
+function scalarCount(): u64 {
+  let text: string = "éA";
+  let mut count = 0u64;
+  for (let scalar of chars(&text)) {
+    count += 1u64;
+  }
+  return count;
+}
+
+function invalidScalar(): bool {
+  return match (fromCodePoint(0xd800u32)) {
+    Option.Some(scalar) => false,
+    Option.None => true,
+  };
+}
+
+function narrowingFails(): bool {
+  guard let number = try_into<u8>(300u16) else (error) {
+    return match (value(&error)) {
+      ConversionError.OutOfRange => true,
+      ConversionError.NotFinite => false,
+    };
+  }
+  return false;
+}
+
+function fractionalConversion(): bool {
+  guard let number = try_into<u8>(-0.5f64) else (error) {
+    return false;
+  }
+  return number == 0u8;
+}
+
+function parsedNumber(): bool {
+  guard let number = parseNumber<i32>(&"12") else (error) {
+    return false;
+  }
+  return number == 12i32;
+}
+
+function copiedOwner(): i32 {
+  let first = shared(7i32);
+  let second = copy(&first);
+  dispose(first);
+  return *view(&second);
+}
+
+function mutexPayload(): i32 {
+  let cell = mutex(2i32);
+  {
+    let mut held = lock(&cell);
+    *held += 1i32;
+  }
+  let held = lock(&cell);
+  return *held;
+}
+
+function bufferedChannel(): bool {
+  let [sender, receiver] = channel<i32>(1u64);
+  guard send(&sender, 12i32) else {
+    return false;
+  }
+  dispose(sender);
+  let first = receive(&receiver);
+  let drained = receive(&receiver);
+  return match (first) {
+    Option.Some(number) => match (drained) {
+      Option.Some(extra) => false,
+      Option.None => number == 12i32,
+    },
+    Option.None => false,
+  };
+}
+
+function recoveredMessage(): bool {
+  let [sender, receiver] = channel<string>(0u64);
+  dispose(receiver);
+  guard send(&sender, "unsent") else (error) {
+    return intoUnsent(intoValue(error)) == "unsent";
+  }
+  return false;
+}
+
+enum ReadyEvent {
+  Message(Option<i32>),
+  Quiet,
+}
+
+function oneCommit(): bool {
+  let [readySender, ready] = channel<i32>(1u64);
+  let [quietSender, quiet] = channel<i32>(0u64);
+  guard send(&readySender, 12i32) else {
+    return false;
+  }
+  let event: ReadyEvent = select([
+    [&ready, (number) => ReadyEvent.Message(number)],
+    [&quiet, (number) => ReadyEvent.Quiet],
+  ]);
+  // Keep the quiet sender alive through selection; closure must not race readiness.
+  dispose(quietSender);
+  dispose(readySender);
+  return match (event) {
+    ReadyEvent.Message(number) => match (number) {
+      Option.Some(value) => value == 12i32,
+      Option.None => false,
+    },
+    ReadyEvent.Quiet => false,
+  };
+}
+
+function plainJoin(): i32 {
+  let [first, second] = join([() => 2i32, () => 3i32]);
+  return first + second;
+}
+
+function fallibleAll(): bool {
+  let result: Result<[i32, i32], SmallError> = all([
+    () => succeed(2i32),
+    () => succeed(3i32),
+  ]);
+  guard let pair = result else (error) {
+    return false;
+  }
+  let [first, second] = pair;
+  return first + second == 5i32;
+}
+
+function settledTypes(): bool {
+  let [first, second] = allSettled([
+    () => succeed(2i32),
+    () => failOther(),
+  ]);
+  return isOk(&first) && !isOk(&second);
+}
+
+function allFailures(): bool {
+  guard let number = any([() => fail(), () => fail()]) else (error) {
+    return length(failures(value(&error))) == 2u64;
+  }
+  return false;
+}
+
+function sizedWork(): bool {
+  let routine = spawnWithStack(() => {}, 1048576u64);
+  stop(&routine);
+  return true;
+}
+
+// Each expectation has independent inputs. Native/concurrent outcomes below are
+// hand-checked contracts, not evidence that a scheduler/backend has run them.
+expect copiedText();
+expect ownedMap() == 5i32;
+expect borrowedMap() == 8i32;
+expect reusedCallback() == 20i32;
+expect mutableTraversal() == 5i32;
+expect mapReplacement() == 7i32;
+expect mapLookup() == 9i32;
+expect mapRemoval();
+expect optionMapping() == 5i32;
+expect resultMapping();
+expect retainedCause();
+expect mappedCause();
+expect borrowedUtf8();
+expect invalidUtf8();
+expect lossyUtf8();
+expect scalarCount() == 2u64;
+expect codePoint('é') == 233u32;
+expect invalidScalar();
+expect narrowingFails();
+expect fractionalConversion();
+expect parsedNumber();
+expect wrappingAdd(255u8, 1u8) == 0u8;
+expect saturatingAdd(255u8, 1u8) == 255u8;
+expect copiedOwner() == 7i32;
+expect mutexPayload() == 3i32;
+expect bufferedChannel();
+expect recoveredMessage();
+expect oneCommit();
+expect plainJoin() == 5i32;
+expect fallibleAll();
+expect settledTypes();
+expect allFailures();
+expect sizedWork();
+expect customIteration() == 3u64;
+expect wrapperCleanup();
