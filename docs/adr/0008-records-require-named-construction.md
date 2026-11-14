@@ -5,7 +5,7 @@
 ## Construction and inference
 
 ```ts
-type Point = { x: int; y: int };
+type Point = { x: i32; y: i32 };
 
 let origin = Point { x: 0, y: 0 };
 let checked: Point = Point { x: 0, y: 0 };
@@ -18,7 +18,7 @@ Use named construction in function returns, arguments, nested fields, and collec
 ## Unions, patterns, and rebuilding
 
 ```ts
-type Circle = { kind: "circle"; center: Point; radius: float };
+type Circle = { kind: "circle"; center: Point; radius: f64 };
 type Empty = { kind: "empty" };
 type Shape = Circle | Empty;
 

@@ -3,9 +3,9 @@ import std::collection::List;
 
 // Design prototype for #15, not an executable compiler test yet.
 
-type Point = { x: int; y: int };
+type Point = { x: i32; y: i32 };
 
-function increment(value: &mut int): void {
+function increment(value: &mut i32): void {
   *value += 1;
 }
 
@@ -30,15 +30,15 @@ function shifted(point: Point): Point {
   return moved;
 }
 
-function total(numbers: &List<int>): int {
-  let mut result = 0;
+function total(numbers: &List<i32>): i32 {
+  let mut result: i32 = 0;
   for (let n of numbers) {
     result += n;
   }
   return result;
 }
 
-function incremented(start: int): int {
+function incremented(start: i32): i32 {
   let mut value = start;
   increment(&mut value);
   return value;
@@ -51,7 +51,7 @@ function independentCopies(): bool {
   return original.x == 1 && changed.x == 9;
 }
 
-function separateFields(): int {
+function separateFields(): i32 {
   let mut point = Point { x: 1, y: 2 };
   let x = &mut point.x;
   let y = &mut point.y; // Disjoint named-field storage.
@@ -61,11 +61,11 @@ function separateFields(): int {
   return point.x + point.y;
 }
 
-function invokeRead(work: &(() => int)): int {
+function invokeRead(work: &(() => i32)): i32 {
   return work();
 }
 
-function invokeMut(work: &mut (mut () => int)): int {
+function invokeMut(work: &mut (mut () => i32)): i32 {
   return work();
 }
 
@@ -73,15 +73,15 @@ function invokeOnce(work: once () => string): string {
   return work();
 }
 
-function readExample(): int {
-  let read: () => int = () => 42;
+function readExample(): i32 {
+  let read: () => i32 = () => 42;
   return invokeRead(&read);
 }
 
-function counterExample(): int {
-  let mut count = 0;
+function counterExample(): i32 {
+  let mut count: i32 = 0;
   // A stored closure captures by value: this owns its own copied counter.
-  let mut next: mut () => int = () => {
+  let mut next: mut () => i32 = () => {
     count += 1;
     return count;
   };
@@ -100,8 +100,8 @@ function identity<T>(value: T): T {
   return value;
 }
 
-function carriedBorrow(): int {
-  let owner = 42;
+function carriedBorrow(): i32 {
+  let owner: i32 = 42;
   let view = identity(&owner);
   // Passing a reference through an owned generic parameter preserves its borrow.
   return *view;
@@ -111,7 +111,7 @@ function remember(slot: &mut &Point, point: &Point): void {
   *slot = point;
 }
 
-function retainedInput(): int {
+function retainedInput(): i32 {
   let first = Point { x: 1, y: 2 };
   let second = Point { x: 9, y: 10 };
   let mut selected = &first;
@@ -145,4 +145,4 @@ expect counterExample() == 12;
 expect takeExample("hello") == "hello";
 expect carriedBorrow() == 42;
 expect retainedInput() == 9;
-expect requireNoBorrow(42) == 42;
+expect requireNoBorrow(42i32) == 42;

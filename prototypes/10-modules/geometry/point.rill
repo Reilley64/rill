@@ -1,9 +1,9 @@
 import formatting::show;
 
-export type Point = { x: int; y: int };
+export type Point = { x: i32; y: i32 };
 
 // Type and function share a spelling in separate namespaces.
-export function Point(x: int, y: int): Point {
+export function Point(x: i32, y: i32): Point {
   return Point { x: x, y: y };
 }
 

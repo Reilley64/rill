@@ -1,13 +1,13 @@
 import std::log;
 import formatting::show;
 
-export type Ticket = { private code: int; label: string };
+export type Ticket = { private code: i32; label: string };
 
 export function issue(label: string): Ticket {
   return Ticket { code: 7, label: label };
 }
 
-export function ticketCode(ticket: &Ticket): int {
+export function ticketCode(ticket: &Ticket): i32 {
   return ticket.code;
 }
 
@@ -16,13 +16,13 @@ export function rename(ticket: Ticket, label: string): Ticket {
   return Ticket { ...ticket, label: label };
 }
 
-type Hidden = { value: int };
+type Hidden = { value: i32 };
 
-export function hidden(value: int): Hidden {
+export function hidden(value: i32): Hidden {
   return Hidden { value: value };
 }
 
-export function readHidden(value: &Hidden): int {
+export function readHidden(value: &Hidden): i32 {
   return value.value;
 }
 

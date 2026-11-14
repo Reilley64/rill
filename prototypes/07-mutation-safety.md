@@ -50,18 +50,18 @@ The prototype's complete `remember(slot: &mut &Point, point: &Point)` and `retai
 - **Accept when checked against the inputs' dependencies:** returning an existing `&User` from an owned `List<&User>`. Moving/freeing the list storage must not erase the users' source dependencies.
 - **Reject:** returning `&local` from a function owning `local`, or returning a reference into locally owned list storage that will be freed.
 - **Reject:** `let view = identity(&shifted(Point { x: 1, y: 2 }));` followed by a later statement using `view`; the borrowed temporary cannot escape its statement. Borrowing the same temporary entirely within an expectation can be valid.
-- **Reject:** reading or mutating a whole value while a result retaining an exclusive dependency on that value is still needed. For example, after a schematic `editAndView(items: &mut List<int>): &int`, the returned read-only element reference does not automatically downgrade access to `items`.
+- **Reject:** reading or mutating a whole value while a result retaining an exclusive dependency on that value is still needed. For example, after a schematic `editAndView(items: &mut List<i32>): &i32`, the returned read-only element reference does not automatically downgrade access to `items`.
 
 ## Callable capabilities and copying
 
 These contracts must not be strengthened through annotations, returns, records, or branch joins:
 
 ```ts
-function wrongMode(work: mut () => int): () => int {
+function wrongMode(work: mut () => i32): () => i32 {
   return work; // Rejected: mutable invocation cannot become read-only invocation.
 }
 
-function wrongAccess(work: &(mut () => int)): int {
+function wrongAccess(work: &(mut () => i32)): i32 {
   return work(); // Rejected: only read-only access to a mutable callable.
 }
 
@@ -73,7 +73,7 @@ function wrongOwnership(work: &mut (once () => string)): string {
 Exclusive-capture duplication must remain rejected even when wrapped in a record or given an arrow annotation:
 
 ```ts
-let mut counter = 0;
+let mut counter: i32 = 0;
 let access = &mut counter;
 let tick = () => {
   *access += 1;
@@ -85,7 +85,7 @@ A closure owning an independent copied integer counter is a different case: muta
 
 ## Generic and erased-callable evidence
 
-The prototype's `requireNoBorrow<T>` deliberately requires `where noBorrow(T)`. Reject the following generic body before monomorphization, even if its current callers happen to use `int`:
+The prototype's `requireNoBorrow<T>` deliberately requires `where noBorrow(T)`. Reject the following generic body before monomorphization, even if its current callers happen to use `i32`:
 
 ```ts
 function unchecked<T>(value: T): T {

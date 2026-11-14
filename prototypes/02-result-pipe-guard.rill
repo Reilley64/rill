@@ -1,9 +1,10 @@
 import std::log;
 import std::result::{Result, Ok, Err, andThen, map};
-import std::string::parseInt;
+// Typed parser spelling/error interface is illustrative pending #23.
+import std::string::parse;
 
-function parsePort(text: string): Result<int> {
-  guard let port = parseInt(&text) else (error) {
+function parsePort(text: string): Result<i32> {
+  guard let port = parse<i32>(&text) else (error) {
     return Err(`not a port: ${text}`, error);
   }
   guard port > 0 && port < 65536 else {
@@ -12,14 +13,14 @@ function parsePort(text: string): Result<int> {
   return Ok(port);
 }
 
-function rejectReserved(port: int): Result<int> {
+function rejectReserved(port: i32): Result<i32> {
   guard port >= 1024 else {
     return Err(`reserved port: ${port}`);
   }
   return Ok(port);
 }
 
-function toAddress(port: int): string {
+function toAddress(port: i32): string {
   return `localhost:${port}`;
 }
 
@@ -38,13 +39,13 @@ function start(text: string): string {
 log(start("8080"));
 log(start("80x0"));
 
-// Output:
+// Output (trace formatting/locations are illustrative pending #24):
 // listening on localhost:8080
 // error: not a port: 80x0
 //   at parsePort (02-result-pipe-guard.rill:7)
 //   at start (02-result-pipe-guard.rill:28)
 // caused by: invalid digit "x" at index 2
-//   at parseInt (std/string.rill:41)
+//   at parse (std/string.rill:41)
 //   at parsePort (02-result-pipe-guard.rill:6)
 
 // Test-only expectations; no dependence on the top-level log calls.

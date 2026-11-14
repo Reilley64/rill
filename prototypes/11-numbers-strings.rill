@@ -1,0 +1,264 @@
+// #18 design artifacts, not executed compiler tests.
+// All new std paths/helper spellings and Result error types are illustrative for #23.
+// In particular, Result<T> here uses the default Error as a placeholder interface;
+// #23 must finalize error types without implicit error conversion or return-only overloads.
+// decodeUtf8/decodeUtf8Lossy below are COPYING operations on List<u8>, not borrowed
+// decoders and not a claim that List has contiguous storage. No byte-view ABI is assumed.
+
+import std::convert::{from, into, try_from, try_into};
+import std::format::show;
+import std::result::Result;
+import std::string::{slice, byteAt, byteLength, parse, decodeUtf8, decodeUtf8Lossy};
+import std::char::{codePoint, fromCodePoint};
+import std::collection::List;
+
+type Point = { x: i32; y: i32 };
+
+// Extend canonical template show because this module owns Point.
+// The primitive formatter called by the inner template is NOT this implementation.
+function show(point: &Point): string {
+  return `point ${point.x},${point.y}`;
+}
+
+// Aliases provide the same canonical availability evidence; trailing From is inferred.
+function widen<To, From>(value: From): To where into(To, From) {
+  return from<To>(value);
+}
+
+function checked<To, From>(value: From): Result<To> where try_into(To, From) {
+  return try_from<To>(value);
+}
+
+function fits(): bool {
+  guard let value = checked<u8>(7u16) else {
+    return false;
+  }
+  return value == 7;
+}
+
+function failsRange(): bool {
+  guard try_into<u8>(300u16) else {
+    return true;
+  }
+  return false;
+}
+
+function trySafePair(): bool {
+  guard let value = try_from<i64>(7i32) else {
+    return false;
+  }
+  return value == 7;
+}
+
+function truncatedUnsigned(): u8 {
+  guard let value = try_into<u8>(-0.5f64) else {
+    return 255;
+  }
+  return value;
+}
+
+function rejectsInfinity(): bool {
+  guard try_from<i32>(1.0f64 / 0.0f64) else {
+    return true;
+  }
+  return false;
+}
+
+function skippedTrap(): i8 {
+  if (false) {
+    return 127i8 + 1i8; // Well-typed. Panic only if this expression is evaluated.
+  }
+  return 0;
+}
+
+function cloneGeneric<T>(value: &T): T where copy(T) {
+  return copy(*value); // Logical read access, including a headerless string view.
+}
+
+function middle(): string {
+  let owner: string = "aéz";
+  guard let view = slice(&owner, 1, 3) else {
+    return "bad slice";
+  }
+  return cloneGeneric<string>(view); // Copy exactly é, not all of owner.
+}
+
+function badBoundary(): bool {
+  let owner: string = "é";
+  guard slice(&owner, 1, 2) else {
+    return true; // Byte 1 is a continuation byte, not a scalar boundary.
+  }
+  return false;
+}
+
+function continuationByte(): u8 {
+  guard let value = byteAt(&"é", 1) else {
+    return 0;
+  }
+  return value;
+}
+
+function relay(input: &string): &string {
+  let local = input;
+  return local; // Backing-source dependency, not a reference to the local slot.
+}
+
+function throughDescriptor(): string {
+  let owner: string = "source";
+  let view = relay(&owner);
+  let descriptor = &view;
+  return copy(**descriptor);
+}
+
+function remember(slot: &mut &string, source: &string): void {
+  *slot = source;
+}
+
+function retainedView(): string {
+  let first: string = "first";
+  let second: string = "second";
+  let mut selected = &first;
+  remember(&mut selected, &second);
+  return copy(*selected); // The destination retains second beyond the call loan.
+}
+
+function literalView(): &string {
+  return &r#"ready"#; // Direct literal borrow: static backing, still a borrow.
+}
+
+function needsOwned<T>(value: T): T where noBorrow(T) {
+  return value;
+}
+
+function repeatedLiteral(): string {
+  let tag = "ready";
+  let again = tag; // Exact literal re-materialization, not an owning-header clone.
+  return `${tag}/${again}`;
+}
+
+function observeExclusive(): string {
+  let mut owner: string = "before";
+  let exclusive = &mut owner;
+  let before = `${exclusive}`; // Standard read-only reference forwarding.
+  *exclusive = "after"; // Formatting did not move or consume the exclusive handle.
+  return `${before}/${exclusive}`;
+}
+
+function replaceAndNumber(owner: &mut string): i32 {
+  *owner = "after";
+  return 2;
+}
+
+function snapshots(): string {
+  let mut owner: string = "before";
+  return `${owner}:${replaceAndNumber(&mut owner)}:${owner}`;
+}
+
+function next(counter: &mut i32): i32 {
+  *counter += 1;
+  return *counter;
+}
+
+function ordered(): string {
+  let mut counter: i32 = 0;
+  return `${next(&mut counter)}${next(&mut counter)}`;
+}
+
+function scalar(): char {
+  guard let value = fromCodePoint(0xe9u32) else {
+    return '?';
+  }
+  return value;
+}
+
+function rejectsSurrogate(): bool {
+  guard fromCodePoint(0xd800u32) else {
+    return true;
+  }
+  return false;
+}
+
+function parsed(): bool {
+  guard let value = parse<i32>(&"42") else {
+    return false;
+  }
+  return value == 42;
+}
+
+function rejectsTrailingText(): bool {
+  guard parse<i32>(&"42x") else {
+    return true;
+  }
+  return false;
+}
+
+function parsedNegativeZero(): string {
+  guard let value = parse<f32>(&"-0") else {
+    return "bad number";
+  }
+  return `${value}`;
+}
+
+function decoded(): bool {
+  let bytes: List<u8> = [0xc3, 0xa9];
+  guard let text = decodeUtf8(&bytes) else {
+    return false;
+  }
+  return text == "é";
+}
+
+function rejectsUtf8(): bool {
+  let bytes: List<u8> = [0xff];
+  guard decodeUtf8(&bytes) else {
+    return true;
+  }
+  return false;
+}
+
+function lossy(): string {
+  let bytes: List<u8> = [0xff];
+  return decodeUtf8Lossy(&bytes);
+}
+
+// No ordinary startup state is captured by any expectation.
+expect into<i64>(7i32) == 7i64;
+expect widen<i64>(7i32) == 7i64;
+expect fits();
+expect failsRange();
+expect trySafePair();
+expect from<f32>(16777217u32) == 16777216.0f32; // Rounding, not a failure.
+expect truncatedUnsigned() == 0;
+expect rejectsInfinity();
+expect -128i8 < 0;
+expect (255u8 << 1) == 254;
+expect (-4i32 >> 1) == -2;
+expect (-5.5f64 % 2.0f64) == -1.5;
+expect skippedTrap() == 0;
+expect middle() == "é";
+expect badBoundary();
+expect continuationByte() == 0xa9;
+expect byteLength(&"aé") == 3u64;
+expect throughDescriptor() == "source";
+expect retainedView() == "second";
+expect needsOwned(copy(*literalView())) == "ready";
+expect repeatedLiteral() == "ready/ready";
+expect observeExclusive() == "before/after";
+expect snapshots() == "before:2:after";
+expect ordered() == "12";
+expect `${Point { x: 1, y: 2 }}` == "point 1,2";
+expect `${scalar()}` == "é";
+expect codePoint(scalar()) == 0xe9u32;
+expect rejectsSurrogate();
+expect parsed();
+expect rejectsTrailingText();
+expect parsedNegativeZero() == "-0";
+expect decoded();
+expect rejectsUtf8();
+expect lossy() == "\u{FFFD}";
+expect r"C:\temp" == "C:\\temp";
+expect r#"${literal}"# == "${literal}";
+expect `\${literal}` == "${literal}";
+expect "\u{E9}" != "e\u{301}";
+expect `${-0.0f64}` == "-0";
+expect `${1.0f32 / 0.0f32}` == "inf";
+expect `${0.0f32 / 0.0f32}` == "NaN";

@@ -1,11 +1,11 @@
 import std::log;
 import std::collection::{List, map, join};
 
-type Point = { x: int; y: int };
+type Point = { x: i32; y: i32 };
 
 function show<T>(value: &T): string;
 
-function show(value: &int): string {
+function show(value: &i32): string {
   return `${value}`;
 }
 
@@ -44,7 +44,7 @@ function greeting(language: string): string {
   return "hello";
 }
 
-function fib(n: int): int {
+function fib(n: i32): i32 {
   return match (n) {
     0 => 0,
     1 => 1,
@@ -54,10 +54,10 @@ function fib(n: int): int {
 
 let origin = Point { x: 0, y: 0 };
 
-log(show(42));
+log(show(42i32));
 log(show(true));
 log(show(origin));
-log(show(&[1, 2, 3]));
+log(show(&[1i32, 2i32, 3i32]));
 log(show(&[origin, Point { x: 3, y: 4 }]));
 log(greeting("fr"));
 log(greeting("de"));
@@ -74,7 +74,7 @@ log(show(fib(10)));
 // 55
 
 // Test-only expectations for overload selection and recursion.
-expect show(42) == "42";
+expect show(42i32) == "42";
 expect show(true) == "yes";
 expect greeting("fr") == "bonjour";
 expect greeting("de") == "hello";
