@@ -28,6 +28,10 @@ _Avoid_: panic, force kill, immediate termination
 A `char` value representing one Unicode scalar, not necessarily a whole user-perceived character. Its code point is distinct from its UTF-8 byte encoding.
 _Avoid_: byte, grapheme, UTF-16 code unit
 
+**Caused-by wrapping**:
+An explicit error-context step written `inner ? outer`: use the successful value, or return the outer error with the original failure as its cause. Merely propagating an error adds no new context.
+_Avoid_: error-mapping callback, propagation report
+
 **Dispose**:
 The `dispose` overload for a type: a function the compiler calls when a value of that type is freed. Calling it directly ends the value early.
 _Avoid_: drop, destructor, deinit, finalizer

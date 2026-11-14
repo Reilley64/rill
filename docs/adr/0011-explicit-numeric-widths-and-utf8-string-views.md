@@ -66,6 +66,8 @@ Templates use the canonical standard `show<T>(&T) -> string` family, not a same-
 
 Evaluate and format once, left-to-right, before the next expression. Observe existing values through read access; show may suspend/effect. Owned rvalues follow normal temporary cleanup, not early guard unlocking. Owned output cannot retain input borrows. Primitive formatters must bootstrap without recursively interpolating the same argument through themselves; unrelated prototype-local show families remain unrelated.
 
+[ADR 0013](0013-caused-by-errors-with-explicit-wrapping.md) adds a separate canonical `display(&E): string` contract for error payloads. It does not rename or replace template `show`: standard wrapper formatting bridges to each error's display and renders its caused-by chain and origins. #23 defines that interface; plain numeric/text formatting here is unchanged.
+
 Default display: strings/chars as text without added quotes/escaping, lowercase booleans, decimal integers without width suffixes, finite floats in shortest round-tripping decimal for the same explicitly known width, and NaN/inf/-inf/-0. No NaN-payload roundtrip promise. Special formatting uses explicit functions, not a template mini-language.
 
 ## Reconciliation and remaining evidence

@@ -1,0 +1,97 @@
+// ADR 0013: design examples, not compiled/executed fixtures.
+// Result/Err accessors and the canonical display module path remain #23 work.
+// This file uses ordinary nominal records; it does not settle #19's Result enum layout.
+import std::result::{Result, Ok, Err};
+import std::error::display;
+
+type ReadFailed = { code: u32 };
+type ConfigLoadFailed = {};
+type StartFailed = { port: u32 };
+
+// No required message field and no manual cause field on user-defined errors.
+function display(error: &ReadFailed): string {
+  return `read failed (code ${error.code})`;
+}
+
+function display(error: &ConfigLoadFailed): string {
+  return "could not load configuration";
+}
+
+function display(error: &StartFailed): string {
+  return `could not start server on port ${error.port}`;
+}
+
+function readConfig(succeed: bool): Result<u32, ReadFailed> {
+  guard succeed else {
+    return Err(ReadFailed { code: 13 });
+  }
+  return Ok(8080u32);
+}
+
+// The RHS is a value, not an implicitly called constructor or handler.
+// A named record needs ordinary named construction; a unit enum error value
+// would use its ordinary qualified value spelling instead.
+function loadConfig(succeed: bool): Result<u32, ConfigLoadFailed> {
+  let config = readConfig(succeed) ? ConfigLoadFailed {};
+  return Ok(config);
+}
+
+function start(succeed: bool): Result<u32, StartFailed> {
+  let config = loadConfig(succeed) ? StartFailed { port: 8080 };
+  return Ok(config);
+}
+
+// Equivalent explicit wrapping preserves the same inner chain.
+// Its new construction location is this Err call, not loadConfig's infix ?.
+function loadExplicit(succeed: bool): Result<u32, ConfigLoadFailed> {
+  guard let config = readConfig(succeed) else (cause) {
+    return Err(ConfigLoadFailed {}, cause);
+  }
+  return Ok(config);
+}
+
+// Plain ? must neither replace the original origin nor add a cause/trace node.
+function propagate(succeed: bool): Result<u32, ReadFailed> {
+  let config = readConfig(succeed)?;
+  return Ok(config);
+}
+
+function mustNotRun(): ConfigLoadFailed {
+  panic("the wrapping RHS must not run on success");
+}
+
+function lazySuccess(): Result<u32, ConfigLoadFailed> {
+  let config = readConfig(true) ? mustNotRun();
+  return Ok(config);
+}
+
+function loadedPort(result: Result<u32, ConfigLoadFailed>): u32 {
+  guard let port = result else {
+    return 0;
+  }
+  return port;
+}
+
+function started(result: Result<u32, StartFailed>): bool {
+  guard result else {
+    return false;
+  }
+  return true;
+}
+
+expect loadedPort(loadConfig(true)) == 8080u32;
+expect loadedPort(loadConfig(false)) == 0u32;
+expect loadedPort(loadExplicit(false)) == 0u32;
+expect loadedPort(lazySuccess()) == 8080u32;
+expect started(start(true));
+expect !started(start(false));
+
+// start(false) formats conceptually as:
+// could not start server on port 8080
+//   at start (its infix ? location)
+// caused by: could not load configuration
+//   at loadConfig (its infix ? location)
+// caused by: read failed (code 13)
+//   at readConfig (its Err construction location)
+// Display handles one typed value; the standard renderer walks all causes.
+// No additional frames come from returning, postfix ?, or printing.
