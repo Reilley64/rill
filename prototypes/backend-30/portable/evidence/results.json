@@ -1,0 +1,1102 @@
+{
+  "gate": "OPEN; manually lowered candidate, not adopted architecture or complete Rill backend",
+  "versions": {
+    "llvm": "23.1.5\n",
+    "clang": "Homebrew clang version 23.1.5\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/23.1.5/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/23.1.5/etc/clang/arm64-apple-darwin27.cfg\n",
+    "linker": "Homebrew LLD 23.1.5\n",
+    "binaryen": "wasm-opt version 133 (version_133)\n",
+    "wasmtime": "wasmtime 50.0.1 (c307ec81d 2026-10-29)\n",
+    "node": "v26.13.0\n",
+    "node-details": "{\"execPath\":\"/opt/homebrew/Cellar/node/26.13.0_2/bin/node\",\"versions\":{\"node\":\"26.13.0\",\"acorn\":\"8.19.0\",\"ada\":\"4.0.0\",\"amaro\":\"1.1.11\",\"ares\":\"1.34.9\",\"brotli\":\"1.2.1\",\"cldr\":\"49.0\",\"icu\":\"79.1\",\"libffi\":\"3.8.0\",\"llhttp\":\"9.4.3\",\"merve\":\"1.2.2\",\"modules\":\"147\",\"napi\":\"10\",\"nbytes\":\"0.1.4\",\"ncrypto\":\"0.0.1\",\"nghttp2\":\"1.70.0\",\"nghttp3\":\"\",\"ngtcp2\":\"\",\"openssl\":\"4.1.0\",\"simdjson\":\"5.1.0\",\"simdutf\":\"9.3.3\",\"sqlite\":\"3.54.1\",\"tz\":\"2026e\",\"undici\":\"8.12.2\",\"unicode\":\"18.0\",\"uv\":\"1.53.0\",\"uvwasi\":\"0.0.23\",\"v8\":\"14.6.202.34-node.40\",\"zlib\":\"1.2.12\",\"zstd\":\"1.5.7\"}}\n",
+    "host": "Darwin Mac.localdomain 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:05:41 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T8122 arm64\n",
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434\n",
+    "sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\n",
+    "apple-linker": "{\n\t\"version\": \"27037.1\",\n\t\"architectures\": [\n\t\t\"armv6\",\n\t\t\"armv7\",\n\t\t\"armv7s\",\n\t\t\"arm64\",\n\t\t\"arm64e\",\n\t\t\"arm64_32\",\n\t\t\"i386\",\n\t\t\"x86_64\",\n\t\t\"x86_64h\",\n\t\t\"armv6m\",\n\t\t\"armv7k\",\n\t\t\"armv7m\",\n\t\t\"armv7em\",\n\t\t\"armv8m.main\",\n\t\t\"armv8.1m.main\"\n\t],\n\t\"lto\": {\n\t\t\"runtime_api_version\": 30,\n\t\t\"static_api_version\": 30,\n\t\t\"version_string\": \"LLVM version 21.0.0\"\n\t},\n\t\"tapi\": {\n\t\t\"version\": \"21.0.0\",\n\t\t\"version_string\": \"Apple TAPI version 21.0.0 (tapi-2100.3.8.1)\"\n\t}\n}\n"
+  },
+  "source_and_tool_sha256": {
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/run.py": "82bc07a261be60f53f8d2652324a443d23c2cacc1123583bdf8e360bc02353b2",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon-check.mjs": "bcd202640f08c5caa3c9e2454005da059a80170251059caedbacd0eb161602f4",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/README.md": "61368e027794523eafbaa6a05294db0d20d9ee3ad66a0b0f44bb8195b32f175f",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/check.mjs": "b3912057b770d88ff58563954b80b5bdcad0d31bc42133f3e17c7b1d7bd73b7b",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c": "73e5a83de5c1ac6f0eafb0fc0d34681f25f321cbd8c404268db1bc4540695958",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/host.c": "682c4505635929141aeda5d70ead305d842c9859c5e66472046e922c3cd79289",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon.py": "bb39ff974ffe0e6d346c5eba0485f43b7675d66b3b2575a2e763e517e489a038",
+    "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang": "edcec56599c95557f16c1e40cb813491cb7f872748cadaef5998493f96a3fe3c",
+    "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt": "9aaee860e97ae076831f91352c06755fce78d2322947d5e17e8612a5a63d6c9e",
+    "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc": "c728162fefd94fb097aa2e01b53a3e3402879256a09bd241ce52c4fcac75c481",
+    "/opt/homebrew/bin/wasm-ld": "57aa226bcac0488f519a5c7114c5ec4b7a982a4aca929f973cd100890a6d4367",
+    "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt": "81041e09f332df94db1c2009a64d8f3b85f0431a2c920ccd014d3ceebb343402",
+    "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis": "5be72355404cb0332d74bc9a84384a52371696c599c54909baaa8d377f27665c",
+    "/opt/homebrew/Cellar/node/26.13.0_2/bin/node": "64e4f47aef084a288c443ebe9a0091a34acba03ad176fb612b6e7d90784ff93d",
+    "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib/libwasmtime.dylib": "5ba1ebe3e4285ed8e132a5a44e421e8ddb10986da03f285739248ba71b01404e"
+  },
+  "callgraph_analysis": {
+    "0": {
+      "acyclic": true,
+      "indirect_targets": [
+        "$step_a",
+        "$step_b",
+        "$step_indirect",
+        "$step_ordinary",
+        "$step_root",
+        "$step_self"
+      ],
+      "frames": {
+        "init": 48,
+        "get": 16,
+        "fill": 16,
+        "install": 64,
+        "frame": 16,
+        "reserve": 64,
+        "copy": 16,
+        "peaks": 16,
+        "poll": 32,
+        "wake": 32,
+        "request_cancel": 16,
+        "drop_handle": 16,
+        "complete_foreign": 32,
+        "words": 16,
+        "canaries": 16,
+        "inspect": 32,
+        "test_blocked_tail": 16,
+        "test_reserve": 48,
+        "step_self": 16,
+        "tail_step": 48,
+        "step_a": 16,
+        "step_b": 16,
+        "step_indirect": 16,
+        "step_ordinary": 16,
+        "verify_packet": 16,
+        "address": 32,
+        "wait_for_host": 16,
+        "returning": 48,
+        "step_root": 32
+      },
+      "static_frames_sum": 784,
+      "conservative_linear_bound": 4960,
+      "charged_linear_reserve": 65536,
+      "guest_imports": {
+        "$fatal": [
+          "\"env\"",
+          "\"fatal\""
+        ]
+      },
+      "no_tail_instructions": true,
+      "graph": {
+        "$init": [
+          "$fatal",
+          "$fill",
+          "$get",
+          "$install"
+        ],
+        "$get": [
+          "$fatal"
+        ],
+        "$fill": [],
+        "$install": [
+          "$copy",
+          "$fatal",
+          "$fill",
+          "$frame",
+          "$get",
+          "$peaks",
+          "$reserve"
+        ],
+        "$frame": [
+          "$fatal",
+          "$get"
+        ],
+        "$reserve": [
+          "$fatal"
+        ],
+        "$copy": [],
+        "$peaks": [],
+        "$poll": [
+          "$fatal",
+          "$frame",
+          "$get",
+          "$step_a",
+          "$step_b",
+          "$step_indirect",
+          "$step_ordinary",
+          "$step_root",
+          "$step_self"
+        ],
+        "$wake": [
+          "$get"
+        ],
+        "$request_cancel": [
+          "$get"
+        ],
+        "$drop_handle": [
+          "$get"
+        ],
+        "$complete_foreign": [
+          "$fatal",
+          "$get",
+          "$words"
+        ],
+        "$words": [
+          "$fatal",
+          "$get"
+        ],
+        "$canaries": [
+          "$get"
+        ],
+        "$inspect": [
+          "$fatal",
+          "$frame",
+          "$get"
+        ],
+        "$test_blocked_tail": [
+          "$frame",
+          "$install"
+        ],
+        "$test_reserve": [
+          "$reserve"
+        ],
+        "$step_self": [
+          "$get",
+          "$tail_step"
+        ],
+        "$tail_step": [
+          "$fatal",
+          "$frame",
+          "$get",
+          "$install",
+          "$returning",
+          "$verify_packet",
+          "$wait_for_host",
+          "$words"
+        ],
+        "$step_a": [
+          "$get",
+          "$tail_step"
+        ],
+        "$step_b": [
+          "$get",
+          "$tail_step"
+        ],
+        "$step_indirect": [
+          "$tail_step"
+        ],
+        "$step_ordinary": [
+          "$address",
+          "$fatal",
+          "$frame",
+          "$get",
+          "$install",
+          "$returning",
+          "$verify_packet",
+          "$wait_for_host",
+          "$words"
+        ],
+        "$verify_packet": [
+          "$fatal",
+          "$frame",
+          "$get"
+        ],
+        "$address": [
+          "$fill",
+          "$get",
+          "$peaks",
+          "$reserve"
+        ],
+        "$wait_for_host": [
+          "$fatal",
+          "$get"
+        ],
+        "$returning": [
+          "$fatal",
+          "$frame",
+          "$get"
+        ],
+        "$step_root": [
+          "$address",
+          "$fatal",
+          "$frame",
+          "$get",
+          "$install",
+          "$returning",
+          "$verify_packet",
+          "$words"
+        ]
+      }
+    },
+    "2": {
+      "acyclic": true,
+      "indirect_targets": [
+        "$step_a",
+        "$step_b",
+        "$step_indirect",
+        "$step_ordinary",
+        "$step_root",
+        "$step_self"
+      ],
+      "frames": {
+        "init": 0,
+        "get": 0,
+        "fill": 0,
+        "install": 0,
+        "frame": 0,
+        "reserve": 0,
+        "copy": 0,
+        "peaks": 0,
+        "poll": 0,
+        "wake": 0,
+        "request_cancel": 0,
+        "drop_handle": 0,
+        "complete_foreign": 0,
+        "words": 0,
+        "canaries": 0,
+        "inspect": 0,
+        "test_blocked_tail": 0,
+        "test_reserve": 0,
+        "step_self": 0,
+        "tail_step": 0,
+        "step_a": 0,
+        "step_b": 0,
+        "step_indirect": 0,
+        "step_ordinary": 0,
+        "verify_packet": 0,
+        "address": 0,
+        "wait_for_host": 0,
+        "returning": 0,
+        "step_root": 0
+      },
+      "static_frames_sum": 0,
+      "conservative_linear_bound": 4176,
+      "charged_linear_reserve": 65536,
+      "guest_imports": {
+        "$fatal": [
+          "\"env\"",
+          "\"fatal\""
+        ]
+      },
+      "no_tail_instructions": true,
+      "graph": {
+        "$init": [
+          "$fatal",
+          "$fill",
+          "$get",
+          "$install"
+        ],
+        "$get": [
+          "$fatal"
+        ],
+        "$fill": [],
+        "$install": [
+          "$copy",
+          "$fatal",
+          "$fill",
+          "$frame",
+          "$get",
+          "$peaks",
+          "$reserve"
+        ],
+        "$frame": [
+          "$fatal",
+          "$get"
+        ],
+        "$reserve": [
+          "$fatal"
+        ],
+        "$copy": [],
+        "$peaks": [],
+        "$poll": [
+          "$fatal",
+          "$frame",
+          "$get",
+          "$step_a",
+          "$step_b",
+          "$step_indirect",
+          "$step_ordinary",
+          "$step_root",
+          "$step_self"
+        ],
+        "$wake": [
+          "$get"
+        ],
+        "$request_cancel": [
+          "$get"
+        ],
+        "$drop_handle": [
+          "$get"
+        ],
+        "$complete_foreign": [
+          "$fatal",
+          "$get",
+          "$words"
+        ],
+        "$words": [
+          "$fatal",
+          "$get"
+        ],
+        "$canaries": [
+          "$get"
+        ],
+        "$inspect": [
+          "$fatal",
+          "$frame",
+          "$get"
+        ],
+        "$test_blocked_tail": [
+          "$frame",
+          "$install"
+        ],
+        "$test_reserve": [
+          "$reserve"
+        ],
+        "$step_self": [
+          "$get",
+          "$tail_step"
+        ],
+        "$tail_step": [
+          "$fatal",
+          "$frame",
+          "$get",
+          "$install",
+          "$returning",
+          "$verify_packet",
+          "$wait_for_host",
+          "$words"
+        ],
+        "$step_a": [
+          "$get",
+          "$tail_step"
+        ],
+        "$step_b": [
+          "$get",
+          "$tail_step"
+        ],
+        "$step_indirect": [
+          "$tail_step"
+        ],
+        "$step_ordinary": [
+          "$address",
+          "$fatal",
+          "$frame",
+          "$get",
+          "$install",
+          "$returning",
+          "$verify_packet",
+          "$wait_for_host",
+          "$words"
+        ],
+        "$verify_packet": [
+          "$fatal",
+          "$frame",
+          "$get"
+        ],
+        "$address": [
+          "$fill",
+          "$get",
+          "$peaks",
+          "$reserve"
+        ],
+        "$wait_for_host": [
+          "$fatal",
+          "$get"
+        ],
+        "$returning": [
+          "$fatal",
+          "$frame",
+          "$get"
+        ],
+        "$step_root": [
+          "$address",
+          "$fatal",
+          "$frame",
+          "$get",
+          "$install",
+          "$returning",
+          "$verify_packet",
+          "$words"
+        ]
+      }
+    }
+  },
+  "observations": [
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 0,
+      "n": 1024,
+      "waits": 2,
+      "saved_peak": 560,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1025,
+      "steps": 1029,
+      "result": 1024,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 0,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 560,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1000001,
+      "steps": 1000980,
+      "result": 1000000,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 1,
+      "n": 1024,
+      "waits": 2,
+      "saved_peak": 736,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1025,
+      "steps": 1029,
+      "result": 1024,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 1,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 736,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1000001,
+      "steps": 1000980,
+      "result": 1000000,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 2,
+      "n": 1024,
+      "waits": 2,
+      "saved_peak": 768,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1025,
+      "steps": 1029,
+      "result": 1024,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 2,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 768,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1000001,
+      "steps": 1000980,
+      "result": 1000000,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "ordinary_borrow_guard_join_wrap_MODEL",
+      "n": 2000,
+      "waits": 501,
+      "saved_peak": 192592,
+      "addressable_peak": 97616,
+      "frames_peak": 2002,
+      "effects": 2001,
+      "steps": 4504,
+      "result": 2001,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "per_routine_saved_setting",
+      "simultaneous_saved": [
+        768592,
+        768592
+      ],
+      "total": 1537184
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "invalid_address_capacity",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 1,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "invalid_saved_capacity",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 1,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "u64_capacity_unrepresentable",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 1,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "saved_exact_root_no_callee_room",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 2,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "tail_larger_aligned_packet_no_room",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 2,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "ordinary_saved_exhaustion",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 2,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "addressable_borrowed_slots_exhaustion",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 3,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "oversized_addressable_request",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 3,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "u64_alignment_overflow",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 4,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "u32_range_overflow",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 3,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "zero_alignment",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 4,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "non_power_two_alignment",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 4,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "unsupported_alignment",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 4,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "malformed_tail_with_obligation_1",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 5,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "malformed_tail_with_obligation_2",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 5,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "malformed_tail_with_obligation_4",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 5,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "malformed_tail_with_obligation_8",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 5,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "exact_fit_and_alignment",
+      "saved_peak": 560,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 2,
+      "steps": 5,
+      "result": 1,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Node/V8",
+      "case": "legal_between_poll_growth_copy_control",
+      "old_view_detached": true,
+      "owner_retained_until_completion": true,
+      "saved_peak": 560,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1000001,
+      "steps": 1000980,
+      "result": 1000000,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "wasmtime_sync_dispatch",
+      "mode": 0,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 560,
+      "frames_peak": 2,
+      "engine_stack_limit": 32768,
+      "tail_feature": false
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "wasmtime_sync_dispatch",
+      "mode": 1,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 736,
+      "frames_peak": 2,
+      "engine_stack_limit": 32768,
+      "tail_feature": false
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "wasmtime_sync_dispatch",
+      "mode": 2,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 768,
+      "frames_peak": 2,
+      "engine_stack_limit": 32768,
+      "tail_feature": false
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "wasmtime_two_live_ordinary_chains",
+      "each_depth": 8000,
+      "combined_saved": 1537184
+    },
+    {
+      "compiler_mode": 0,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "native_copy_completion_after_legal_relocation",
+      "relocated": true,
+      "early_wake_rejected": true,
+      "remaining_waits": 976,
+      "result": 1000000
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 0,
+      "n": 1024,
+      "waits": 2,
+      "saved_peak": 560,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1025,
+      "steps": 1029,
+      "result": 1024,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 0,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 560,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1000001,
+      "steps": 1000980,
+      "result": 1000000,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 1,
+      "n": 1024,
+      "waits": 2,
+      "saved_peak": 736,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1025,
+      "steps": 1029,
+      "result": 1024,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 1,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 736,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1000001,
+      "steps": 1000980,
+      "result": 1000000,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 2,
+      "n": 1024,
+      "waits": 2,
+      "saved_peak": 768,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1025,
+      "steps": 1029,
+      "result": 1024,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "tail_replacement",
+      "mode": 2,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 768,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1000001,
+      "steps": 1000980,
+      "result": 1000000,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "ordinary_borrow_guard_join_wrap_MODEL",
+      "n": 2000,
+      "waits": 501,
+      "saved_peak": 192592,
+      "addressable_peak": 97616,
+      "frames_peak": 2002,
+      "effects": 2001,
+      "steps": 4504,
+      "result": 2001,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "per_routine_saved_setting",
+      "simultaneous_saved": [
+        768592,
+        768592
+      ],
+      "total": 1537184
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "invalid_address_capacity",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 1,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "invalid_saved_capacity",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 1,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "u64_capacity_unrepresentable",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 1,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "saved_exact_root_no_callee_room",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 2,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "tail_larger_aligned_packet_no_room",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 2,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "ordinary_saved_exhaustion",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 2,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "addressable_borrowed_slots_exhaustion",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 3,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "oversized_addressable_request",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 3,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "u64_alignment_overflow",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 4,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "u32_range_overflow",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 3,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "zero_alignment",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 4,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "non_power_two_alignment",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 4,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "unsupported_alignment",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 4,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "malformed_tail_with_obligation_1",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 5,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "malformed_tail_with_obligation_2",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 5,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "malformed_tail_with_obligation_4",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 5,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "malformed_tail_with_obligation_8",
+      "outcome": "FATAL_EXPECTED",
+      "reason": 5,
+      "adjacent_canaries_intact": true
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "exact_fit_and_alignment",
+      "saved_peak": 560,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 2,
+      "steps": 5,
+      "result": 1,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Node/V8",
+      "case": "legal_between_poll_growth_copy_control",
+      "old_view_detached": true,
+      "owner_retained_until_completion": true,
+      "saved_peak": 560,
+      "addressable_peak": 65600,
+      "frames_peak": 2,
+      "effects": 1000001,
+      "steps": 1000980,
+      "result": 1000000,
+      "backing_bytes": 2097728,
+      "header_bytes": 416
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "wasmtime_sync_dispatch",
+      "mode": 0,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 560,
+      "frames_peak": 2,
+      "engine_stack_limit": 32768,
+      "tail_feature": false
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "wasmtime_sync_dispatch",
+      "mode": 1,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 736,
+      "frames_peak": 2,
+      "engine_stack_limit": 32768,
+      "tail_feature": false
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "wasmtime_sync_dispatch",
+      "mode": 2,
+      "n": 1000000,
+      "waits": 977,
+      "saved_peak": 768,
+      "frames_peak": 2,
+      "engine_stack_limit": 32768,
+      "tail_feature": false
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "wasmtime_two_live_ordinary_chains",
+      "each_depth": 8000,
+      "combined_saved": 1537184
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "native_copy_completion_after_legal_relocation",
+      "relocated": true,
+      "early_wake_rejected": true,
+      "remaining_waits": 976,
+      "result": 1000000
+    }
+  ],
+  "limits": [
+    "No automated Rill MIR/ABI/ownership/checker transform",
+    "Primitive/byte-pattern aggregates only; not owned-resource move/drop proof",
+    "Cleanup/joins/wrapping/cancellation are modeled record phases, not production Rill semantics",
+    "64KiB conservative runtime reservation charged from entry; admission policy not approved",
+    "Native M:N migration, complete provider integrations and full compiler-generated bounds remain open"
+  ]
+}

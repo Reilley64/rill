@@ -1,0 +1,1437 @@
+{
+  "gate": "OPEN: incompatible portable tail+suspension pipeline and incomplete target/budget/runtime evidence",
+  "note": "Successful assertions reproduce finite standalone probes, NOT Rill implementation or support",
+  "archive_pins": {
+    "binaryen-version_133-arm64-macos.tar.gz": [
+      "WebAssembly/binaryen/version_133",
+      "ad66da82ac13f163e424b1643f16c6dfcccc98b5966296b43e52d3cab04f84a8"
+    ],
+    "wasmtime-v50.0.1-aarch64-macos-c-api.tar.xz": [
+      "bytecodealliance/wasmtime/v50.0.1",
+      "a49327ca596fae51cd92e230265132112bb7896c5a24e4d58cd05b56612e26bb"
+    ],
+    "wasmtime-v50.0.1-aarch64-macos.tar.xz": [
+      "bytecodealliance/wasmtime/v50.0.1",
+      "960e5216c7ebd7e9b45e6561d15821b8b801b7d54aee28c7b91921aeb30c65c8"
+    ]
+  },
+  "file_sha256": {
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/run.py": "52c7d2ee159863852a1410dfb00d0d4aae9b4d9d80e17e9790e1905421a8f5a7",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/README.md": "9d3f2b0cb3fb062ec8a9d647f05e7fbb588d7ec144c5311c005451af009e5d75",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/cleanup.c": "aa9df1f66069daf4fec1ba339b735fb1b07b2d55ae9fc38e8bfd5260ae3c4b03",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native.c": "7adf04ab4b4703854571243adaf4ce4c1a6074911b1c861396809631227c160d",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/wasmtime.c": "982b9bf9f38c6b4ac958ac3564cd4dce9e390e0ccbd1b1342aa8efffe6f99cd6",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/asyncify.mjs": "3f4ec670424d7476c79c206f95dbaf0659ae82ade9cb2fa77e0014f9cd1a244a",
+    "/private/tmp/rill-30-evidence-final/native.ll": "672c2bd65eef6ee742d39dd997d5fb2f494a9676b39884f6279b9feaa008936b",
+    "/private/tmp/rill-30-evidence-final/wasm.ll": "09b588d92977159563378af6ff71ae89b066c8c8af279496b03771fc0a7bec2f",
+    "/private/tmp/rill-30-evidence-final/byval.ll": "8e48982f319995bcb09820e394afb6ece382ff88c96b0c8d8387bec95852a3fd",
+    "/private/tmp/rill-30-evidence-final/wasm-tailcc.ll": "c88dd7a8983b8ccb7ac8be106eb8626793f8847048b730a01fdedf5fade3b0f6",
+    "/private/tmp/rill-30-evidence-final/indirect-only.ll": "94e12da0170b5b0356e6dddd0449b345a19da2fa85057b8de3103113771c1f74",
+    "/private/tmp/rill-30-evidence-final/asyncify-control.wat": "45e44f3f7aadf01e741e33f3defbb79a629c180455a894b6136dc5d578f9d893",
+    "/private/tmp/rill-30-evidence-final/leaf.ll": "2469e6d20907d50694993326ddc85a62cc4c9129b57cb955be0ff1e80663da66",
+    "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc": "c728162fefd94fb097aa2e01b53a3e3402879256a09bd241ce52c4fcac75c481",
+    "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt": "9aaee860e97ae076831f91352c06755fce78d2322947d5e17e8612a5a63d6c9e",
+    "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang": "edcec56599c95557f16c1e40cb813491cb7f872748cadaef5998493f96a3fe3c",
+    "/opt/homebrew/bin/wasm-ld": "57aa226bcac0488f519a5c7114c5ec4b7a982a4aca929f973cd100890a6d4367",
+    "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt": "81041e09f332df94db1c2009a64d8f3b85f0431a2c920ccd014d3ceebb343402",
+    "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos/wasmtime": "249ec535c752c84a1a386a31ddfc3c7611f4819363bf5d3840d7dfabd1046534",
+    "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib/libwasmtime.dylib": "5ba1ebe3e4285ed8e132a5a44e421e8ddb10986da03f285739248ba71b01404e"
+  },
+  "observations": [
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "stack_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "byval_256_bytes",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "aggregate",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "explicit_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "stack_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "byval_256_bytes",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "aggregate",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "explicit_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 0,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "C model/macOS/AArch64",
+      "mode": 0,
+      "case": "ordered_suspending_cleanup_cause_model",
+      "nodes": 200000,
+      "yields": 196,
+      "worklist_peak_bytes": 4194304,
+      "sp_span_bytes": 64
+    },
+    {
+      "target": "C model/macOS/AArch64",
+      "mode": 0,
+      "case": "checked_alignment_arena_model",
+      "canary_intact": true
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "stack_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "aggregate",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "explicit_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 6144
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "stack_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "aggregate",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "explicit_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 0,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 6144
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "growth_copy_trap_store_drop",
+      "relocated": true,
+      "borrower_completed_after_store_drop": true
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "host_stack_overflow_isolated_instance",
+      "stack_overflow_trap": true
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "async_run_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "growth_copy_trap_store_drop",
+      "relocated": true,
+      "borrower_completed_after_store_drop": true
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 0,
+      "case": "host_stack_overflow_isolated_instance",
+      "stack_overflow_trap": true
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "stack_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "byval_256_bytes",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "aggregate",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "explicit_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "stack_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "byval_256_bytes",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "aggregate",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "explicit_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/x86-64/Rosetta",
+      "mode": 2,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "C model/macOS/AArch64",
+      "mode": 2,
+      "case": "ordered_suspending_cleanup_cause_model",
+      "nodes": 200000,
+      "yields": 196,
+      "worklist_peak_bytes": 4194304,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "C model/macOS/AArch64",
+      "mode": 2,
+      "case": "checked_alignment_arena_model",
+      "canary_intact": true
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "stack_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "aggregate",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "explicit_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 6144
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "stack_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "aggregate",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "explicit_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "macOS/AArch64",
+      "mode": 2,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 6144
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0,
+      "yields": 2,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "growth_copy_trap_store_drop",
+      "relocated": true,
+      "borrower_completed_after_store_drop": true
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "host_stack_overflow_isolated_instance",
+      "stack_overflow_trap": true
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "async_run_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0,
+      "yields": 977,
+      "live_continuations_peak": 1,
+      "fiber_allocations": 1,
+      "fiber_bytes_peak": 1048576
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "growth_copy_trap_store_drop",
+      "relocated": true,
+      "borrower_completed_after_store_drop": true
+    },
+    {
+      "target": "Wasmtime/Cranelift/macOS/AArch64",
+      "mode": 2,
+      "case": "host_stack_overflow_isolated_instance",
+      "stack_overflow_trap": true
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "stack_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "aggregate",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "explicit_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 6144
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "stack_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "aggregate",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "explicit_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 0,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 6144
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "stack_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "aggregate",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "explicit_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "stack_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "aggregate",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "explicit_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/arm64/Docker/VM",
+      "mode": 2,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "stack_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "byval_256_bytes",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "aggregate",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "explicit_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "stack_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "byval_256_bytes",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "aggregate",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "explicit_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 0,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "self",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "mutual",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "indirect",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "stack_arguments",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "byval_256_bytes",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "aggregate",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "explicit_sret",
+      "n": 1024,
+      "samples": 1025,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "self",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "mutual",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "indirect",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "stack_arguments",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "byval_256_bytes",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "aggregate",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "explicit_sret",
+      "n": 1000000,
+      "samples": 1000001,
+      "sp_span_bytes": 0
+    },
+    {
+      "target": "Linux/linux/amd64/Docker/emulated",
+      "mode": 2,
+      "case": "ordinary_live_local_control",
+      "n": 128,
+      "samples": 257,
+      "sp_span_bytes": 4096
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 0,
+      "case": "ordinary_asyncify_saved_history",
+      "depth": 16,
+      "capacity": 32768,
+      "saved_bytes": 476,
+      "adjacent_canary_changed": false,
+      "trapped": false
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 0,
+      "case": "ordinary_asyncify_saved_history",
+      "depth": 128,
+      "capacity": 32768,
+      "saved_bytes": 3612,
+      "adjacent_canary_changed": false,
+      "trapped": false
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 0,
+      "case": "ordinary_asyncify_saved_history",
+      "depth": 1024,
+      "capacity": 32768,
+      "saved_bytes": 28700,
+      "adjacent_canary_changed": false,
+      "trapped": false
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 0,
+      "case": "linear_stack_leaf_redzone_containment",
+      "contract": "FAIL",
+      "capacity": 1047552,
+      "remaining_bytes": 16,
+      "frame_bytes": 64,
+      "adjacent_canary_changed": true,
+      "trapped": false
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 0,
+      "case": "saved_budget_prewrite_containment",
+      "contract": "FAIL",
+      "depth": 128,
+      "capacity": 16,
+      "saved_bytes": 3612,
+      "adjacent_canary_changed": true,
+      "trapped": true
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 2,
+      "case": "ordinary_asyncify_saved_history",
+      "depth": 16,
+      "capacity": 32768,
+      "saved_bytes": 476,
+      "adjacent_canary_changed": false,
+      "trapped": false
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 2,
+      "case": "ordinary_asyncify_saved_history",
+      "depth": 128,
+      "capacity": 32768,
+      "saved_bytes": 3612,
+      "adjacent_canary_changed": false,
+      "trapped": false
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 2,
+      "case": "ordinary_asyncify_saved_history",
+      "depth": 1024,
+      "capacity": 32768,
+      "saved_bytes": 28700,
+      "adjacent_canary_changed": false,
+      "trapped": false
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 2,
+      "case": "linear_stack_leaf_redzone_containment",
+      "contract": "FAIL",
+      "capacity": 1047552,
+      "remaining_bytes": 16,
+      "frame_bytes": 64,
+      "adjacent_canary_changed": true,
+      "trapped": false
+    },
+    {
+      "target": "Binaryen/Node/macOS/AArch64",
+      "mode": 2,
+      "case": "saved_budget_prewrite_containment",
+      "contract": "FAIL",
+      "depth": 128,
+      "capacity": 16,
+      "saved_bytes": 3612,
+      "adjacent_canary_changed": true,
+      "trapped": true
+    }
+  ],
+  "untested": [
+    "x86-64 physical-hardware execution (translated/emulated only)",
+    "Rill source classification/checker",
+    "complete aggregate ABI",
+    "managed pre-write stack/saved-budget checks and probes",
+    "compiler-generated masked cleanup/cause processing and native joins (only an explicit C worklist model exercised)",
+    "native M:N migration and zero-copy borrower leases",
+    "same unshared memory growth while a C async future is pending (API forbids outer-driver access)"
+  ]
+}

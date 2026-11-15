@@ -1,0 +1,424 @@
+[
+  {
+    "name": "version-llvm",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llvm-config",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-clang",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-linker",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-binaryen",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-wasmtime",
+    "argv": [
+      "/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos/wasmtime",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-node",
+    "argv": [
+      "node",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-node-details",
+    "argv": [
+      "node",
+      "-p",
+      "JSON.stringify({execPath:process.execPath,versions:process.versions})"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-host",
+    "argv": [
+      "uname",
+      "-a"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-os",
+    "argv": [
+      "sw_vers"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-sdk",
+    "argv": [
+      "xcrun",
+      "--show-sdk-path"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-apple-linker",
+    "argv": [
+      "xcrun",
+      "ld",
+      "-version_details"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=wasm32-unknown-wasip1",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-strict-aliasing",
+      "-fno-stack-protector",
+      "-fstack-usage",
+      "-mno-tail-call",
+      "-mno-bulk-memory",
+      "-mno-reference-types",
+      "-mno-multivalue",
+      "-mno-sign-ext",
+      "-mno-nontrapping-fptoint",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O0",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "object-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=wasm32-unknown-wasip1",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-strict-aliasing",
+      "-fno-stack-protector",
+      "-fstack-usage",
+      "-mno-tail-call",
+      "-mno-bulk-memory",
+      "-mno-reference-types",
+      "-mno-multivalue",
+      "-mno-sign-ext",
+      "-mno-nontrapping-fptoint",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O0",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "link-0",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--stack-first",
+      "-z",
+      "stack-size=65536",
+      "--initial-memory=6291456",
+      "--max-memory=33554432",
+      "--export-memory",
+      "--export=init",
+      "--export=poll",
+      "--export=wake",
+      "--export=request_cancel",
+      "--export=drop_handle",
+      "--export=complete_foreign",
+      "--export=canaries",
+      "--export=inspect",
+      "--export=test_reserve",
+      "--export=test_blocked_tail",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.o",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "dis-0",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.wat"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "mvp-validate-0",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "--mvp-features",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/validated-O0.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "node-0",
+    "argv": [
+      "node",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/check.mjs",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "host-build-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-O0",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/host.c",
+      "-I",
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/include",
+      "-L",
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
+      "-lwasmtime",
+      "-Wl,-rpath,/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/host-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "wasmtime-0",
+    "argv": [
+      "/private/tmp/rill-30-portable-reviewed/host-O0",
+      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=wasm32-unknown-wasip1",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-strict-aliasing",
+      "-fno-stack-protector",
+      "-fstack-usage",
+      "-mno-tail-call",
+      "-mno-bulk-memory",
+      "-mno-reference-types",
+      "-mno-multivalue",
+      "-mno-sign-ext",
+      "-mno-nontrapping-fptoint",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O2",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "object-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=wasm32-unknown-wasip1",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-strict-aliasing",
+      "-fno-stack-protector",
+      "-fstack-usage",
+      "-mno-tail-call",
+      "-mno-bulk-memory",
+      "-mno-reference-types",
+      "-mno-multivalue",
+      "-mno-sign-ext",
+      "-mno-nontrapping-fptoint",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O2",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "link-2",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--stack-first",
+      "-z",
+      "stack-size=65536",
+      "--initial-memory=6291456",
+      "--max-memory=33554432",
+      "--export-memory",
+      "--export=init",
+      "--export=poll",
+      "--export=wake",
+      "--export=request_cancel",
+      "--export=drop_handle",
+      "--export=complete_foreign",
+      "--export=canaries",
+      "--export=inspect",
+      "--export=test_reserve",
+      "--export=test_blocked_tail",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.o",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "dis-2",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.wat"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "mvp-validate-2",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "--mvp-features",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/validated-O2.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "node-2",
+    "argv": [
+      "node",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/check.mjs",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "host-build-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/host.c",
+      "-I",
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/include",
+      "-L",
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
+      "-lwasmtime",
+      "-Wl,-rpath,/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
+      "-o",
+      "/private/tmp/rill-30-portable-reviewed/host-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "wasmtime-2",
+    "argv": [
+      "/private/tmp/rill-30-portable-reviewed/host-O2",
+      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm",
+      "2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  }
+]
