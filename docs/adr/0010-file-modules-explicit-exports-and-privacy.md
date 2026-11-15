@@ -56,6 +56,10 @@ A genuinely private nominal type may occur in an exported operation's signature 
 
 Ordinary overload families named as requirements in exported generic interfaces must themselves have publicly nameable exported declarations. Do not expose hidden family requirements in v0 public contracts. Importing an operation does not inject its requirement names into the caller's source scope; the compiler checks canonical metadata. This restriction does not prohibit opaque private value types or private implementation dependencies inside bodies.
 
+## Later implementation and conversion refinement (#41)
+
+[ADR 0017](0017-user-implementable-conversions.md) changes family bodies language-wide to `implement`, preserving declaration-wide visibility and canonical import identity. For the canonical conversion families only, destination/source pair patterns replace ordinary parameter-pattern keys and either endpoint's defining module can implement; reference-peeled outer nominal ownership is required. Identical pair patterns remain duplicates, concrete specializations can beat generic defaults, and incomparable applicable patterns are call ambiguities. Numeric pairs and infallible identity are protected. This does not change the ordinary orphan/duplicate rules or impose the rejected outermost-type rule on copy/dispose below.
+
 ## Overload identity, collection, and protected operations
 
 An imported original declaration, including an alias, identifies an extended family; matching spelling does not merge unrelated functions. The declaring module controls the family's visibility and implementations inherit it. An extension's metadata participates wherever the family is visible, but extending it does not automatically re-export that module's private import binding: use `export import` for a new public name path. Implementations are not individually exported/hidden.

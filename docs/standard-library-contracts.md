@@ -6,6 +6,8 @@ Read the newer decisions over historical examples: #18 explicit widths/UTF-8; #1
 
 ## Reading the catalogue
 
+[#41 / ADR 0017](adr/0017-user-implementable-conversions.md) adds language-wide `implement` syntax for family bodies: `implement show(value: &Local): string { ... }` and `implement<T> show(value: &Box<T>): string where show(T) { ... }`. Body-less family declarations and standalone definitions retain `function`. Infer omitted family arguments from implementation signatures, not bodies. Implementations inherit family visibility. Only the canonical conversion families have the destination/source key exception described in §9; ordinary return-only dispatch remains forbidden.
+
 Signatures below specify public operations, not complete source files: repeated operation signatures describe implementations of **one** family, not multiple conflicting body-less declarations. Each overload family has one declaration. All ordinary implementations preserve its parameter count, reference structure as specialized through type parameters, and return pattern. No dispatch on return type alone, constraint truth, runtime value, import order, or dead-code elimination is added.
 
 A loose declaration deliberately exposes its result type parameters when parameter specialization determines the result. For example:
@@ -33,9 +35,9 @@ The arity schemas below describe exactly the **2-, 3-, and 4-item implementation
 | `std::result` | Result, Ok, Err type/construction operation, map, mapErr, andThen, isOk, ok, err |
 | `std::error` | Error, error, Cause, SourceLocation, display, value, intoValue, origin, cause, formatLocation, formatError, formatCause |
 | `std::format` | show |
-| `std::convert` | from/into, try_from/try_into, ConversionError |
+| `std::convert` | into/from, tryInto/tryFrom, ConversionError |
 | `std::number` | parseNumber, ParseError; wrappingAdd/Sub/Mul, saturatingAdd/Sub/Mul |
-| `std::bytes` | Bytes type/factory, length, slice, get, getMut, append, intoList, copyFromList, copyToList |
+| `std::bytes` | Bytes type/factory, length, slice, get, getMut, append, clear, truncate, reserve, intoList, copyFromList, copyToList |
 | `std::string` | length, slice, append, bytes, viewUtf8, decodeUtf8, decodeLossy, chars, charIndices, CharAt, Utf8Error |
 | `std::char` | codePoint, fromCodePoint |
 | `std::shared` | Shared, shared, view |
@@ -43,7 +45,7 @@ The arity schemas below describe exactly the **2-, 3-, and 4-item implementation
 | `std::channel` | Sender, Receiver, SendError, channel, send, receive, after, select, unsent, intoUnsent |
 | `std::routine` | Routine, AllFailed, failures, join, all, allSettled, race, any |
 | `std::time` | sleep |
-| `std::io` | IoError, IoErrorKind, kind, nativeCode, readStdin, writeStdout, writeStderr, flushStdout, flushStderr |
+| `std::io` | IoError, IoErrorKind, kind, nativeCode, readStdin, writeStdout, writeStderr, flushStdout, flushStderr; read, write, flush, close, readExact, writeAll, readToEnd, IoFailure, ReadExactError, ReadToEndError, BufferedReader, BufferedWriter, bufferedReader, bufferedWriter, intoParts, BufferedFlushError, BufferedCloseError |
 | `std::fs` | readFile, writeFile; uses the canonical std::io::IoError |
 
 Library types/functions need explicit imports. Primitive `string`/`char` do not; their modules contain helpers, not replacement primitive types. Canonical interpolation/iteration/cleanup can load required metadata without source bindings. `map` in collection/result/option and `join` in collection/routine are different families; import aliases resolve source collisions. No implicit broad std import, mutable exported globals, module initializers, methods, traits or user-defined conversion operators are added.
@@ -291,6 +293,7 @@ Bytes owns a contiguous byte sequence; &Bytes is logical read access to a whole/
 | bytes slice | slice(&Bytes,u64,u64):Option<&Bytes> |
 | bytes get/getMut | get(&Bytes,u64):Option<u8>; getMut(&mut Bytes,u64):Option<&mut u8> |
 | bytes append | append(&mut Bytes,&Bytes):void |
+| bytes reuse (#32) | clear(&mut Bytes):void; truncate(&mut Bytes,u64):void; reserve(&mut Bytes,u64):void |
 | bytes conversions | intoList(Bytes):List<u8>; copyFromList(&List<u8>):Bytes; copyToList(&Bytes):List<u8> |
 | string length | length(&string):u64, counts UTF-8 bytes |
 | string slice | slice(&string,u64,u64):Option<&string> |
@@ -304,23 +307,41 @@ Bytes owns a contiguous byte sequence; &Bytes is logical read access to a whole/
 
 Slices use half-open byte bounds; reject reversed/out-of-bounds ranges, and for text reject non-scalar endpoints. Empty valid ranges succeed. Byte get may observe continuation bytes. Append cannot bypass conflicting loans/self-aliasing. Decoding errors own their diagnostic data; `Utf8Error` is a named record exposing `validUpTo:u64` and `errorLength:Option<u64>` (None for incomplete trailing input), with display. Strict borrowed success retains the original byte storage; copying success does not. Lossy decode replaces invalid input with U+FFFD rather than dropping it. Concrete invalid-sequence grouping follows the strict UTF-8 decoder's maximal valid-prefix/error-span contract and must be tested in #28, not confused with a view-cast.
 
+[#32 / ADR 0018](adr/0018-streaming-and-buffered-io.md) adds Bytes reuse: clear sets length to zero while retaining reusable allocation; truncate shortens or does nothing when already shorter; reserve ensures room for at least the requested additional bytes without changing length. No exact capacity/allocator footprint or public uninitialized memory is exposed. Checked length/addressability/reservation failure follows existing fatal allocation policy; no native-size wrapping or bypass of conflicting views. Streaming reads append into a whole exclusively borrowed owner, not a new writable subrange API.
+
 CharAt is a named record `{ offset:u64; value:char }`, exported from std::string. Chars/CharIndices are opaque source-retaining iterators, yielding scalars/CharAt through canonical next. fromCodePoint accepts Unicode scalars, excluding surrogates/out-of-range values, not merely printable/assigned characters. No grapheme indexing, normalization, locale collation, writable UTF-8 bytes, mutable substrings, implicit List contiguity or fabricated &List<u8> temporary headers.
 
 String literals are expressions of string type, not singleton types. Uninterpolated literal expressions can be rematerialized into fresh logical owners/static backing under #18, but a named string binding moves unless explicitly copied. Optimizer knowledge does not grant implicit copying, noBorrow to a view, capture access or a safe numeric conversion. `copy(&owner)` copies owned text; `copy(view)` already passes a &string and copies the observed extent. To copy the descriptor itself use its read-only implicit-copy rules or the appropriately typed borrowed descriptor, preserving dependencies. These are not duplicate freeable owners or hidden reference counts.
 
-## 9. Numeric conversion, parsing and formatting
+## 9. Conversion, numeric compatibility, parsing and formatting
+
+[#41 / ADR 0017](adr/0017-user-implementable-conversions.md) supersedes the closed-only conversion boundary from #18/#23:
 
 ```rill
-// closed compiler-known std::convert operations, not user-extensible overloads
-into<To, From>(value: From): To
-try_into<To, From>(value: From): Result<To, ConversionError>
-// from aliases into; try_from aliases try_into, same type-argument order.
+// std::convert canonical user-extensible families
+export function into<To, From>(value: From): To;
+export function tryInto<To, From, E>(value: From): Result<To, E>;
+// from aliases into; tryFrom aliases tryInto, same destination-first argument order.
+// Historical try_into/try_from spellings are superseded, not extra implementation sets.
 
-// closed std::number operation
+implement into<UserId>(value: string): UserId { /* body */ }
+implement tryInto<UserId>(value: &string): Result<UserId, InvalidUserId> { /* body */ }
+
+// closed std::number operation, not automatically registered as a conversion
 parseNumber<T>(text: &string): Result<T, ParseError>
 ```
 
-Requirements are canonical into(To,From), try_into(To,From) and parseNumber(T); aliases preserve the same operation. Destinations come from explicit leading arguments or an immediate unique expected type. Source widths must be independently established. No as, fallback width, arbitrary return-only implementations, source guessing or user conversion/parser trait. Domain parsing/conversion uses separately named functions.
+Only these canonical conversion families distinguish implementations by `(To, From)` rather than ordinary parameter patterns. E is the selected implementation's output evidence, never a selection key. Infer source/error family arguments from registration signatures. Calls use `into<To>(value)` / `tryInto<To>(value)` or an immediate unique concrete expected destination (including a Result success type). Do not choose a destination from the number of available implementations, later uses or a default. Source widths must be independently established. Concrete function values require resolved endpoints and the exact selected signature/error; there is no erased runtime registry.
+
+Canonical requirements are `into(To, From)`, `tryInto(To, From, E)` and `parseNumber(T)`; aliases preserve identity. Generic bodies are checked before monomorphization using symbolic selected-signature/property/dependency evidence. Both endpoints must be named in requirements; unlike a call, no value supplies the source. E can be inferred at a concrete call, but exact equality is checked against the winning implementation. A generic body cannot assume an overridable fallback's concrete error and later substitute a differently typed specialization. Additional properties such as display(E) remain explicit. For example, `stringify<T>(value:T):string where into(string,T)` accepts any owned T with the conversion; a borrowed variant requires `into(string,&T)`.
+
+Collect loaded implementations once. Reject identical canonical pair patterns regardless of error/constraints; aliases and generic renaming do not create distinct patterns. Choose the unique most-specific applicable source/destination pattern, allowing concrete specializations of generic defaults. Incomparable applicable patterns are ambiguous; constraints, expected errors and import order do not rank candidates. An expected-error mismatch cannot force fallback selection. The implementation module must own the family or an endpoint's outer nominal type after peeling references. Local wrappers count; foreign wrappers containing local types, bare generic parameters, local errors, constraints and aliases do not confer ownership. Ordinary families retain their existing orphan/duplicate rules and declaration-wide implementation visibility.
+
+Built-in numeric pairs remain protected. Standard `into<T,T>` identity takes precedence for equal endpoints even over overlapping generic wrappers; explicit user infallible identity registrations are rejected. Identity preserves moves/copies/reference dependencies, not backing-storage cloning. No user infallible-to-fallible adapter or universal fallible identity is generated. Numeric safe/identity pairs retain standard fallible ConversionError entries; other fallible identity entries require explicit registration with a concrete E.
+
+Owned T, &T and &mut T sources are distinct contracts. Calls explicitly move/borrow/copy; no implicit borrowed adapters. Destinations and errors preserve nested dependencies and exclusive access, reject local-source escape, and cannot fabricate noBorrow/sendable/shareable or extend lifetimes. Custom errors use canonical display for Err construction; exact-E propagation, explicit mapErr and existing cause/origin rules are unchanged. Infallible implementations may have ordinary effects or fatal panics; infallibility does not promise purity or losslessness.
+
+No as, fallback width, arbitrary ordinary return-only implementations, source guessing or conversion/parser trait. No implicit casts, conversion chaining, structural mapping, automatic display/serialization/JSON/database registration or SQL-expression capture. Applications can register explicit conversions with their own semantics/errors; #31 JSON numeric behavior stays distinct. Intended-valid and independent rejection cases are in [prototype 18](../prototypes/18-conversions.md).
 
 Preserve #18: infallible integer pairs require full base-range inclusion; integer/float and float/float destinations use IEEE rounding and may lose precision/overflow to infinity. Float-to-integer truncates first, then checks range/non-finiteness; try supports safe pairs too and keeps Result shape. ConversionError is an enum with OutOfRange and NotFinite unit variants, supplied display/eq implementations and owned origin handling through Err. No rejected infallible call becomes a panic-catching helper.
 
@@ -347,13 +368,88 @@ writeFile(path: &string, bytes: &Bytes): Result<void, IoError>
 
 Stdin may return a short nonempty read; None means EOF, not temporarily unavailable input. A zero request returns Some(empty Bytes) without consuming input. A request is an upper bound, not a promise the target can allocate maxBytes; implementations may perform smaller reads without narrowing/wrapping the public u64. Writes attempt the complete sequence; errors/cancellation can leave a committed prefix and are not rollback or safe whole-buffer-retry promises. Flush does not imply filesystem crash durability. Shared standard-stream state is trusted synchronized runtime state, not named functions capturing exported runtime lets. Native operations retain buffers/path sources until completion or confirmed release, including deferred cleanup; Wasm pointers need the #30 validation, not owner retention alone.
 
-readFile returns owned bytes. writeFile creates/truncates and may leave partial output after failure/cancellation, with no atomic replacement, rollback, durable-sync or file-locking promise. Embedded-NUL/invalid platform paths return InvalidInput rather than unsafe path truncation. No general streaming-file/reader-writer abstraction, networking, seeking or directory traversal is required here. Text I/O composes bytes and explicit UTF-8 handling.
+readFile returns owned bytes. writeFile creates/truncates and may leave partial output after failure/cancellation, with no atomic replacement, rollback, durable-sync or file-locking promise. Embedded-NUL/invalid platform paths return InvalidInput rather than unsafe path truncation. That #23 baseline alone did not require a general streaming-file/reader-writer abstraction, networking, seeking or directory traversal. #32 adds the streaming foundations below; concrete handles/protocols remain in their own tickets. Text I/O composes bytes and explicit UTF-8 handling.
 
 IoError is an opaque owned diagnostic type with `kind(&IoError):IoErrorKind` and `nativeCode(&IoError):Option<i64>`. IoErrorKind has NotFound, PermissionDenied, AlreadyExists, InvalidInput, Other variants; unmapped platform failures use Other. Optional native codes are platform-specific, not portable branching contracts. Its display uses owned diagnostic context; callers do not parse human-readable messages. IoError, ConversionError, ParseError and Utf8Error provide display and noBorrow/sendable/shareable evidence. Underlying native-code translation must not make cancellation a recoverable I/O error or fabricate successful completion.
 
 Root log/panic each use one `(S)` declaration shape with string and &string input implementations. Log writes text plus newline, returns void, synchronizes whole messages (same stream synchronization as output operations), and has unspecified concurrent message order. Failure is fatal; fallible I/O is the alternative. It is text-only: show/interpolation is explicit, not generic reflection or implicit owner copying.
 
 Source panic requires importing std::panic and returns never. Compiler-generated arithmetic/allocation/stack failures use canonical runtime metadata without a lexical panic binding. User shadowing cannot redirect them. Allocation/reservation failure is fatal, not ubiquitous recoverable allocation Results. #22 overflow uses bounded best-effort emergency reporting without user formatters/full trace/required allocation/unwind; host failure may prevent a report. Other fatal panic remains uncatchable, with no cleanup/global-exit guarantee.
+
+### Streaming and buffering extension (#32)
+
+**Q36 confirmed scoped restriction:** local probes/internal adapter buffers and consuming-close flush failures require the scoped noBorrow evidence listed below. The user explicitly approved this conservative rule after artifact validation; [ADR 0018](adr/0018-streaming-and-buffered-io.md#scoped-borrow-free-errors-confirmed-after-artifact-validation-q36) records its reason and limits. This is design approval, not a completed checker or soundness proof.
+
+[#32 / ADR 0018](adr/0018-streaming-and-buffered-io.md) adds these ordinary canonical families in std::io; it leaves the preceding stdio/whole-file convenience signatures unchanged. Their existing partial-effect warnings do not retroactively become reliable progress counts. No global standard-handle ownership scheme, traits, methods, public dyn, return-only dispatch or new prelude binding is introduced.
+
+```rill
+function read<R,E>(source: &mut R, destination: &mut Bytes, maxBytes: u64)
+  : Result<Option<u64>, IoFailure<E>>;
+function write<W,E>(destination: &mut W, source: &Bytes)
+  : Result<u64, IoFailure<E>>;
+function flush<S,E>(stream: &mut S): Result<void,E>;
+function close<S,E>(stream: S): Result<void,E>;
+
+type IoFailure<E> = { transferred: u64; error: Err<E> };
+
+// Generic helpers; requirements shown are part of each public contract.
+readExact<R,E>(&mut R, &mut Bytes, u64): Result<void,ReadExactError<E>>
+  where read(R,E), display(E)
+writeAll<W,E>(&mut W, &Bytes): Result<void,IoFailure<E>>
+  where write(W,E), display(E)
+readToEnd<R,E>(&mut R, &mut Bytes, u64): Result<u64,ReadToEndError<E>>
+  where read(R,E), display(E), noBorrow(E)
+
+bufferedReader<R>(R,u64): BufferedReader<R>
+bufferedWriter<W>(W,u64): BufferedWriter<W>
+function intoParts<B,S>(buffer: B): [S,Bytes];
+// Distinct input-pattern implementations: BufferedReader<R> -> [R,Bytes],
+// BufferedWriter<W> -> [W,Bytes].
+
+enum ReadExactError<E> {
+  UnexpectedEof { transferred: u64 },
+  Read(Err<IoFailure<E>>),
+}
+enum ReadToEndError<E> {
+  Read(Err<IoFailure<E>>),
+  LimitExceeded {
+    transferred: u64,
+    extra: Bytes,
+    probeFailure: Option<Err<IoFailure<E>>>,
+  },
+}
+enum BufferedFlushError<WE,FE> {
+  Write(Err<IoFailure<WE>>),
+  Flush(Err<FE>),
+}
+enum BufferedCloseError<WE,FE,CE> {
+  Flush(Err<BufferedFlushError<WE,FE>>),
+  Close(Err<CE>),
+  Both { flushing: Err<BufferedFlushError<WE,FE>>, closing: Err<CE> },
+}
+```
+
+Scoped requirements beyond capability/display evidence: readToEnd needs noBorrow(E); BufferedReader read needs noBorrow of its underlying read error; BufferedWriter write/flush need noBorrow of the underlying write error; BufferedWriter consuming close additionally needs noBorrow of the underlying flush error. These prevent local-buffer escape/retained mutation and errors borrowing a consumed resource. No extra noBorrow is imposed on primitive errors, caller-buffer readExact/writeAll, buffered-reader close or the consuming underlying close error. No sendable/shareable follows. Generic callers must state the scoped evidence before monomorphization; concrete borrow-free errors may satisfy it structurally.
+
+Each capability independently determines E from its input implementation. Generic requirements are read(R,E), write(W,E), flush(S,E) and close(S,E), plus separately needed properties such as display(E); check bodies before monomorphization. Family bodies use implement and ordinary collection/duplicate/orphan/visibility rules. Desired errors cannot select implementations. Standard display for the error wrappers/enums requires display of their parameter errors. Retaining typed Err values preserves actual dependencies without automatic heterogeneous cause erasure or blanket noBorrow/sendable/shareable. Normal exact-E propagation, explicit adaptation, origins and causes remain.
+
+Read appends at most maxBytes, preserving existing contents. Positive requests succeed with Some(n), 1 <= n <= maxBytes, or None at EOF with no appended bytes. Short reads are not EOF or message/UTF-8 boundaries. Zero request immediately returns Some(0) without consumption or EOF testing. Write accepts a prefix of its supplied logical extent: positive progress for nonempty success, zero for empty input. Calls suspend the routine while unavailable, not return WouldBlock; backend execution must not simply block the scheduler thread. Counts are public u64 upper bounds, never implicit native-size wrapping/allocation promises.
+
+IoFailure.transferred exactly reports appended/accepted bytes from this operation, including failure; no rollback, unreported destination bytes or whole-buffer retry promise. Acceptance is relative to the layer, not peer receipt/durable storage. Helpers check successful zero progress, bounds and read length/count/EOF consistency before arithmetic/slicing; impossible reports are fatal adapter bugs, not synthetic E or infinite loops. Existing-prefix preservation is required without promising byte-for-byte validation of every adapter.
+
+Exact/all helpers loop with bounded stacks; empty exact/all operations do not touch the stream. readExact succeeds only after appending the requested count. Its errors retain the obtained prefix and cumulative progress. writeAll accepts the entire input or reports cumulative failure; it does not flush/close or create framing. Rebase IoFailure progress with metadata-preserving mapping, retaining both the I/O envelope and nested original Err<E>; new context envelopes have normal new construction origins.
+
+readToEnd requires a maximum additional-byte budget and returns the appended count. At the limit, probe separately for one byte: EOF succeeds; a byte yields LimitExceeded with exactly one owned extra byte, never appended beyond the bound. A simultaneous error is retained in probeFailure with its original probe-relative count; the top-level transferred is destination-relative. Probe failure without a byte is Read with cumulative progress. Zero budget still probes. Existing destination length is excluded; subtract it when enforcing a total-size budget. No unlimited variant or silently discarded lookahead.
+
+BufferedReader/Writer own their wrapped values and have explicit nonzero u64 capacities bounding logical pending bytes, not exact allocation footprint. Zero capacity is a fatal programmer error; allocation/reservation failures retain fatal policy. No borrowed constructors, hidden background work, unbounded queues, public writable views or peek/consume API. Capabilities require wrapped evidence rather than being fabricated by construction. Reader may read ahead up to capacity; a partial refill failure reports immediately with caller-relative progress and retains the unread remainder. No deferred-error queue. Writer drains when necessary before accepting more input, with no implicit underlying flush merely to create space. Current-input progress may be zero when older output partially commits. Remove only confirmed prefixes and retain unsent suffixes on recoverable failure. Continued transport usability is implementation-specific.
+
+intoParts consumes without I/O, returning the wrapped value and all unread/pending bytes in order. No silent buffer loss; pending output must precede later output if the caller preserves ordering. Reader close discards unread input and delegates underlying close, not draining to EOF.
+
+BufferedWriter flush requires write(W,WE), flush(W,FE), display(WE), display(FE), noBorrow(WE): drain local pending output first, then underlying flush. Drain errors retain suffixes/skip underlying flush; underlying-flush errors leave local pending empty. Retry cannot replay confirmed bytes. Flush is layer handoff, not durability/peer acknowledgement. Consuming buffered close additionally requires close(W,CE), display(CE), noBorrow(FE), attempts safe underlying close even after flush failure, and preserves flush-only/close-only/both errors. Ownership is gone after either recoverable outcome; required cleanup completes. Flush while retaining ownership first when recovery is wanted. Disposal instead discards unsent output and does not flush or perform graceful protocol shutdown; remaining-field cleanup cannot double-close a moved/consumed resource.
+
+Operations exclusively borrow their stream; reads also exclusively borrow destination and writes retain read-only source access. Suspension/cancellation must retain buffers, callback/native state and handles until completion or confirmed abortion, not merely an abort request. No fabricated lifetimes/properties or overlapping whole-stream operations. Separate directional handles are #34's decision. Cooperative cancellation is outside Result and may leave partial external effects without returning progress to stopped code. Cleanup can suspend indefinitely with cancellation deferred, including after close's cancellable flush phase. No force-kill, fatal-panic cleanup or global-exit delivery promise.
+
+#33 owns concrete deadlines/context/races; no timeout parameter is added here or hard return promised by racing a timer. #34/#35/#38 own actual socket/file/TLS handles, shutdown and fatal states; #39/#40 own body/driver abandonment and connection reuse. Disposal does not acknowledge input or guarantee remote rollback. #30 still gates native/Wasm pointer stability and scheduling/cleanup machinery. [Prototype 19](../prototypes/19-streaming-io.rill) and its [case inventory/composition sketches](../prototypes/19-streaming-io.md) are hand-checked evidence, not implementations or validation proofs.
 
 ## 11. Validation and follow-through
 

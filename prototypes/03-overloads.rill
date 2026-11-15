@@ -5,42 +5,42 @@ type Point = { x: i32; y: i32 };
 
 function show<T>(value: &T): string;
 
-function show(value: &i32): string {
+implement show(value: &i32): string {
   return `${value}`;
 }
 
-function show(value: &bool): string {
+implement show(value: &bool): string {
   return match (value) {
     true => "yes",
     false => "no",
   };
 }
 
-function show(point: &Point): string {
+implement show(point: &Point): string {
   return `(${show(point.x)}, ${show(point.y)})`;
 }
 
-function show<T>(items: &List<T>): string where show(T) {
+implement<T> show(items: &List<T>): string where show(T) {
   let parts = items |> map(show) |> join(", ");
   return `[${parts}]`;
 }
 
-function show(points: &List<Point>): string {
+implement show(points: &List<Point>): string {
   let parts = points |> map(show) |> join(" -> ");
   return `path ${parts}`;
 }
 
 function greeting(language: string): string;
 
-function greeting(language: "fr"): string {
+implement greeting(language: "fr"): string {
   return "bonjour";
 }
 
-function greeting(language: "es"): string {
+implement greeting(language: "es"): string {
   return "hola";
 }
 
-function greeting(language: string): string {
+implement greeting(language: string): string {
   return "hello";
 }
 

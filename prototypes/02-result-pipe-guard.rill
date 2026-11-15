@@ -7,7 +7,7 @@ import std::error::display;
 
 type PortError = { detail: string };
 
-function display(error: &PortError): string {
+implement display(error: &PortError): string {
   return `${error.detail}`;
 }
 

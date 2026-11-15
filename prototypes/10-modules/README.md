@@ -80,7 +80,7 @@ Required built-in guard release, owner-count maintenance, and native-borrow rete
 
 ```ts
 function ready<T>(value: &T): bool;
-function ready(value: &i32): bool { return true; }
+implement ready(value: &i32): bool { return true; }
 
 export function check<T>(value: &T): bool where ready(T) {
   return ready(value); // Exported interface is rejected: ready is private.

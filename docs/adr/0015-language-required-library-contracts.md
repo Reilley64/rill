@@ -4,6 +4,14 @@
 
 ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separate sessions. This decision follows both, including when a separately prepared artifact is not yet present in a checkout.
 
+## Later implementation and conversion refinement (#41)
+
+[ADR 0017](0017-user-implementable-conversions.md) supersedes the closed-only numeric conversion boundary below and the old snake_case try spellings. Canonical into/from and tryInto/tryFrom allow user endpoint-owned implementations, destination/source specificity and implementation-defined typed errors. Numeric pairs retain protected standard behavior and ConversionError. Parsing stays separate. `implement` becomes language-wide family-body syntax; declarations and standalone functions retain `function`. The updated catalogue and prototypes distinguish these exceptions from unchanged ordinary overload, ownership and error/cause rules.
+
+## Later streaming extension (#32)
+
+[ADR 0018](0018-streaming-and-buffered-io.md) extends the baseline with separate ordinary read/write/flush/close families, exact typed progress errors, bounded append reads and owning buffered adapters. It adds Bytes clear/truncate/reserve, not a competing buffer or writable view API. Q36 explicitly requires scoped noBorrow evidence for readToEnd/local-buffer adapter errors and the flush error preserved across buffered consuming close, not a blanket prohibition on primary borrowed errors. Existing stdio/whole-file signatures and their partial-effect warnings stay unchanged; no reliable progress count is retrofitted into them. Explicit consuming close observes finalization failures, while disposal discards pending output and still completes required native cleanup. #33/#34/#35/#38/#39/#40 own deadlines/concrete consumers; #30 remains the backend gate. See the updated catalogue and prototype 19 for hand-checked examples, not implemented streaming.
+
 ## Decisions and consequences
 
 - `List`/hash `Map` are owned, explicitly mutable and independently copied; u64 counts/indices, Option queries, read-only keys and explicit eq/hash contracts. Map insertion retains an existing equal key and returns its displaced value. List transformations are eager, sequential and support both consumed and borrowed input.

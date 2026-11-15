@@ -2,6 +2,8 @@
 
 Design artifacts for [#18](https://github.com/Reilley64/rill/issues/18) and [ADR 0011](../docs/adr/0011-explicit-numeric-widths-and-utf8-string-views.md). The `.rill` companion contains 41 intended-valid expectations, checked by inspection only. There is no compiler/runtime or executable compile-fail suite. New standard-library paths/helper names and `Result<T>`'s illustrative default error are **not complete #23 interfaces**. In particular, different error types cannot silently convert for `?`, and target-only generic helpers cannot be implemented as duplicate return-only overloads.
 
+**#41 supersession:** [ADR 0017](../docs/adr/0017-user-implementable-conversions.md) replaces the closed-only conversion model with user-implementable canonical families and the `tryInto`/`tryFrom` spellings. The companion's generic fallible helper now names E and requires `tryInto(To, From, E), display(E)`; it does not assume the default Error or implicit error adaptation. Unrelated helper sketches remain historical where #23 supersedes them. Family bodies now use `implement`; body-less declarations and standalone functions remain `function`.
+
 ## Valid fixture coverage
 
 The companion covers width establishment and aliases, generic infallible/fallible evidence, range failure as a Result even for constant input, float rounding/truncation/non-finite rejection, signed minimum, shifts/remainder, an unexecuted integer trap, exact substring copying, byte versus scalar boundaries, descriptor and retained-storage dependencies, static literal views, literal copying, exclusive-reference formatting, sequential formatting snapshots, canonical custom show, scalar validation, strict numeric parsing, UTF-8 decoding/lossy replacement, escapes/raw strings, normalization distinctions and special float rendering.
@@ -28,7 +30,7 @@ let missingTry = into<u8>(1i32); // Base-type pair is fallible, despite this val
 
 Reject int/float/byte/isize/usize as built-in numeric names and reject `value as u8`. Ordinary import `as` aliases remain valid; the ban concerns conversion/type-assertion syntax. Destination inference can use a unique explicit expected type, never a fallback. Partial generic arguments infer trailing parameters from already-typed inputs.
 
-The four conversion names identify **two closed compiler-known operations** with explicit target/source type arguments. They are not ordinary implementations selected by return type. Keep ADR 0010's rejection of duplicate parameter-pattern bodies intact. Reject standard conversion attempts involving bool, char, records, or references outside the numeric table; user domain factories and Unicode/byte validation are separate operations.
+The four conversion names identify **two canonical user-implementable families** under #41 / [ADR 0017](../docs/adr/0017-user-implementable-conversions.md), with protected standard numeric pairs. Conversion-specific source/target selection does not authorize general return-only dispatch or relax ADR 0010's ordinary duplicate-pattern rule. Reject unsupported standard numeric pairs involving bool, char, records, or references; do not infer such support from the numeric table. Authorized user conversions may involve domain types under ADR 0017's rules. Unicode/byte validation remains separately specified.
 
 ```ts
 function missingEvidence<To, From>(value: From): To {
@@ -93,8 +95,8 @@ A panic is whole-program fatal under ADR 0005; these cases need separate process
 | Shift count equal to or greater than width | Panic, no masked count |
 | The same well-typed trap in a branch never executed | No panic and no mandatory compilation rejection |
 | Out-of-range single literal, even in an unexecuted branch | Compilation rejection |
-| `try_into<u8>(300u16)` | Err, including when input is constant |
-| `try_into<u8>(-0.5f64)` | Ok(0), truncate before range-checking |
+| `tryInto<u8>(300u16)` | Err, including when input is constant |
+| `tryInto<u8>(-0.5f64)` | Ok(0), truncate before range-checking |
 | Float-to-integer NaN/infinity or out-of-range truncated result | Err |
 | Integer-to-float / float narrowing | IEEE-rounded value, possibly infinity; not a conversion error |
 | Floating division/remainder by zero | Floating infinity/NaN behavior, not integer panic |

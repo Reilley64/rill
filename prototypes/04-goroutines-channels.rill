@@ -83,26 +83,26 @@ function slowLength(numbers: &List<i32>): u64 {
 
 function quote(shop: string, delay: u32): Result<i64>;
 
-function quote(shop: "closed", delay: u32): Result<i64> {
+implement quote(shop: "closed", delay: u32): Result<i64> {
   sleep(into<u64>(delay));
   return Err("shop is closed");
 }
 
-function quote(shop: string, delay: u32): Result<i64> {
+implement quote(shop: string, delay: u32): Result<i64> {
   sleep(into<u64>(delay));
   return Ok(into<i64>(delay) * 10);
 }
 
 function describe<T>(result: &Result<T>): string;
 
-function describe(result: &Result<i64>): string {
+implement describe(result: &Result<i64>): string {
   guard let price = result else (error) {
     return `error: ${error}`;
   }
   return `price ${price}`;
 }
 
-function describe(result: &Result<[i64, i64]>): string {
+implement describe(result: &Result<[i64, i64]>): string {
   guard let [one, two] = result else (error) {
     return `error: ${error}`;
   }

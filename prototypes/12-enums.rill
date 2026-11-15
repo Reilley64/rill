@@ -14,11 +14,11 @@ enum Box<T> {
 
 function greeting(language: &Language): string;
 
-function greeting(language: &Language): string {
+implement greeting(language: &Language): string {
   return "Hello";
 }
 
-function greeting(language: &Language.French): string {
+implement greeting(language: &Language.French): string {
   return "Bonjour";
 }
 

@@ -2,6 +2,10 @@
 
 Rill has no traits, so overloading carries per-type behavior. To keep that checkable, a name can only have overloads after a body-less overload declaration, such as `function show<T>(value: &T): string;`, fixes their shape. Every overload is the declaration with some types made more specific, and every call resolves to exactly one overload at compile time. A generic overload names what it needs with `where show(T)`, an overloaded name passed as a value takes the declaration's type, and overloads may only be written in the declaration's module or in a module that defines a type in their parameters, which limits extension without by itself preventing all conflicts.
 
+## Later implementation and conversion refinement (#41)
+
+[ADR 0017](0017-user-implementable-conversions.md) introduces language-wide `implement` for family bodies (`implement<T> show(value: &Box<T>): string where show(T) { ... }`); body-less declarations and standalone functions retain `function`. It supersedes the closed conversion claims below: canonical into/from and tryInto/tryFrom are user-extensible with a conversion-only destination/source key, implementation-selected error evidence and endpoint ownership permission. Ordinary duplicate/return/orphan rules remain unchanged; conversion-specific exceptions are explicit in that ADR. Specific implementations can override generic defaults; error types never rank candidates.
+
 ## Enum-variant refinement (#19)
 
 [ADR 0012](0012-enums-replace-unions-and-literal-overloads.md) supersedes primitive literal types/overloads and the unknown-runtime-value error rule. A statically known enum variant can select its variant implementation; a parent-enum argument selects an applicable general implementation, never a runtime dispatcher. Existing all-parameter specificity, declarations, generics, family identity, and collection rules remain.

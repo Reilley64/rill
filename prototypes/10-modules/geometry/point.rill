@@ -13,7 +13,7 @@ export function origin(): Point {
 
 // Extends formatting's family because this module owns Point.
 // The body participates in the family; the private import is not re-exported.
-function show(point: &Point): string {
+implement show(point: &Point): string {
   return `(${point.x}, ${point.y})`;
 }
 

@@ -9,15 +9,15 @@ type ConfigLoadFailed = {};
 type StartFailed = { port: u32 };
 
 // No required message field and no manual cause field on user-defined errors.
-function display(error: &ReadFailed): string {
+implement display(error: &ReadFailed): string {
   return `read failed (code ${error.code})`;
 }
 
-function display(error: &ConfigLoadFailed): string {
+implement display(error: &ConfigLoadFailed): string {
   return "could not load configuration";
 }
 
-function display(error: &StartFailed): string {
+implement display(error: &StartFailed): string {
   return `could not start server on port ${error.port}`;
 }
 

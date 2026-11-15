@@ -72,6 +72,10 @@ _Avoid_: thread, task, fiber, green thread
 A statement of the form `guard <condition> else { ... }` whose `else` block must leave its scope, with `return`, `break`, `continue`, or a call to a `never` function. It can also unwrap a value, as in `guard let user = findUser(id) else { ... }`.
 _Avoid_: precondition, assert, early return
 
+**I/O progress**:
+Bytes appended to a read destination or accepted from a write input by the current stream layer. Acceptance does not imply durable storage, peer receipt or application acknowledgement.
+_Avoid_: delivered bytes, committed transaction, rollback guarantee
+
 **Lock guard**:
 A non-copyable value that borrows a mutex and owns responsibility for releasing its lock. Its disposer unlocks; protected borrows depend on it, and ownership stays in the locking goroutine.
 _Avoid_: shared lock owner, raw lock, OS-thread-affine guard
@@ -93,7 +97,7 @@ A synchronization value granting exclusive access to a protected payload through
 _Avoid_: mutable Shared, runtime borrow checker
 
 **Numeric conversion**:
-A conversion between explicitly sized numeric types. `from`/`into` are infallible, while `try_from`/`try_into` return a Result; infallibility does not promise losslessness.
+A conversion between explicitly sized numeric types. `into`/`from` are infallible, while `tryInto`/`tryFrom` return a Result; infallibility does not promise losslessness.
 _Avoid_: as cast, type assertion, implicit coercion
 
 **Opaque value**:

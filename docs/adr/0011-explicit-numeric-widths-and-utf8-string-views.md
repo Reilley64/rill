@@ -24,6 +24,10 @@ Floats support NaNs, infinities, and signed zero with IEEE arithmetic/comparison
 
 **Literal validity and expression evaluation differ.** `256u8` is a compile error, but `127i8 + 1i8` is well-typed and panics only if evaluated. The same applies to well-typed zero-divisor and invalid-count expressions, including in branches never executed. No mandatory arithmetic constant-evaluation/rejection regime or arbitrary user-function const execution is introduced. Warnings may identify a trap; folding must preserve program acceptance, effects, and panic timing, neither hoisting nor discarding observable traps. A valid constant floating expression can produce infinity although an overflowing individual finite float literal is rejected.
 
+## Later user-extension refinement (#41)
+
+[ADR 0017](0017-user-implementable-conversions.md) supersedes this decision's closed numeric-only extension boundary, snake_case try aliases and fixed error across the whole fallible operation. Use canonical into/from and tryInto/tryFrom, explicit `implement` registrations, a conversion-specific destination/source key and `tryInto(To, From, E)` exact selected-error evidence. Numeric pairs remain standard-owned/protected with the same availability, rounding/truncation and ConversionError behavior, including fallible numeric safe/identity pairs. No general return-only dispatch, traits, implicit casts, default widths or numeric semantics change is introduced. The historical section below is read subject to this refinement; prototype call spellings and generic evidence are migrated.
+
 ## Two conversion operations, four function names
 
 No `as` conversion/assertion syntax. The free functions `from`/`into` alias one canonical infallible standard operation; `try_from`/`try_into` alias one canonical fallible operation returning `Result`. Both aliases share availability and behavior. The try operation also accepts infallible pairs, returning `Ok` with the same result shape.
