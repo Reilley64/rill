@@ -112,6 +112,10 @@ _Avoid_: method, trait implementation, instance
 A body-less `function` signature, ending in `;`, that owns an overload family's identity, visibility, and required shape. Imported aliases identify that same family, not new declarations.
 _Avoid_: trait, interface, protocol, type class
 
+**Path**:
+A native filesystem-location spelling, distinct from an opened object or access authority. Lexical equality compares the spelling, not whether two paths resolve to the same object.
+_Avoid_: filename string, canonical identity, sandbox boundary
+
 **Prelude**:
 The fixed primitive types, intrinsic predicates, and canonical copy/dispose declarations available without explicit imports. It introduces no runtime global bindings.
 _Avoid_: wildcard std import, module initializer

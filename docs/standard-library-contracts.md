@@ -46,7 +46,8 @@ The arity schemas below describe exactly the **2-, 3-, and 4-item implementation
 | `std::routine` | Routine, AllFailed, failures, join, all, allSettled, race, any |
 | `std::time` | sleep |
 | `std::io` | IoError, IoErrorKind, kind, nativeCode, readStdin, writeStdout, writeStderr, flushStdout, flushStderr; read, write, flush, close, readExact, writeAll, readToEnd, IoFailure, ReadExactError, ReadToEndError, BufferedReader, BufferedWriter, bufferedReader, bufferedWriter, intoParts, BufferedFlushError, BufferedCloseError |
-| `std::fs` | readFile, writeFile; uses the canonical std::io::IoError |
+| `std::path` | Path type/factory, PathError, PathComponent, Components, pathBytes, pathText, isAbsolute, join, parent, fileName, components |
+| `std::fs` | readFile, writeFile; ReadFile, WriteFile, ReadWriteFile, WriteOptions, CreateMode, WriteBehavior, SeekFrom, openRead, openWrite, openReadWrite, seek, sync, syncDirectory; Metadata, FileKind, metadata, symlinkMetadata, readLink, createSymlink, currentDir; DirEntry, ReadDir, readDir, createDir, createDirs, removeFile, removeDir, rename; TempFile, TempDir, TempFileCloseError, tempFile, tempDir, tempPath, keep; uses canonical std::io::IoError |
 
 Library types/functions need explicit imports. Primitive `string`/`char` do not; their modules contain helpers, not replacement primitive types. Canonical interpolation/iteration/cleanup can load required metadata without source bindings. `map` in collection/result/option and `join` in collection/routine are different families; import aliases resolve source collisions. No implicit broad std import, mutable exported globals, module initializers, methods, traits or user-defined conversion operators are added.
 
@@ -370,7 +371,7 @@ Stdin may return a short nonempty read; None means EOF, not temporarily unavaila
 
 readFile returns owned bytes. writeFile creates/truncates and may leave partial output after failure/cancellation, with no atomic replacement, rollback, durable-sync or file-locking promise. Embedded-NUL/invalid platform paths return InvalidInput rather than unsafe path truncation. That #23 baseline alone did not require a general streaming-file/reader-writer abstraction, networking, seeking or directory traversal. #32 adds the streaming foundations below; concrete handles/protocols remain in their own tickets. Text I/O composes bytes and explicit UTF-8 handling.
 
-IoError is an opaque owned diagnostic type with `kind(&IoError):IoErrorKind` and `nativeCode(&IoError):Option<i64>`. IoErrorKind has NotFound, PermissionDenied, AlreadyExists, InvalidInput, Other variants; unmapped platform failures use Other. Optional native codes are platform-specific, not portable branching contracts. Its display uses owned diagnostic context; callers do not parse human-readable messages. IoError, ConversionError, ParseError and Utf8Error provide display and noBorrow/sendable/shareable evidence. Underlying native-code translation must not make cancellation a recoverable I/O error or fabricate successful completion.
+IoError is an opaque owned diagnostic type with `kind(&IoError):IoErrorKind` and `nativeCode(&IoError):Option<i64>`. IoErrorKind has NotFound, PermissionDenied, AlreadyExists, InvalidInput, Other plus #35's Unsupported, NotDirectory, IsDirectory, DirectoryNotEmpty variants; unmapped platform failures use Other. Optional native codes are platform-specific, not portable branching contracts. Its display uses owned diagnostic context; callers do not parse human-readable messages. IoError, ConversionError, ParseError and Utf8Error provide display and noBorrow/sendable/shareable evidence. Underlying native-code translation must not make cancellation a recoverable I/O error or fabricate successful completion.
 
 Root log/panic each use one `(S)` declaration shape with string and &string input implementations. Log writes text plus newline, returns void, synchronizes whole messages (same stream synchronization as output operations), and has unspecified concurrent message order. Failure is fatal; fallible I/O is the alternative. It is text-only: show/interpolation is explicit, not generic reflection or implicit owner copying.
 
@@ -450,6 +451,88 @@ BufferedWriter flush requires write(W,WE), flush(W,FE), display(WE), display(FE)
 Operations exclusively borrow their stream; reads also exclusively borrow destination and writes retain read-only source access. Suspension/cancellation must retain buffers, callback/native state and handles until completion or confirmed abortion, not merely an abort request. No fabricated lifetimes/properties or overlapping whole-stream operations. Separate directional handles are #34's decision. Cooperative cancellation is outside Result and may leave partial external effects without returning progress to stopped code. Cleanup can suspend indefinitely with cancellation deferred, including after close's cancellable flush phase. No force-kill, fatal-panic cleanup or global-exit delivery promise.
 
 #33 owns concrete deadlines/context/races; no timeout parameter is added here or hard return promised by racing a timer. #34/#35/#38 own actual socket/file/TLS handles, shutdown and fatal states; #39/#40 own body/driver abandonment and connection reuse. Disposal does not acknowledge input or guarantee remote rollback. #30 still gates native/Wasm pointer stability and scheduling/cleanup machinery. [Prototype 19](../prototypes/19-streaming-io.rill) and its [case inventory/composition sketches](../prototypes/19-streaming-io.md) are hand-checked evidence, not implementations or validation proofs.
+
+### Native paths and filesystem extension (#35)
+
+[#35 / ADR 0019](adr/0019-paths-files-and-filesystem-operations.md) confirms the filesystem extension. These are public contracts, not an implemented filesystem/provider or security proof. Ordinary families retain canonical identity/parameter-pattern collection; implementations use `implement`. No methods, traits, return-only dispatch or new prelude bindings.
+
+```rill
+// std::path: Path is an opaque owned byte-preserving value.
+function Path<S>(source: S): Result<Path,PathError>;
+// Ordinary implementations accept &string / &Bytes and copy their extent.
+enum PathError { EmbeddedNul { offset: u64 } }
+pathBytes(&Path): &Bytes
+pathText(&Path): Result<&string,Utf8Error>
+isAbsolute(&Path): bool
+join(&Path,&Path): Path
+parent(&Path): Option<Path>
+fileName(&Path): Option<&Bytes>
+components(&Path): Components
+enum PathComponent { Root(u64), Current, Parent, Name(&Bytes) }
+
+// std::fs
+function readFile<P>(path: P): Result<Bytes,IoError>;
+function writeFile<P>(path: P, bytes: &Bytes): Result<void,IoError>;
+// Ordinary input-pattern implementations accept &Path and the existing &string.
+enum CreateMode { ExistingOnly, IfMissing, NewOnly }
+enum WriteBehavior { Preserve, Truncate, Append }
+type WriteOptions = { creation: CreateMode; behavior: WriteBehavior };
+openRead(&Path): Result<ReadFile,IoError>
+openWrite(&Path,WriteOptions): Result<WriteFile,IoError>
+openReadWrite(&Path,WriteOptions): Result<ReadWriteFile,IoError>
+enum SeekFrom { Start(u64), Current(i64), End(i64) }
+function seek<F>(file: &mut F, from: SeekFrom): Result<u64,IoError>;
+function sync<F>(file: &mut F): Result<void,IoError>;
+syncDirectory(&Path): Result<void,IoError>
+
+enum FileKind { Regular, Directory, Symlink, Other }
+type Metadata = { kind: FileKind; size: Option<u64> };
+function metadata<S>(source: S): Result<Metadata,IoError>;
+// &Path follows final links; borrowed file handles inspect their opened object.
+symlinkMetadata(&Path): Result<Metadata,IoError>
+readLink(&Path): Result<Path,IoError>
+createSymlink(target: &Path, link: &Path): Result<void,IoError>
+currentDir(): Result<Path,IoError>
+
+type DirEntry = { name: Path };
+readDir(&Path): Result<ReadDir,IoError>
+createDir(&Path): Result<void,IoError>
+createDirs(&Path): Result<void,IoError>
+removeFile(&Path): Result<void,IoError>
+removeDir(&Path): Result<void,IoError>
+rename(source: &Path, destination: &Path): Result<void,IoError>
+tempFile(parent: &Path): Result<TempFile,IoError>
+tempDir(parent: &Path): Result<TempDir,IoError>
+function tempPath<T>(temporary: &T): &Path;
+function keep<T,R>(temporary: T): R;
+// keep(TempFile) -> [ReadWriteFile,Path]; keep(TempDir) -> Path
+
+enum TempFileCloseError {
+  Close(Err<IoError>),
+  Remove(Err<IoError>),
+  Both { closing: Err<IoError>, removing: Err<IoError> },
+}
+```
+
+Path factories reject NUL with a byte offset, preserving all other bytes without existence/backend checks. No Windows drive/UNC grammar, normalization/case folding, tilde/env expansion or lossy decoding. Empty Path is lexically valid but InvalidInput for every filesystem location. pathBytes/pathText borrow underlying storage; parent returns owned storage, not a new &Path subrange abstraction. Canonical explicit copy, byte-based eq/hash and escaped diagnostic show are supplied. Diagnostic text is not a round-trip path encoding. Path/PathError have standard borrow-free/transfer/share metadata as appropriate to their owned byte/scalar representations; display(PathError) is supplied. Invalid encoding on actual backend use is InvalidInput, not filename replacement. Text whole-file conveniences keep IoError, validate the same native path rules and do not introduce implicit conversion/error adaptation.
+
+Join: absolute child replaces base; empty child/base preserve the other; insert a separator only when needed while preserving spelling. Components retain root slash count and explicit `.`/`..`, skip empty interior/trailing components, and preserve source dependencies through canonical iterate/next. fileName ignores trailing separators and returns only a final ordinary name. parent removes the last component and preceding separator run while preserving the root run: `a/b/` -> `a`, `a` -> empty, `/a` -> `/`, `//a` -> `//`, `a/.` and `a/..` -> `a`; roots/empty have no parent. No lexical operation is symlink resolution, filesystem identity or confinement; exact-two-leading-slash native behavior is not normalized away.
+
+ReadFile implements read/close; WriteFile implements write/flush/close; ReadWriteFile implements both directions/flush/close. All have seek and borrowed-handle metadata; only write-capable handles have sync. TempFile delegates the same read/write/seek/flush/sync/metadata capabilities to its owned ReadWriteFile but has its own close error below. File primitive errors are IoError; read/write errors are IoFailure<IoError>. Handle owners are not implicitly copied; no duplication/shared-cursor wrapper. Generic file requirements are seek(F)/sync(F) with fixed IoError; metadata uses distinct &Path/&ReadFile/&WriteFile/&ReadWriteFile/&TempFile input patterns. Access modes are static but object seekability is not; filesystem pipes/devices can fail Unsupported and directory byte I/O is IsDirectory.
+
+WriteOptions fields are mandatory. Read-only never creates. ExistingOnly requires existence; IfMissing does not truncate unless explicitly requested; NewOnly atomically fails AlreadyExists on any existing final entry including a dangling link. Preserve starts at zero without shortening; Truncate is destructive; Append obeys native append regardless of seek. Every combination is meaningful. Unsupported faithful exclusivity/append must fail, not be emulated by prechecks. Each underlying append is distinct; writeAll has no whole-record atomicity. Seek checks negative/native-range errors without wrapping, returns absolute u64 position and does not extend/write merely by seeking beyond EOF. Separate handles do not isolate contents from external changes. Open/create/truncate may leave effects after later failure/cancellation; finish safe cleanup, not rollback.
+
+Unbuffered file flush has no Rill-owned output buffer and does not sync. Explicit file sync requests platform data/required-metadata synchronization; syncDirectory separately requests directory metadata synchronization. No universal hardware/crash transaction, silent skip, or transparent buffered seek/sync. Flush/decompose adapters explicitly and account for unread/pending bytes; Current uses the actual advanced underlying cursor.
+
+Metadata size is Some only for regular files; no timestamps pending #33 coordination, ownership/ACL management, cached entry-kind/identity or exists helper. Path metadata follows the final link; symlinkMetadata/readLink inspect it but intermediate links can still resolve. Relative link targets resolve from the link parent. Ordinary opens/directory lookup follow native traversal. removeFile/rename operate on the final link; removeDir does not follow a link to recursively delete a target. No hard-link/all-components-no-symlink API or portable sandbox is implied. Native currentDir observes process state; no process-wide setter, and external embedding changes can still affect relative paths.
+
+ReadDir uses canonical iterate/next: next(&mut ReadDir) yields Option<Result<DirEntry,IoError>>. Owned one-component entry names exclude `.`/`..`; order is unspecified, not a snapshot or recursive walk. EOF or one yielded enumeration error makes next terminal. Remaining enumeration state stays owned until close(ReadDir):Result<void,IoError> or disposal, exactly once. createDir creates one entry and errors on existence; createDirs iteratively creates missing ancestors and accepts existing directories, with possible partial effects. removeDir only removes empty directories; no recursive deletion helper. Rename uses native compatible-target replacement, not portable no-replace or copy-and-delete fallback; cross-filesystem/unsupported cases fail and success is not durability.
+
+Ordinary creation requests conventional native permissions filtered by host umask/ACL/capability policy; temporaries request owner-only access. No process umask mutation/general chmod/chown/ACL API. TempFile/TempDir require an explicit parent, fresh exclusive names and a finite collision-retry policy, not env/global temp selection or secrecy tokens. Missing faithful private temporary-creation support is Unsupported. tempPath borrows the guard; keep consumes/disarms deletion without renaming/syncing/closing. TempFile close closes then attempts removal even after close failure, preserving close-only/remove-only/both envelopes. TempDir close attempts empty-directory removal with IoError. Both consume on failure; disposal attempts best-effort nonrecursive removal and required native cleanup without a recoverable error/deletion guarantee. External name replacement affects path-based cleanup; moved initialized fields cannot be closed twice. Standard display for TempFileCloseError preserves inspectable owned typed errors.
+
+IoError adds Unsupported/NotDirectory/IsDirectory/DirectoryNotEmpty; authority denial is PermissionDenied, invalid paths/encoding are InvalidInput. Native codes remain optional/nonportable. WASI absolute paths choose the longest component-boundary preopen guest-name match, relative paths require `.`; no first-preopen guess, ambient access or broader-capability fallback after denial. Leave `..` for host-enforced resolution after capability binding. Ambiguous/unusable mappings fail explicitly. Missing namespace/operation support is Unsupported; currentDir is Unsupported on WASI v0. Provider/private-creation/namespace guarantees require actual support, not reduced-success fallbacks. #28 must formalize root/mount spelling and errors; host mechanisms are not validated here.
+
+All path/buffer/handle/native dependencies survive suspension until actual completion or confirmed abortion. Cancellation is outside Result, may leave effects and cleanup can wait indefinitely. Do not blindly retry interrupted native close across descriptor reuse. Existing #32 Q36 scoped requirements remain; standard IoError already satisfies them. #30 gates actual native/Wasm scheduling, pointers and reclamation. Process spawning/watching, general ACL management, migration/static-file frameworks and new copyFile helper are excluded. [Prototype 20](../prototypes/20-filesystem.rill) and its [case inventory](../prototypes/20-filesystem.md) cover lexical checks and bounded copy/config/certificate/directory/temp workflows by inspection, not execution/security proof.
 
 ## 11. Validation and follow-through
 

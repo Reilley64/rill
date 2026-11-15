@@ -1,0 +1,280 @@
+// #35 / ADR 0019: hand-checked design evidence; no Rill or native FS execution.
+// Only lexical checks are expectations. Effectful workflows require caller-owned
+// locations/handles and do not assume the agent's working directory or OS state.
+import std::panic;
+import std::path::{Path, PathError, pathBytes, pathText, isAbsolute, join,
+  parent, fileName, components, PathComponent};
+import std::bytes::{Bytes, length, get, slice, clear};
+import std::compare::eq;
+import std::option::Option;
+import std::result::{Result, Ok, Err};
+import std::error::{display, value, formatError};
+import std::io::{IoError, IoFailure, ReadToEndError, read, writeAll, readToEnd,
+  flush, close};
+import std::fs::{ReadFile, WriteFile, ReadDir, WriteOptions, CreateMode,
+  WriteBehavior, openRead, openWrite, sync};
+import std::iter::next;
+
+function path(text: &string): Path {
+  guard let result = Path(text) else { panic(&"literal path must exclude NUL"); }
+  return result;
+}
+function textIs(candidate: &Path, expected: &string): bool {
+  guard let text = pathText(candidate) else { return false; }
+  return eq(text, expected);
+}
+function parentIs(candidate: &Path, expected: &string): bool {
+  guard let result = parent(candidate) else { return false; }
+  return textIs(&result, expected);
+}
+function noParent(candidate: &Path): bool {
+  return match (parent(candidate)) {
+    Option.None => true,
+    Option.Some(found) => false,
+  };
+}
+function noName(candidate: &Path): bool {
+  return match (fileName(candidate)) {
+    Option.None => true,
+    Option.Some(found) => false,
+  };
+}
+function nativeBytes(): bool {
+  let bytes = Bytes([255u8, 120u8]);
+  guard let result = Path(&bytes) else { return false; }
+  return match (get(pathBytes(&result), 0u64)) {
+    Option.Some(byte) => byte == 255u8 && length(pathBytes(&result)) == 2u64,
+    Option.None => false,
+  };
+}
+function nulRejected(): bool {
+  let bytes = Bytes([97u8, 0u8, 98u8]);
+  guard Path(&bytes) else (error) {
+    return match (value(&error)) {
+      PathError.EmbeddedNul { offset } => offset == 1u64,
+    };
+  }
+  return false;
+}
+function invalidTextRejected(): bool {
+  let bytes = Bytes([255u8]);
+  guard let result = Path(&bytes) else { return false; }
+  guard pathText(&result) else { return true; }
+  return false;
+}
+function absoluteChild(): bool {
+  let base = path(&"/safe");
+  let child = path(&"/other");
+  let result = join(&base, &child);
+  return isAbsolute(&result) && textIs(&result, &"/other");
+}
+function boundaryJoin(): bool {
+  let base = path(&"a//");
+  let child = path(&"b");
+  let result = join(&base, &child);
+  return !isAbsolute(&result) && textIs(&result, &"a//b");
+}
+function emptyChild(): bool {
+  let base = path(&"a/");
+  let child = path(&"");
+  return eq(&join(&base, &child), &base);
+}
+function byteEquality(): bool {
+  let first = path(&"a/b");
+  let second = path(&"a/./b");
+  return !eq(&first, &second);
+}
+function filenameTrailing(): bool {
+  let input = path(&"a/b/");
+  guard let name = fileName(&input) else { return false; }
+  guard let result = Path(name) else { return false; }
+  return textIs(&result, &"b");
+}
+function rootSpelling(): bool {
+  let input = path(&"//a");
+  return parentIs(&input, &"//");
+}
+function componentKinds(): bool {
+  let input = path(&"//a/./../b//");
+  let mut count = 0u64;
+  let mut roots = 0u64;
+  let mut names = 0u64;
+  for (let component of components(&input)) {
+    count += 1u64;
+    match (component) {
+      PathComponent.Root(slashes) => { roots += slashes; },
+      PathComponent.Current => {},
+      PathComponent.Parent => {},
+      PathComponent.Name(name) => { names += 1u64; },
+    }
+  }
+  return count == 5u64 && roots == 2u64 && names == 2u64;
+}
+function copiedPath(): bool {
+  let original = path(&"a/../b");
+  let duplicate = copy(&original);
+  return eq(&original, &duplicate);
+}
+
+expect nativeBytes();
+expect nulRejected();
+expect invalidTextRejected();
+expect absoluteChild();
+expect boundaryJoin();
+expect emptyChild();
+expect byteEquality();
+expect parentIs(&path(&"a/b/"), &"a");
+expect parentIs(&path(&"a"), &"");
+expect noParent(&path(&"/"));
+expect rootSpelling();
+expect filenameTrailing();
+expect noName(&path(&"a/."));
+expect noName(&path(&"a/.."));
+expect componentKinds();
+expect copiedPath();
+
+// Bounded config/certificate loading: returns bytes, not parsed text or a
+// validated certificate. Read and close errors remain separately observable.
+enum LoadError {
+  Open(Err<IoError>),
+  Read { reading: Err<ReadToEndError<IoError>>, closing: Option<Err<IoError>> },
+  Close(Err<IoError>),
+}
+implement display(error: &LoadError): string {
+  return match (error) {
+    LoadError.Open(inner) => `open failed: ${formatError(inner)}`,
+    LoadError.Close(inner) => `close failed: ${formatError(inner)}`,
+    LoadError.Read { reading, closing } => match (closing) {
+      Option.None => `read failed: ${formatError(reading)}`,
+      Option.Some(inner) =>
+        `read failed: ${formatError(reading)}; close also failed: ${formatError(inner)}`,
+    },
+  };
+}
+function issue(result: Result<void,IoError>): Option<Err<IoError>> {
+  guard result else (error) { return Option.Some(error); }
+  return Option.None;
+}
+function loadBounded(location: &Path, maximum: u64): Result<Bytes,LoadError> {
+  guard let opened = openRead(location) else (error) {
+    return Err(LoadError.Open(error));
+  }
+  let mut input = opened;
+  let mut output = Bytes([]);
+  guard readToEnd(&mut input, &mut output, maximum) else (error) {
+    // IoError is noBorrow, so this failure does not retain input/probe storage.
+    let closing = issue(close(input));
+    return Err(LoadError.Read { reading: error, closing: closing });
+  }
+  guard close(input) else (error) { return Err(LoadError.Close(error)); }
+  return Ok(output);
+}
+
+// Application example, not a new std::fs::copyFile contract. It borrows both
+// handles so the caller can observe finalization after either outcome. Pending
+// bytes consumed from input but not accepted by output are retained on failure.
+enum CopyError {
+  Read { copied: u64, pending: Bytes, failure: Err<IoFailure<IoError>> },
+  Write { copied: u64, pending: Bytes, failure: Err<IoFailure<IoError>> },
+  LimitExceeded {
+    copied: u64, extra: Bytes, probeFailure: Option<Err<IoFailure<IoError>>>,
+  },
+}
+implement display(error: &CopyError): string {
+  return match (error) {
+    CopyError.Read { copied, pending, failure } =>
+      `read failed after copying ${copied} bytes: ${formatError(failure)}`,
+    CopyError.Write { copied, pending, failure } =>
+      `write failed after accepting ${copied} bytes: ${formatError(failure)}`,
+    CopyError.LimitExceeded { copied, extra, probeFailure } => match (probeFailure) {
+      Option.None => `copy limit exceeded after ${copied} bytes`,
+      Option.Some(inner) =>
+        `copy limit exceeded after ${copied} bytes; probe failed: ${formatError(inner)}`,
+    },
+  };
+}
+function smaller(left: u64, right: u64): u64 {
+  return if (left < right) left else right;
+}
+function extent(bytes: &Bytes, start: u64, end: u64): &Bytes {
+  guard let part = slice(bytes, start, end) else { panic(&"trusted count invariant"); }
+  return part;
+}
+function copyBounded(input: &mut ReadFile, output: &mut WriteFile,
+  maximum: u64, chunkSize: u64): Result<u64,CopyError> {
+  if (chunkSize == 0u64) { panic(&"positive copy chunk required"); }
+  let mut buffer = Bytes([]);
+  let mut copied = 0u64;
+  while (copied < maximum) {
+    clear(&mut buffer);
+    let request = smaller(chunkSize, maximum - copied);
+    guard let progress = read(input, &mut buffer, request) else (error) {
+      return Err(CopyError.Read { copied: copied, pending: buffer, failure: error });
+    }
+    let count = match (progress) {
+      Option.None => { return Ok(copied); },
+      Option.Some(number) => number,
+    };
+    guard writeAll(output, &buffer) else (error) {
+      let accepted = value(&error).transferred;
+      let pending = copy(extent(&buffer, accepted, length(&buffer)));
+      return Err(CopyError.Write {
+        copied: copied + accepted, pending: pending, failure: error,
+      });
+    }
+    copied += count;
+  }
+  // One additional byte is retained outside the copied-output budget.
+  let mut probe = Bytes([]);
+  guard let progress = read(input, &mut probe, 1u64) else (error) {
+    if (length(&probe) == 1u64) {
+      return Err(CopyError.LimitExceeded {
+        copied: copied, extra: probe, probeFailure: Option.Some(error),
+      });
+    }
+    return Err(CopyError.Read { copied: copied, pending: probe, failure: error });
+  }
+  return match (progress) {
+    Option.None => Ok(copied),
+    Option.Some(number) => Err(CopyError.LimitExceeded {
+      copied: copied, extra: probe, probeFailure: Option.None,
+    }),
+  };
+}
+function newCopyDestination(location: &Path): Result<WriteFile,IoError> {
+  return openWrite(location, WriteOptions {
+    creation: CreateMode.NewOnly, behavior: WriteBehavior.Preserve,
+  });
+}
+
+type FinishReport = {
+  flushing: Option<Err<IoError>>;
+  syncing: Option<Err<IoError>>;
+  outputClose: Option<Err<IoError>>;
+  inputClose: Option<Err<IoError>>;
+};
+function finishCopy(input: ReadFile, output: WriteFile, durable: bool): FinishReport {
+  let mut writer = output;
+  let flushing = issue(flush(&mut writer));
+  let syncing = if (durable) issue(sync(&mut writer)) else Option.None;
+  let outputClose = issue(close(writer));
+  let inputClose = issue(close(input));
+  return FinishReport {
+    flushing: flushing, syncing: syncing, outputClose: outputClose, inputClose: inputClose,
+  };
+}
+
+// Enumeration is caller-budgeted and retains caller ownership of the iterator.
+// This observation count is intentionally not a snapshot or a collected listing.
+function observeSome(entries: &mut ReadDir, budget: u64): Result<u64,IoError> {
+  let mut count = 0u64;
+  while (count < budget) {
+    let entry = match (next(entries)) {
+      Option.None => { return Ok(count); },
+      Option.Some(result) => result?,
+    };
+    let _ = entry.name;
+    count += 1u64;
+  }
+  return Ok(count);
+}

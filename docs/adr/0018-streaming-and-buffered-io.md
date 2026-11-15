@@ -126,6 +126,10 @@ Recording exposed a concrete conservative-borrow gap: readToEnd's local probe an
 
 These are deliberately stronger than the theoretically minimal dependency conditions, using existing evidence rather than inventing selective lifetime/dependency annotations. No blanket restriction is added to primitive read/write/flush/close errors, readExact/writeAll over caller-owned buffers, or buffered-reader close delegated to consuming close(R,CE). No sendable/shareable requirement follows. A generic readToEnd caller must state noBorrow(E) even when some concrete instantiations would be borrow-free; MemoryError in prototype 19 satisfies it structurally. Applications needing borrowed errors can use direct operations/caller-buffer helpers or explicitly adapt errors to an owned form before these restricted adapters. #28 still owes formal checking/evidence transport and must not treat this approval or examples as a soundness proof.
 
+## Later filesystem realization (#35)
+
+[ADR 0019](0019-paths-files-and-filesystem-operations.md) now supplies concrete file access-mode types, explicit Path opens, seek/sync and filesystem/temp policies. It does not change these streaming/progress/cancellation or Q36 scoped error rules. Standard file IoError already satisfies the scoped noBorrow evidence. File flush is not sync, and buffered wrappers do not silently gain seek/sync forwarding.
+
 ## Baseline, artifacts and follow-through
 
 Existing readStdin/writeStdout/writeStderr/flushStdout/flushStderr/readFile/writeFile signatures stay unchanged with #23's partial-effect warnings, not retroactive progress reporting. Shared standard-stream state remains trusted synchronized runtime state; no new global-handle ownership model is silently introduced. This extends #23, rather than reopening unrelated baseline decisions.

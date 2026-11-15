@@ -12,6 +12,10 @@ ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separa
 
 [ADR 0018](0018-streaming-and-buffered-io.md) extends the baseline with separate ordinary read/write/flush/close families, exact typed progress errors, bounded append reads and owning buffered adapters. It adds Bytes clear/truncate/reserve, not a competing buffer or writable view API. Q36 explicitly requires scoped noBorrow evidence for readToEnd/local-buffer adapter errors and the flush error preserved across buffered consuming close, not a blanket prohibition on primary borrowed errors. Existing stdio/whole-file signatures and their partial-effect warnings stay unchanged; no reliable progress count is retrofitted into them. Explicit consuming close observes finalization failures, while disposal discards pending output and still completes required native cleanup. #33/#34/#35/#38/#39/#40 own deadlines/concrete consumers; #30 remains the backend gate. See the updated catalogue and prototype 19 for hand-checked examples, not implemented streaming.
 
+## Later filesystem extension (#35)
+
+[ADR 0019](0019-paths-files-and-filesystem-operations.md) adds byte-preserving Path, access-mode-specific file handles, checked seek/explicit sync, focused metadata/directories/symlinks and nonrecursive temporary guards. Existing text whole-file APIs keep their guarantees and gain &Path implementations; IoErrorKind gains explicit filesystem outcomes. Native/WASI capability limits, path races, partial effects and cleanup are recorded rather than treated as a sandbox/durability proof. See catalogue/prototype 20; #28/#30 retain formal/provider validation.
+
 ## Decisions and consequences
 
 - `List`/hash `Map` are owned, explicitly mutable and independently copied; u64 counts/indices, Option queries, read-only keys and explicit eq/hash contracts. Map insertion retains an existing equal key and returns its displaced value. List transformations are eager, sequential and support both consumed and borrowed input.
