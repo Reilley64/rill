@@ -117,7 +117,7 @@ User codec errors remain concrete and retain their Err envelope/origin/cause dat
 
 ## 4. Database errors and uniqueness
 
-DbError<E> has a first-class UniqueViolation and typed native failures, plus standard local cases for invalid arguments, decoding/null/range/precision/encoding, cardinality, invalid state, unsupported operations and limits. Local failures do not manufacture E. The standard error vocabulary is:
+DbError<E> has a first-class UniqueViolation and typed native failures, plus standard local cases for invalid arguments, decoding/null/range/precision/encoding, cardinality, invalid state, unsupported operations and limits. Generic standard helpers do not manufacture arbitrary E. A concrete driver may construct its own legitimate provider-local error variants without inventing native result codes; #43 clarifies this distinction. The standard error vocabulary is:
 
 ```rill
 enum DbError<E> {
@@ -301,7 +301,7 @@ The example domain module implements SQL Parameter and JSON Value conversions an
 
 A PostgreSQL-like adapter owns TCP/TLS protocol state and errors; a SQLite-like adapter needs a separately specified narrow native-provider contract for native connections/statements/bindings/reset/finalization. Ordinary families express the seam but do not implement C ABI hooks. No raw pointers, public thread pinning or general FFI is authorized. Provider operations/disposal must be valid under worker migration and retain source/native state until completion or confirmed abortion. Blocking-pool dispatch/abort request is not release; Wasm pointer stability remains #30 work.
 
-[Native-provider follow-up #43](https://github.com/Reilley64/rill/issues/43) now tracks that contract and the validation needed before claiming embedded support. The user explicitly approved separating it from shared-interface design closure/RFC drafting; it has not been fulfilled. A PostgreSQL/SQLite sketch remains a design target, not delivered support. No native ABI, general FFI, public pinning or provider/target guarantee is inferred from closing #40.
+[Native-provider follow-up #43](https://github.com/Reilley64/rill/issues/43) now has an explicitly confirmed [external SQLite provider design](sqlite-provider-contracts.md), [ADR 0024](adr/0024-external-sqlite-native-provider.md) and [prototype 26 reference inventory](../prototypes/26-sqlite-provider/README.md). Its runtime/build implementation and integration validation remain unfulfilled, so #43 stays OPEN. The user explicitly separated it from shared-interface closure/RFC drafting. A PostgreSQL/SQLite sketch remains a design target, not delivered support. No native ABI, general FFI, public pinning or provider/target guarantee is inferred from closing #40.
 
 #33 is closed and its confirmed types/semantics are integrated above, with the narrow domain-validation amendment recorded back to #33. Original blanket 'cancellation outside Result' SQL wording is superseded: it applies to intrinsic stopping, not explicitly token-aware SQL outcomes. No competing clock/epoch/calendar model or generic cancellation wrapper is introduced.
 

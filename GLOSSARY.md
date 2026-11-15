@@ -100,9 +100,13 @@ _Avoid_: shared mutable reference, raw pointer
 A synchronization value granting exclusive access to a protected payload through a lock guard.
 _Avoid_: mutable Shared, runtime borrow checker
 
+**Native resource offer**:
+A provider-owned connection, statement or transaction responsibility awaiting explicit adoption by a Rill owner. Completion or copied token bytes do not themselves transfer ownership.
+_Avoid_: returned pointer, adopted owner, completed cleanup
+
 **Native SQL provider**:
-A separately specified and validated platform bridge required by an embedded driver for opaque native handles and safe buffer/error/cancellation/finalization behavior. A driver-shaped fixture does not supply one or authorize general FFI or public thread pinning.
-_Avoid_: SQL interface, runtime driver registry, working SQLite support
+An external embedded driver's narrowly approved platform bridge for native resources and their ownership/control guarantees. Its confirmed design and reference checks are not a working integration or authority for general FFI or public thread pinning.
+_Avoid_: standard SQL interface, runtime driver registry, working SQLite support
 
 **Numeric conversion**:
 A conversion between explicitly sized numeric types. `into`/`from` are infallible, while `tryInto`/`tryFrom` return a Result; infallibility does not promise losslessness.
@@ -135,6 +139,10 @@ _Avoid_: wildcard std import, module initializer
 **Private field**:
 A record field accessible only in its defining module. Its presence prevents external whole-record construction or rebuilding, regardless of aliases.
 _Avoid_: protected field, project-private field
+
+**Provider binding contract**:
+The narrowly approved agreement admitting a particular external provider's native implementations and ownership roles into a Rill build/runtime. Supplying metadata alone does not grant this authority.
+_Avoid_: general FFI, native plugin registry, ordinary overload declaration
 
 **Record**:
 A value of a declared nominal type with named fields, constructed with its type name as in `Point { x: 0, y: 0 }`. Matching fields do not make different record types interchangeable; anonymous structural records do not exist.
