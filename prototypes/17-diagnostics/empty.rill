@@ -1,0 +1,4 @@
+// #24 source-valid empty test suite; no startup or expectations.
+function unused(): u64 {
+  return 1;
+}

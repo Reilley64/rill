@@ -37,6 +37,10 @@ ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separa
 - Finalize closed numeric conversions and parseNumber, six explicit wrapping/saturating integer helpers, typed errors and non-recursive canonical primitive formatter bootstrap. No as/assertions, implicit numeric/error conversions or default widths.
 - Required I/O is direct stdio and whole-file byte operations with typed owned errors. Writes can be partial on failure/cancellation; no rollback, atomic replacement, durable-sync, general reader/writer or networking promise. Allocation failure remains fatal.
 
+[ADR 0019](0019-owned-startup-environment-and-arguments.md) / #36 separately extend this baseline with std::env owned startup Inputs, strict byte/text access and isolated test inputs. The original minimum here is not a prohibition on that approved application foundation; #23 remains closed. The catalogue's section 12 records its complete contract without adding source globals, process mutation or implicit captures.
+
+[ADR 0020](0020-secure-random-byte-generation.md) / #37 add std::random secure bytes with complete-fill-or-error, explicit platform providers/host trust, provider-free empty calls and native-retention/cancellation rules. Errors remain separate from fatal allocation/host failure. Real secure behavior also applies in rill test; #36's empty environment is not a general deterministic-provider override. This is another approved extension, not a reopening of the core baseline.
+
 ## Alternatives and supersession
 
 Rejected persistent collection defaults, implicit callback copying, once-only map callbacks, erased arrows as spawn evidence, trait-based invocation/iteration, broad ownership sealing/outermost-type orphan restrictions, runtime overload dispatch, variable-arity ordinary helpers, hidden return-based all flattening, string-tagged select, reflection-based error formatting, report/trace-by-propagation, unsafe byte views and recoverable allocation errors everywhere.

@@ -1,0 +1,10 @@
+// Expected R0304 at collection even without a call.
+function echo<T>(value: T): T;
+
+implement<T> echo(value: T): T {
+  return value;
+}
+
+implement<U> echo(value: U): U {
+  return value;
+}

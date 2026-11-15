@@ -1,0 +1,330 @@
+[
+  {
+    "name": "version-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "--version"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "version-llc",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "--version"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "version-linker",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--version"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "version-node",
+    "argv": [
+      "node",
+      "--version"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-retcon-reviewed/inline.ll"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-split",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=module(coro-early),cgscc(coro-split),module(coro-cleanup),verify",
+      "-S",
+      "/private/tmp/rill-30-retcon-reviewed/inline.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-split.ll"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-opt-0",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O0>,verify",
+      "-S",
+      "/private/tmp/rill-30-retcon-reviewed/inline-split.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O0.ll"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-obj-0",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-mattr=-tail-call,-bulk-memory,-reference-types,-multivalue",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O0.o"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-link-0",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--allow-undefined",
+      "--export-memory",
+      "--export=start",
+      "--export=resume",
+      "--export=stats",
+      "--export=pool_address",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O0.o",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O0.wasm"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-dis-0",
+    "argv": [
+      "/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O0.wasm",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O0.wat"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-node-0",
+    "argv": [
+      "node",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon-check.mjs",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O0.wasm",
+      "0"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-opt-2",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O2>,verify",
+      "-S",
+      "/private/tmp/rill-30-retcon-reviewed/inline-split.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O2.ll"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-obj-2",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-mattr=-tail-call,-bulk-memory,-reference-types,-multivalue",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O2.o"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-link-2",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--allow-undefined",
+      "--export-memory",
+      "--export=start",
+      "--export=resume",
+      "--export=stats",
+      "--export=pool_address",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O2.o",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O2.wasm"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-dis-2",
+    "argv": [
+      "/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O2.wasm",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O2.wat"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "inline-node-2",
+    "argv": [
+      "node",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon-check.mjs",
+      "/private/tmp/rill-30-retcon-reviewed/inline-O2.wasm",
+      "0"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-retcon-reviewed/fallback.ll"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-split",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=module(coro-early),cgscc(coro-split),module(coro-cleanup),verify",
+      "-S",
+      "/private/tmp/rill-30-retcon-reviewed/fallback.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-split.ll"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-opt-0",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O0>,verify",
+      "-S",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-split.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O0.ll"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-obj-0",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-mattr=-tail-call,-bulk-memory,-reference-types,-multivalue",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O0.o"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-link-0",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--allow-undefined",
+      "--export-memory",
+      "--export=start",
+      "--export=resume",
+      "--export=stats",
+      "--export=pool_address",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O0.o",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O0.wasm"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-dis-0",
+    "argv": [
+      "/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O0.wasm",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O0.wat"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-node-0",
+    "argv": [
+      "node",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon-check.mjs",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O0.wasm",
+      "1"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-opt-2",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O2>,verify",
+      "-S",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-split.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O2.ll"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-obj-2",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-mattr=-tail-call,-bulk-memory,-reference-types,-multivalue",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O2.o"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-link-2",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--allow-undefined",
+      "--export-memory",
+      "--export=start",
+      "--export=resume",
+      "--export=stats",
+      "--export=pool_address",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O2.o",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O2.wasm"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-dis-2",
+    "argv": [
+      "/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O2.wasm",
+      "-o",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O2.wat"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "fallback-node-2",
+    "argv": [
+      "node",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon-check.mjs",
+      "/private/tmp/rill-30-retcon-reviewed/fallback-O2.wasm",
+      "1"
+    ],
+    "exit": 0
+  }
+]

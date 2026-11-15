@@ -4,6 +4,10 @@ Rill is a functional-first programming language with TypeScript-style syntax. It
 
 ## Language
 
+**Analysis context**:
+A selected Rill entry file, target and compiler-option combination that determines the loaded program graph and meaning of editor results. A workspace folder or search index is not that context.
+_Avoid_: guessed project root, merged program, workspace folder
+
 **Borrow**:
 Access to a value through a read-only reference (`&T`) or an exclusive mutable reference (`&mut T`) without owning it. Reference types do not name lifetimes.
 _Avoid_: lifetime, pointer
@@ -32,6 +36,14 @@ _Avoid_: byte string, contiguous List guarantee, owning view
 An intrinsic cooperative request to stop a goroutine while completing its required cleanup, outside ordinary Result. Explicit cancellation-token requests are separate observable state: token-aware operations can return typed outcomes after required release. Neither mechanism implies rollback or immediate termination.
 _Avoid_: panic, force kill, immediate termination
 
+**Cancellation source**:
+An owned capability to request one-shot cancellation state, including its directed descendants. A request establishes a signal, not completion of the operations observing it.
+_Avoid_: join handle, task owner, cancellation token
+
+**Cancellation token**:
+An owned observation capability for one-shot cancellation state, used explicitly by an operation. It grants no authority to request cancellation and is not a goroutine or completion result.
+_Avoid_: ambient context, stop handle, cancellation source
+
 **Character**:
 A `char` value representing one Unicode scalar, not necessarily a whole user-perceived character. Its code point is distinct from its UTF-8 byte encoding.
 _Avoid_: byte, grapheme, UTF-16 code unit
@@ -39,6 +51,10 @@ _Avoid_: byte, grapheme, UTF-16 code unit
 **Caused-by wrapping**:
 An explicit error-context step written `inner ? outer`: use the successful value, or return the outer error with the original failure as its cause. Merely propagating an error adds no new context.
 _Avoid_: error-mapping callback, propagation report
+
+**Controlled TCP view**:
+A borrowed TCP view carrying explicit network control for the I/O operations it permits. It retains access dependencies without owning closure of the underlying resource.
+_Avoid_: new connection, owning socket, ambient context
 
 **Dispose**:
 The `dispose` overload for a type: extra cleanup followed by disposal of its remaining owned fields. Calling it directly consumes the value early; moved or already disposed fields are not disposed again.
@@ -80,6 +96,26 @@ _Avoid_: delivered bytes, committed transaction, rollback guarantee
 The std::time::validateInstantDomain check that a Clock and Instant share immutable domain identity, without reading time, registering a timer, exposing IDs or testing timeline health. It permits SQL preflight without privileged field access.
 _Avoid_: clock read, deadline wait, public domain ID
 
+**Inputs**:
+An independently owned snapshot of a program's startup arguments and environment, exposed through std::env. It preserves byte data and is distinct from live process-global state or parsed application configuration.
+_Avoid_: live environment, ambient configuration, shared process handle
+
+**Instant**:
+A Rill clock-specific elapsed-time reading, distinct from a wall Timestamp. It can mark a deadline but is not a persistent or cross-clock time identifier.
+_Avoid_: Unix timestamp, wall time, deadline guarantee
+
+**JSON number**:
+A Number value preserving one validated JSON numeric token, including its spelling, without implicit primitive rounding. It is not a primitive float or an arbitrary-precision arithmetic value.
+_Avoid_: f64 number, quoted numeric string, bigint
+
+**JSON object**:
+An Object with unique decoded member names and preserved insertion order. It is distinct from Rill's unordered Map and nominal application records.
+_Avoid_: reflected record, unordered object map, class instance
+
+**JSON value**:
+An owned Value of one of JSON's fixed alternatives, independent of its parsed input buffer. Read-only or mutable views retain that owner's ordinary borrowing restrictions.
+_Avoid_: borrowed DOM, reflected application value, shared snapshot
+
 **Lock guard**:
 A non-copyable value that borrows a mutex and owns responsibility for releasing its lock. Its disposer unlocks; protected borrows depend on it, and ownership stays in the locking goroutine.
 _Avoid_: shared lock owner, raw lock, OS-thread-affine guard
@@ -107,6 +143,10 @@ _Avoid_: returned pointer, adopted owner, completed cleanup
 **Native SQL provider**:
 An external embedded driver's narrowly approved platform bridge for native resources and their ownership/control guarantees. Its confirmed design and reference checks are not a working integration or authority for general FFI or public thread pinning.
 _Avoid_: standard SQL interface, runtime driver registry, working SQLite support
+
+**Network control**:
+Rill's explicit clock, optional absolute deadline and cancellation-token descriptor for a networking operation. Its captured snapshot retains ordinary borrow dependencies, not hidden ownership or an ambient request context.
+_Avoid_: timeout duration, goroutine cancellation, live resource setting
 
 **Numeric conversion**:
 A conversion between explicitly sized numeric types. `into`/`from` are infallible, while `tryInto`/`tryFrom` return a Result; infallibility does not promise losslessness.
@@ -144,6 +184,10 @@ _Avoid_: protected field, project-private field
 The narrowly approved agreement admitting a particular external provider's native implementations and ownership roles into a Rill build/runtime. Supplying metadata alone does not grant this authority.
 _Avoid_: general FFI, native plugin registry, ordinary overload declaration
 
+**Proper tail call**:
+A Rill call that needs no eliminated caller storage or post-return disposal/joins. It guarantees bounded activation growth in all supported builds, not merely a final-looking expression.
+_Avoid_: final-looking call, optional tail-call optimization
+
 **Record**:
 A value of a declared nominal type with named fields, constructed with its type name as in `Point { x: 0, y: 0 }`. Matching fields do not make different record types interchangeable; anonymous structural records do not exist.
 _Avoid_: object literal, structural record
@@ -163,6 +207,10 @@ _Avoid_: clean connection, retry permission, rollback acknowledgement
 **Routine**:
 The handle `spawn(() => f(x))` returns for the goroutine it starts. `stop(&routine)` requests cancellation and waits for termination and cleanup; freeing the handle does not stop it.
 _Avoid_: task, future, promise, join handle
+
+**Saved activation budget**:
+Rill's per-routine Wasm limit on retained suspension/call state, distinct from its addressable stack and ordinary program data.
+_Avoid_: snapshot of all borrowed storage, total heap quota
 
 **Sendable**:
 Safe to transfer ownership or permitted exclusive access between independently executing goroutines, as required by `sendable(T)`. This does not imply borrow-freedom or safe concurrent read-sharing.
@@ -196,6 +244,18 @@ _Avoid_: owning row, materialized result list, reusable connection
 Date/Time/DateTime from std::time::civil or Timestamp from std::time, explicitly packed into Parameter with faithful checked native mapping. No silent precision/range/sentinel repair, inferred zone/unit or calendar/elapsed conversion. Checked temporal failures retain their original Err<TimeError>.
 _Avoid_: monotonic Instant, implicit zone, database interval
 
+**Span**:
+A one-sign temporal value retaining calendar and time units. It is distinct from SignedDuration: interpreting calendar units as elapsed quantities needs explicit context.
+_Avoid_: milliseconds, fixed duration, fieldwise sum
+
+**Signed duration**:
+A SignedDuration expressing an exact signed elapsed quantity, without calendar-unit meaning. Negative values are valid quantities but not relative wait requests.
+_Avoid_: calendar span, timeout sentinel
+
+**Stack capacity**:
+Rill's usable addressable stack budget selected for a routine before it starts, independently of the Wasm saved activation budget. It is not a recursion-depth count, resident-memory guarantee, or total-memory limit.
+_Avoid_: engine-stack limit, heap quota
+
 **String**:
 An owned value of valid UTF-8 text, written `string`. Named string bindings move unless explicitly copied.
 _Avoid_: String class, byte buffer, implicitly shared string
@@ -207,3 +267,11 @@ _Avoid_: str type, owned substring, shared owner
 **Unique violation**:
 A reported primary-key or unique-key collision, including composite keys whose values are unique as a tuple. The category does not guarantee that every backend supplies the key's column names.
 _Avoid_: duplicate UUID, individually unique columns, automatic retry
+
+**Timestamp**:
+A Unix wall-time value with nanosecond precision, distinct from a monotonic Instant and a civil date/time. A numeric representation does not imply clock accuracy.
+_Avoid_: monotonic instant, local datetime, implicit timezone
+
+**Zone snapshot**:
+The immutable rules retained by a TimeZone or Zoned value. A database update or matching zone name does not change or reproduce those retained rules.
+_Avoid_: current database, numeric offset, serialized rules

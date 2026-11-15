@@ -1,0 +1,57 @@
+// #24 intended-valid language examples, not executed compiler/instrumentation tests.
+// Uses current #19 enums and #23 explicit borrowed copy.
+
+enum Stage {
+  Idle,
+  Count(u64),
+}
+
+type Point = { value: u64 };
+
+function clone<T>(value: &T): T where copy(T) {
+  return copy(value);
+}
+
+function cloneAndKeep(): bool {
+  let first: string = "kept";
+  let second = clone<string>(&first);
+  return first == second;
+}
+
+function count(stage: Stage): u64 {
+  return match (stage) {
+    Stage.Idle => 0,
+    Stage.Count(value) => value,
+  };
+}
+
+function pointValue(): u64 {
+  let point = Point { value: 9 };
+  return point.value;
+}
+
+function visit(counter: &mut u64): bool {
+  *counter += 1;
+  return true;
+}
+
+function shortCircuit(): bool {
+  let mut counter: u64 = 0;
+  let left = false && visit(&mut counter);
+  let right = true || visit(&mut counter);
+  return !left && right && counter == 0;
+}
+
+function scalarText(): string {
+  let owner: string = "λ";
+  return clone<string>(&owner);
+}
+
+expect cloneAndKeep();
+expect count(Stage.Idle) == 0;
+expect count(Stage.Count(7)) == 7;
+expect pointValue() == 9;
+expect shortCircuit();
+expect -128i8 < 0i8;
+expect (1u64 << 3u32) == 8u64;
+expect scalarText() == "λ";

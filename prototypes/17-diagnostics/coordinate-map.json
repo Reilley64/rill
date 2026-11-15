@@ -1,0 +1,60 @@
+{
+  "fixture": "locations.rill",
+  "newline": "CRLF",
+  "tokens": [
+    {
+      "text": "\"🙂\"",
+      "location": {
+        "uri": "file:///workspace/rill/prototypes/17-diagnostics/locations.rill",
+        "sourceSnapshotId": "sha256:39fb3a15b63dc5c7a846cc57b88059df101d50d4b02d14b735f93a998e238146",
+        "startByte": "90",
+        "endByte": "96",
+        "start": {
+          "line": "3",
+          "column": "9"
+        },
+        "end": {
+          "line": "3",
+          "column": "12"
+        }
+      },
+      "lspRange": {
+        "start": {
+          "line": 2,
+          "character": 8
+        },
+        "end": {
+          "line": 2,
+          "character": 12
+        }
+      }
+    },
+    {
+      "text": "\"🙃\"",
+      "location": {
+        "uri": "file:///workspace/rill/prototypes/17-diagnostics/locations.rill",
+        "sourceSnapshotId": "sha256:39fb3a15b63dc5c7a846cc57b88059df101d50d4b02d14b735f93a998e238146",
+        "startByte": "100",
+        "endByte": "106",
+        "start": {
+          "line": "3",
+          "column": "16"
+        },
+        "end": {
+          "line": "3",
+          "column": "19"
+        }
+      },
+      "lspRange": {
+        "start": {
+          "line": 2,
+          "character": 16
+        },
+        "end": {
+          "line": 2,
+          "character": 20
+        }
+      }
+    }
+  ]
+}

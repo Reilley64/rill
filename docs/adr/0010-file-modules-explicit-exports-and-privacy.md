@@ -40,6 +40,12 @@ A small fixed prelude provides primitive types, compiler predicates, and canonic
 
 No exported runtime `let` bindings or implicit module initializers in v0. Named functions remain non-capturing under ADR 0009. Parse/type-check loaded ordinary startup code and expectation bodies in both build/test modes; ignored code is not an unchecked island. Normal execution runs only the entry file's startup. `rill test` instead runs independent expectations once per loaded module; expectations may use declarations/helpers, not capture ordinary startup bindings. Ordinary executables omit expectations and their test-only executable code. Imports used only by tests still participate in the static graph and family collection.
 
+## Editor context is not a module-loading rule
+
+[ADR 0016](0016-structured-diagnostics-and-complete-openidea-lsp.md) / #24 retain entry-directory origins, std isolation and loaded-graph family collection for editor analysis. A workspace search index cannot add implementations to a program. Explicit entry/target/options contexts stay separate; named loose application files can be identified standalone entries, but installed toolchain source keeps its read-only std origin. Editor settings are not a new Rill manifest.
+
+Organize-imports preserves loaded modules/implementations/public bindings/expectations, not merely textual references. Navigation/rename respects canonical aliases, both namespaces, privacy and search bounds; viewing a private declaration is not permission to construct/use its representation. Full selected-client LSP delivery remains #42, not an implemented resolver or blanket visibility exception.
+
 ## Fields and opaque interfaces
 
 Record fields are public by default. `private` fields are accessible only in the defining module:

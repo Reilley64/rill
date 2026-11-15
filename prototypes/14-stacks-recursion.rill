@@ -1,0 +1,126 @@
+// #22 source examples, not executed stack/backend tests or depth measurements.
+// Uses current #19 enums, not the superseded singleton/union model.
+// Sized-spawn path/spelling and full capture/mode/evidence interfaces are provisional
+// for #23. Small expectations do not prove TCO, overflow containment or reclamation.
+
+import std::{spawnWithStack, stop};
+import std::routine::Routine;
+import std::collection::List;
+
+type Point = { value: u64 };
+
+enum Stage {
+  More(u64),
+  Finished(u64),
+}
+
+// No owned local needing post-call disposal or borrowed local slot is retained.
+function countDown(remaining: u64, total: u64): u64 {
+  if (remaining == 0) {
+    return total;
+  }
+  return countDown(remaining - 1, total + 1);
+}
+
+function even(remaining: u64): bool {
+  if (remaining == 0) {
+    return true;
+  }
+  return odd(remaining - 1);
+}
+
+function odd(remaining: u64): bool {
+  if (remaining == 0) {
+    return false;
+  }
+  return even(remaining - 1);
+}
+
+// The callback descriptor/environment belongs to the caller, not this frame.
+// A supported backend must honor eligible indirect transfer too, or diagnose it.
+function forward(work: &(() => u64)): u64 {
+  return work();
+}
+
+function indirectExample(): u64 {
+  let work: () => u64 = () => 7;
+  // This outer call borrows local work; forward's own tail call is the candidate.
+  return forward(&work);
+}
+
+function viaStage(stage: Stage): u64 {
+  return match (stage) {
+    Stage.More(remaining) => countDown(remaining, 0),
+    Stage.Finished(value) => value,
+  };
+}
+
+function iterativeTotal(numbers: &List<u64>): u64 {
+  let mut total: u64 = 0;
+  for (let value of numbers) {
+    total += value;
+  }
+  return total;
+}
+
+function afterCall(remaining: u64): u64 {
+  if (remaining == 0) {
+    return 0;
+  }
+  let child = afterCall(remaining - 1);
+  return child + 1; // Genuine post-call work: no proper-tail guarantee.
+}
+
+function readPoint(point: &Point): u64 {
+  return point.value;
+}
+
+function readLocal(value: u64): u64 {
+  let local = Point { value: value };
+  // Valid ordinary call: do not tear down local storage while readPoint needs it.
+  // An optimizer may remove equivalent computation, not grant a portable guarantee.
+  return readPoint(&local);
+}
+
+function copyText(view: &string): string {
+  return copy(*view);
+}
+
+function copyLocalOwner(text: string): string {
+  // Keep the owned source through the call and ordinary cleanup; no early release.
+  return copyText(&text);
+}
+
+function worker(): void {
+  let _ = countDown(32, 0);
+}
+
+function startWithCapacity(stackBytes: u64): Routine {
+  // Before-start addressable capacity only; not a source-level MiB literal,
+  // per-child inherited default, saved-activation limit or host-stack control.
+  return spawnWithStack(() => worker(), stackBytes);
+}
+
+function createdAndJoined(): bool {
+  let routine = startWithCapacity(1024u64 * 1024);
+  stop(&routine);
+  stop(&routine); // Completed handle remains usable after execution storage release.
+  // This does not assert worker ran before cancellation or physically inspect reuse.
+  return true;
+}
+
+// All inputs are independent of ordinary startup bindings and deliberately small.
+expect countDown(0, 5) == 5;
+expect countDown(8, 2) == 10;
+expect even(10);
+expect !even(9);
+expect odd(9);
+expect indirectExample() == 7;
+expect viaStage(Stage.More(6)) == 6;
+expect viaStage(Stage.Finished(12)) == 12;
+expect iterativeTotal(&[1, 2, 3, 4]) == 10;
+expect iterativeTotal(&[]) == 0;
+expect afterCall(4) == 4;
+expect readLocal(9) == 9;
+expect copyLocalOwner("kept through call") == "kept through call";
+expect createdAndJoined();

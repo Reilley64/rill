@@ -1,0 +1,4 @@
+// Expected R0102; expect is not a runtime assertion.
+function bad(): void {
+  expect true;
+}

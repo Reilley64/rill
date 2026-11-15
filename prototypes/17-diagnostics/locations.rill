@@ -1,0 +1,3 @@
+// #24 coordinate fixture: CRLF and a leading tab are intentional.
+expect true;
+	expect "🙂" == "🙃";

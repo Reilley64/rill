@@ -1,0 +1,257 @@
+// #33 / ADR 0022: intended-valid design fixtures, not executed Rill tests.
+import std::panic;
+import std::result::{Result, isOk};
+import std::compare::eq;
+import std::time::{
+  TimeError, Span, SpanSign, SpanFields,
+  Unit, SpanTotalOptions, defaultSpanFields, spanFields,
+  durationFromNanoseconds, durationNanoseconds,
+  timestampFromNanoseconds, unixNanoseconds, durationSecondsExact, durationSecondsTrunc,
+  add, subtract, divideDurationExact, divideDurationTrunc, roundTo,
+  durationUntil, zonedAt, resolveLocal,
+  spanTotalExact, spanTotalApprox, addSpan,
+  TextLimits, defaultTextLimits,
+};
+import std::time::civil::{
+  Date, Time, DateFields, TimeFields, isoWeekFields,
+};
+import std::time::tz::{
+  TimeZone, bundledDatabase, get, fixedZone, offsetFromSeconds, Disambiguation,
+};
+import std::time::fmt::{
+  parseDate, parseTime, parseDateTime, parseTimestamp, parseZoned,
+  parseSpan, parseSignedDuration, formatDate, formatDateTime, formatTimestamp,
+  formatZoned, formatSpan, formatSignedDuration, formatDateWithLimits, parseDateWithLimits,
+};
+import std::option::Option;
+
+function must<T>(result: Result<T, TimeError>): T {
+  guard let value = result else (error) { panic(&"invalid temporal fixture"); }
+  return value;
+}
+
+function dateText(text: &string): string {
+  let value = must(parseDate(text));
+  return must(formatDate(&value));
+}
+
+function datetimeText(text: &string): string {
+  let value = must(parseDateTime(text));
+  return must(formatDateTime(&value));
+}
+
+function timestampText(text: &string): string {
+  let value = must(parseTimestamp(text));
+  return must(formatTimestamp(&value));
+}
+
+function spanText(text: &string): string {
+  let value = must(parseSpan(text));
+  return must(formatSpan(&value));
+}
+
+function durationText(text: &string): string {
+  let value = must(parseSignedDuration(text));
+  return must(formatSignedDuration(&value));
+}
+
+function namedZone(name: &string): TimeZone {
+  let database = must(bundledDatabase());
+  return must(get(&database, name)); // Zone outlives the local database owner.
+}
+
+function zonedText(text: &string): string {
+  let database = must(bundledDatabase());
+  let value = must(parseZoned(text, &database));
+  return must(formatZoned(&value));
+}
+
+function days(count: u64): Span {
+  let base = defaultSpanFields();
+  return must(Span(SpanSign.Positive, SpanFields { ...base, days: count }));
+}
+
+function hours(count: u64): Span {
+  let base = defaultSpanFields();
+  return must(Span(SpanSign.Positive, SpanFields { ...base, hours: count }));
+}
+
+function datePlusHours(count: u64): string {
+  let date = must(parseDate(&"2024-02-28"));
+  let result = must(add(&date, hours(count)));
+  return must(formatDate(&result));
+}
+
+function rejectsDateRemainder(): bool {
+  let date = must(parseDate(&"2024-02-28"));
+  return !isOk(&add(&date, hours(23u64)));
+}
+
+function aggregatedDay(): string {
+  let date = must(parseDate(&"2024-02-28"));
+  let base = defaultSpanFields();
+  let amount = must(Span(SpanSign.Positive, SpanFields {
+    ...base, hours: 23u64, minutes: 60u64,
+  }));
+  return must(formatDate(&must(add(&date, amount))));
+}
+
+function combinedMonthChange(): string {
+  let date = must(parseDate(&"2020-02-29"));
+  let base = defaultSpanFields();
+  let amount = must(Span(SpanSign.Positive, SpanFields { ...base, years: 1u64, months: 1u64 }));
+  return must(formatDate(&must(add(&date, amount))));
+}
+
+function durationMinimumSubtracts(): i128 {
+  let minimum = must(durationFromNanoseconds(-9223372036854775808999999999i128));
+  return durationNanoseconds(&must(subtract(&minimum, minimum)));
+}
+
+function exactDivisionRejects(): bool {
+  let value = must(durationFromNanoseconds(1i128));
+  return !isOk(&divideDurationExact(&value, 2i128));
+}
+
+function truncatedDivision(): i128 {
+  let value = must(durationFromNanoseconds(1i128));
+  return durationNanoseconds(&must(divideDurationTrunc(&value, 2i128)));
+}
+
+function exactSecondsReject(): bool {
+  let value = must(durationFromNanoseconds(-1i128));
+  return !isOk(&durationSecondsExact(&value));
+}
+
+function truncatedSeconds(): i128 {
+  let value = must(durationFromNanoseconds(-1i128));
+  return durationSecondsTrunc(&value);
+}
+
+function halfAway(): string {
+  let value = must(durationFromNanoseconds(-1500000000i128));
+  return must(formatSignedDuration(&must(roundTo(&value, Unit.Second))));
+}
+
+function scalarCopy(): bool {
+  let first = must(Date(DateFields { year: 2024i32, month: 2u8, day: 29u8 }));
+  let second = first;
+  return eq(&first, &second);
+}
+
+function millisecondsNormalizeOnlyText(): bool {
+  let base = defaultSpanFields();
+  let original = must(Span(SpanSign.Positive, SpanFields { ...base, milliseconds: 1000u64 }));
+  let encoded = must(formatSpan(&original));
+  let decoded = must(parseSpan(&encoded));
+  return encoded == "PT1S" && spanFields(&original).milliseconds == 1000u64
+    && spanFields(&decoded).seconds == 1u64;
+}
+
+function springDayElapsed(): string {
+  let zoneValue = namedZone(&"America/New_York");
+  let start = must(resolveLocal(must(parseDateTime(&"2024-03-10T00:00:00")),
+    &zoneValue, Disambiguation.Compatible));
+  let end = must(add(&start, days(1u64)));
+  return must(formatSignedDuration(&durationUntil(&start, &end)));
+}
+
+function gapCompatible(): string {
+  let zoneValue = namedZone(&"America/New_York");
+  let local = must(parseDateTime(&"2024-03-10T02:30:00"));
+  return must(formatZoned(&must(resolveLocal(local, &zoneValue, Disambiguation.Compatible))));
+}
+
+function gapReject(): bool {
+  let zoneValue = namedZone(&"America/New_York");
+  let local = must(parseDateTime(&"2024-03-10T02:30:00"));
+  return !isOk(&resolveLocal(local, &zoneValue, Disambiguation.Reject));
+}
+
+function secondOffset(): string {
+  let fixed = fixedZone(must(offsetFromSeconds(1i32)));
+  let instant = must(parseTimestamp(&"2000-01-01T00:00:00Z"));
+  return must(formatZoned(&zonedAt(instant, &fixed)));
+}
+
+function retainedZoneCopy(): bool {
+  let first = namedZone(&"America/New_York");
+  let second = copy(&first);
+  return eq(&first, &second);
+}
+
+function exactTotalRejects(): bool {
+  let base = defaultSpanFields();
+  let value = must(Span(SpanSign.Positive, SpanFields { ...base, minutes: 30u64 }));
+  return !isOk(&spanTotalExact(&value, SpanTotalOptions { unit: Unit.Hour, relative: Option.None }));
+}
+
+function approximateTotal(): f64 {
+  let value = must(parseSpan(&"PT30M"));
+  return must(spanTotalApprox(&value, SpanTotalOptions { unit: Unit.Hour, relative: Option.None }));
+}
+
+function calendarCancellationNeedsContext(): bool {
+  let base = defaultSpanFields();
+  let positive = days(1u64);
+  let negative = must(Span(SpanSign.Negative, SpanFields { ...base, days: 1u64 }));
+  return !isOk(&addSpan(&positive, negative, Option.None));
+}
+
+function dateOutputCapped(): bool {
+  let date = must(parseDate(&"2024-07-04"));
+  let base = defaultTextLimits();
+  let limits = TextLimits { ...base, maxOutputBytes: 9u64 };
+  return !isOk(&formatDateWithLimits(&date, limits));
+}
+
+function dateInputCapped(): bool {
+  let base = defaultTextLimits();
+  let limits = TextLimits { ...base, maxInputBytes: 9u64 };
+  return !isOk(&parseDateWithLimits(&"2024-07-04", limits));
+}
+
+function isoWeekYear(): i32 {
+  let date = must(parseDate(&"2019-12-30"));
+  return isoWeekFields(&date).year;
+}
+
+expect dateText(&"2024-02-29") == "2024-02-29";
+expect !isOk(&parseDate(&"2023-02-29"));
+expect !isOk(&Time(TimeFields { hour: 0u8, minute: 0u8, second: 0u8, nanosecond: 1000000000u32 }));
+expect dateText(&"-000001-01-01") == "-000001-01-01";
+expect datetimeText(&"2024-07-04 08:39:00,1200") == "2024-07-04T08:39:00.12";
+expect !isOk(&parseDate(&"2024-07-04 "));
+expect !isOk(&parseTime(&"08:39"));
+expect !isOk(&parseTime(&"23:59:60"));
+expect !isOk(&parseDate(&"2024-07-04T08:39:00"));
+expect timestampText(&"2024-07-04T08:39:00-04:00") == "2024-07-04T12:39:00Z";
+expect unixNanoseconds(&must(timestampFromNanoseconds(-1i128))) == -1i128;
+expect !isOk(&parseTimestamp(&"2024-07-04T12:39:00-00:00"));
+expect !isOk(&parseTimestamp(&"2024-07-04T12:39:00Z[UTC]"));
+expect spanText(&"PT1H60M") == "PT1H60M";
+expect durationText(&"PT24H") == "PT24H";
+expect !isOk(&parseSignedDuration(&"P0D"));
+expect millisecondsNormalizeOnlyText();
+expect durationMinimumSubtracts() == 0i128;
+expect exactDivisionRejects();
+expect truncatedDivision() == 0i128;
+expect exactSecondsReject();
+expect truncatedSeconds() == 0i128;
+expect datePlusHours(24u64) == "2024-02-29";
+expect rejectsDateRemainder();
+expect aggregatedDay() == "2024-02-29";
+expect combinedMonthChange() == "2021-03-29";
+expect halfAway() == "-PT2S";
+expect scalarCopy();
+expect springDayElapsed() == "PT23H";
+expect gapCompatible() == "2024-03-10T03:30:00-04:00[America/New_York]";
+expect gapReject();
+expect secondOffset() == "2000-01-01T00:00:01+00:00:01[+00:00:01]";
+expect retainedZoneCopy();
+expect exactTotalRejects();
+expect approximateTotal() == 0.5f64;
+expect calendarCancellationNeedsContext();
+expect dateOutputCapped();
+expect dateInputCapped();
+expect isoWeekYear() == 2020i32;

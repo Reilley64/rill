@@ -1,0 +1,9 @@
+// Expected R0302: a joined stop does not waive spawn's noBorrow requirement.
+import std::{spawn, stop, log};
+
+function bad(): void {
+  let owner: string = "borrowed";
+  let view = &owner;
+  let child = spawn(() => log(view));
+  stop(&child);
+}
