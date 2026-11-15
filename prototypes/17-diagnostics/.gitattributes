@@ -1,0 +1,2 @@
+# Preserve original bytes used by the CRLF/Unicode coordinate and hash fixture.
+locations.rill -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

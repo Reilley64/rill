@@ -1,0 +1,6 @@
+// Expected R0500 despite ordinary nested-payload orphan permission.
+import std::mutex::LockGuard;
+type Payload = { value: u64 };
+
+implement dispose(guard: LockGuard<Payload>): void {
+}

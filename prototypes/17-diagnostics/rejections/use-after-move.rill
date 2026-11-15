@@ -1,0 +1,9 @@
+// Expected R0200 at the second consume(text), not emitted by a compiler.
+function consume(value: string): void {
+}
+
+function bad(): void {
+  let text: string = "hello";
+  consume(text);
+  consume(text);
+}

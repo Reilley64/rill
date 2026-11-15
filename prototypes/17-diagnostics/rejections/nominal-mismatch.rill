@@ -1,0 +1,11 @@
+// Expected R0100 despite identical fields.
+type Left = { value: u64 };
+type Right = { value: u64 };
+
+function read(value: Right): u64 {
+  return value.value;
+}
+
+function bad(): u64 {
+  return read(Left { value: 1 });
+}

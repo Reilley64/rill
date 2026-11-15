@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rill diagnostic/report JSONL record, version 1",
+  "description": "Each JSONL line is one record. This is a reporting contract, not LSP or a Rill runtime JSON API. Unknown optional fields are allowed for additive evolution. Cross-record sequence, source-range, count and UTF-8 preview-budget invariants require additional validation.",
+  "oneOf": [
+    { "$ref": "#/$defs/diagnosticRecord" },
+    { "$ref": "#/$defs/expectationRecord" },
+    { "$ref": "#/$defs/toolFailureRecord" },
+    { "$ref": "#/$defs/summaryRecord" }
+  ],
+  "$defs": {
+    "natural": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+    "positive": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+    "code": { "type": "string", "pattern": "^R[0-9]{4,}$" },
+    "uri": { "type": "string", "format": "uri" },
+    "position": {
+      "type": "object",
+      "required": ["line", "column"],
+      "properties": {
+        "line": { "$ref": "#/$defs/positive" },
+        "column": { "$ref": "#/$defs/positive" }
+      },
+      "description": "One-based decoded source lines and Unicode-scalar columns, NOT LSP positions."
+    },
+    "location": {
+      "type": "object",
+      "required": ["uri", "sourceSnapshotId", "startByte", "endByte"],
+      "properties": {
+        "uri": { "$ref": "#/$defs/uri" },
+        "sourceSnapshotId": { "type": "string", "minLength": 1 },
+        "startByte": { "$ref": "#/$defs/natural" },
+        "endByte": { "$ref": "#/$defs/natural" },
+        "start": { "$ref": "#/$defs/position" },
+        "end": { "$ref": "#/$defs/position" }
+      },
+      "dependentRequired": { "start": ["end"], "end": ["start"] },
+      "description": "Original UTF-8 byte range, exclusive end. Decoded coordinates may be absent when unavailable; never fake line zero."
+    },
+    "labeledLocation": {
+      "type": "object",
+      "required": ["location", "label"],
+      "properties": {
+        "location": { "$ref": "#/$defs/location" },
+        "label": { "type": "string" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "required": ["id", "snapshotId"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "snapshotId": { "type": "string", "minLength": 1 },
+        "entryUri": { "$ref": "#/$defs/uri" },
+        "target": { "type": "string", "minLength": 1 },
+        "compilerOptions": { "type": "object" }
+      },
+      "description": "Named entry/target/options analysis and relevant dependency snapshot, not only one document version."
+    },
+    "base": {
+      "type": "object",
+      "required": ["schemaVersion", "runId", "sequence", "kind", "context"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "runId": { "type": "string", "minLength": 1 },
+        "sequence": { "$ref": "#/$defs/positive" },
+        "kind": { "type": "string" },
+        "context": { "anyOf": [{ "$ref": "#/$defs/context" }, { "type": "null" }] }
+      }
+    },
+    "edit": {
+      "type": "object",
+      "required": ["location", "replacement"],
+      "properties": {
+        "location": { "$ref": "#/$defs/location" },
+        "replacement": { "type": "string" }
+      }
+    },
+    "suggestion": {
+      "type": "object",
+      "required": ["title", "intent", "applicability", "snapshotId", "edits"],
+      "properties": {
+        "title": { "type": "string" },
+        "intent": { "enum": ["mechanical", "behaviorChoice", "scaffold"] },
+        "applicability": { "enum": ["verified", "requiresChoice", "unavailable"] },
+        "snapshotId": { "type": "string", "minLength": 1 },
+        "edits": { "type": "array", "items": { "$ref": "#/$defs/edit" } },
+        "reason": { "type": "string" }
+      },
+      "description": "A proposed edit with source/dependency preconditions, not an apply command or atomicity promise."
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["code", "severity", "message", "primary", "related", "notes", "help", "suggestions"],
+      "properties": {
+        "code": { "$ref": "#/$defs/code" },
+        "severity": { "enum": ["error", "warning"] },
+        "message": { "type": "string", "minLength": 1 },
+        "primary": { "anyOf": [{ "$ref": "#/$defs/labeledLocation" }, { "type": "null" }] },
+        "related": { "type": "array", "items": { "$ref": "#/$defs/labeledLocation" } },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "help": { "type": "array", "items": { "type": "string" } },
+        "suggestions": { "type": "array", "items": { "$ref": "#/$defs/suggestion" } },
+        "documentationUri": { "$ref": "#/$defs/uri" },
+        "detailTruncated": { "type": "boolean" }
+      }
+    },
+    "diagnosticRecord": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "required": ["diagnostic"],
+          "properties": {
+            "kind": { "const": "diagnostic" },
+            "diagnostic": { "$ref": "#/$defs/diagnostic" }
+          }
+        }
+      ]
+    },
+    "observation": {
+      "type": "object",
+      "required": ["expression", "role", "status"],
+      "properties": {
+        "expression": { "type": "string" },
+        "role": { "enum": ["left", "right", "condition", "result", "operand"] },
+        "status": { "enum": ["captured", "notEvaluated", "unavailable", "truncated"] },
+        "location": { "$ref": "#/$defs/location" },
+        "type": { "type": "string" },
+        "rendered": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "enum": ["captured", "truncated"] } } },
+          "then": { "required": ["rendered", "type"] }
+        },
+        {
+          "if": { "properties": { "status": { "enum": ["notEvaluated", "unavailable"] } } },
+          "then": { "not": { "required": ["rendered"] } }
+        }
+      ],
+      "description": "Bounded trusted preview data, not a retained or serialized program value."
+    },
+    "expectationRecord": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "required": ["expectation"],
+          "properties": {
+            "kind": { "const": "expectationResult" },
+            "expectation": {
+              "type": "object",
+              "required": ["id", "location", "expression", "status", "observations", "previewBudget", "previewIncomplete"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "location": { "$ref": "#/$defs/location" },
+                "expression": { "type": "string" },
+                "expressionTruncated": { "type": "boolean" },
+                "status": { "enum": ["passed", "failed"] },
+                "observations": { "type": "array", "items": { "$ref": "#/$defs/observation" } },
+                "previewBudget": {
+                  "type": "object",
+                  "required": ["maxDepth", "maxChildren", "maxRenderedBytes"],
+                  "properties": {
+                    "maxDepth": { "$ref": "#/$defs/positive" },
+                    "maxChildren": { "$ref": "#/$defs/positive" },
+                    "maxRenderedBytes": { "$ref": "#/$defs/positive" }
+                  }
+                },
+                "previewIncomplete": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "toolFailureRecord": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "required": ["failure"],
+          "properties": {
+            "kind": { "const": "toolFailure" },
+            "failure": {
+              "type": "object",
+              "required": ["code", "message", "phase", "analysisTrusted"],
+              "properties": {
+                "code": { "const": "R9000" },
+                "message": { "type": "string", "minLength": 1 },
+                "phase": { "type": "string", "minLength": 1 },
+                "analysisTrusted": { "const": false }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "required": ["errors", "warnings", "expectationsDiscovered", "expectationsEvaluated", "expectationsPassed", "expectationsFailed", "omittedPrimaryReports"],
+      "properties": {
+        "errors": { "$ref": "#/$defs/natural" },
+        "warnings": { "$ref": "#/$defs/natural" },
+        "expectationsDiscovered": { "$ref": "#/$defs/natural" },
+        "expectationsEvaluated": { "$ref": "#/$defs/natural" },
+        "expectationsPassed": { "$ref": "#/$defs/natural" },
+        "expectationsFailed": { "$ref": "#/$defs/natural" },
+        "omittedPrimaryReports": { "$ref": "#/$defs/natural" }
+      }
+    },
+    "summaryRecord": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "required": ["summary"],
+          "properties": {
+            "kind": { "const": "summary" },
+            "summary": {
+              "type": "object",
+              "required": ["operation", "phase", "outcome", "analysisComplete", "reportComplete", "countsExact", "counts"],
+              "properties": {
+                "operation": { "enum": ["check", "build", "run", "test", "explain"] },
+                "phase": { "enum": ["frontEnd", "build", "expectations", "driver"] },
+                "outcome": { "enum": ["passed", "rejected", "failed", "canceled", "incomplete"] },
+                "analysisComplete": { "type": "boolean" },
+                "reportComplete": { "type": "boolean" },
+                "countsExact": { "type": "boolean" },
+                "counts": { "$ref": "#/$defs/counts" },
+                "reason": { "type": "string" }
+              },
+              "allOf": [
+                {
+                  "if": { "properties": { "outcome": { "const": "passed" } } },
+                  "then": {
+                    "properties": {
+                      "analysisComplete": { "const": true },
+                      "counts": {
+                        "properties": {
+                          "errors": { "const": "0" },
+                          "expectationsFailed": { "const": "0" }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": { "properties": { "outcome": { "enum": ["canceled", "incomplete"] } } },
+                  "then": { "properties": { "analysisComplete": { "const": false } } }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,4 @@
+// Expected R0003: no numeric width from annotation, suffix or known context.
+function bad(): void {
+  let amount = 1;
+}

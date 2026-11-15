@@ -4,6 +4,10 @@ Rill is a functional-first programming language with TypeScript-style syntax. It
 
 ## Language
 
+**Analysis context**:
+A selected Rill entry file, target and compiler-option combination that determines the loaded program graph and meaning of editor results. A workspace folder or search index is not that context.
+_Avoid_: guessed project root, merged program, workspace folder
+
 **Borrow**:
 Access to a value through a read-only reference (`&T`) or an exclusive mutable reference (`&mut T`) without owning it. Reference types do not name lifetimes.
 _Avoid_: lifetime, pointer
@@ -21,12 +25,24 @@ A function value with a read-only, mutable, or consuming invocation contract. Th
 _Avoid_: Fn trait, async function
 
 **Cancellation**:
-A cooperative request to stop a goroutine while completing its required cleanup. It is distinct from panic and may remain pending while cleanup or another protected operation finishes.
+Rill's cooperative runtime process for stopping a goroutine while completing required cleanup; delivery can remain pending during protected work. A cancellation-token request is a separate signal and does not by itself stop a goroutine.
 _Avoid_: panic, force kill, immediate termination
+
+**Cancellation source**:
+An owned capability to request one-shot cancellation state, including its directed descendants. A request establishes a signal, not completion of the operations observing it.
+_Avoid_: join handle, task owner, cancellation token
+
+**Cancellation token**:
+An owned observation capability for one-shot cancellation state, used explicitly by an operation. It grants no authority to request cancellation and is not a goroutine or completion result.
+_Avoid_: ambient context, stop handle, cancellation source
 
 **Character**:
 A `char` value representing one Unicode scalar, not necessarily a whole user-perceived character. Its code point is distinct from its UTF-8 byte encoding.
 _Avoid_: byte, grapheme, UTF-16 code unit
+
+**Controlled TCP view**:
+A borrowed TCP view carrying explicit network control for the I/O operations it permits. It retains access dependencies without owning closure of the underlying resource.
+_Avoid_: new connection, owning socket, ambient context
 
 **Dispose**:
 The `dispose` overload for a type: a function the compiler calls when a value of that type is freed. Calling it directly ends the value early.
@@ -68,6 +84,10 @@ _Avoid_: shared mutable reference, raw pointer
 A synchronization value granting exclusive access to a protected payload through a lock guard.
 _Avoid_: mutable Shared, runtime borrow checker
 
+**Network control**:
+Rill's explicit clock, optional absolute deadline and cancellation-token descriptor for a networking operation. Its captured snapshot retains ordinary borrow dependencies, not hidden ownership or an ambient request context.
+_Avoid_: timeout duration, goroutine cancellation, live resource setting
+
 **Numeric conversion**:
 A conversion between explicitly sized numeric types. `from`/`into` are infallible, while `try_from`/`try_into` return a Result; infallibility does not promise losslessness.
 _Avoid_: as cast, type assertion, implicit coercion
@@ -92,6 +112,10 @@ _Avoid_: wildcard std import, module initializer
 A record field accessible only in its defining module. Its presence prevents external whole-record construction or rebuilding, regardless of aliases.
 _Avoid_: protected field, project-private field
 
+**Proper tail call**:
+A Rill call that needs no eliminated caller storage or post-return disposal/joins. It guarantees bounded activation growth in all supported builds, not merely a final-looking expression.
+_Avoid_: final-looking call, optional tail-call optimization
+
 **Record**:
 A value of a declared nominal type with named fields, constructed with its type name as in `Point { x: 0, y: 0 }`. Matching fields do not make different record types interchangeable; anonymous structural records do not exist.
 _Avoid_: object literal, structural record
@@ -104,6 +128,10 @@ _Avoid_: copy, new owner
 The handle `spawn(() => f(x))` returns for the goroutine it starts. `stop(&routine)` requests cancellation and waits for termination and cleanup; freeing the handle does not stop it.
 _Avoid_: task, future, promise, join handle
 
+**Saved activation budget**:
+Rill's per-routine Wasm limit on retained suspension/call state, distinct from its addressable stack and ordinary program data.
+_Avoid_: snapshot of all borrowed storage, total heap quota
+
 **Sendable**:
 Safe to transfer ownership or permitted exclusive access between independently executing goroutines, as required by `sendable(T)`. This does not imply borrow-freedom or safe concurrent read-sharing.
 _Avoid_: borrow-free, copyable, thread-affine
@@ -113,8 +141,12 @@ Safe for read-only access by concurrently executing goroutines, as required by `
 _Avoid_: shared owner, mutable, copyable
 
 **Shared**:
-A `Shared<T>` handle gives a value more than one owner by counting its owners. It is the only counted value in Rill, and shared ownership alone grants no mutable access to its payload.
+A `Shared<T>` handle gives a value more than one owner by explicitly counting its owners. Ordinary values are not implicitly counted, and shared ownership alone grants no mutable access to the payload.
 _Avoid_: Arc, Rc
+
+**Stack capacity**:
+Rill's usable addressable stack budget selected for a routine before it starts, independently of the Wasm saved activation budget. It is not a recursion-depth count, resident-memory guarantee, or total-memory limit.
+_Avoid_: engine-stack limit, heap quota
 
 **String**:
 An owned value of valid UTF-8 text, written `string`. General strings move unless explicitly copied; precise literal constants retain their constant-value rules.

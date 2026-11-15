@@ -1,0 +1,2 @@
+// Expected R0101; this is an independent compile-rejection fixture.
+expect 1u8;

@@ -1,0 +1,9 @@
+error[R0200]: cannot use text after its ownership was transferred
+ --> rejections/use-after-move.rill:8:11
+  7 |   consume(text);
+    |           ^^^^ ownership transferred here
+  8 |   consume(text);
+    |           ^^^^ used again here
+ note: string does not gain implicit copying from a literal initializer
+ help: choose permitted borrowing or an explicit supported copy according to intent
+ explain: rill explain R0200

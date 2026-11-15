@@ -1,0 +1,314 @@
+// #34 Q1–Q93 / ADR 0023: intended-valid design fixtures, NOT executed tests.
+// Pure address/configuration work and explicit manual-clock/token state only.
+// No resource fabrication, live networking, system-clock reads or public test backend.
+import std::panic;
+import std::result::{Result, isOk};
+import std::option::Option;
+import std::error::value;
+import std::compare::eq;
+import std::hash::hash;
+import std::format::show;
+import std::collection::length;
+import std::net::{
+  Ipv4Address, Ipv6Address, IpAddress, SocketAddress,
+  ipv4, ipv6, ipv4Octets, ipv6Segments, socketAddress, scopedSocketAddress,
+  ip, port, scopeId, parseIpv4, parseIpv6, parseIp, parseSocketAddress,
+  NetError, NetErrorKind, NetOperation, kind, operation, nativeCodes,
+  TcpOptions, ListenOptions, DialOptions, KeepAlive, Ipv6ListenMode, AddressFamily,
+  tcpOptions, listenOptions, dialOptions, NetControl,
+};
+import std::time::{
+  ClockError, SignedDuration, manualClock, clock, now, advance, shiftInstant,
+  checkInstantDomain, durationFromNanoseconds, durationNanoseconds,
+};
+import std::cancel::{
+  CancellationSource, token, neverCanceledToken, cancel, isCancellationRequested,
+};
+
+function mustNet<T>(result: Result<T, NetError>): T {
+  guard let parsed = result else (error) { panic(&"invalid networking fixture"); }
+  return parsed;
+}
+
+function mustClock<T>(result: Result<T, ClockError>): T {
+  guard let observed = result else (error) { panic(&"invalid manual-clock fixture"); }
+  return observed;
+}
+
+function nanos(count: i128): SignedDuration {
+  guard let duration = durationFromNanoseconds(count) else (error) {
+    panic(&"invalid fixture duration");
+  }
+  return duration;
+}
+
+function ipv4Text(text: &string): string { return show(&mustNet(parseIpv4(text))); }
+function ipv6Text(text: &string): string { return show(&mustNet(parseIpv6(text))); }
+function socketText(text: &string): string { return show(&mustNet(parseSocketAddress(text))); }
+
+function sameParseOperation(left: NetOperation, right: NetOperation): bool {
+  let pair: [NetOperation, NetOperation] = [left, right];
+  return match (pair) {
+    [NetOperation.ParseIpv4, NetOperation.ParseIpv4] => true,
+    [NetOperation.ParseIpv6, NetOperation.ParseIpv6] => true,
+    [NetOperation.ParseIp, NetOperation.ParseIp] => true,
+    [NetOperation.ParseSocketAddress, NetOperation.ParseSocketAddress] => true,
+    _ => false,
+  };
+}
+
+function invalid<T>(result: Result<T, NetError>, expected: NetOperation): bool {
+  guard let parsed = result else (error) {
+    let problem = value(&error);
+    return (match (kind(problem)) { NetErrorKind.InvalidInput => true, _ => false })
+      && sameParseOperation(operation(problem), expected)
+      && length(nativeCodes(problem)) == 0u64;
+  }
+  return false;
+}
+
+function octetsCopied(): bool {
+  let original: Ipv4Address = ipv4([192u8, 0u8, 2u8, 255u8]);
+  let duplicate = copy(&original);
+  let [a, b, c, d] = ipv4Octets(&duplicate);
+  return a == 192u8 && b == 0u8 && c == 2u8 && d == 255u8
+    && eq(&original, &duplicate);
+}
+
+function segmentsCopied(): bool {
+  let original: Ipv6Address = ipv6([8193u16, 3512u16, 0u16, 0u16, 0u16, 0u16, 0u16, 1u16]);
+  let [a, b, c, d, e, f, g, h] = ipv6Segments(&original);
+  return a == 8193u16 && b == 3512u16 && c == 0u16 && d == 0u16
+    && e == 0u16 && f == 0u16 && g == 0u16 && h == 1u16;
+}
+
+function v4Observers(): bool {
+  let host = IpAddress.V4(ipv4([127u8, 0u8, 0u8, 1u8]));
+  let endpoint: SocketAddress = socketAddress(host, 8080u16);
+  return eq(&ip(&endpoint), &host) && port(&endpoint) == 8080u16
+    && (match (scopeId(&endpoint)) { Option.None => true, _ => false });
+}
+
+function v6DefaultScope(): bool {
+  let host = IpAddress.V6(mustNet(parseIpv6(&"fe80::1")));
+  let endpoint = socketAddress(host, 443u16);
+  return eq(&ip(&endpoint), &host)
+    && (match (scopeId(&endpoint)) { Option.Some(0u32) => true, _ => false });
+}
+
+function portZeroIsData(): bool {
+  let endpoint = mustNet(parseSocketAddress(&"0.0.0.0:0"));
+  return port(&endpoint) == 0u16 && show(&endpoint) == "0.0.0.0:0";
+}
+
+function maximumPortAndScope(): bool {
+  let endpoint = scopedSocketAddress(mustNet(parseIpv6(&"fe80::1")), 65535u16, 4294967295u32);
+  return port(&endpoint) == 65535u16
+    && (match (scopeId(&endpoint)) { Option.Some(4294967295u32) => true, _ => false })
+    && show(&endpoint) == "[fe80::1%4294967295]:65535";
+}
+
+function equivalentValues(): bool {
+  let first = mustNet(parseIpv6(&"2001:0DB8:0:0:0:0:0:1"));
+  let second = mustNet(parseIpv6(&"2001:db8::1"));
+  let a = socketAddress(IpAddress.V6(first), 443u16);
+  let b = mustNet(parseSocketAddress(&"[2001:db8::1%000]:00443"));
+  return eq(&first, &second) && hash(&first) == hash(&second)
+    && eq(&a, &b) && hash(&a) == hash(&b);
+}
+
+function familiesStayDistinct(): bool {
+  let v4 = mustNet(parseIp(&"192.0.2.1"));
+  let mapped = mustNet(parseIp(&"::ffff:192.0.2.1"));
+  return !eq(&v4, &mapped)
+    && (match (v4) { IpAddress.V4(address) => true, _ => false })
+    && (match (mapped) { IpAddress.V6(address) => true, _ => false });
+}
+
+function endpointIdentity(): bool {
+  let host = mustNet(parseIpv6(&"fe80::1"));
+  let a = scopedSocketAddress(host, 443u16, 3u32);
+  let otherScope = scopedSocketAddress(host, 443u16, 4u32);
+  let otherPort = scopedSocketAddress(host, 444u16, 3u32);
+  return !eq(&a, &otherScope) && !eq(&a, &otherPort);
+}
+
+function rejectsIpv4(): bool {
+  return invalid(parseIpv4(&"192.00.2.1"), NetOperation.ParseIpv4)
+    && invalid(parseIpv4(&"127.1"), NetOperation.ParseIpv4)
+    && invalid(parseIpv4(&"0x7f.0.0.1"), NetOperation.ParseIpv4)
+    && invalid(parseIpv4(&"256.0.0.1"), NetOperation.ParseIpv4)
+    && invalid(parseIpv4(&" 192.0.2.1"), NetOperation.ParseIpv4);
+}
+
+function rejectsIpv6(): bool {
+  return invalid(parseIpv6(&"1::2::3"), NetOperation.ParseIpv6)
+    && invalid(parseIpv6(&"[::1]"), NetOperation.ParseIpv6)
+    && invalid(parseIpv6(&"fe80::1%3"), NetOperation.ParseIpv6)
+    && invalid(parseIpv6(&"::ffff:192.00.2.1"), NetOperation.ParseIpv6)
+    && invalid(parseIpv6(&"12345::"), NetOperation.ParseIpv6);
+}
+
+function rejectsIp(): bool {
+  return invalid(parseIp(&"localhost"), NetOperation.ParseIp)
+    && invalid(parseIp(&"192.0.2.1/24"), NetOperation.ParseIp)
+    && invalid(parseIp(&"192.0.2.1:80"), NetOperation.ParseIp)
+    && invalid(parseIp(&"::1 "), NetOperation.ParseIp);
+}
+
+function rejectsSocket(): bool {
+  return invalid(parseSocketAddress(&"[::1]"), NetOperation.ParseSocketAddress)
+    && invalid(parseSocketAddress(&"::1:80"), NetOperation.ParseSocketAddress)
+    && invalid(parseSocketAddress(&"localhost:80"), NetOperation.ParseSocketAddress)
+    && invalid(parseSocketAddress(&"192.0.2.1:65536"), NetOperation.ParseSocketAddress)
+    && invalid(parseSocketAddress(&"[fe80::1%4294967296]:80"), NetOperation.ParseSocketAddress);
+}
+
+function rejectsZoneSyntax(): bool {
+  return invalid(parseSocketAddress(&"[fe80::1%eth0]:80"), NetOperation.ParseSocketAddress)
+    && invalid(parseSocketAddress(&"[fe80::1%]:80"), NetOperation.ParseSocketAddress)
+    && invalid(parseSocketAddress(&"[fe80::1%-1]:80"), NetOperation.ParseSocketAddress)
+    && invalid(parseSocketAddress(&"[fe80::1%3%4]:80"), NetOperation.ParseSocketAddress)
+    && invalid(parseSocketAddress(&"[fe80::1%25eth0]:80"), NetOperation.ParseSocketAddress);
+}
+
+function detachedAddress(): SocketAddress {
+  let source: string = "[2001:db8::1]:443";
+  return mustNet(parseSocketAddress(&source));
+}
+
+function tcpDefaults(): bool {
+  let options: TcpOptions = tcpOptions();
+  return options.noDelay
+    && (match (options.keepAlive) { KeepAlive.Disabled => true, _ => false });
+}
+
+function listenerDefaults(): bool {
+  let options: ListenOptions = listenOptions();
+  return options.backlog == 128u32 && !options.reuseAddress
+    && (match (options.ipv6Mode) { Ipv6ListenMode.V6Only => true, _ => false })
+    && options.acceptedTcp.noDelay
+    && (match (options.acceptedTcp.keepAlive) { KeepAlive.Disabled => true, _ => false });
+}
+
+function dialDefaults(): bool {
+  let options: DialOptions = dialOptions();
+  return (match (options.family) { AddressFamily.Any => true, _ => false })
+    && options.tcp.noDelay
+    && (match (options.tcp.keepAlive) { KeepAlive.Disabled => true, _ => false })
+    && durationNanoseconds(&options.attemptDelay) == 250000000i128
+    && (match (options.attemptTimeout) {
+      Option.Some(duration) => durationNanoseconds(&duration) == 10000000000i128,
+      Option.None => false,
+    });
+}
+
+function configurationSnapshots(): bool {
+  let mut original: ListenOptions = listenOptions();
+  let captured = copy(&original);
+  original.backlog = 64u32;
+  original.reuseAddress = true;
+  original.acceptedTcp.noDelay = false;
+  let base = dialOptions();
+  let mut policy = DialOptions { ...base, family: AddressFamily.V4, attemptTimeout: Option.None };
+  let saved = copy(&policy);
+  policy.family = AddressFamily.V6;
+  return captured.backlog == 128u32 && !captured.reuseAddress && captured.acceptedTcp.noDelay
+    && original.backlog == 64u32 && !original.acceptedTcp.noDelay
+    && (match (saved.family) { AddressFamily.V4 => true, _ => false })
+    && (match (saved.attemptTimeout) { Option.None => true, _ => false });
+}
+
+function keepAliveQuantities(): bool {
+  let options = TcpOptions {
+    noDelay: false,
+    keepAlive: KeepAlive.Custom {
+      idle: nanos(1000000000i128), interval: nanos(32767000000000i128), probeCount: 127u32,
+    },
+  };
+  return !options.noDelay && (match (options.keepAlive) {
+    KeepAlive.Custom { idle, interval, probeCount } =>
+      durationNanoseconds(&options.keepAlive.idle) == 1000000000i128
+      && durationNanoseconds(&options.keepAlive.interval) == 32767000000000i128
+      && options.keepAlive.probeCount == 127u32,
+    _ => false,
+  }); // Construction stores values; it does not validate/apply native options.
+}
+
+function manualDomainCheck(): bool {
+  let first = manualClock();
+  let second = manualClock();
+  let observed = clock(&first);
+  let duplicate = copy(&observed);
+  let instant = mustClock(now(&observed));
+  let same = isOk(&checkInstantDomain(&duplicate, instant));
+  guard let checked = checkInstantDomain(&clock(&second), instant) else (error) {
+    return same && (match (value(&error)) { ClockError.DomainMismatch => true, _ => false });
+  }
+  return false;
+}
+
+function controlDescriptorSnapshot(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let source = CancellationSource();
+  let request = token(&source);
+  let never = neverCanceledToken();
+  let deadline = mustClock(shiftInstant(mustClock(now(&observed)), nanos(10i128)));
+  let mut descriptor = NetControl { clock: &observed, deadline: Option.Some(deadline), token: &request };
+  let captured = copy(&descriptor);
+  descriptor.deadline = Option.None;
+  descriptor.token = &never;
+  cancel(&source);
+  return isCancellationRequested(captured.token) && !isCancellationRequested(descriptor.token)
+    && (match (captured.deadline) {
+      Option.Some(instant) => isOk(&checkInstantDomain(captured.clock, instant)),
+      Option.None => false,
+    }) && (match (descriptor.deadline) { Option.None => true, _ => false });
+}
+
+function manualDeadlineSnapshot(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let never = neverCanceledToken();
+  let deadline = mustClock(shiftInstant(mustClock(now(&observed)), nanos(10i128)));
+  let descriptor = NetControl { clock: &observed, deadline: Option.Some(deadline), token: &never };
+  let _ = mustClock(advance(&manual, nanos(10i128)));
+  return match (descriptor.deadline) {
+    Option.Some(instant) => eq(&instant, &mustClock(now(descriptor.clock))),
+    Option.None => false,
+  }; // Demonstrates manual state only, not admission/expiry of native work.
+}
+
+expect octetsCopied();
+expect segmentsCopied();
+expect v4Observers();
+expect v6DefaultScope();
+expect portZeroIsData();
+expect maximumPortAndScope();
+expect ipv4Text(&"192.0.2.255") == "192.0.2.255";
+expect ipv6Text(&"2001:0DB8:0:0:0:0:0:1") == "2001:db8::1";
+expect ipv6Text(&"1:0:0:2:0:0:3:4") == "1::2:0:0:3:4";
+expect ipv6Text(&"1:2:3:0:4:5:6:7") == "1:2:3:0:4:5:6:7";
+expect ipv6Text(&"::ffff:c000:201") == "::ffff:192.0.2.1";
+expect ipv6Text(&"2001:db8::192.0.2.1") == "2001:db8::c000:201";
+expect socketText(&"192.0.2.1:00080") == "192.0.2.1:80";
+expect socketText(&"[fe80::1%000]:00443") == "[fe80::1]:443";
+expect socketText(&"[fe80::1%0003]:00443") == "[fe80::1%3]:443";
+expect equivalentValues();
+expect familiesStayDistinct();
+expect endpointIdentity();
+expect rejectsIpv4();
+expect rejectsIpv6();
+expect rejectsIp();
+expect rejectsSocket();
+expect rejectsZoneSyntax();
+expect show(&detachedAddress()) == "[2001:db8::1]:443";
+expect tcpDefaults();
+expect listenerDefaults();
+expect dialDefaults();
+expect configurationSnapshots();
+expect keepAliveQuantities();
+expect manualDomainCheck();
+expect controlDescriptorSnapshot();
+expect manualDeadlineSnapshot();

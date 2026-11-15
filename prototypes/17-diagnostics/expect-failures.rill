@@ -1,0 +1,17 @@
+// #24 source-valid but INTENTIONALLY FAILING expectations.
+// No Rill execution performed; golden reports are hand-authored contract examples.
+import std::log;
+
+function probe(): u64 {
+  log("probe called");
+  return 7;
+}
+
+function skipped(): bool {
+  log("must not run");
+  return true;
+}
+
+expect probe() == 8u64;
+expect false && skipped();
+expect "🙂" == "🙃";

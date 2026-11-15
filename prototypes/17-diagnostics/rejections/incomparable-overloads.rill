@@ -1,0 +1,14 @@
+// Expected R0303, not return-type/constraint/import-order dispatch.
+function choose<A, B>(left: A, right: B): u64;
+
+implement<B> choose(left: u8, right: B): u64 {
+  return 1;
+}
+
+implement<A> choose(left: A, right: u8): u64 {
+  return 2;
+}
+
+function bad(): u64 {
+  return choose(1u8, 2u8);
+}

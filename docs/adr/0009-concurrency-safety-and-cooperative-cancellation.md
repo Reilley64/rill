@@ -75,6 +75,24 @@ Native blocking work must cease accessing every borrowed source before cleanup i
 
 Normal top-level completion retains #8's program-exit behavior, without an implicit global join or guarantee of disposal in every background goroutine. Explicit stopping/waiting is needed when that completion matters. Panic remains ADR 0005's immediate whole-program termination without cleanup. Compiler-generated cooperative cancellation cleanup is a separate mechanism, not catchable panic or panic unwinding.
 
+## Stack lifetime and bounded default cleanup
+
+[ADR 0014](0014-bounded-stacks-proper-tail-calls-and-backend-gates.md) keeps live addressable stacks stable through migration/suspension and until execution, required cleanup and retained child/native borrowers actually complete or confirm release. Handle drop, cancel request or abort request is insufficient. Completed control handles may outlive execution storage; no global exit join is added. Wasm memory.grow must not invalidate a retained host pointer merely because the linear-memory owner still exists; validate copying/pinning/growth coordination or another safe mechanism.
+
+Standard/default ownership cleanup must bound its call-stack use with iterative worklists where needed while preserving order, initialization, dependencies, suspension/masking and joins. User callbacks/disposers remain ordinary code. Worklists can retain depth-dependent data without being tracing GC or an eligible-tail activation chain. Allocation failure is fatal resource exhaustion, not recursive fallback or recoverable partial disposal. Pending guards/joins can prevent tail transfer; do not unlock or free a source early to force it. Sized spawning must preserve ordinary owned callable/mode/noBorrow/sendable evidence and still returns Routine. Backend evidence remains explicitly gated by #30, not proven by these contracts.
+
+## Explicit network control and raw TCP direction release
+
+[ADR 0023](0023-tcp-addresses-resolution-and-controlled-networking.md), the [networking contract](../networking-contracts.md) and [#33 clock/token contract](../clock-cancellation-contracts.md) qualify cancellation terminology: intrinsic goroutine cancellation remains outside Result, whereas an explicitly supplied token can select an ordinary operation error. There is no ambient token or generic withCancellation. A controlled TCP view borrows its resource; token/expiry selection cannot silently destroy that resource or release native borrowers. Preserve the selected outcome and final actual prefix through confirmed abort/completion, including late external effects. withDeadline still preserves its nested R and joins losing work.
+
+The explicitly confirmed raw write-half disposer attempts local send-direction release even while the read half survives. This does not flush a discarded outer buffered queue, perform TLS/application shutdown or join the reader's routine. Closing either half finishes its own obligations, retaining shared native state for remaining owners/uses until actual final release. Ordinary secondary teardown errors do not replace a selected outcome, and a failed close does not license blind retry of a recycled descriptor. No hard cleanup/return bound or safety proof is inferred.
+
+## Diagnostic observation does not change ownership
+
+[ADR 0016](0016-structured-diagnostics-and-complete-openidea-lsp.md) / #24 require expectation snapshots to retain diagnostic data only: no additional user formatter/copy/iterator/disposer/comparison calls, owner moves, program loans, early unlock or lifetime extension. Resource/synchronization internals stay opaque; no hidden lock to print a value. The current #23 remaining-initialized-field cleanup and retained-cause evidence contracts still apply. False expectation cleanup is ordinary execution, not panic unwinding or a cancellation shortcut.
+
+Sequential tests do not isolate explicit background work, roll back filesystem effects or add a global join. Fatal execution may prevent any final report. Trusted snapshot/noninterference and client freshness/refactor safety are unvalidated implementation obligations, not proofs from the examples; #42 carries complete LSP delivery and #28/#30 retain checker/runtime/backend gates.
+
 ## Alternatives and validation
 
 - **Channels only:** simpler public surface, but disallows useful synchronized shared state. Not adopted.

@@ -1,0 +1,5 @@
+// #24 source-valid R0700 warning; still checked, not a compile rejection.
+function flow(): u64 {
+  return 1;
+  let amount: u64 = 2;
+}
