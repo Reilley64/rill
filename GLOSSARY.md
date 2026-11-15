@@ -29,8 +29,16 @@ Rill's owned contiguous byte sequence, distinct from List<u8>. Read-only logical
 _Avoid_: byte string, contiguous List guarantee, owning view
 
 **Cancellation**:
-A cooperative request to stop a goroutine while completing its required cleanup. It is distinct from panic and may remain pending while cleanup or another protected operation finishes.
+Rill's cooperative runtime process for stopping a goroutine while completing required cleanup; delivery can remain pending during protected work. A cancellation-token request is a separate signal and does not by itself stop a goroutine.
 _Avoid_: panic, force kill, immediate termination
+
+**Cancellation source**:
+An owned capability to request one-shot cancellation state, including its directed descendants. A request establishes a signal, not completion of the operations observing it.
+_Avoid_: join handle, task owner, cancellation token
+
+**Cancellation token**:
+An owned observation capability for one-shot cancellation state, used explicitly by an operation. It grants no authority to request cancellation and is not a goroutine or completion result.
+_Avoid_: ambient context, stop handle, cancellation source
 
 **Character**:
 A `char` value representing one Unicode scalar, not necessarily a whole user-perceived character. Its code point is distinct from its UTF-8 byte encoding.
@@ -75,6 +83,22 @@ _Avoid_: precondition, assert, early return
 **Inputs**:
 An independently owned snapshot of a program's startup arguments and environment, exposed through std::env. It preserves byte data and is distinct from live process-global state or parsed application configuration.
 _Avoid_: live environment, ambient configuration, shared process handle
+
+**Instant**:
+A Rill clock-specific elapsed-time reading, distinct from a wall Timestamp. It can mark a deadline but is not a persistent or cross-clock time identifier.
+_Avoid_: Unix timestamp, wall time, deadline guarantee
+
+**JSON number**:
+A Number value preserving one validated JSON numeric token, including its spelling, without implicit primitive rounding. It is not a primitive float or an arbitrary-precision arithmetic value.
+_Avoid_: f64 number, quoted numeric string, bigint
+
+**JSON object**:
+An Object with unique decoded member names and preserved insertion order. It is distinct from Rill's unordered Map and nominal application records.
+_Avoid_: reflected record, unordered object map, class instance
+
+**JSON value**:
+An owned Value of one of JSON's fixed alternatives, independent of its parsed input buffer. Read-only or mutable views retain that owner's ordinary borrowing restrictions.
+_Avoid_: borrowed DOM, reflected application value, shared snapshot
 
 **Lock guard**:
 A non-copyable value that borrows a mutex and owns responsibility for releasing its lock. Its disposer unlocks; protected borrows depend on it, and ownership stays in the locking goroutine.
@@ -148,6 +172,14 @@ _Avoid_: shared owner, mutable, copyable
 A `Shared<T>` handle gives a value more than one owner by explicitly counting its owners. Ordinary values are not implicitly counted, and shared ownership alone grants no mutable access to the payload.
 _Avoid_: Arc, Rc
 
+**Span**:
+A one-sign temporal value retaining calendar and time units. It is distinct from SignedDuration: interpreting calendar units as elapsed quantities needs explicit context.
+_Avoid_: milliseconds, fixed duration, fieldwise sum
+
+**Signed duration**:
+A SignedDuration expressing an exact signed elapsed quantity, without calendar-unit meaning. Negative values are valid quantities but not relative wait requests.
+_Avoid_: calendar span, timeout sentinel
+
 **String**:
 An owned value of valid UTF-8 text, written `string`. Named string bindings move unless explicitly copied.
 _Avoid_: String class, byte buffer, implicitly shared string
@@ -155,3 +187,11 @@ _Avoid_: String class, byte buffer, implicitly shared string
 **String view**:
 Read-only borrowed text written `&string`, which may cover a whole string or substring. Duplicating its descriptor retains the backing-source dependencies rather than producing owned text.
 _Avoid_: str type, owned substring, shared owner
+
+**Timestamp**:
+A Unix wall-time value with nanosecond precision, distinct from a monotonic Instant and a civil date/time. A numeric representation does not imply clock accuracy.
+_Avoid_: monotonic instant, local datetime, implicit timezone
+
+**Zone snapshot**:
+The immutable rules retained by a TimeZone or Zoned value. A database update or matching zone name does not change or reproduce those retained rules.
+_Avoid_: current database, numeric offset, serialized rules

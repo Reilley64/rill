@@ -1,0 +1,339 @@
+// #31 / ADR 0018: hand-checked design fixtures, not a parser implementation.
+// Conversion machinery is confirmed in #41; no numeric converters run here.
+import std::panic;
+import std::option::Option;
+import std::result::{Result, Ok, isOk};
+import std::error::{value, cause, display};
+import std::compare::eq;
+import std::string::append;
+import std::encoding::json::{
+  Value, Number, Object, number, text as numberText,
+  parse, parseWithLimits, stringify, stringifyWithLimits, pretty, prettyWithOptions,
+  ParseLimits, ParseError, ParseLimit, SyntaxReason, NumberError,
+  FormatLimits, FormatError, PrettyOptions,
+  defaultParseLimits, defaultFormatLimits, defaultPrettyOptions,
+  get, getMut, insert, remove,
+};
+
+function parsed(source: &string): Value {
+  guard let tree = parse(source) else (error) { panic(&"invalid JSON fixture"); }
+  return tree;
+}
+
+function compact(tree: &Value): string {
+  guard let output = stringify(tree) else (error) { panic(&"format fixture limit"); }
+  return output;
+}
+
+function roundTrip(source: &string): string {
+  let tree = parsed(source);
+  return compact(&tree);
+}
+
+function prettyText(source: &string): string {
+  let tree = parsed(source);
+  guard let output = pretty(&tree) else (error) { panic(&"pretty fixture limit"); }
+  return output;
+}
+
+function rejects(source: &string): bool {
+  return !isOk(&parse(source));
+}
+
+function tokenIs(token: &string, expected: &string): bool {
+  guard let parsedNumber = number(token) else (error) { return false; }
+  return eq(numberText(&parsedNumber), expected);
+}
+
+function invalidToken(token: &string): bool {
+  return !isOk(&number(token));
+}
+
+function ownedNumber(): Number {
+  let source: string = "1e400";
+  guard let exact = number(source) else (error) { panic(&"number fixture"); }
+  return exact;
+}
+
+function numberErrorPosition(): bool {
+  guard let exact = number(&"1 ") else (error) {
+    let problem = value(&error);
+    return match (problem) {
+      NumberError.InvalidSyntax { offset } => problem.offset == 1u64,
+    };
+  }
+  return false;
+}
+
+function duplicatePositions(): bool {
+  guard let tree = parse(&"{\"a\":1,\"\\u0061\":2}") else (error) {
+    let problem = value(&error);
+    return match (problem) {
+      ParseError.DuplicateName { offset, firstOffset } =>
+        problem.offset == 7u64 && problem.firstOffset == 1u64,
+      _ => false,
+    };
+  }
+  return false;
+}
+
+function leadingBom(): bool {
+  guard let tree = parse(&"\u{feff}{}") else (error) {
+    let problem = value(&error);
+    return match (problem) {
+      ParseError.LeadingBom { offset } => problem.offset == 0u64,
+      _ => false,
+    };
+  }
+  return false;
+}
+
+function utf8ByteOffset(): bool {
+  guard let tree = parse(&"[\"é\",]") else (error) {
+    let problem = value(&error);
+    return match (problem) {
+      ParseError.Syntax { offset, reason } => problem.offset == 6u64
+        && (match (problem.reason) { SyntaxReason.UnexpectedToken => true, _ => false }),
+      _ => false,
+    };
+  }
+  return false;
+}
+
+function objectReplacement(): string {
+  let mut object = Object();
+  let _ = insert(&mut object, "b", Value.Bool(true));
+  let _ = insert(&mut object, "a", Value.Null);
+  let _ = insert(&mut object, "b", Value.Bool(false));
+  let tree = Value.Object(object);
+  return compact(&tree);
+}
+
+function removeAndReinsert(): string {
+  let mut object = Object();
+  let _ = insert(&mut object, "b", Value.Bool(true));
+  let _ = insert(&mut object, "a", Value.Null);
+  guard let previous = remove(&mut object, &"b") else { panic(&"missing fixture name"); }
+  let _ = insert(&mut object, "b", previous);
+  let tree = Value.Object(object);
+  return compact(&tree);
+}
+
+function mutableValue(): bool {
+  let mut object = Object();
+  let _ = insert(&mut object, "flag", Value.Null);
+  guard let slot = getMut(&mut object, &"flag") else { return false; }
+  *slot = Value.Bool(true);
+  guard let observed = get(&object, &"flag") else { return false; }
+  return match (observed) { Value.Bool(true) => true, _ => false };
+}
+
+function memberOrder(): string {
+  let mut object = Object();
+  let _ = insert(&mut object, "b", Value.Null);
+  let _ = insert(&mut object, "a", Value.Null);
+  let mut names: string = "";
+  for (let member of &object) { append(&mut names, member.name); }
+  return names;
+}
+
+function independentCopy(): bool {
+  let first = parsed(&"{\"n\":-0,\"a\":[1E+01]}");
+  let mut second = copy(&first);
+  match (&mut second) {
+    Value.Object(object) => { let _ = insert(object, "n", Value.Bool(false)); },
+    _ => { panic(&"wrong fixture kind"); },
+  };
+  return compact(&first) == "{\"n\":-0,\"a\":[1E+01]}"
+    && compact(&second) == "{\"n\":false,\"a\":[1E+01]}";
+}
+
+function detachedTree(): Value {
+  let source: string = "{\"x\":\"owned\"}";
+  return parsed(&source);
+}
+
+function sameLimit(left: ParseLimit, right: ParseLimit): bool {
+  // Test helper only: not a JSON Value/Number semantic equality implementation.
+  let pair: [ParseLimit, ParseLimit] = [left, right];
+  return match (pair) {
+    [ParseLimit.InputBytes, ParseLimit.InputBytes] => true,
+    [ParseLimit.Depth, ParseLimit.Depth] => true,
+    [ParseLimit.Nodes, ParseLimit.Nodes] => true,
+    [ParseLimit.StringBytes, ParseLimit.StringBytes] => true,
+    [ParseLimit.NumberBytes, ParseLimit.NumberBytes] => true,
+    _ => false,
+  };
+}
+
+function parseCapped(source: &string, kind: ParseLimit, maximum: u64, at: u64): bool {
+  let base = defaultParseLimits();
+  let limits = match (kind) {
+    ParseLimit.InputBytes => ParseLimits { ...base, maxInputBytes: maximum },
+    ParseLimit.Depth => ParseLimits { ...base, maxDepth: maximum },
+    ParseLimit.Nodes => ParseLimits { ...base, maxNodes: maximum },
+    ParseLimit.StringBytes => ParseLimits { ...base, maxStringBytes: maximum },
+    ParseLimit.NumberBytes => ParseLimits { ...base, maxNumberBytes: maximum },
+  };
+  guard let tree = parseWithLimits(source, limits) else (error) {
+    let problem = value(&error);
+    return match (problem) {
+      ParseError.LimitExceeded { offset: position, kind: budget, maximum: allowed } =>
+        problem.offset == at && problem.maximum == maximum
+          && sameLimit(kind, problem.kind),
+      _ => false,
+    };
+  }
+  return false;
+}
+
+function outputCapped(source: &string, maximum: u64): bool {
+  let tree = parsed(source);
+  let base = defaultFormatLimits();
+  let limits = FormatLimits { ...base, maxOutputBytes: maximum };
+  guard let output = stringifyWithLimits(&tree, limits) else (error) {
+    let problem = value(&error);
+    return match (problem) {
+      FormatError.OutputLimit { maximum: allowed } => problem.maximum == maximum,
+      _ => false,
+    };
+  }
+  return false;
+}
+
+function exactOutputBoundary(): string {
+  let tree = parsed(&"\"é\"");
+  let limits = FormatLimits { maxDepth: 0u64, maxOutputBytes: 4u64 };
+  guard let output = stringifyWithLimits(&tree, limits) else (error) {
+    panic(&"four-byte output must fit");
+  }
+  return output;
+}
+
+function constructedDepth(): bool {
+  let tree = Value.Array([Value.Array([Value.Null])]);
+  let limits = FormatLimits { maxDepth: 1u64, maxOutputBytes: 100u64 };
+  guard let output = stringifyWithLimits(&tree, limits) else (error) {
+    return match (value(&error)) { FormatError.DepthLimit { maximum } => true, _ => false };
+  }
+  return false;
+}
+
+function zeroIndent(): string {
+  let tree = parsed(&"[null]");
+  let base = defaultPrettyOptions();
+  let options = PrettyOptions { ...base, indent: 0u64 };
+  guard let output = prettyWithOptions(&tree, options) else (error) { panic(&"pretty fixture"); }
+  return output;
+}
+
+function prettyCapped(): bool {
+  let tree = parsed(&"[null]");
+  let limits = FormatLimits { maxDepth: 1u64, maxOutputBytes: 6u64 };
+  let options = PrettyOptions { indent: 2u64, limits: limits };
+  guard let output = prettyWithOptions(&tree, options) else (error) {
+    return match (value(&error)) { FormatError.OutputLimit { maximum } => true, _ => false };
+  }
+  return false;
+}
+
+function hugeIndent(): bool {
+  let tree = Value.Array([Value.Null]);
+  let limits = FormatLimits { maxDepth: 1u64, maxOutputBytes: 16u64 };
+  let options = PrettyOptions { indent: 18446744073709551615u64, limits: limits };
+  guard let output = prettyWithOptions(&tree, options) else (error) {
+    return match (value(&error)) { FormatError.OutputLimit { maximum } => true, _ => false };
+  }
+  return false;
+}
+
+function constructorHasNoDocumentQuota(): bool {
+  let mut token: string = "1";
+  let mut count = 0u64;
+  while (count < 1024u64) { append(&mut token, &"0"); count += 1u64; }
+  guard let exact = number(&token) else (error) { return false; }
+  return parseCapped(&token, ParseLimit.NumberBytes, 1024u64, 1024u64);
+}
+
+function defaults(): bool {
+  let parsing = defaultParseLimits();
+  let formatting = defaultFormatLimits();
+  let options = defaultPrettyOptions();
+  return parsing.maxInputBytes == 16777216u64 && parsing.maxDepth == 128u64
+    && parsing.maxNodes == 1000000u64 && parsing.maxStringBytes == 1048576u64
+    && parsing.maxNumberBytes == 1024u64 && formatting.maxDepth == 128u64
+    && formatting.maxOutputBytes == 16777216u64 && options.indent == 2u64
+    && options.limits.maxDepth == formatting.maxDepth
+    && options.limits.maxOutputBytes == formatting.maxOutputBytes;
+}
+
+enum InputProblem { Json }
+implement display(problem: &InputProblem): string { return "invalid JSON input"; }
+
+function wrappedInput(source: &string): Result<Value, InputProblem> {
+  let tree = parse(source) ? InputProblem.Json;
+  return Ok(tree);
+}
+
+function typedCause(): bool {
+  guard let tree = wrappedInput(&"[}") else (error) {
+    return match (cause(&error)) { Option.Some(inner) => true, Option.None => false };
+  }
+  return false;
+}
+
+// Each case owns its inputs; no ordinary startup or numeric converter implementation.
+expect roundTrip(&" \t\r\nnull\r\n") == "null";
+expect roundTrip(&"true") == "true";
+expect roundTrip(&"42") == "42";
+expect roundTrip(&"1.0") == "1.0";
+expect roundTrip(&"9007199254740993") == "9007199254740993";
+expect roundTrip(&"1e400") == "1e400";
+expect roundTrip(&"-0") == "-0";
+expect roundTrip(&"{\"\\u0061\":1E+01}") == "{\"a\":1E+01}";
+expect roundTrip(&"\"\\u0061\\/\\b\\t\\n\\f\\r\\u0000\\\"\\\\\"")
+  == "\"a/\\b\\t\\n\\f\\r\\u0000\\\"\\\\\"";
+expect roundTrip(&"\"\\uD834\\uDD1E\"") == "\"\u{1d11e}\"";
+expect roundTrip(&"\"\\uFDD0\"") == "\"\u{fdd0}\"";
+expect roundTrip(&"\"\\uFEFF\"") == "\"\u{feff}\"";
+expect roundTrip(&"{\"é\":1,\"e\\u0301\":2}") == "{\"é\":1,\"e\u{0301}\":2}";
+expect rejects(&"/*x*/null");
+expect rejects(&"[1,]");
+expect rejects(&"{\"a\":1,\"a\":2}");
+expect rejects(&"\"\\uD800\"");
+expect rejects(&"\"\\uDEAD\"");
+expect rejects(&"01");
+expect rejects(&"+1");
+expect rejects(&"NaN");
+expect rejects(&" \t\r\n");
+expect rejects(&"true false");
+expect leadingBom();
+expect duplicatePositions();
+expect utf8ByteOffset();
+expect objectReplacement() == "{\"b\":false,\"a\":null}";
+expect removeAndReinsert() == "{\"a\":null,\"b\":true}";
+expect mutableValue();
+expect memberOrder() == "ba";
+expect independentCopy();
+expect compact(&detachedTree()) == "{\"x\":\"owned\"}";
+expect tokenIs(&"1e-0002", &"1e-0002");
+expect invalidToken(&" 1");
+expect invalidToken(&"01");
+expect eq(numberText(&ownedNumber()), &"1e400");
+expect numberErrorPosition();
+expect parseCapped(&" null ", ParseLimit.InputBytes, 5u64, 5u64);
+expect parseCapped(&"[[]]", ParseLimit.Depth, 1u64, 1u64);
+expect parseCapped(&"[null]", ParseLimit.Nodes, 1u64, 1u64);
+expect parseCapped(&"\"é\"", ParseLimit.StringBytes, 1u64, 1u64);
+expect parseCapped(&"\"\\uD834\\uDD1E\"", ParseLimit.StringBytes, 3u64, 1u64);
+expect parseCapped(&"123", ParseLimit.NumberBytes, 2u64, 2u64);
+expect outputCapped(&"\"é\"", 3u64);
+expect exactOutputBoundary() == "\"é\"";
+expect constructedDepth();
+expect prettyText(&"[null]") == "[\n  null\n]";
+expect zeroIndent() == "[\nnull\n]";
+expect prettyCapped();
+expect hugeIndent();
+expect constructorHasNoDocumentQuota();
+expect typedCause();
+expect defaults();

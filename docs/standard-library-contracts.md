@@ -1,8 +1,10 @@
 # Rill v0 standard-library contracts
 
-Confirmed design input for [#23](https://github.com/Reilley64/rill/issues/23), summarized by [ADR 0015](adr/0015-language-required-library-contracts.md). This is **not** an implemented library, accepted feature RFC, or checker/backend proof. #28 writes and validates the feature RFCs; #24 owns compiler diagnostics. Separately approved application foundations extend the closed #23 core without reopening it: std::env is recorded in section 12 / [ADR 0019](adr/0019-owned-startup-environment-and-arguments.md), and secure random bytes in section 13 / [ADR 0020](adr/0020-secure-random-byte-generation.md). JSON has its own approved scope/design ticket, [#31](https://github.com/Reilley64/rill/issues/31), and does not gate closing #23.
+Confirmed design input for [#23](https://github.com/Reilley64/rill/issues/23), summarized by [ADR 0015](adr/0015-language-required-library-contracts.md). This is **not** an implemented library, accepted feature RFC, or checker/backend proof. #28 writes and validates the feature RFCs; #24 owns compiler diagnostics. Separately approved application foundations extend the closed #23 core without reopening it: std::env is recorded in section 12 / [ADR 0019](adr/0019-owned-startup-environment-and-arguments.md), and secure random bytes in section 13 / [ADR 0020](adr/0020-secure-random-byte-generation.md). JSON has its own [confirmed contract](json-contracts.md) from [#31](https://github.com/Reilley64/rill/issues/31), and does not gate closing #23.
 
 Read the newer decisions over historical examples: #18 explicit widths/UTF-8; #19 enums, not unions/singleton types; #29 origins and explicit causes, not propagation reports; #22 bounded stacks/proper tails. This contract refines #29's cause-retention boundary and #15/#17's copy/disposal interfaces explicitly below. ADRs 0013/0014 and their fixtures were prepared in separate sessions and may not yet be present in this checkout. Their GitHub decisions remain source inputs; their absence is not evidence those policies were dropped.
+
+**Concurrent conversion refinement:** [#41's confirmed decision](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679) supersedes the historical closed-conversion/snake-case declarations below and uses explicit implement for family bodies. Its separate artifact migration is not duplicated by the JSON work in this checkout. Read both confirmed inputs for current conversion-specific dispatch/error evidence; #28 still owes combined formalization and validation.
 
 ## Reading the catalogue
 
@@ -42,11 +44,13 @@ The arity schemas below describe exactly the **2-, 3-, and 4-item implementation
 | `std::mutex` | Mutex, LockGuard, mutex, lock |
 | `std::channel` | Sender, Receiver, SendError, channel, send, receive, after, select, unsent, intoUnsent |
 | `std::routine` | Routine, AllFailed, failures, join, all, allSettled, race, any |
-| `std::time` | sleep |
+| `std::time` | sleep; [#33 temporal/clock/wait contract](time-contracts.md) and [cancellation integration](clock-cancellation-contracts.md) |
+| `std::cancel` | [#33 sources, tokens, links, guard and poll/wait/select observation](clock-cancellation-contracts.md) |
 | `std::io` | IoError, IoErrorKind, kind, nativeCode, readStdin, writeStdout, writeStderr, flushStdout, flushStderr |
 | `std::fs` | readFile, writeFile; uses the canonical std::io::IoError |
 | `std::env` | Inputs, EnvError, EnvErrorKind, EnvPosition; inputs, fromParts, argsBytes, varsBytes, getBytes, args, vars, get, kind, position |
 | `std::random` | randomBytes, fillRandom, RandomError, RandomErrorKind, kind, nativeCode |
+| `std::encoding::json` | Owned Value/Number/Object, explicit parse/format/limits/errors; see the [JSON contract](json-contracts.md) |
 
 Library types/functions need explicit imports. Primitive `string`/`char` do not; their modules contain helpers, not replacement primitive types. Canonical interpolation/iteration/cleanup can load required metadata without source bindings. `map` in collection/result/option and `join` in collection/routine are different families; import aliases resolve source collisions. No implicit broad std import, mutable exported globals, module initializers, methods, traits or user-defined conversion operators are added.
 
@@ -262,7 +266,7 @@ sleep(milliseconds: u64): void
 after(milliseconds: u64): Receiver<void>
 ```
 
-Timers use monotonic time, not calendar time. after produces one void notification then closes. Zero is immediately eligible, not a forced yield. Scheduling/native work/cleanup can delay completion indefinitely; checked duration/deadline representation must not silently wrap. No portable maximum scheduling-latency or hard-deadline promise.
+Timers use monotonic time, not calendar time. after produces one void notification then closes. Zero is immediately eligible, not a forced yield. Scheduling/native work/cleanup can delay completion indefinitely; checked duration/deadline representation must not silently wrap. No portable maximum scheduling-latency or hard-deadline promise. [Confirmed #33](clock-cancellation-contracts.md) makes the default clock suspend-inclusive, preserves these millisecond shapes and defines fatal unsupported/failure handling for their error-free signatures. New typed waits take an explicit token and return/deliver WaitError; explicit token cancellation is not intrinsic goroutine cancellation.
 
 ### select without string tags
 
@@ -357,13 +361,17 @@ Root log/panic each use one `(S)` declaration shape with string and &string inpu
 
 Source panic requires importing std::panic and returns never. Compiler-generated arithmetic/allocation/stack failures use canonical runtime metadata without a lexical panic binding. User shadowing cannot redirect them. Allocation/reservation failure is fatal, not ubiquitous recoverable allocation Results. #22 overflow uses bounded best-effort emergency reporting without user formatters/full trace/required allocation/unwind; host failure may prevent a report. Other fatal panic remains uncatchable, with no cleanup/global-exit guarantee.
 
+## Confirmed time and cancellation extension (#33)
+
+[ADR 0022](adr/0022-jiff-time-and-explicit-cancellation.md), the [temporal contract](time-contracts.md) and [clock/token contract](clock-cancellation-contracts.md) record the explicitly confirmed expansion. Jiff-derived validated values/immutable zones, explicit source limits, exact arithmetic/text boundaries, suspend-inclusive clocks/manual controls and token-aware waits extend this baseline. Sources request one-shot state; tokens observe; stop still joins. There is no generic withCancellation, public callback registry, ambient token or source CancelAfter. withDeadline preserves its R and joins losing work/cleanup. Explicit token outcomes can complete normally during masked cleanup only after safe resource release; intrinsic delivery remains deferred. #36 supplies explicit Inputs for system-zone TZ, never live environment reads. Prototypes 23/24 are hand-checked, not compiler/runtime/provider proof; #28/#30 retain gates.
+
 ## 11. Validation and follow-through
 
 `prototypes/15-library-contracts.rill` and its `.md` inventory contain hand-checked intended-valid and rejected cases. They are not compiler-executed tests or a demonstration of stack, callback, native, or borrow-checker soundness. Earlier fixtures whose no-arg channels, copy(value), variadic work calls, plain all, string tags, implicit Error construction or propagation reports conflict are historical in those respects; do not count them as v0-valid without migration.
 
 #28 must reconcile these interfaces with all source tickets, formally specify generic requirement/candidate inference (including direct tuple literals/overloaded callbacks), source/iterator/callback dependencies, callee exits, mutable storage and transitive last use, enum joins/widening, property evidence and sealed cause invariants. Validate protected overlaps/negative capabilities/remaining-field cleanup, exactly-once native/channel state, cancellation masks, standard bounded-stack traversal/default release, numeric/parser/UTF-8 edge cases, alias identity/public contracts, and both accepted/rejected adversarial examples. A missing consistent required rule is returned to the map, not concealed by a conservative-sounding safety claim. #30 separately gates pinned backend/ABI/Wasm mechanisms; no target compatibility proof is asserted here.
 
-#24 owns diagnostics; #25 exercises a realistic program using these interfaces; #31 settles JSON separately before its RFC coverage. #26 owns final RFC organization/status. These design inputs neither implement the standard library nor accept the future feature proposals.
+#24 owns diagnostics; #25 supplies the accepted realistic-program evidence; #31 records the separate [JSON contract](json-contracts.md). #41 owns the requested user-extensible camelCase conversion/error interface, including reconciliation of the earlier closed numeric declarations above; it is not settled by the JSON ticket. #26 owns final RFC organization/status. These design inputs neither implement the standard library nor accept the future feature proposals.
 
 ## 12. Environment and argument inputs
 
