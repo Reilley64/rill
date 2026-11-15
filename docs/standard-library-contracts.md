@@ -1,6 +1,6 @@
-# Rill v0 language-required standard-library contracts
+# Rill v0 standard-library contracts
 
-Confirmed design input for [#23](https://github.com/Reilley64/rill/issues/23), summarized by [ADR 0015](adr/0015-language-required-library-contracts.md). This is **not** an implemented library, accepted feature RFC, or checker/backend proof. #28 writes and validates the feature RFCs; #24 owns compiler diagnostics. JSON has its own approved scope/design ticket, [#31](https://github.com/Reilley64/rill/issues/31), and does not gate closing #23.
+Confirmed design input for [#23](https://github.com/Reilley64/rill/issues/23), summarized by [ADR 0015](adr/0015-language-required-library-contracts.md). This is **not** an implemented library, accepted feature RFC, or checker/backend proof. #28 writes and validates the feature RFCs; #24 owns compiler diagnostics. Separately approved application foundations extend the closed #23 core without reopening it: std::env is recorded in section 12 / [ADR 0019](adr/0019-owned-startup-environment-and-arguments.md), and secure random bytes in section 13 / [ADR 0020](adr/0020-secure-random-byte-generation.md). JSON has its own approved scope/design ticket, [#31](https://github.com/Reilley64/rill/issues/31), and does not gate closing #23.
 
 Read the newer decisions over historical examples: #18 explicit widths/UTF-8; #19 enums, not unions/singleton types; #29 origins and explicit causes, not propagation reports; #22 bounded stacks/proper tails. This contract refines #29's cause-retention boundary and #15/#17's copy/disposal interfaces explicitly below. ADRs 0013/0014 and their fixtures were prepared in separate sessions and may not yet be present in this checkout. Their GitHub decisions remain source inputs; their absence is not evidence those policies were dropped.
 
@@ -45,6 +45,8 @@ The arity schemas below describe exactly the **2-, 3-, and 4-item implementation
 | `std::time` | sleep |
 | `std::io` | IoError, IoErrorKind, kind, nativeCode, readStdin, writeStdout, writeStderr, flushStdout, flushStderr |
 | `std::fs` | readFile, writeFile; uses the canonical std::io::IoError |
+| `std::env` | Inputs, EnvError, EnvErrorKind, EnvPosition; inputs, fromParts, argsBytes, varsBytes, getBytes, args, vars, get, kind, position |
+| `std::random` | randomBytes, fillRandom, RandomError, RandomErrorKind, kind, nativeCode |
 
 Library types/functions need explicit imports. Primitive `string`/`char` do not; their modules contain helpers, not replacement primitive types. Canonical interpolation/iteration/cleanup can load required metadata without source bindings. `map` in collection/result/option and `join` in collection/routine are different families; import aliases resolve source collisions. No implicit broad std import, mutable exported globals, module initializers, methods, traits or user-defined conversion operators are added.
 
@@ -362,3 +364,141 @@ Source panic requires importing std::panic and returns never. Compiler-generated
 #28 must reconcile these interfaces with all source tickets, formally specify generic requirement/candidate inference (including direct tuple literals/overloaded callbacks), source/iterator/callback dependencies, callee exits, mutable storage and transitive last use, enum joins/widening, property evidence and sealed cause invariants. Validate protected overlaps/negative capabilities/remaining-field cleanup, exactly-once native/channel state, cancellation masks, standard bounded-stack traversal/default release, numeric/parser/UTF-8 edge cases, alias identity/public contracts, and both accepted/rejected adversarial examples. A missing consistent required rule is returned to the map, not concealed by a conservative-sounding safety claim. #30 separately gates pinned backend/ABI/Wasm mechanisms; no target compatibility proof is asserted here.
 
 #24 owns diagnostics; #25 exercises a realistic program using these interfaces; #31 settles JSON separately before its RFC coverage. #26 owns final RFC organization/status. These design inputs neither implement the standard library nor accept the future feature proposals.
+
+## 12. Environment and argument inputs
+
+[#36](https://github.com/Reilley64/rill/issues/36) / [ADR 0019](adr/0019-owned-startup-environment-and-arguments.md) add this explicitly confirmed application foundation after #23. This section is the current std::env contract, not a live-process configuration API.
+
+### Public surface and ownership
+
+All new types/functions are exported from `std::env`; none enters the fixed prelude. `Inputs` and `EnvError` are opaque nominal private-field types. Public signature contracts are:
+
+```rill
+inputs(): Result<Inputs, EnvError>
+fromParts(arguments: List<Bytes>, variables: List<[Bytes, Bytes]>)
+  : Result<Inputs, EnvError>
+argsBytes(inputs: &Inputs): &List<Bytes>
+varsBytes(inputs: &Inputs): &List<[Bytes, Bytes]>
+getBytes(inputs: &Inputs, name: &Bytes): Result<Option<&Bytes>, EnvError>
+args(inputs: &Inputs): Result<List<string>, EnvError>
+vars(inputs: &Inputs): Result<List<[string, string]>, EnvError>
+get(inputs: &Inputs, name: &string): Result<Option<string>, EnvError>
+kind(error: &EnvError): EnvErrorKind
+position(error: &EnvError): Option<EnvPosition>
+```
+
+`inputs()` returns a fresh independently owned copy of the fixed startup inputs, never a live read or a hidden counted handle. `fromParts` consumes the lists/byte owners supplied by the caller; the caller must copy explicitly to retain them. Successful Inputs has no mutable accessor and no implicit copy. The standard `copy(&Inputs):Inputs` implementation independently copies its contents. Inputs and EnvError supply noBorrow/sendable/shareable evidence; EnvError supplies canonical display. Ordinary cleanup disposes owned fields; no new resource action or copy of Err/Cause is implied.
+
+Raw query results retain ordinary source dependencies. In particular, getBytes conservatively depends on both borrowed Inputs and borrowed lookup name; this API does not add a special lifetime annotation or an exception just because the key is not the value's backing storage. Keep those owners alive until the result's last use. Text results own independent strings and do not retain the Inputs or query. Scoped read-only use and explicit owned transfer/copy obey existing callable/concurrency rules.
+
+### Bytes, validation and ordering
+
+Preserve all delivered argument bytes and their order, including argument zero if supplied. An empty list is valid; argument zero is not a guaranteed executable path, and strings are not shell-split, unquoted or interpreted again.
+
+Environment names are nonempty, case-sensitive exact bytes, excluding NUL and `=`; non-UTF-8 names and names outside shell-identifier grammar are valid. Values may be empty or contain `=`, but not NUL. Arguments may be empty, but not contain NUL. A host entry splits at its first `=`; absence of a separator is MalformedEntry and an empty left side is InvalidName. Duplicate exact names reject even if their values agree; case-distinct names remain distinct.
+
+Validate arguments in supplied order for InvalidArgument, then environment entries in supplied order. At each host entry check separator, name, value, then duplication; fromParts already supplies pairs, so its per-entry checks are name, value, then duplication. Report the first failure with no partial Inputs. Only after validation, sort variables lexicographically by unsigned raw name bytes (ordinary prefix ordering), without locale/case folding or Unicode normalization. This canonical enumeration is not unordered Map iteration and does not imply a new public sorting/hash API.
+
+Validate lookup names even on empty Inputs. Invalid queries yield InvalidName/LookupName, not absence. Missing valid names produce Ok(None); present-empty produces Ok(Some(empty bytes/text)). getBytes never validates Unicode. Text get validates only the selected value; unrelated non-UTF-8 keys/values do not break a valid lookup. Bulk args/vars conversion stops on its first invalid UTF-8 item, never skipping/replacing it: argument order for args, canonical variable order with name before value for vars. Returned text is owned; explicit lossy conversion remains existing byte/string composition.
+
+### Safe structured errors
+
+```rill
+enum EnvErrorKind {
+  Unavailable,
+  AcquisitionFailed,
+  InvalidName,
+  InvalidArgument,
+  InvalidValue,
+  DuplicateName,
+  MalformedEntry,
+  InvalidUtf8,
+}
+enum EnvPosition {
+  Argument(u64),
+  VariableName(u64),
+  VariableValue(u64),
+  LookupName,
+}
+```
+
+Unavailable means the supported running host/embedding cannot provide the operation; AcquisitionFailed means attempted acquisition failed. InvalidArgument/InvalidValue mean embedded NUL; InvalidName covers empty/NUL/equals names. DuplicateName identifies the later duplicate through VariableName. MalformedEntry identifies the unsplittable host entry through VariableName. InvalidUtf8 identifies the argument/name/value being converted.
+
+Positions are optional: acquisition failures need not have an input index. Construction errors use supplied pre-sort indices, while bulk variable text errors and a selected invalid text value use canonical varsBytes indices. Invalid lookup names use LookupName. All counts/indices are u64 with existing target addressability/checked-sizing limits.
+
+EnvError retains only safe category/position information, not offending names/values, full argv/environ or arbitrary host diagnostic strings. Its standard display and wrapper/cause rendering must not reintroduce those contents. A decoder can inspect internally without retaining the offending source in the diagnostic. No general reflected Inputs dump or secret-detection/zeroization guarantee is added. Applications may deliberately retrieve/print values or explicitly wrap errors under normal rules; that is their responsibility. Existing origin/cause semantics remain, not propagation traces or implicit error conversion.
+
+### Startup, tests and hosts
+
+Capture once at a controlled runtime point before Rill workers. No later operation consults mutable process-global state or guest-libc environment state. Publish an immutable owned outcome: captured data or safe acquisition/validation failure information. Each inputs call creates its own owned Inputs or EnvError result under ordinary construction-origin rules, without cloning unique Err/Cause state, executing user formatters at bootstrap or terminating early merely for malformed input. There is no publicly mutable runtime global or module initializer; named functions still receive application state explicitly.
+
+An embedding host must supply owned inputs or establish a genuinely safe capture point; an internal mutex cannot coordinate foreign native mutation. Synthetic/host-supplied pairs use the same validation rules. Native Linux/macOS and wasm32-wasip1 share the API; WASI sees only instance-provided data, not ambient host inheritance, and a host may restrict injection to UTF-8. Empty supplied data is valid. Ordinary reported acquisition failures remain Result errors. Allocation failure, fatal host traps and inability to instantiate are not recoverable EnvError promises; #30 still gates backend/host-pointer support. No Windows behavior is implied.
+
+In rill test, skip actual host capture and use empty arguments/variables, regardless of developer/CI environment and runner flags. Tests needing data call fromParts explicitly; no host-inheritance testing switch is added. Build/runner options are not implicitly reclassified as application arguments; the API preserves only the input sequence actually supplied to the application. Flag parsing, dotenv/layered configuration, process spawning/mutation, executable-location discovery and an ambient-host opt-in remain outside this scope.
+
+### Evidence and follow-through
+
+[Prototype 20](../prototypes/20-environment-inputs.rill) and its [independent cases](../prototypes/20-environment-inputs.md) cover byte preservation, text ownership, validation priority, case/order/missing/empty semantics, error positions, explicit worker configuration and isolated tests. Examples are hand-checked, not compiler/runtime execution. Standard capture/validation/sorting/copying/decoding/default cleanup must bound call-stack use per #22; target limits and fatal allocation policy remain, with no silent truncation.
+
+#28 must formalize conservative result/key dependencies, callee exits, opaque property/copy evidence, source construction origins, safe startup/embedding capture and immutable outcome publication, checked host count/size/read consistency, exactly-once cleanup and cancellation of partial copies/conversions. Host traps and arbitrary concurrent foreign mutation cannot be made safe by interface wording. #24's confirmed diagnostics model applies; #35 owns actual filesystem paths. Return an unworkable required checking/platform rule to the map; design approval is neither a safety proof nor final RFC acceptance.
+
+## 13. Secure random bytes
+
+[#37](https://github.com/Reilley64/rill/issues/37) / [ADR 0020](adr/0020-secure-random-byte-generation.md) add this explicitly confirmed secure-byte foundation without reopening #23 or changing #36's environment/test contract.
+
+### Public surface and security boundary
+
+`std::random` exports the following ordinary operations and opaque RandomError, plus public RandomErrorKind. No names enter the prelude, and no public provider, seed, global/environment override or deterministic mode is added.
+
+```rill
+randomBytes(length: u64): Result<Bytes, RandomError>
+fillRandom(destination: &mut Bytes): Result<void, RandomError>
+kind(error: &RandomError): RandomErrorKind
+nativeCode(error: &RandomError): Option<i64>
+
+enum RandomErrorKind {
+  Unavailable,
+  PermissionDenied,
+  ProviderFailed,
+}
+```
+
+randomBytes returns exactly the requested logical length of independently owned Bytes only after complete provider success. No partial owner escapes on error/cancellation. fillRandom replaces all bytes in the destination's existing logical extent on success, with no resize, append, spare-capacity access or writable borrowed subrange. Both forms use existing Bytes, not a new random-buffer/reader interface. Success is not a count/short fill.
+
+On in-place error/cancellation, contents may be modified with no usable-prefix or rollback guarantee; logical length remains unchanged. Do not use the destination as successfully generated material after failure. Normal initialized-byte/memory-safety and ownership rules still hold; unspecified contents do not permit uninitialized memory or writes outside the extent. A later whole-buffer successful fill establishes its own complete result. No byte-generation operation promises uniqueness or that any particular byte is nonzero.
+
+Within a running supported runtime, randomBytes(0) returns empty Bytes and filling an empty owner succeeds without consulting/initializing a provider. This is not a capability probe or a promise that missing Wasm imports instantiate. Normal scheduling/cancellation and fatal allocation/host behavior are not turned into Result success guarantees.
+
+Use checked u64 requests and existing target addressability/Bytes capacity/allocation behavior, with no silent truncation/narrowing or artificial portable total-size quota. Unrepresentable capacity/allocation failures remain fatal, not recoverable RandomError variants. Callers bound untrusted sizes. Chunking/checkpoints are implementation details: check remaining lengths, offsets and native size_t/WASI u32 conversions against real provider limits. Standard traversal/cleanup bounds call-stack growth per #22; no full-request shadow buffer or zeroization protocol is required by the public contract.
+
+### Errors and providers
+
+RandomError owns safe category/optional native numeric code, never the generated bytes, destination contents or an automatic diagnostic buffer dump. It supplies canonical display and noBorrow/sendable/shareable evidence. Native codes are diagnostic platform-specific signed i64 observations, not a cross-platform branching protocol. Preserve representable native code values without wrapping; portable decisions use kind.
+
+Unavailable identifies an unavailable source/operation; PermissionDenied covers reliably identified access restrictions; otherwise a reported source failure is ProviderFailed. Unknown statuses need not be falsely classified as permission or absence. Linux EINTR is retried rather than exposed as Interrupted, with normal checks between attempts. Nonempty zero progress produces ProviderFailed rather than spinning or returning an incomplete success; a runtime/provider bounds violation is not made safe or recoverable by an error label. Typed errors do not include fatal host traps, missing-import/instantiation failures, allocation failure or cancellation delivery. Error wrappers retain ordinary construction origins and explicit causes, not automatic propagation traces or implicit conversion.
+
+| Target | Selected baseline |
+| --- | --- |
+| Linux x86-64/AArch64 | getrandom(..., 0), waiting for secure initialization; handle positive short counts, retry EINTR, no GRND_INSECURE/GRND_RANDOM/device-file or Rill-generator compatibility fallback. Report unavailable syscall or sandbox errors when the runtime receives them. |
+| macOS x86-64/AArch64 | SecRandomCopyBytes(kSecRandomDefault, ...), checked status and size_t lengths; trusted runtime/system-framework linkage. No assumed short-count, rollback or bounded-latency guarantee. |
+| wasm32-wasip1 | random_get only under an explicitly supported trusted host configuration providing cryptographically secure bytes; checked u32 ABI lengths/offsets and host-compatible bounded calls. Preview1 high-quality wording alone does not certify every host. |
+
+No Windows support is implied. Provider trust is part of supported deployment, not something guest byte statistics can verify. A vetted securely seeded cryptographic generator inside an OS/host service is not intrinsically a weak fallback; predictable/weak/fixed/test/zero output must never be substituted for secure success. The chosen Linux baseline deliberately omits a compatibility backend even if another secure-source approach could be separately reviewed later.
+
+### Blocking, cancellation and testing
+
+Potentially blocking native provider work uses the runtime blocking facility instead of an ordinary scheduler worker. Small requests being usually fast is not a nonblocking guarantee. Provider calls use bounded chunks; positive counts advance only the confirmed region, retries cannot spin without normal cancellation/fairness opportunities, and errors never publish a partially complete owned result. There is no new public timeout/try-nonblocking API.
+
+Retain backing owners and all exclusive-access restrictions until actual native completion or confirmed abortion. Requesting cancellation, dropping a handle or moving work to a blocking pool does not end native writes. Cleanup can suspend indefinitely; no hard return/cancel deadline, force kill, rollback or fatal-panic cleanup promise. Partial allocations/copies/owned output dispose exactly once only after source/native obligations end.
+
+Wasm's synchronous import may stall its single-threaded scheduler. Offload/reentrancy/memory.grow safety needs backend validation: a guest offset is not a permanently valid host pointer. Host-owned staging with safe copy-back is a candidate, not an implemented or universally required mechanism. #30's existing support gates remain; unsupported integration must not be silently described as a working asynchronous entropy provider.
+
+rill test keeps real secure provider behavior; it does not automatically seed/replace std::random, even though std::env intentionally supplies empty inputs in tests. Application consumers can explicitly accept fake callables in their own code. Failure/partial-write/retry tests of the standard adapter use structurally separate private harness/linkage, never a public production seed/provider override or new user-implementable secure source. Local aliases/shadowing do not change canonical identity or the standard support/security contract. Tests must not assert exact random values, all-nonzero output or guaranteed uniqueness; observations cannot certify unpredictability.
+
+Output is ordinary Bytes, without locked-memory, secure erase or protection from explicit application printing. Seeded PRNGs, ranges/floats/shuffling, UUID/token formatting, cryptographic algorithms and special secret storage remain separate designs.
+
+### Evidence and follow-through
+
+[Prototype 21](../prototypes/21-secure-random.rill) and its [independent inventory](../prototypes/21-secure-random.md) demonstrate empty calls, ordinary production call shapes and explicit application fakes without a standard-provider override. They are hand-checked source examples, not live provider tests or entropy/security proof. ADR 0020 records exact primary-source contracts and differences; no historical Linux size limit, macOS getentropy limit or Wasmtime default limit becomes a universal API cap.
+
+#28 must validate checked count/offset/chunk progress, source error mapping/origins and buffer-safe diagnostics, native blocking/retention/cleanup, cancellation/retries and non-escaping owned partial output. Specify/link the chosen macOS system framework and actual supported WASI provider configurations, including synchronous stalls, host traps and memory relocation/reentrancy. #38 must use a justified TLS entropy/provider configuration, not infer that this byte API alone establishes TLS security or authorizes entropy overrides/general FFI. Missing necessary checking/provider mechanisms return to the map; design approval neither implements the library nor accepts the future RFC.

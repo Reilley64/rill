@@ -1,0 +1,331 @@
+// #36 / ADR 0019: hand-checked design examples, not compiled/executed tests.
+// All application input is explicit. Only testDefaultIsEmpty queries the runtime,
+// and it is called by expect: rill test must bypass actual host capture entirely.
+import std::panic;
+import std::env::{Inputs, EnvError, EnvErrorKind, EnvPosition, inputs, fromParts,
+  argsBytes, varsBytes, getBytes, args, vars, get, kind, position};
+import std::collection::{List, length, get as at};
+import std::bytes::{Bytes, length as byteLength, get as byteAt};
+import std::string::{bytes, decodeUtf8};
+import std::compare::eq;
+import std::option::Option;
+import std::result::Result;
+import std::error::value;
+import std::routine::join;
+
+function encoded(text: &string): Bytes {
+  return copy(bytes(text));
+}
+
+function fixture(arguments: List<Bytes>, variables: List<[Bytes, Bytes]>): Inputs {
+  guard let snapshot = fromParts(arguments, variables) else {
+    panic("invalid fixture");
+  }
+  return snapshot;
+}
+
+function textIs(result: Result<Option<string>, EnvError>, expected: &string): bool {
+  guard let found = result else {
+    return false;
+  }
+  return match (found) {
+    Option.Some(text) => eq(&text, expected),
+    Option.None => false,
+  };
+}
+
+function textAt(values: &List<string>, index: u64, expected: &string): bool {
+  return match (at(values, index)) {
+    Option.Some(text) => eq(text, expected),
+    Option.None => false,
+  };
+}
+
+function nameAt(snapshot: &Inputs, index: u64, expected: &string): bool {
+  guard let [name, content] = at(varsBytes(snapshot), index) else {
+    return false;
+  }
+  guard let text = decodeUtf8(name) else {
+    return false;
+  }
+  return eq(&text, expected);
+}
+
+function errorKindOf<T>(result: Result<T, EnvError>): Option<EnvErrorKind> {
+  guard result else (error) {
+    return Option.Some(kind(value(&error)));
+  }
+  return Option.None;
+}
+
+function errorPositionOf<T>(result: Result<T, EnvError>): Option<EnvPosition> {
+  guard result else (error) {
+    return position(value(&error));
+  }
+  return Option.None;
+}
+
+function emptySynthetic(): bool {
+  let snapshot = fixture([], []);
+  return length(argsBytes(&snapshot)) == 0u64
+    && length(varsBytes(&snapshot)) == 0u64;
+}
+
+function fullArgumentSequence(): bool {
+  let snapshot = fixture([encoded(&"launcher label"), encoded(&"two words"), Bytes([])], []);
+  guard let text = args(&snapshot) else {
+    return false;
+  }
+  return length(&text) == 3u64
+    && textAt(&text, 0u64, &"launcher label")
+    && textAt(&text, 1u64, &"two words")
+    && textAt(&text, 2u64, &"");
+}
+
+function sortedVariables(): bool {
+  let snapshot = fixture([], [
+    [encoded(&"z"), encoded(&"last")],
+    [encoded(&"a"), encoded(&"lower")],
+    [encoded(&"A"), encoded(&"upper")],
+  ]);
+  return nameAt(&snapshot, 0u64, &"A")
+    && nameAt(&snapshot, 1u64, &"a")
+    && nameAt(&snapshot, 2u64, &"z")
+    && textIs(get(&snapshot, &"A"), &"upper")
+    && textIs(get(&snapshot, &"a"), &"lower");
+}
+
+function absentIsNotEmpty(): bool {
+  let snapshot = fixture([], [[encoded(&"EMPTY"), Bytes([])]]);
+  guard let missing = get(&snapshot, &"MISSING") else {
+    return false;
+  }
+  return match (missing) {
+    Option.None => textIs(get(&snapshot, &"EMPTY"), &""),
+    Option.Some(text) => false,
+  };
+}
+
+function unrestrictedNamesAndEquals(): bool {
+  let snapshot = fixture([], [[encoded(&"1.x-y"), encoded(&"a=b=c")]]);
+  return textIs(get(&snapshot, &"1.x-y"), &"a=b=c");
+}
+
+function rawInvalidUtf8Preserved(): bool {
+  let snapshot = fixture([], [[encoded(&"RAW"), Bytes([255u8])]]);
+  let key = encoded(&"RAW");
+  guard let found = getBytes(&snapshot, &key) else {
+    return false;
+  }
+  return match (found) {
+    Option.Some(raw) => match (byteAt(raw, 0u64)) {
+      Option.Some(255u8) => byteLength(raw) == 1u64,
+      _ => false,
+    },
+    Option.None => false,
+  };
+}
+
+function nonUtf8NameIsUsableAsBytes(): bool {
+  let snapshot = fixture([], [[Bytes([255u8]), encoded(&"kept")]]);
+  let key = Bytes([255u8]);
+  guard let found = getBytes(&snapshot, &key) else {
+    return false;
+  }
+  return match (found) {
+    Option.Some(raw) => byteLength(raw) == 4u64,
+    Option.None => false,
+  };
+}
+
+function unrelatedInvalidTextDoesNotBreakLookup(): bool {
+  let snapshot = fixture([], [
+    [Bytes([255u8]), Bytes([254u8])],
+    [encoded(&"GOOD"), encoded(&"usable")],
+  ]);
+  return textIs(get(&snapshot, &"GOOD"), &"usable");
+}
+
+function invalidValueKind(): Option<EnvErrorKind> {
+  let snapshot = fixture([], [[encoded(&"RAW"), Bytes([255u8])]]);
+  return errorKindOf(get(&snapshot, &"RAW"));
+}
+
+function invalidArgumentTextPosition(): Option<EnvPosition> {
+  let snapshot = fixture([encoded(&"label"), Bytes([255u8])], []);
+  return errorPositionOf(args(&snapshot));
+}
+
+function sortedTextErrorPosition(): Option<EnvPosition> {
+  let snapshot = fixture([], [
+    [encoded(&"z"), Bytes([255u8])],
+    [encoded(&"a"), encoded(&"valid")],
+  ]);
+  return errorPositionOf(vars(&snapshot));
+}
+
+function invalidNameTextPosition(): Option<EnvPosition> {
+  let snapshot = fixture([], [[Bytes([255u8]), Bytes([254u8])]]);
+  return errorPositionOf(vars(&snapshot));
+}
+
+function ownedTextOutlivesSnapshot(): bool {
+  let snapshot = fixture([], [[encoded(&"KEY"), encoded(&"independent")]]);
+  let result = get(&snapshot, &"KEY");
+  dispose(snapshot);
+  return textIs(result, &"independent");
+}
+
+function ownedArgumentTextOutlivesSnapshot(): bool {
+  let snapshot = fixture([encoded(&"label")], []);
+  guard let text = args(&snapshot) else {
+    return false;
+  }
+  dispose(snapshot);
+  return textAt(&text, 0u64, &"label");
+}
+
+function independentCopy(): bool {
+  let snapshot = fixture([], [[encoded(&"KEY"), encoded(&"copied")]]);
+  let other = copy(&snapshot);
+  dispose(snapshot);
+  return textIs(get(&other, &"KEY"), &"copied");
+}
+
+function keepsCopiedConstructorSource(): bool {
+  let arguments: List<Bytes> = [encoded(&"label")];
+  let variables: List<[Bytes, Bytes]> = [[encoded(&"KEY"), encoded(&"value")]];
+  let snapshot = fixture(copy(&arguments), variables);
+  return length(&arguments) == 1u64
+    && length(argsBytes(&snapshot)) == 1u64;
+}
+
+type WorkerConfig = { name: string };
+
+function worker(config: WorkerConfig): string {
+  return config.name;
+}
+
+function explicitWorkerConfiguration(): bool {
+  let snapshot = fixture([], [[encoded(&"ROLE"), encoded(&"api")]]);
+  guard let found = get(&snapshot, &"ROLE") else {
+    return false;
+  }
+  guard let configuredName = found else {
+    return false;
+  }
+  let config = WorkerConfig { name: configuredName };
+  dispose(snapshot);
+  let [workerName, marker] = join([() => worker(config), () => 1u32]);
+  return eq(&workerName, &"api") && marker == 1u32;
+}
+
+function testDefaultIsEmpty(): bool {
+  guard let snapshot = inputs() else {
+    return false;
+  }
+  return length(argsBytes(&snapshot)) == 0u64
+    && length(varsBytes(&snapshot)) == 0u64;
+}
+
+function acquisitionCopiesAreIndependent(): bool {
+  guard let first = inputs() else {
+    return false;
+  }
+  guard let second = inputs() else {
+    return false;
+  }
+  dispose(first);
+  return length(argsBytes(&second)) == 0u64;
+}
+
+expect emptySynthetic();
+expect fullArgumentSequence();
+expect sortedVariables();
+expect absentIsNotEmpty();
+expect unrestrictedNamesAndEquals();
+expect rawInvalidUtf8Preserved();
+expect nonUtf8NameIsUsableAsBytes();
+expect unrelatedInvalidTextDoesNotBreakLookup();
+expect ownedTextOutlivesSnapshot();
+expect ownedArgumentTextOutlivesSnapshot();
+expect independentCopy();
+expect keepsCopiedConstructorSource();
+expect explicitWorkerConfiguration();
+expect testDefaultIsEmpty();
+expect acquisitionCopiesAreIndependent();
+
+expect match (invalidValueKind()) {
+  Option.Some(EnvErrorKind.InvalidUtf8) => true,
+  _ => false,
+};
+expect match (invalidArgumentTextPosition()) {
+  Option.Some(EnvPosition.Argument(1u64)) => true,
+  _ => false,
+};
+expect match (sortedTextErrorPosition()) {
+  Option.Some(EnvPosition.VariableValue(1u64)) => true,
+  _ => false,
+};
+expect match (invalidNameTextPosition()) {
+  Option.Some(EnvPosition.VariableName(0u64)) => true,
+  _ => false,
+};
+expect match (errorKindOf(fromParts([Bytes([0u8])], []))) {
+  Option.Some(EnvErrorKind.InvalidArgument) => true,
+  _ => false,
+};
+expect match (errorKindOf(fromParts([], [[Bytes([]), Bytes([])]]))) {
+  Option.Some(EnvErrorKind.InvalidName) => true,
+  _ => false,
+};
+expect match (errorKindOf(fromParts([], [[encoded(&"A=B"), Bytes([])]]))) {
+  Option.Some(EnvErrorKind.InvalidName) => true,
+  _ => false,
+};
+expect match (errorKindOf(fromParts([], [[Bytes([65u8, 0u8]), Bytes([])]]))) {
+  Option.Some(EnvErrorKind.InvalidName) => true,
+  _ => false,
+};
+expect match (errorKindOf(fromParts([], [[encoded(&"KEY"), Bytes([0u8])]]))) {
+  Option.Some(EnvErrorKind.InvalidValue) => true,
+  _ => false,
+};
+expect match (errorPositionOf(fromParts([], [
+  [encoded(&"KEY"), encoded(&"first")],
+  [encoded(&"KEY"), encoded(&"second")],
+]))) {
+  Option.Some(EnvPosition.VariableName(1u64)) => true,
+  _ => false,
+};
+expect match (errorKindOf(fromParts([], [
+  [encoded(&"KEY"), encoded(&"same")],
+  [encoded(&"KEY"), encoded(&"same")],
+]))) {
+  Option.Some(EnvErrorKind.DuplicateName) => true,
+  _ => false,
+};
+expect match (errorKindOf(fromParts([Bytes([0u8])], [[Bytes([]), Bytes([])]]))) {
+  Option.Some(EnvErrorKind.InvalidArgument) => true,
+  _ => false,
+};
+
+function invalidTextLookup(): Option<EnvPosition> {
+  let snapshot = fixture([], []);
+  return errorPositionOf(get(&snapshot, &"BAD=NAME"));
+}
+
+function invalidByteLookup(): Option<EnvErrorKind> {
+  let snapshot = fixture([], []);
+  let name = Bytes([65u8, 0u8]);
+  return errorKindOf(getBytes(&snapshot, &name));
+}
+
+expect match (invalidTextLookup()) {
+  Option.Some(EnvPosition.LookupName) => true,
+  _ => false,
+};
+expect match (invalidByteLookup()) {
+  Option.Some(EnvErrorKind.InvalidName) => true,
+  _ => false,
+};

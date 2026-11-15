@@ -8,6 +8,10 @@ Sample programs for [issue #2](https://github.com/Reilley64/rill/issues/2). They
 
 **#25 accepted realistic program:** [16-batch-report](16-batch-report/README.md) contains a 298-line, two-module batch processor with 14 independent hand-checked expectations, source-level borrow/copy counts and error/cleanup analysis. The user accepted it as RFC evidence, not compiler execution or a checker/backend proof.
 
+**#36 environment/arguments:** [ADR 0019](../docs/adr/0019-owned-startup-environment-and-arguments.md) and the [std::env contract](../docs/standard-library-contracts.md#12-environment-and-argument-inputs) add owned fixed-startup Inputs, validated synthetic construction, borrowed bytes/strict owned text, canonical variable ordering and safe structured errors. `rill test` uses empty host inputs; fixtures inject their own. See [20-environment-inputs.rill](20-environment-inputs.rill) and its [case inventory](20-environment-inputs.md): **29 hand-checked intended-valid expectations**, not an executed library/checker/backend suite. This extends #23 without adding live mutation, flag parsing or implicit captures.
+
+**#37 secure random bytes:** [ADR 0020](../docs/adr/0020-secure-random-byte-generation.md) and the [std::random contract](../docs/standard-library-contracts.md#13-secure-random-bytes) define complete owned generation/exclusive fill, typed errors, provider-free empty requests and direct Linux/macOS plus trusted WASI providers. Real entropy is not replaced under rill test. [21-secure-random.rill](21-secure-random.rill) and its [inventory](21-secure-random.md) have **eight hand-checked intended-valid expectations** using empty calls and explicitly injected application fakes, not private standard-provider replacement or executed crypto/native tests. Buffer partial-failure/cancellation, host support and backend mechanisms still require #28/#30 validation.
+
 ## Decisions so far
 
 Later tickets changed some of these. The ticket behind each change is in parentheses.

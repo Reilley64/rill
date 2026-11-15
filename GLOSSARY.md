@@ -72,6 +72,10 @@ _Avoid_: thread, task, fiber, green thread
 A statement of the form `guard <condition> else { ... }` whose `else` block must leave its scope, with `return`, `break`, `continue`, or a call to a `never` function. It can also unwrap a value, as in `guard let user = findUser(id) else { ... }`.
 _Avoid_: precondition, assert, early return
 
+**Inputs**:
+An independently owned snapshot of a program's startup arguments and environment, exposed through std::env. It preserves byte data and is distinct from live process-global state or parsed application configuration.
+_Avoid_: live environment, ambient configuration, shared process handle
+
 **Lock guard**:
 A non-copyable value that borrows a mutex and owns responsibility for releasing its lock. Its disposer unlocks; protected borrows depend on it, and ownership stays in the locking goroutine.
 _Avoid_: shared lock owner, raw lock, OS-thread-affine guard
