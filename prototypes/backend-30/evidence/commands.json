@@ -1,0 +1,1594 @@
+[
+  {
+    "name": "version-llvm",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llvm-config",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-clang",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-llc",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-opt",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-lld",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-binaryen",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-wasmtime",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos/wasmtime",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-host",
+    "argv": [
+      "uname",
+      "-a"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-os",
+    "argv": [
+      "sw_vers"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-sdk",
+    "argv": [
+      "xcrun",
+      "--show-sdk-path"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-apple-linker",
+    "argv": [
+      "xcrun",
+      "ld",
+      "-version_details"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-rust",
+    "argv": [
+      "rustc",
+      "--version",
+      "--verbose"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-cargo",
+    "argv": [
+      "cargo",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-node",
+    "argv": [
+      "node",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-brew-llvm",
+    "argv": [
+      "brew",
+      "info",
+      "--json=v2",
+      "llvm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-native",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/native.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-wasm",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/wasm.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-byval",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/byval.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-wasm-tailcc",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/wasm-tailcc.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "opt-native-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=default<O0>",
+      "-S",
+      "/private/tmp/rill-30-evidence-final/native.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-native-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "opt-wasm-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=default<O0>",
+      "-S",
+      "/private/tmp/rill-30-evidence-final/wasm.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-wasm-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cross-arm-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=0",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/arm-macos-O0.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-arm-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=0",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-arm-macos-O0.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected_rejection": "failed to perform tail call elimination",
+    "matched_expectation": true
+  },
+  {
+    "name": "cross-arm-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=0",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/arm-linux-O0.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-arm-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=0",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-arm-linux-O0.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected_rejection": "failed to perform tail call elimination",
+    "matched_expectation": true
+  },
+  {
+    "name": "cross-x86-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-apple-darwin",
+      "-O=0",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/x86-macos-O0.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-x86-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-apple-darwin",
+      "-O=0",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-macos-O0.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cross-x86-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=0",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/x86-linux-O0.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-x86-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=0",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-linux-O0.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "object-arm-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/arm-linux-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "object-x86-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/x86-linux-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-object-x86-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-linux-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "object-x86-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-apple-darwin",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/x86-macos-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-object-x86-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-apple-darwin",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-macos-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-link-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-O0",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-DHAVE_BYVAL",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native.c",
+      "/private/tmp/rill-30-evidence-final/x86-macos-O0.o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-macos-O0.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/native-x86-macos-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-execute-0-1024",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-evidence-final/native-x86-macos-O0",
+      "1024"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-execute-0-1000000",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-evidence-final/native-x86-macos-O0",
+      "1000000"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cleanup-link-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-O0",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/cleanup.c",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/cleanup-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cleanup-execute-0",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/cleanup-O0",
+      "normal"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cleanup-fatal-0",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/cleanup-O0",
+      "fail"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected_rejection": "fatal injected worklist allocation failure; no recursive fallback",
+    "matched_expectation": true
+  },
+  {
+    "name": "native-object-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/native-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/native-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "native-link-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-O0",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native.c",
+      "/private/tmp/rill-30-evidence-final/native-O0.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/native-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "native-execute-0-1024",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/native-O0",
+      "1024"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "native-execute-0-1000000",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/native-O0",
+      "1000000"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasm-object-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-mattr=+tail-call",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasm-link-0",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--allow-undefined",
+      "--export-memory",
+      "-z",
+      "stack-size=1048576",
+      "--export=run_self",
+      "--export=run_mutual",
+      "--export=run_indirect",
+      "--export=run_arguments",
+      "--export=run_sret",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasm-dis-0",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.wasm",
+      "--enable-tail-call",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.wat"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "asyncify-reject-0",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.wasm",
+      "--enable-tail-call",
+      "--asyncify",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/rejected-O0.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 1,
+    "expected_rejection": "tail calls not yet supported in asyncify",
+    "matched_expectation": true
+  },
+  {
+    "name": "host-link-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-O0",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/wasmtime.c",
+      "-I",
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/include",
+      "-L",
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
+      "-lwasmtime",
+      "-Wl,-rpath,/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasmtime-host-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasmtime-execute-0-1024",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/wasmtime-host-O0",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.wasm",
+      "1024",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasmtime-execute-0-1000000",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/wasmtime-host-O0",
+      "/private/tmp/rill-30-evidence-final/wasm-O0.wasm",
+      "1000000",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "opt-native-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=default<O2>",
+      "-S",
+      "/private/tmp/rill-30-evidence-final/native.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-native-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "opt-wasm-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=default<O2>",
+      "-S",
+      "/private/tmp/rill-30-evidence-final/wasm.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-wasm-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cross-arm-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=2",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/arm-macos-O2.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-arm-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=2",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-arm-macos-O2.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected_rejection": "failed to perform tail call elimination",
+    "matched_expectation": true
+  },
+  {
+    "name": "cross-arm-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=2",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/arm-linux-O2.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-arm-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=2",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-arm-linux-O2.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected_rejection": "failed to perform tail call elimination",
+    "matched_expectation": true
+  },
+  {
+    "name": "cross-x86-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-apple-darwin",
+      "-O=2",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/x86-macos-O2.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-x86-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-apple-darwin",
+      "-O=2",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-macos-O2.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cross-x86-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=2",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/x86-linux-O2.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-x86-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=2",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-linux-O2.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "object-arm-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/arm-linux-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "object-x86-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/x86-linux-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-object-x86-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-linux-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "object-x86-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-apple-darwin",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/x86-macos-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "byval-object-x86-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=x86_64-apple-darwin",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/byval.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-macos-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-link-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-DHAVE_BYVAL",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native.c",
+      "/private/tmp/rill-30-evidence-final/x86-macos-O2.o",
+      "/private/tmp/rill-30-evidence-final/byval-x86-macos-O2.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/native-x86-macos-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-execute-2-1024",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-evidence-final/native-x86-macos-O2",
+      "1024"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-execute-2-1000000",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-evidence-final/native-x86-macos-O2",
+      "1000000"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cleanup-link-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/cleanup.c",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/cleanup-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cleanup-execute-2",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/cleanup-O2",
+      "normal"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "cleanup-fatal-2",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/cleanup-O2",
+      "fail"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected_rejection": "fatal injected worklist allocation failure; no recursive fallback",
+    "matched_expectation": true
+  },
+  {
+    "name": "native-object-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/native-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/native-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "native-link-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native.c",
+      "/private/tmp/rill-30-evidence-final/native-O2.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/native-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "native-execute-2-1024",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/native-O2",
+      "1024"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "native-execute-2-1000000",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/native-O2",
+      "1000000"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasm-object-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-mattr=+tail-call",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasm-link-2",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--allow-undefined",
+      "--export-memory",
+      "-z",
+      "stack-size=1048576",
+      "--export=run_self",
+      "--export=run_mutual",
+      "--export=run_indirect",
+      "--export=run_arguments",
+      "--export=run_sret",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasm-dis-2",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.wasm",
+      "--enable-tail-call",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.wat"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "asyncify-reject-2",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.wasm",
+      "--enable-tail-call",
+      "--asyncify",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/rejected-O2.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 1,
+    "expected_rejection": "tail calls not yet supported in asyncify",
+    "matched_expectation": true
+  },
+  {
+    "name": "host-link-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/wasmtime.c",
+      "-I",
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/include",
+      "-L",
+      "/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
+      "-lwasmtime",
+      "-Wl,-rpath,/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/wasmtime-host-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasmtime-execute-2-1024",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/wasmtime-host-O2",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.wasm",
+      "1024",
+      "2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "wasmtime-execute-2-1000000",
+    "argv": [
+      "/private/tmp/rill-30-evidence-final/wasmtime-host-O2",
+      "/private/tmp/rill-30-evidence-final/wasm-O2.wasm",
+      "1000000",
+      "2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-rosetta",
+    "argv": [
+      "pkgutil",
+      "--pkg-info",
+      "com.apple.pkg.RosettaUpdateAuto"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-docker",
+    "argv": [
+      "docker",
+      "version",
+      "--format",
+      "{{json .Server}}"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "linux-arm-container",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-evidence-final,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "set -ex; uname -a; cc --version; ld --version; rustc --version --verbose; getconf GNU_LIBC_VERSION; dpkg-query -W; for mode in 0 2; do cc -O$mode -Wall -Wextra -Werror -pthread  /src/native.c /out/arm-linux-O$mode.o -o /out/native-arm-linux-O$mode; for n in 1024 1000000; do /out/native-arm-linux-O$mode $n > /out/linux-arm-O$mode-$n.jsonl; done; done"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "linux-x86-container",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-evidence-final,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "set -ex; uname -a; cc --version; ld --version; rustc --version --verbose; getconf GNU_LIBC_VERSION; dpkg-query -W; for mode in 0 2; do cc -O$mode -Wall -Wextra -Werror -pthread -DHAVE_BYVAL /out/byval-x86-linux-O$mode.o /src/native.c /out/x86-linux-O$mode.o -o /out/native-x86-linux-O$mode; for n in 1024 1000000; do /out/native-x86-linux-O$mode $n > /out/linux-x86-O$mode-$n.jsonl; done; done"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-indirect-only",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/indirect-only.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "indirect-only-object",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-mattr=+tail-call",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/indirect-only.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/indirect-only.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "indirect-only-link",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--export=f",
+      "/private/tmp/rill-30-evidence-final/indirect-only.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/indirect-only.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "asyncify-indirect-reject",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "/private/tmp/rill-30-evidence-final/indirect-only.wasm",
+      "--enable-tail-call",
+      "--asyncify",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/indirect-rejected.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 1,
+    "expected_rejection": "tail calls not yet supported in asyncify",
+    "matched_expectation": true
+  },
+  {
+    "name": "wasm-tailcc-reject",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-mattr=+tail-call",
+      "/private/tmp/rill-30-evidence-final/wasm-tailcc.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/unsupported.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 1,
+    "expected_rejection": "calling convention",
+    "matched_expectation": true
+  },
+  {
+    "name": "asyncify-control",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "/private/tmp/rill-30-evidence-final/asyncify-control.wat",
+      "--asyncify",
+      "--pass-arg=asyncify-imports@env.pause",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/asyncify-control.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-leaf",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-evidence-final/leaf.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "leaf-object-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/leaf.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/leaf-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "leaf-link-0",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--export=leaf",
+      "--export=__stack_pointer",
+      "--export-memory",
+      "-z",
+      "stack-size=1048576",
+      "/private/tmp/rill-30-evidence-final/leaf-O0.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/leaf-O0.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "leaf-check-0",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "/private/tmp/rill-30-evidence-final/leaf-O0.wasm",
+      "--stack-check",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/leaf-checked-O0.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "leaf-dis-0",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-evidence-final/leaf-checked-O0.wasm",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/leaf-checked-O0.wat"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "asyncify-budgets-0",
+    "argv": [
+      "node",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/asyncify.mjs",
+      "/private/tmp/rill-30-evidence-final/asyncify-control.wasm",
+      "/private/tmp/rill-30-evidence-final/leaf-checked-O0.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "leaf-object-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/llc",
+      "-mtriple=wasm32-unknown-wasip1",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-evidence-final/leaf.ll",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/leaf-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "leaf-link-2",
+    "argv": [
+      "/opt/homebrew/bin/wasm-ld",
+      "--no-entry",
+      "--export=leaf",
+      "--export=__stack_pointer",
+      "--export-memory",
+      "-z",
+      "stack-size=1048576",
+      "/private/tmp/rill-30-evidence-final/leaf-O2.o",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/leaf-O2.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "leaf-check-2",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
+      "/private/tmp/rill-30-evidence-final/leaf-O2.wasm",
+      "--stack-check",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/leaf-checked-O2.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "leaf-dis-2",
+    "argv": [
+      "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
+      "/private/tmp/rill-30-evidence-final/leaf-checked-O2.wasm",
+      "-o",
+      "/private/tmp/rill-30-evidence-final/leaf-checked-O2.wat"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  },
+  {
+    "name": "asyncify-budgets-2",
+    "argv": [
+      "node",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/asyncify.mjs",
+      "/private/tmp/rill-30-evidence-final/asyncify-control.wasm",
+      "/private/tmp/rill-30-evidence-final/leaf-checked-O2.wasm"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected_rejection": null,
+    "matched_expectation": true
+  }
+]
