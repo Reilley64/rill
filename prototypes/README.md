@@ -8,6 +8,10 @@ Sample programs for [issue #2](https://github.com/Reilley64/rill/issues/2). They
 
 **#25 accepted realistic program:** [16-batch-report](16-batch-report/README.md) contains a 298-line, two-module batch processor with 14 independent hand-checked expectations, source-level borrow/copy counts and error/cleanup analysis. The user accepted it as RFC evidence, not compiler execution or a checker/backend proof.
 
+**#31 JSON design:** [ADR 0018](../docs/adr/0018-owned-precision-preserving-json.md) and the [JSON contract](../docs/json-contracts.md) specify owned precision-preserving values, ordered unique names, strict scalar-safe parsing and explicit budgets. [19-json.rill](19-json.rill) / [case inventory](19-json.md) contain **53 hand-checked expectations**, not an implemented parser or executed tests. Conversion registration/generic evidence is separately confirmed in #41; JSON does not add reflection, streaming, semantic equality or implicit fallible stringify.
+
+**#33 time/clock/cancellation design:** [ADR 0022](../docs/adr/0022-jiff-time-and-explicit-cancellation.md), [temporal contract](../docs/time-contracts.md) and [clock/token contract](../docs/clock-cancellation-contracts.md). [23-time-values.rill](23-time-values.rill) / [inventory](23-time-values.md) have **39 hand-checked expectations**; [24-clocks-cancellation.rill](24-clocks-cancellation.rill) / [inventory](24-clocks-cancellation.md) have **26**. Pinned Jiff/C#/Tokio/platform research supplies facts, not backend selection or executed tests. Generic withCancellation is explicitly excluded; tokens, manual clocks and joined withDeadline are included.
+
 ## Decisions so far
 
 Later tickets changed some of these. The ticket behind each change is in parentheses.

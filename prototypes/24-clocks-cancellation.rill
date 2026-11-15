@@ -1,0 +1,295 @@
+// #33 / ADR 0022: hand-checked manual-clock/token fixtures, not execution.
+import std::panic;
+import std::result::{Result, isOk};
+import std::option::isSome;
+import std::collection::List;
+import std::compare::eq;
+import std::error::{value, cause};
+import std::time::{
+  SignedDuration, ClockError, WaitError, DeadlineError,
+  manualClock, clock, now, advance, reportedResolution, shiftInstant,
+  instantUntil, compareInstants, durationFromNanoseconds, durationNanoseconds,
+  afterFor, afterUntil, withDeadline,
+};
+import std::time::fmt::parseTime;
+import std::channel::receive;
+import std::cancel::{
+  CancellationSource, CancellationToken, token, neverCanceledToken, cancel,
+  isCancellationRequested, waitForCancellation, cancellationSignal,
+  childSource, linkedSource, cancelOnDispose, disarm,
+};
+
+function mustClock<T>(result: Result<T, ClockError>): T {
+  guard let value = result else (error) { panic(&"clock fixture failure"); }
+  return value;
+}
+
+function nanos(count: i128): SignedDuration {
+  guard let result = durationFromNanoseconds(count) else (error) { panic(&"duration fixture"); }
+  return result;
+}
+
+function requestCopies(): bool {
+  let source = CancellationSource();
+  let observer = token(&source);
+  let second = copy(&observer);
+  let authority = copy(&source);
+  cancel(&authority);
+  return isCancellationRequested(&observer) && isCancellationRequested(&second);
+}
+
+function detachedToken(): CancellationToken {
+  let source = CancellationSource();
+  return token(&source); // Owns state, not a view into the source descriptor.
+}
+
+function independentIdentity(): bool {
+  let first = CancellationSource();
+  let second = CancellationSource();
+  return !eq(&token(&first), &token(&second));
+}
+
+function childDirection(): bool {
+  let parent = CancellationSource();
+  let parentToken = token(&parent);
+  let child = childSource(&parentToken);
+  let sibling = childSource(&parentToken);
+  let childToken = token(&child);
+  let siblingToken = token(&sibling);
+  cancel(&child);
+  return isCancellationRequested(&childToken) && !isCancellationRequested(&parentToken)
+    && !isCancellationRequested(&siblingToken);
+}
+
+function parentPropagates(): bool {
+  let parent = CancellationSource();
+  let child = childSource(&token(&parent));
+  let grandchild = childSource(&token(&child));
+  let last = token(&grandchild);
+  cancel(&parent);
+  return isCancellationRequested(&last);
+}
+
+function linkedOr(): bool {
+  let first = CancellationSource();
+  let second = CancellationSource();
+  let inputs: List<CancellationToken> = [token(&first), token(&second)];
+  let linked = linkedSource(&inputs);
+  let observer = token(&linked);
+  cancel(&second);
+  return isCancellationRequested(&observer) && !isCancellationRequested(&token(&first));
+}
+
+function lateChild(): bool {
+  let parent = CancellationSource();
+  cancel(&parent);
+  let child = childSource(&token(&parent));
+  return isCancellationRequested(&token(&child));
+}
+
+function emptyLink(): bool {
+  let inputs: List<CancellationToken> = [];
+  let linked = linkedSource(&inputs);
+  return !isCancellationRequested(&token(&linked));
+}
+
+function armedGuard(): bool {
+  let source = CancellationSource();
+  let observer = token(&source);
+  let guardValue = cancelOnDispose(source);
+  dispose(guardValue);
+  return isCancellationRequested(&observer);
+}
+
+function disarmedGuard(): bool {
+  let source = CancellationSource();
+  let observer = token(&source);
+  let guardValue = cancelOnDispose(source);
+  let recovered = disarm(guardValue);
+  return !isCancellationRequested(&observer);
+}
+
+function persistentSignal(): bool {
+  let source = CancellationSource();
+  let observer = token(&source);
+  cancel(&source);
+  let first = cancellationSignal(&observer);
+  let second = cancellationSignal(&observer);
+  let firstSeen = isSome(&receive(&first));
+  let secondSeen = isSome(&receive(&second));
+  let firstClosed = !isSome(&receive(&first));
+  waitForCancellation(&observer); // Observation, not a cancellation exception.
+  return firstSeen && secondSeen && firstClosed;
+}
+
+function repeatedRequest(): bool {
+  let source = CancellationSource();
+  let observer = token(&source);
+  cancel(&source);
+  cancel(&source);
+  return isCancellationRequested(&observer);
+}
+
+function advancedTime(): i128 {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let before = mustClock(now(&observed));
+  let _ = mustClock(advance(&manual, nanos(10i128)));
+  let after = mustClock(now(&observed));
+  return durationNanoseconds(&mustClock(instantUntil(before, after)));
+}
+
+function negativeAdvanceUnchanged(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let before = mustClock(now(&observed));
+  let rejected = !isOk(&advance(&manual, nanos(-1i128)));
+  return rejected && eq(&before, &mustClock(now(&observed)));
+}
+
+function domainsReject(): bool {
+  let first = manualClock();
+  let second = manualClock();
+  let a = mustClock(now(&clock(&first)));
+  let b = mustClock(now(&clock(&second)));
+  return !eq(&a, &b) && !isOk(&compareInstants(a, b));
+}
+
+function copiedClockIdentity(): bool {
+  let manual = manualClock();
+  let first = clock(&manual);
+  let second = copy(&first);
+  return eq(&mustClock(now(&first)), &mustClock(now(&second)));
+}
+
+function manualResolution(): i128 {
+  let manual = manualClock();
+  guard let resolution = reportedResolution(&clock(&manual)) else { panic(&"manual resolution"); }
+  return durationNanoseconds(&resolution);
+}
+
+function timerAfterAdvance(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let never = neverCanceledToken();
+  let timer = afterFor(&observed, nanos(10i128), &never);
+  let _ = mustClock(advance(&manual, nanos(10i128)));
+  guard let outcome = receive(&timer) else { return false; }
+  return isOk(&outcome) && !isSome(&receive(&timer));
+}
+
+function pastDeadline(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let past = mustClock(shiftInstant(mustClock(now(&observed)), nanos(-1i128)));
+  let never = neverCanceledToken();
+  let timer = afterUntil(&observed, past, &never);
+  guard let outcome = receive(&timer) else { return false; }
+  return isOk(&outcome);
+}
+
+function canceledZero(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let source = CancellationSource();
+  let request = token(&source);
+  cancel(&source);
+  let timer = afterFor(&observed, nanos(0i128), &request);
+  guard let outcome = receive(&timer) else { return false; }
+  guard let done = outcome else (error) {
+    return match (value(&error)) { WaitError.Cancelled => true, _ => false };
+  }
+  return false;
+}
+
+function invalidBeforeRequest(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let source = CancellationSource();
+  let request = token(&source);
+  cancel(&source);
+  let timer = afterFor(&observed, nanos(-1i128), &request);
+  guard let outcome = receive(&timer) else { return false; }
+  guard let done = outcome else (error) {
+    return match (value(&error)) {
+      WaitError.ClockFailure => isSome(&cause(&error)),
+      _ => false,
+    };
+  }
+  return false;
+}
+
+function expirySkipsInvocation(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let deadline = mustClock(now(&observed));
+  let mut calls = 0u64;
+  let callsView = &mut calls;
+  let outcome = withDeadline(&observed, deadline, () => {
+    *callsView += 1u64;
+    return 7i32;
+  });
+  guard let result = outcome else (error) {
+    return calls == 0u64 && (match (value(&error)) { DeadlineError.Expired => true, _ => false });
+  }
+  return false;
+}
+
+function completesBeforeManualDeadline(): i32 {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let deadline = mustClock(shiftInstant(mustClock(now(&observed)), nanos(10i128)));
+  guard let result = withDeadline(&observed, deadline, () => 7i32) else (error) { panic(&"deadline fixture"); }
+  return result;
+}
+
+function operationErrorStaysNested(): bool {
+  let manual = manualClock();
+  let observed = clock(&manual);
+  let deadline = mustClock(shiftInstant(mustClock(now(&observed)), nanos(10i128)));
+  guard let result = withDeadline(&observed, deadline, () => parseTime(&"24:00:00")) else (error) {
+    return false;
+  }
+  return !isOk(&result);
+}
+
+function deepChildren(): bool {
+  let root = CancellationSource();
+  let mut leaf = childSource(&token(&root));
+  let mut count = 0u64;
+  while (count < 1024u64) {
+    let parentToken = token(&leaf);
+    leaf = childSource(&parentToken);
+    count += 1u64;
+  }
+  let observer = token(&leaf);
+  cancel(&root);
+  return isCancellationRequested(&observer);
+}
+
+expect !isCancellationRequested(&detachedToken());
+expect requestCopies();
+expect independentIdentity();
+expect eq(&neverCanceledToken(), &neverCanceledToken());
+expect childDirection();
+expect parentPropagates();
+expect linkedOr();
+expect lateChild();
+expect emptyLink();
+expect armedGuard();
+expect disarmedGuard();
+expect persistentSignal();
+expect repeatedRequest();
+expect advancedTime() == 10i128;
+expect negativeAdvanceUnchanged();
+expect domainsReject();
+expect copiedClockIdentity();
+expect manualResolution() == 1i128;
+expect timerAfterAdvance();
+expect pastDeadline();
+expect canceledZero();
+expect invalidBeforeRequest();
+expect expirySkipsInvocation();
+expect completesBeforeManualDeadline() == 7i32;
+expect operationErrorStaysNested();
+expect deepChildren();
