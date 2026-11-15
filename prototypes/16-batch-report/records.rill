@@ -1,0 +1,174 @@
+// #25: design prototype; not compiled or executed.
+import std::panic;
+import std::collection::{List, Map, map, push, get, getMut, insert, sum, join, length};
+import std::option::Option;
+import std::result::{Result, Ok, Err, isOk};
+import std::error::{display, cause};
+import std::string::{slice, charIndices, length as textLength};
+import std::number::parseNumber;
+import std::convert::into;
+
+export type RawRow = { label: string; amount: i32 };
+export type Row = { label: string; amount: i64 };
+export type Counts = { files: u64; rows: u64 };
+export type Totals = { values: Map<string, i64>; order: List<string> };
+type Summary = { label: string; amount: i64 };
+
+export enum RowError {
+  Shape { line: u64 },
+  Number { line: u64 },
+}
+
+function display(error: &RowError): string {
+  return match (error) {
+    RowError.Shape { line } => `expected label<TAB>i32 on line ${line}`,
+    RowError.Number { line } => `invalid amount on line ${line}`,
+  };
+}
+
+function knownSlice(text: &string, start: u64, end: u64): &string {
+  guard let part = slice(text, start, end) else {
+    panic(&"internal scalar-boundary invariant");
+  }
+  return part;
+}
+
+function parseLine(text: &string, number: u64): Result<RawRow, RowError> {
+  let mut tabs = 0u64;
+  let mut at = 0u64;
+  for (let point of charIndices(text)) {
+    if (point.value == '\t') {
+      tabs += 1u64;
+      at = point.offset;
+    }
+    if (tabs > 1u64 || point.value == '\r' || point.value == '\n') {
+      return Err(RowError.Shape { line: number });
+    }
+  }
+  if (tabs != 1u64 || at == 0u64 || at + 1u64 == textLength(text)) {
+    return Err(RowError.Shape { line: number });
+  }
+  let label = knownSlice(text, 0u64, at);
+  let digits = knownSlice(text, at + 1u64, textLength(text));
+  let amount = parseNumber<i32>(digits) ? RowError.Number { line: number };
+  return Ok(RawRow { label: copy(label), amount: amount });
+}
+
+export function parseRows(text: &string): Result<List<RawRow>, RowError> {
+  let mut rows: List<RawRow> = [];
+  let mut start = 0u64;
+  let mut number = 1u64;
+  let mut previousCR: Option<u64> = Option.None;
+  for (let point of charIndices(text)) {
+    if (point.value == '\n') {
+      let end = match (previousCR) {
+        Option.Some(offset) => offset,
+        Option.None => point.offset,
+      };
+      push(&mut rows, parseLine(knownSlice(text, start, end), number)?);
+      start = point.offset + 1u64;
+      number += 1u64;
+    }
+    previousCR = if (point.value == '\r') Option.Some(point.offset) else Option.None;
+  }
+  if (start < textLength(text)) {
+    push(&mut rows, parseLine(knownSlice(text, start, textLength(text)), number)?);
+  }
+  return Ok(rows);
+}
+
+export function widen(row: RawRow): Row {
+  return Row { label: row.label, amount: into<i64>(row.amount) };
+}
+
+export function emptyTotals(): Totals {
+  return Totals { values: Map<string, i64>(), order: [] };
+}
+
+function addExisting(values: &mut Map<string, i64>, row: &Row): bool {
+  guard let total = getMut(values, &row.label) else {
+    return false;
+  }
+  *total += row.amount;
+  return true;
+}
+
+export function addRows(totals: &mut Totals, rows: List<Row>): void {
+  for (let row of rows) {
+    if (!addExisting(&mut totals.values, &row)) {
+      push(&mut totals.order, copy(&row.label));
+      let _ = insert(&mut totals.values, row.label, row.amount);
+    }
+  }
+}
+
+function readTotal(values: &Map<string, i64>, label: &string): i64 {
+  return match (get(values, label)) {
+    Option.Some(total) => *total,
+    Option.None => panic(&"ordered key missing from totals"),
+  };
+}
+
+function renderBlock<T, F>(items: &List<T>, format: &mut F): string
+  where callableMut(F, [&T], string) {
+  let lines = map(items, format);
+  return lines |> join(&"\n");
+}
+
+export function renderReport(totals: Totals, counts: Counts): string {
+  let values = totals.values;
+  let order = totals.order;
+  let valuesView = &values;
+  let summaries = map(order, (label: string) => {
+    let amount = readTotal(valuesView, &label);
+    return Summary { label: label, amount: amount };
+  });
+  let amounts = map(&summaries, (row) => row.amount);
+  let footer: List<Summary> = [Summary { label: "TOTAL", amount: sum(&amounts) }];
+  let mut serial = 0u64;
+  let mut format = (row: &Summary) => {
+    serial += 1u64;
+    return `${serial}\t${row.label}\t${row.amount}`;
+  };
+  let body = renderBlock(&summaries, &mut format);
+  let tail = renderBlock(&footer, &mut format);
+  let header = `files=${counts.files} records=${counts.rows}`;
+  if (textLength(&body) == 0u64) {
+    return `${header}\n${tail}\n`;
+  }
+  return `${header}\n${body}\n${tail}\n`;
+}
+
+function sampleReport(): string {
+  guard let raw = parseRows(&"tea\t2\ntea\t-1\ncoffee\t3\r\n") else (error) {
+    panic(&"invalid report fixture");
+  }
+  let count = length(&raw);
+  let mut totals = emptyTotals();
+  addRows(&mut totals, map(raw, widen));
+  return renderReport(totals, Counts { files: 1u64, rows: count });
+}
+
+function numberHasCause(): bool {
+  guard let rows = parseRows(&"tea\tnope") else (error) {
+    return match (cause(&error)) {
+      Option.Some(inner) => true,
+      Option.None => false,
+    };
+  }
+  return false;
+}
+
+// Independent test-only inputs; imported expectations run once, not startup.
+expect isOk(&parseRows(&""));
+expect isOk(&parseRows(&"tea\t2"));
+expect isOk(&parseRows(&"café\t-1\r\ncoffee\t3\n"));
+expect !isOk(&parseRows(&"\n"));
+expect !isOk(&parseRows(&"\t2"));
+expect !isOk(&parseRows(&"tea\t"));
+expect !isOk(&parseRows(&"tea\t1\t2"));
+expect !isOk(&parseRows(&"tea\t2\r"));
+expect !isOk(&parseRows(&"tea\t2147483648"));
+expect !isOk(&parseRows(&"tea\t 2"));
+expect numberHasCause();
+expect sampleReport() == "files=1 records=3\n1\ttea\t1\n2\tcoffee\t3\n3\tTOTAL\t4\n";

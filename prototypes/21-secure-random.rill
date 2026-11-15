@@ -1,0 +1,158 @@
+// #37 / ADR 0020: intended-valid hand-checked design examples, not executed tests.
+// Empty standard calls need no entropy provider; this is not a deterministic
+// std::random test mode. Every nonempty deterministic source below is explicitly
+// an APPLICATION FAKE and never replaces/registers a standard provider.
+import std::random::{randomBytes, fillRandom, RandomError, RandomErrorKind, kind, nativeCode};
+import std::bytes::{Bytes, length, get, getMut, append};
+import std::result::{Result, Ok, Err};
+import std::option::Option;
+import std::error::{display, value};
+
+// Ordinary production call shapes; nonempty calls are not auto-run by expect.
+function liveRequest(count: u64): Result<Bytes, RandomError> {
+  return randomBytes(count);
+}
+
+function liveFillLength(destination: &mut Bytes): Result<u64, RandomError> {
+  fillRandom(destination)?;
+  return Ok(length(destination));
+}
+
+function observeKind(error: &RandomError): RandomErrorKind {
+  return kind(error);
+}
+
+function observeNativeCode(error: &RandomError): Option<i64> {
+  return nativeCode(error);
+}
+
+// Explicit application-level dependencies, not new std traits/overrides.
+// This application's seam opts into borrow-free errors; std APIs have fixed E.
+function requestFrom<F, E>(count: u64, source: F): Result<Bytes, E>
+  where callableOnce(F, [u64], Result<Bytes, E>), noBorrow(E) {
+  return source(count);
+}
+
+function fillFrom<F, E>(destination: &mut Bytes, source: F): Result<void, E>
+  where callableOnce(F, [&mut Bytes], Result<void, E>), noBorrow(E) {
+  return source(destination);
+}
+
+enum ExampleError {
+  WrongSize,
+  DeliberateFailure,
+}
+
+// #41 uses implement for a body attached to an existing canonical family.
+implement display(error: &ExampleError): string {
+  return match (error) {
+    ExampleError.WrongSize => "application fixture size",
+    ExampleError.DeliberateFailure => "application fixture failure",
+  };
+}
+
+// Predictable bytes are useful here only because this callable is explicitly
+// selected by application test code. It is NOT a cryptographic random provider.
+function fakeBytes(count: u64): Result<Bytes, ExampleError> {
+  if (count != 3u64) {
+    return Err(ExampleError.WrongSize);
+  }
+  return Ok(Bytes([0u8, 1u8, 2u8]));
+}
+
+function fakePartialFill(destination: &mut Bytes): Result<void, ExampleError> {
+  guard let first = getMut(destination, 0u64) else {
+    return Err(ExampleError.WrongSize);
+  }
+  *first = 99u8;
+  return Err(ExampleError.DeliberateFailure);
+}
+
+function byteIs(data: &Bytes, index: u64, expected: u8): bool {
+  return match (get(data, index)) {
+    Option.Some(actual) => actual == expected,
+    Option.None => false,
+  };
+}
+
+function emptyOwned(): bool {
+  guard let output = randomBytes(0u64) else {
+    return false;
+  }
+  return length(&output) == 0u64;
+}
+
+function emptyFill(): bool {
+  let mut destination = Bytes([]);
+  guard fillRandom(&mut destination) else {
+    return false;
+  }
+  return length(&destination) == 0u64;
+}
+
+function emptyRemainsOwnedAndMutable(): bool {
+  let mut destination = Bytes([]);
+  guard fillRandom(&mut destination) else {
+    return false;
+  }
+  let suffix = Bytes([7u8]);
+  append(&mut destination, &suffix);
+  return length(&destination) == 1u64 && byteIs(&destination, 0u64, 7u8);
+}
+
+function productionCallableEmpty(): bool {
+  guard let output = requestFrom(0u64, randomBytes) else {
+    return false;
+  }
+  return length(&output) == 0u64;
+}
+
+function explicitFakeOutput(): bool {
+  guard let output = requestFrom(3u64, fakeBytes) else {
+    return false;
+  }
+  return length(&output) == 3u64
+    && byteIs(&output, 0u64, 0u8)
+    && byteIs(&output, 2u64, 2u8);
+}
+
+function explicitFakeError(): bool {
+  guard let output = requestFrom(4u64, fakeBytes) else (error) {
+    return match (value(&error)) {
+      ExampleError.WrongSize => true,
+      _ => false,
+    };
+  }
+  return false;
+}
+
+function explicitPartialMutation(): bool {
+  let mut destination = Bytes([1u8, 2u8, 3u8]);
+  guard fillFrom(&mut destination, fakePartialFill) else (error) {
+    let expectedFailure = match (value(&error)) {
+      ExampleError.DeliberateFailure => true,
+      _ => false,
+    };
+    return expectedFailure && length(&destination) == 3u64
+      && byteIs(&destination, 0u64, 99u8)
+      && byteIs(&destination, 1u64, 2u8);
+  }
+  return false;
+}
+
+function emptyFillThroughProductionHelper(): bool {
+  let mut destination = Bytes([]);
+  guard let filledLength = liveFillLength(&mut destination) else {
+    return false;
+  }
+  return filledLength == 0u64 && length(&destination) == 0u64;
+}
+
+expect emptyOwned();
+expect emptyFill();
+expect emptyRemainsOwnedAndMutable();
+expect productionCallableEmpty();
+expect explicitFakeOutput();
+expect explicitFakeError();
+expect explicitPartialMutation();
+expect emptyFillThroughProductionHelper();

@@ -1,5 +1,7 @@
 # Named types are nominal
 
+**Union and primitive-literal rules superseded by [ADR 0012](0012-enums-replace-unions-and-literal-overloads.md).** Enums replace `A | B` and literal `kind` tags in v0; primitive literal types and literal-preserving inference are removed. Nominal record identity remains.
+
 **Construction and inline structural-record rules superseded by [ADR 0008](0008-records-require-named-construction.md).** Nominal typing and its defining-module rationale remain. The historical text below allowed contextual record literals and inline structural records; #21 now requires named record construction and separately named record variants for tagged unions. Tuple rules are unchanged.
 
 **Numeric placeholders superseded by [ADR 0011](0011-explicit-numeric-widths-and-utf8-string-views.md).** The historical int/float spellings below are no longer built-ins. Explicit numeric bases are required; immutable literal refinements remain, while mutable initializers widen to their established base. Precise string literals can be re-materialized without duplicating ownership of a freeable general-string buffer.

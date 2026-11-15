@@ -1,5 +1,7 @@
 # Explicit numeric widths and UTF-8 string views
 
+**Later refinements:** [ADR 0012](0012-enums-replace-unions-and-literal-overloads.md) (#19) removes the historical singleton types/literal refinements and their copy exceptions below, without restoring default widths or changing numeric availability/UTF-8 semantics. [ADR 0015](0015-language-required-library-contracts.md) (#23) finalizes byte/parser/conversion/format interfaces and `copy(&value)`; for an existing `&string` view, `copy(view)` copies its text. Historical examples remain design inputs where not superseded, not executed tests.
+
 [Issue #18](https://github.com/Reilley64/rill/issues/18) adopts explicit-width numbers, checked integer operations, and one primary owned `string` spelling with borrowed text views. This takes Rust's explicitness without default numeric widths, a public String/str split, conversion traits, or programmer-written lifetimes. The consolidated interview and two consistency follow-ups are approved; the combined checker/runtime remains a proposal, not an implementation or proof.
 
 ## Numeric types and inference
@@ -65,6 +67,8 @@ Numeric text parsing requires a known destination and returns `Result`, consumin
 Templates use the canonical standard `show<T>(&T) -> string` family, not a same-spelled local function. Import its declaration to extend it under ordinary orphan rules; missing support is a compile error, not record/private-field reflection. Generic templates need canonical `show(T)` evidence. Standard reference-forwarding implementations cover read-only references and read-only observation of exclusive references when T is showable; no blanket automatic dereference dispatch, owner move, or exclusive-capability duplication. Exact declarations/path are #23's work. Required standard metadata/dependencies are loaded without injecting source bindings or expanding the prelude.
 
 Evaluate and format once, left-to-right, before the next expression. Observe existing values through read access; show may suspend/effect. Owned rvalues follow normal temporary cleanup, not early guard unlocking. Owned output cannot retain input borrows. Primitive formatters must bootstrap without recursively interpolating the same argument through themselves; unrelated prototype-local show families remain unrelated.
+
+[ADR 0013](0013-caused-by-errors-with-explicit-wrapping.md) adds a separate canonical `display(&E): string` contract for error payloads. It does not rename or replace template `show`: standard wrapper formatting bridges to each error's display and renders its caused-by chain and origins. #23 defines that interface; plain numeric/text formatting here is unchanged.
 
 Default display: strings/chars as text without added quotes/escaping, lowercase booleans, decimal integers without width suffixes, finite floats in shortest round-tripping decimal for the same explicitly known width, and NaN/inf/-inf/-0. No NaN-payload roundtrip promise. Special formatting uses explicit functions, not a template mini-language.
 

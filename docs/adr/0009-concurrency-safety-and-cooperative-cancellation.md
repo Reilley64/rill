@@ -4,6 +4,14 @@
 
 **Status:** approved design direction, not an implemented checker/runtime or a safety proof. #23 must specify evidence-preserving library interfaces and #28 must supply explicit checking rules, cancellation/commit state machines, and adversarial examples. This resolves ADR 0007's pending cancellation/replacement policy without relaxing its borrow rules.
 
+## Confirmed library interface refinements (#23)
+
+[ADR 0015](0015-language-required-library-contracts.md) and the [catalogue](../standard-library-contracts.md) finalize std::mutex factories/forwarding, generic once-callable spawn/spawnWithStack, tuple-based scoped helpers with plain join separate from fallible all, explicit channel capacity, undelivered-message errors and receiver/handler select tuples. Copying explicitly borrows its input; canonical protected actions plus remaining-field cleanup preserve nested obligations. #22/#30 separately govern stack policy/backend validation; no compatible backend or safe host-pointer mechanism is inferred from these interfaces. Existing transfer, guard scope-exit, cancellation masking and cleanup-before-return rules remain.
+
+## Confirmed explicit token and deadline extension (#33)
+
+[ADR 0022](0022-jiff-time-and-explicit-cancellation.md) and the [clock/cancellation contract](../clock-cancellation-contracts.md) add explicit source/token signals, links, observation and a unique request-on-disposal guard without changing stop's join or native-source retention. Tokens do not attach themselves to goroutines. New token-aware operations return ordinary typed outcomes only after safe release; polling/normal token outcomes remain visible during runtime cancellation masking, which still defers intrinsic delivery and cannot abandon required cleanup. Generic withCancellation was explicitly dropped. withDeadline uses ordinary scoped evidence and joins losing work; no hard return bound or force kill. Sources/token handles and the signal-only guard are not mutex guards or inferred completion owners. #28/#30 still validate state/evidence/backend mechanisms.
+
 ## Transfer, sharing, and scheduling
 
 `sendable(T)` and `shareable(T)` are compiler-recognized predicates, not user-implementable overloads. They are separate from `noBorrow(T)` and copyability; #20's exclusion of named constraint groups remains. Check generic bodies before monomorphization, using explicit individual requirements rather than assuming properties from eventual instantiations or erased callable annotations.
@@ -11,7 +19,7 @@
 | Type | `sendable` | `shareable` |
 | --- | --- | --- |
 | Scalars and immutable strings | Yes | Yes |
-| Record, tuple, list, union | Corresponding property of every contained value/member | Corresponding property of every contained value/member |
+| Record, tuple, list, enum | Corresponding property of every contained value/member | Corresponding property of every contained value/member |
 | `&T` | Requires `shareable(T)` | Requires `shareable(T)` |
 | `&mut T` | Requires `sendable(T)` | Requires `shareable(T)` for read-only access to the reference |
 | `Shared<T>` | Requires `sendable(T)` and `shareable(T)` | Requires `sendable(T)` and `shareable(T)` |

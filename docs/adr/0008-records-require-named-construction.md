@@ -1,5 +1,7 @@
 # Records require named construction
 
+**The union/variant sections below are historical, superseded by [ADR 0012](0012-enums-replace-unions-and-literal-overloads.md) (#19).** Rust-style enums now provide scoped unit, tuple, and record variants instead of `A | B`, separately declared record members, or literal `kind` tags. Qualified record-variant construction is allowed; ordinary records still require named construction. Ordinary record privacy/rebuilding and tuple rules remain. Enum visibility and payload rules follow ADR 0012, including no individually private variants/payload fields.
+
 [Issue #21](https://github.com/Reilley64/rill/issues/21) makes record identity explicit at construction: declare a nominal record type and construct it with `Point { x: 0, y: 0 }`. There are no anonymous structural record types or values, and tagged unions use separately named record variants. This supersedes ADR 0004's contextual record-literal and inline structural-record rules, while retaining nominal typing and the existing tuple rules.
 
 ## Construction and inference
