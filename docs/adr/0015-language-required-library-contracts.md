@@ -16,6 +16,10 @@ ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separa
 
 [ADR 0019](0019-paths-files-and-filesystem-operations.md) adds byte-preserving Path, access-mode-specific file handles, checked seek/explicit sync, focused metadata/directories/symlinks and nonrecursive temporary guards. Existing text whole-file APIs keep their guarantees and gain &Path implementations; IoErrorKind gains explicit filesystem outcomes. Native/WASI capability limits, path races, partial effects and cleanup are recorded rather than treated as a sandbox/durability proof. See catalogue/prototype 20; #28/#30 retain formal/provider validation.
 
+## Partial SQL extension checkpoint (#40)
+
+[ADR 0021](0021-partial-standard-sql-contract.md) records confirmed independent standard SQL placement/value/codec/error/resource decisions, detailed in the [partial contract](../sql-contracts.md). It is not a completed required callable surface: #40 remains open for #33 deadline/time integration, final operation arities and the unprovided embedded native bridge. External drivers/pools/ORMs remain separate. Named conversion helpers and user JSON examples preserve #41/#31 rather than adding automatic reflection/registration. #28/#30 retain formal/provider gates.
+
 ## Decisions and consequences
 
 - `List`/hash `Map` are owned, explicitly mutable and independently copied; u64 counts/indices, Option queries, read-only keys and explicit eq/hash contracts. Map insertion retains an existing equal key and returns its displaced value. List transformations are eager, sequential and support both consumed and borrowed input.

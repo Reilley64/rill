@@ -1,0 +1,24 @@
+# Standard SQL execution with typed codecs and honest errors — partial
+
+**Status: independent decisions confirmed; integration incomplete.** [#40](https://github.com/Reilley64/rill/issues/40) remains open behind #33 and the recorded native-provider/final-interface work. The user approved Q1–Q57 and explicitly confirmed recording this partial checkpoint, not a finished SQL implementation, checked interface, accepted feature RFC or protocol/security proof. Number 0020/prototype 21 is reserved by #37's separately published random-byte design.
+
+Place the shared SQL execution interface in **std::sql**, with canonical driver-facing families under **std::sql::driver** and identity-preserving exports/helpers. The user rejected the proposed external common execution library. Drivers and concrete pools remain external; static concrete connectors/types and ordinary pre-monomorphization family evidence replace assumptions of Go interfaces, runtime registration or public dyn. Keep SQL/dialect/ORM/schema-generation machinery external rather than promise universally portable SQL or inspect ordinary closures.
+
+[The partial contract](../sql-contracts.md) records the agreed value and resource model: owned arguments/rows/prepared descriptors, a common Parameter subset with open concrete driver codecs, typed NULL/exact decimals, explicit into/tryInto binding/extraction, one statement/result stream, strict row cardinality, finite configurable limits, managed transaction guards and conservative reuse. Owning values carry explicit noBorrow evidence; scoped helper restrictions do not prohibit all direct borrowed errors. Native/server preparation resources belong to bounded session state, not dangling descriptor pointers.
+
+Unique violations are first-class typed errors preserving native Err<E>. They can name qualified keys/ordered columns when established, but unavailable is explicit: current backend contracts cannot guarantee every column list, and expression keys are not ordinary column constraints. Metadata enrichment is explicit, provenance-aware and fallible. Standard formatting does not print native/codec payloads, values or SQL by default; retaining typed diagnostics is not automatic Cause erasure. These choices follow [primary-source research](../research/0040-standard-sql-and-unique-errors.md), not unsupported claims about library popularity or portability.
+
+Commit/rollback consume guards and report confirmed committed/rolled-back/unknown outcomes separately from session disposition. Abandoned transactions discard; result abandonment requires positive cleanup/reuse evidence. External pools validate/reset candidates, and no standard operation is automatically replayed. Cancellation remains outside Result and cleanup can wait indefinitely without proving rollback, native abortion or safe reuse.
+
+JSON already permits application conversions to/from std::encoding::json::Value under #31/#41. Add explicit examples, not another Serializable trait or structural mapper. SQL's named conversion-aware binding is a narrow library integration, not implicit casting/chaining/registration. Do not overwrite separately prepared JSON artifacts or confuse their historical numbering with these streaming/SQL files.
+
+## Alternatives and pending work
+
+- **External common execution module:** rejected by the user in favor of a Go-style standard seam; this does not move Go's concrete pool/registry into std.
+- **One closed universal SQL value/error type:** rejected as a ceiling. A common parameter subset and structured error categories coexist with concrete driver values/errors and typed user codec failures.
+- **Guaranteed nonempty unique-column list for all drivers:** rejected in favor of honest known/unavailable/provenance information; no message parser is promoted into a guarantee.
+- **Implicit serialization/SQL rewriting/automatic retries:** rejected. Callers choose conversion helpers, dialect logic and reconciliation policies explicitly.
+- **Deadline/time values/final operation arities:** unresolved until #33's confirmed contract is integrated. Schematic family shapes are not frozen public declarations.
+- **Embedded native provider:** separately unspecified/unvalidated; no general FFI, raw pointers or public thread pinning is authorized by an example adapter.
+
+[Prototype 22](../../prototypes/22-sql-codecs/main.rill), its [domain codecs](../../prototypes/22-sql-codecs/domain.rill) and [inventory](../../prototypes/22-sql-codecs/README.md) are hand-checked evidence, not SQL/database/provider execution. #28 must formalize output inference, specificity, ownership/error/evidence transport, resource limits/redaction and exactly-once cleanup; #30 retains actual native/Wasm validation. An unworkable mechanism returns to map #1. Do not close #40 or mark the standard SQL interface complete from this ADR alone.

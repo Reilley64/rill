@@ -1,0 +1,78 @@
+// #40 partial contract: application-owned codecs, not a std/driver implementation.
+// This module imports no concrete database driver. JSON follows #31's published
+// Value contract; its separately prepared draft is not copied into this worktree.
+import std::convert::{into, tryInto};
+import std::sql::Parameter;
+import std::encoding::json::Value;
+import std::result::{Result, Ok, Err};
+import std::error::display;
+import std::compare::eq;
+
+export type Email = { private text: string };
+export type EmailInput = { text: string };
+export enum EmailError { Empty, WrongJsonKind }
+export enum EmailDecodeError<E> {
+  Cell(Err<E>),
+  Validation(Err<EmailError>),
+}
+
+implement display(error: &EmailError): string {
+  return match (error) {
+    EmailError.Empty => "email representation is empty",
+    EmailError.WrongJsonKind => "email JSON representation has the wrong kind",
+  };
+}
+implement<E> display(error: &EmailDecodeError<E>): string {
+  // Deliberately do not render arbitrary native/user error payloads by default.
+  return "email cell conversion failed";
+}
+
+export function emailText(value: &Email): &string {
+  return &value.text;
+}
+
+// Example validation only: nonempty does NOT implement a complete email grammar.
+implement tryInto<Email>(text: string): Result<Email,EmailError> {
+  if (eq(&text, &"")) { return Err(EmailError.Empty); }
+  return Ok(Email { text: text });
+}
+
+// Infallible representation after construction; no automatic TryInto adapter.
+implement into<Parameter>(value: Email): Parameter {
+  return Parameter.Text(value.text);
+}
+implement tryInto<Parameter>(value: EmailInput): Result<Parameter,EmailError> {
+  let checked = tryInto<Email>(value.text)?;
+  return Ok(into<Parameter>(checked));
+}
+
+// A source-type-generic decoder uses existing conversion evidence, not reflection,
+// an associated type, or a separate implementation importing each concrete driver.
+implement<C,E> tryInto<Email>(cell: &C): Result<Email,EmailDecodeError<E>>
+  where tryInto(string, &C, E) {
+  guard let text = tryInto<string>(cell) else (error) {
+    return Err(EmailDecodeError.Cell(error));
+  }
+  guard let checked = tryInto<Email>(text) else (error) {
+    return Err(EmailDecodeError.Validation(error));
+  }
+  return Ok(checked);
+}
+
+// JSON and SQL target different canonical pairs. No automatic serializer/mapper.
+implement into<Value>(value: Email): Value {
+  return Value.String(value.text);
+}
+implement tryInto<Email>(value: Value): Result<Email,EmailError> {
+  return match (value) {
+    Value.String(text) => tryInto<Email>(text),
+    _ => Err(EmailError.WrongJsonKind),
+  };
+}
+// Borrowed source is an explicit distinct implementation; copy observed text.
+implement tryInto<Email>(value: &Value): Result<Email,EmailError> {
+  return match (value) {
+    Value.String(text) => tryInto<Email>(copy(text)),
+    _ => Err(EmailError.WrongJsonKind),
+  };
+}

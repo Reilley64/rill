@@ -112,6 +112,10 @@ _Avoid_: method, trait implementation, instance
 A body-less `function` signature, ending in `;`, that owns an overload family's identity, visibility, and required shape. Imported aliases identify that same family, not new declarations.
 _Avoid_: trait, interface, protocol, type class
 
+**Owning SQL row**:
+A result row whose data remains valid after advancing or closing its result stream. Views into that data still depend on the row owner.
+_Avoid_: cursor view, borrowed protocol buffer, entity mapping
+
 **Path**:
 A native filesystem-location spelling, distinct from an opened object or access authority. Lexical equality compares the spelling, not whether two paths resolve to the same object.
 _Avoid_: filename string, canonical identity, sandbox boundary
@@ -136,6 +140,10 @@ _Avoid_: copy, new owner
 A uniquely owned underlying error preserved with its origin and complete cause chain. Retention requires display, borrow-freedom, sendability and shareability evidence, independently of the outer error.
 _Avoid_: erased unchecked error, stack trace, shared Report
 
+**Reuse candidate**:
+A SQL session eligible for validation and reset, not one already proven clean or guaranteed to remain connected. Reuse candidacy says nothing about whether a failed operation may safely be repeated.
+_Avoid_: clean connection, retry permission, rollback acknowledgement
+
 **Routine**:
 The handle `spawn(() => f(x))` returns for the goroutine it starts. `stop(&routine)` requests cancellation and waits for termination and cleanup; freeing the handle does not stop it.
 _Avoid_: task, future, promise, join handle
@@ -152,6 +160,10 @@ _Avoid_: shared owner, mutable, copyable
 A `Shared<T>` handle gives a value more than one owner by explicitly counting its owners. Ordinary values are not implicitly counted, and shared ownership alone grants no mutable access to the payload.
 _Avoid_: Arc, Rc
 
+**SQL result stream**:
+A cursor retaining the session and execution dependencies needed to produce owning rows. Exhaustion alone does not establish safe session reuse.
+_Avoid_: owning row, materialized result list, reusable connection
+
 **String**:
 An owned value of valid UTF-8 text, written `string`. Named string bindings move unless explicitly copied.
 _Avoid_: String class, byte buffer, implicitly shared string
@@ -159,3 +171,7 @@ _Avoid_: String class, byte buffer, implicitly shared string
 **String view**:
 Read-only borrowed text written `&string`, which may cover a whole string or substring. Duplicating its descriptor retains the backing-source dependencies rather than producing owned text.
 _Avoid_: str type, owned substring, shared owner
+
+**Unique violation**:
+A reported primary-key or unique-key collision, including composite keys whose values are unique as a tuple. The category does not guarantee that every backend supplies the key's column names.
+_Avoid_: duplicate UUID, individually unique columns, automatic retry
