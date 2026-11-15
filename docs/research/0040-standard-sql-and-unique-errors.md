@@ -4,7 +4,7 @@ Research input for [Rill #40](https://github.com/Reilley64/rill/issues/40), **no
 
 ## Interview follow-up
 
-The user subsequently confirmed the [partial SQL contract](../sql-contracts.md): std placement, concrete pools external, explicit typed uniqueness with known/unavailable provenance, named into/tryInto codec integration and redacted defaults. The options/checklist below remain the research input, not unresolved votes overriding those later decisions. #40 stays open for #33/final-interface/native-provider work; this note is not implementation evidence.
+The user subsequently confirmed the [integrated SQL contract](../sql-contracts.md): std placement, external concrete pools, typed uniqueness with known/unavailable provenance, explicit codecs and redacted defaults. After #33 closed, Q58–Q77 confirmed owned controls, typed token outcomes distinct from intrinsic stopping, temporal mappings, fixed arities and the narrow validateInstantDomain consumer amendment. #43 separately tracks native-provider work; it is not fulfilled by design closure. The options/checklist and historical open-#33 statements below are research inputs at that time, not unresolved votes overriding later decisions or implementation evidence.
 
 ## Premises and short answer
 
@@ -24,7 +24,7 @@ Read alongside these local decisions:
 - [ADR 0017](../adr/0017-user-implementable-conversions.md): `function` declarations, `implement` bodies, ordinary input-based family selection; conversions do not create automatic database mapping or expression capture.
 - [ADR 0018](../adr/0018-streaming-and-buffered-io.md): explicit progress and owning adapters; cancellation/close/disposal do not prove remote rollback or connection reuse. Its scoped `noBorrow` restrictions are not universal driver-error restrictions.
 
-[#33](https://github.com/Reilley64/rill/issues/33) is still **OPEN** when inspected through `gh`, including its comments. Deadline representation, propagation, races, native-work abortion and wall-clock representation remain unresolved prerequisites. **This note chooses no timeout parameter, context/token type, clock epoch, duration unit or deadline API.** The #32 handoff comments on #40/#33 expressly leave that work open and require retaining native/buffer obligations through completion or confirmed abortion. #30's backend/native-pointer gates remain; a SQLite-like adapter is a contrasting design target, not permission to expose SQLite C handles today.
+At the **initial research checkpoint**, [#33](https://github.com/Reilley64/rill/issues/33) was still OPEN when inspected through `gh`, including its comments; the later integrated contract above supersedes this historical dependency state. Deadline representation, propagation, races, native-work abortion and wall-clock representation remain unresolved prerequisites. **This note chooses no timeout parameter, context/token type, clock epoch, duration unit or deadline API.** The #32 handoff comments on #40/#33 expressly leave that work open and require retaining native/buffer obligations through completion or confirmed abortion. #30's backend/native-pointer gates remain; a SQLite-like adapter is a contrasting design target, not permission to expose SQLite C handles today.
 
 ## Why these comparisons
 

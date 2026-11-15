@@ -1,8 +1,8 @@
-# #40 partial SQL/JSON codec and error evidence
+# #40 SQL/JSON codec, control and error evidence
 
-**Partial checkpoint, not a completed SQL interface.** [#40](https://github.com/Reilley64/rill/issues/40) remains open. [The contract](../../docs/sql-contracts.md), [ADR 0021](../../docs/adr/0021-partial-standard-sql-contract.md) and [research](../../docs/research/0040-standard-sql-and-unique-errors.md) distinguish confirmed independent choices from #33 deadline/time integration, final arities and the unprovided embedded native bridge. ADR 0020/prototype 21 are reserved by #37; separately prepared JSON drafts are not overwritten.
+**Human-confirmed shared-interface design, not implementation.** [The contract](../../docs/sql-contracts.md) and [ADR 0021](../../docs/adr/0021-partial-standard-sql-contract.md) integrate #33 and Q58–Q77, replacing the partial checkpoint. [Research](../../docs/research/0040-standard-sql-and-unique-errors.md) remains source input. [#43](https://github.com/Reilley64/rill/issues/43) separately gates actual embedded-provider support, not #40 design closure/RFC drafting. ADR 0020/prototype 21 belong to #37; separately prepared JSON/time drafts are not overwritten.
 
-[main.rill](main.rill) has **20 intended-valid expectations** and loads [domain.rill](domain.rill). All are hand-checked, not Rill/database/native/WASI/protocol/security execution. The memory argument encoder and two cell fixtures are **not SQL drivers** and do not prove that PostgreSQL/SQLite integration exists.
+[main.rill](main.rill) has **20 intended-valid expectations** and loads [domain.rill](domain.rill). [control.rill](control.rill) is a separate entry with **12 control/temporal expectations**, for **32 total**. All are hand-checked, not Rill/clock/token/database/native/WASI/protocol/security execution. The memory argument encoder, immediate counter and cell fixtures are **not SQL drivers** and do not prove PostgreSQL/SQLite integration or race/abortion behavior.
 
 ## What the source actually demonstrates
 
@@ -17,9 +17,13 @@
 
 These tests do not check actual field/row/frame limits, metadata lookup, cardinality, transaction outcome, cleanup, caches, native ABI, cryptography, or a borrow checker. Their required independent cases are below. Default diagnostics are not a parseable stable-string protocol; source tests only check that selected sensitive substrings are absent, not an exact message.
 
-## Two actual adapter obligations (signature sketches only)
+## Control/temporal source coverage and limits
 
-The following roles are **not implemented types or frozen operation declarations**. #33 can still affect parameter lists. No body-less declaration is being presented as a completed native hook.
+control.rill uses actual #33 types plus the explicitly approved std::time::validateInstantDomain consumer amendment. It checks immediate-fixture admission with uncontrolled/requested/expired/mismatched controls, copied token/clock state, all four temporal parameter variants, retained temporal constructor errors and exact-microsecond rejection. No source code reads private clock/Instant fields. The counter only completes immediately; it is not a pending-I/O cancellation or timer-race implementation. Setup may read a manual clock to construct an Instant; a successful source expectation cannot prove the domain validator avoided a read internally. That needs a private call-count harness, not a public clock-provider override.
+
+## Two actual adapter obligations (implementation sketches only)
+
+The following roles are **not implemented types/native hooks**. Fixed public operation declarations are in docs/sql-contracts.md; the earlier deadline-independent sketches are superseded. #33 is confirmed, not an unresolved excuse for alternate arities.
 
 ### PostgreSQL-like network adapter
 
@@ -104,9 +108,32 @@ Defaults are exactly those confirmed in docs/sql-contracts.md: parameter/field 1
 | Several owning prepared descriptors alive | No permanent exclusive session loans; each execution still excludes conflicts. |
 | Cache eviction/old session/schema change | Validate/reprepare or error; never dereference freed native state. |
 | queryOne/queryOptional sees second row | Structured cardinality failure, finalize local cursor and preserve cleanup errors. No unlimited collection. |
-| Cancellation while native work retains inputs | Retain every owner/loan/native registration until completion or confirmed abortion. No Result cancellation/outcome delivered to stopped code. |
-| Cleanup cannot abort / timer wins | May wait indefinitely; #33 deadline API remains unresolved, no hard return guarantee. |
+| Intrinsic cancellation while native work retains inputs | Retain every owner/loan/native registration until completion or confirmed abortion. No Result cancellation/outcome delivered to stopped code; explicit token outcomes are separate. |
+| Cleanup cannot abort / expiry selected | Keep owners and wait indefinitely if necessary; integrated #33 control does not promise a hard return bound or prove native abortion. |
 
-## Still open, not silently implemented
+## Independent integrated-control and temporal cases
 
-#40 remains open behind #33, with no final deadline/context/calendar/temporal value or operation arity. The native embedded-provider prerequisite is not fulfilled by a fixture. Complete transaction options/outcome/error payloads and remaining generic cleanup/capability/resolver details in the integrated interface. #28 owes checking/candidate/dependency/redaction/limit and exactly-once rules; #30 owes real native/Wasm retention/pointer/scheduling validation. JSON draft numbering/integration must be reconciled without overwriting other worktrees. Any unworkable mechanism returns to map #1 rather than being hidden by this partial checkpoint.
+| Case | Required behavior |
+| --- | --- |
+| Deadline clock differs; token already requested | DomainMismatch retained as ClockFailure before token outcome; no clock reading/timer required by domain-only validation, no new SQL submitted. |
+| Matching clock is terminally failed; token already requested | Domain compatibility can still validate; token preflight selects Cancelled without reading the failed timeline. No claim that validation tests clock health. |
+| No deadline / never-cancelled token | No clock lookup/read; ordinary intrinsic cancellation still applies. |
+| Explicitly copy control then request source | Both copies observe the same request; copying does not freeze/reset the flag or retarget the absolute Instant. |
+| connect/begin succeeded; later original token requested | Does not asynchronously cancel the idle session/transaction. Each later operation receives its own explicit control. |
+| Active next with buffered data and already-requested control | May terminate before another row is selected; observation is relative to admitted query, not latest fetch. Previously returned rows remain valid. |
+| Terminal next, then token requested/clock fails | Still None; no second failure or retroactive outcome replacement. |
+| Completion/expiry/request ready after admission | No guaranteed bias; preserve chosen outcome through cleanup, not a late return-time clock reclassification. |
+| Control failure, mandatory native release blocked | Keep all owners/loans; use noncancelled internal cleanup and wait for completion/confirmed abortion. No hard return deadline. |
+| Commit request not submitted | Does not prove prior transaction work rolled back; consuming guard cleanup and explicit outcome still apply. |
+| Commit acknowledged after expiry selected | Failure can still report ConfirmedCommitted; never retry or replace selected control failure with success. |
+| Failed/interrupted pool reset | Discard, not silent reconnect/replay; successful reset is documented baseline, not future liveness. |
+| nanoseconds not divisible by 1,000 for microsecond backend | Precision error with original TimeError where used, not truncation. |
+| Native invalid date/24:00/leap second/infinity/out-of-range epoch | Checked error, not repair/normalization. |
+| Civil DateTime -> instant; Zoned -> instant; calendar interval -> elapsed | No implicit zone/context/unit/rules loss. Use explicit/schema-native mappings; common subset does not promise faithful zone/interval storage. |
+| withDeadline around query creation | R stays nested Result; outer expiry is not a token request or rollback proof. A returned cursor needs its own explicit control for future advances. |
+| Row-helper iteration error borrows local cursor | noBorrow(NE) required before retaining it across close; caller-owned-row get keeps valid borrowed outputs/errors. |
+| Different query/next/close or finalization/cleanup errors | Preserve independent types and both envelopes; no expected-error-selected implementation or implicit unification. |
+
+## Remaining implementation and validation work
+
+The explicitly confirmed design permits #40 closure. Native embedded-provider work is tracked in #43 and is not fulfilled by a fixture; no general FFI/pinning or working adapter is claimed. #28 owes checker/candidate/dependency/redaction/limit/cleanup/race formalization and #30 real native/Wasm retention/pointer/scheduling validation. Merge the narrow validateInstantDomain amendment into #33's separate clock artifacts and reconcile JSON/time/random numbering without overwriting drafts. Any unworkable mechanism returns to map #1; design closure is not an accepted RFC or runtime/provider/security proof.

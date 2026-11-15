@@ -1,6 +1,6 @@
-// #40 partial contract: hand-checked value/codec/error examples, NOT SQL execution.
+// #40 design contract: hand-checked value/codec/error examples, NOT SQL execution.
 // These two cell fixtures are not PostgreSQL/SQLite protocol or native adapters.
-// No connect/query/deadline arity is frozen by this source.
+// Fixed bind helpers use a memory encoder; no connect/query is performed.
 import domain::{Email, EmailInput, EmailError, EmailDecodeError, emailText};
 import std::convert::{into, tryInto};
 import std::sql::{Parameter, ParameterType, bindInto, tryBind, BindError,

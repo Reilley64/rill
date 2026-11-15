@@ -1,8 +1,8 @@
-# Partial standard SQL contract — #40
+# Standard SQL interface contract — #40
 
-**Status: human-confirmed independent decisions; incomplete integration contract.** The user approved Q1–Q57 and explicitly confirmed recording this checkpoint. [#40](https://github.com/Reilley64/rill/issues/40) stays open. [#33](https://github.com/Reilley64/rill/issues/33) still gates deadline/time/calendar integration and final operation parameter lists. An embedded native provider remains separately unspecified/unvalidated. Nothing here implements a driver, pool, ORM, protocol, compiler or security/soundness proof, or accepts a future RFC.
+**Status: human-confirmed shared-interface design.** The user confirmed the Q1–Q57 checkpoint, then Q58–Q77 and the consolidated integration summary after [#33](https://github.com/Reilley64/rill/issues/33) closed. This supersedes the partial checkpoint: control, temporal mappings and fixed operation arities are now specified. [#40](https://github.com/Reilley64/rill/issues/40) completes shared-interface design only. The separately approved [embedded native-provider follow-up #43](https://github.com/Reilley64/rill/issues/43) remains unfulfilled and gates claims of embedded support, not this design closure or RFC drafting. Nothing here implements a driver, pool, ORM, protocol, compiler or security/soundness proof, or accepts a future RFC.
 
-[ADR 0021](adr/0021-partial-standard-sql-contract.md) records placement/tradeoffs. [Primary-source research](research/0040-standard-sql-and-unique-errors.md) compares Go/pgx/sqlc/SQLx/Diesel/jOOQ and actual backend error fields. [Prototype 22](../prototypes/22-sql-codecs/main.rill) and its [inventory](../prototypes/22-sql-codecs/README.md) are hand-checked codec/error evidence. Numbers avoid #37's separately published ADR 0020/prototype 21 reservation. JSON's authoritative [#31 snapshot](https://github.com/Reilley64/rill/issues/31#issuecomment-6886030678) has separate drafts; its colliding historical numbers are not reused as identities here.
+[ADR 0021](adr/0021-partial-standard-sql-contract.md) records placement/tradeoffs; its historical filename is retained for existing links. [#33's confirmed snapshot](https://github.com/Reilley64/rill/issues/33#issuecomment-6891620139) supplies temporal/clock/token types; its separately prepared files are not assumed present in this checkout. [Primary-source research](research/0040-standard-sql-and-unique-errors.md) compares Go/pgx/sqlc/SQLx/Diesel/jOOQ and actual backend error fields. [Prototype 22](../prototypes/22-sql-codecs/main.rill), its [control/temporal entry](../prototypes/22-sql-codecs/control.rill) and [inventory](../prototypes/22-sql-codecs/README.md) are hand-checked codec/error/control evidence. Numbers avoid #37's separately published ADR 0020/prototype 21 reservation. JSON's authoritative [#31 snapshot](https://github.com/Reilley64/rill/issues/31#issuecomment-6886030678) has separate drafts; its colliding historical numbers are not reused as identities here.
 
 ## 1. Placement and non-goals
 
@@ -19,13 +19,14 @@ The following value shapes record the agreed common subset. They are not a manda
 ```rill
 enum ParameterType {
   Bool, I8, I16, I32, I64, I128, U8, U16, U32, U64, U128,
-  F32, F64, Text, Binary, Decimal,
+  F32, F64, Text, Binary, Decimal, Date, Time, DateTime, Timestamp,
 }
 enum Parameter {
   Null(ParameterType), Bool(bool),
   I8(i8), I16(i16), I32(i32), I64(i64), I128(i128),
   U8(u8), U16(u16), U32(u32), U64(u64), U128(u128),
   F32(f32), F64(f64), Text(string), Binary(Bytes), Decimal(Decimal),
+  Date(Date), Time(Time), DateTime(DateTime), Timestamp(Timestamp),
 }
 enum ColumnRef { Index(u64), Name(string) }
 type ExecSummary = { rowsAffected: Option<u64> };
@@ -45,9 +46,46 @@ Decimal is an opaque owned finite token, not a general arbitrary-precision arith
 -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
 ```
 
-`decimal(text)` returns Result<Decimal,DecimalError>, accepting owned string or borrowed &string (copying the latter). `decimalWithLimit(text,maxBytes:u64)` overrides the token budget; `decimalText(&Decimal):&string` borrows the original token. Preserve sign/negative zero, fractional trailing zeros and exponent spelling. Reject whitespace, leading plus/leading-zero forms, NaN/infinity. DecimalError distinguishes InvalidSyntax with byte offset from LimitExceeded with safe length/budget context; it does not dump input values. It is owned with standard safe display/property evidence.
+```rill
+function decimal<S>(text: S): Result<Decimal,DecimalError>;
+function decimalWithLimit<S>(text: S, maxBytes: u64): Result<Decimal,DecimalError>;
+decimalText(&Decimal): &string
+enum DecimalError {
+  InvalidSyntax { offset: u64 },
+  LimitExceeded { maxBytes: u64, actualBytes: u64 },
+}
+```
+
+The two factory families accept owned string or borrowed &string (copying the latter). `decimalWithLimit(text,maxBytes:u64)` overrides the token budget; `decimalText(&Decimal):&string` borrows the original token. Preserve sign/negative zero, fractional trailing zeros and exponent spelling. Reject whitespace, leading plus/leading-zero forms, NaN/infinity. DecimalError distinguishes InvalidSyntax with byte offset from LimitExceeded with safe length/budget context; it does not dump input values. It is owned with standard safe display/property evidence.
 
 Check token length before a borrowed copy; validation is bounded by token length and never expands exponents or converts through float. Backend range/scale conversion must also reject safely without enormous expansion. The resemblance to JSON number grammar is not a shared parser identity or authorization to import JSON numeric rounding into SQL decoding. No equality-as-arithmetic, SQL-literal interpolation, automatic text fallback or arithmetic operations are added.
+
+### Temporal values from #33
+
+Date/Time/DateTime are std::time::civil types; Timestamp is std::time::Timestamp. They are existing nominal implicit-copy/noBorrow/sendable/shareable scalars, not new SQL wrappers. Standard into<Parameter> pairs pack these validated values; they do not automatically supply tryInto pairs or database support. Drivers document faithful native mappings; absent such a mapping, reject unless the caller explicitly chooses a text/integer storage codec. Do not select a mapping merely from a backend's type-name spelling.
+
+DateTime is civil, not an instant; Timestamp is the defined Unix-timeline instant, not a monotonic Instant. No hidden session/system zone, inferred epoch unit, numeric float seconds or automatic wall-clock-to-deadline conversion. Explicit timestamp extraction yields the instant, not a promise to preserve native zone/offset metadata. No implicit Zoned/TimeZone/Span/SignedDuration common parameter: retained rules, contextual calendars, mixed-sign database intervals and elapsed durations are not interchangeable. Concrete native codecs and explicit schema mappings remain available.
+
+Reject unsupported ranges, invalid/zero dates, 24:00/leap seconds, native infinity sentinels or unrepresentable precision instead of repairing/truncating them. Nanoseconds bound to a microsecond representation must be divisible by 1,000. Explicit lossy conversion is separate. #33's civil/instant ranges and fixed-unit exact extractors apply; neither the library nor a type name audits coercions explicitly performed by SQL/columns/triggers. Retain an original Err<TimeError> in DbError.Temporal when a checked temporal operation fails; do not manufacture a native E or discard the original metadata. Local checks with no underlying TimeError can use DecodeError.
+
+### Explicit owned operation control
+
+```rill
+// Clock/Instant/ClockError from std::time; token from std::cancel.
+type SqlControl = {
+  deadline: Option<[Clock,Instant]>;
+  cancellation: CancellationToken;
+};
+uncontrolled(): SqlControl
+// std::time consumer amendment approved in #40 Q68:
+validateInstantDomain(&Clock, Instant): Result<void,ClockError>
+```
+
+SqlControl owns its handles, is noBorrow/sendable/shareable, and is not implicitly copied. Explicit copy retains the same clock service/token state and absolute target; it neither restarts a timeout nor aliases the caller's mutable record slot. uncontrolled supplies None and neverCanceledToken without obtaining/reading a clock. Each controlled operation consumes its control, allowing cursors to retain it without borrowing a temporary caller slot. Dropping ordinary handles does not request cancellation.
+
+validateInstantDomain belongs to std::time, not std::sql: compare immutable private domain identity only, without reading the clock, registering a timer, exposing IDs or testing timeline health. Return DomainMismatch for a different domain; even a terminally failed matching clock still has matching identity, with read failure checked later if needed. This narrow public amendment avoids granting SQL privileged field access or misusing a wait just to validate a pair. It does not reopen #33's clock/deadline model.
+
+Controls are per operation. Successful connect/begin does not impose its control on the session/transaction lifetime. For a whole transaction budget, explicitly copy the same absolute control to each operation. Idle transactions are not asynchronously disposed by a flag. Query cursors retain query control for subsequent advances; there is no ambient token or automatic inheritance. Local value/codec helpers gain no clock/token parameter. withDeadline remains #33's scoped helper with its own callable/sendability evidence, joined cleanup and exact nested Result; it neither flattens SQL errors nor sets token flags or automatically controls a returned cursor's future advances.
 
 ## 3. User codecs and typed errors
 
@@ -79,7 +117,7 @@ User codec errors remain concrete and retain their Err envelope/origin/cause dat
 
 ## 4. Database errors and uniqueness
 
-DbError<E> has a first-class UniqueViolation and typed native failures, plus standard local cases for invalid arguments, decoding/null/range/precision/encoding, cardinality, invalid state, unsupported operations and limits. Local failures do not manufacture E. The partial structural vocabulary used by the examples is:
+DbError<E> has a first-class UniqueViolation and typed native failures, plus standard local cases for invalid arguments, decoding/null/range/precision/encoding, cardinality, invalid state, unsupported operations and limits. Local failures do not manufacture E. The standard error vocabulary is:
 
 ```rill
 enum DbError<E> {
@@ -91,7 +129,16 @@ enum DbError<E> {
   InvalidState,
   Unsupported,
   LimitExceeded(LimitKind),
+  Cancelled { observation: ExecutionObservation, source: Option<Err<E>> },
+  DeadlineExceeded { observation: ExecutionObservation, source: Option<Err<E>> },
+  ClockFailure {
+    observation: ExecutionObservation, clock: Err<ClockError>, source: Option<Err<E>>,
+  },
+  Temporal { error: Err<TimeError> },
 }
+enum ExecutionObservation { NotSubmitted, MayHaveExecuted }
+enum LimitKind { ParameterBytes, FieldBytes, RowBytes, FrameBytes, MetadataBytes,
+  Columns, Parameters, DecimalTokenBytes }
 enum ArgumentError {
   ParameterCount { expected: u64, actual: u64 },
   ColumnNotFound(string), AmbiguousColumn(string),
@@ -101,7 +148,7 @@ enum DecodeError { UnexpectedNull, TypeMismatch, OutOfRange, PrecisionLoss, Inva
 enum CardinalityError { NoRows, MoreThanOneRow }
 ```
 
-These are confirmed categories with illustrative minimum payload shapes, not the closed final enum inventory/ABI. Preserve native diagnostics for everything not reliably classified; do not classify by finding an English word in a message. Native SQLSTATE/codes remain available through the concrete E. No retry implication follows from any category.
+These are public semantic shapes, not a native memory layout/ABI. Preserve native diagnostics for everything not reliably classified; do not classify by finding an English word in a message. Native SQLSTATE/codes remain available through the concrete E. No retry implication follows from any category. Control failures preserve independent typed clock/native diagnostics when present, with no fabricated native value for preflight errors. NotSubmitted concerns this requested operation, not prior transaction work or mandatory cleanup; on an admitted query it cannot merely describe one next call that fetched nothing. Transaction outcome and reuse disposition remain independent.
 
 UniqueViolation covers actual primary-key/unique-key/rowid collisions, not only UUIDs. A composite `(tenant_id,email)` is one tuple constraint, not two independently unique columns. Ordinary native codes can identify uniqueness even when key details are unavailable. The research shows no universal complete column list: PostgreSQL generally reports constraint/index identity, SQLite no structured failing-key identity, and MySQL/SQL Server object names primarily in message text. Expression/partial indexes and triggers further defeat simplistic mapping.
 
@@ -139,19 +186,40 @@ A physical session is an owned noncopying resource. One active operation has exc
 
 Raw execution consumes owned SQL string and arguments. Prepared execution borrows its owning descriptor and consumes arguments. Returned cursors retain necessary session/descriptor/native storage dependencies; owning rows survive advance/close and only later cell views depend on those rows. No default zero-copy cursor view is added.
 
-Canonical iterate/next yields Option<Result<Row,DbError<E>>>. A streaming error is yielded once then terminal None. EOF alone does not prove protocol synchronization/reuse. Explicit consuming result close can drain/cancel/resynchronize or report failure; disposal/early abandonment conservatively discards unless cleanup actually completed and positive safe-state evidence exists. No detached cleanup followed by premature reuse.
+Canonical iterate/next yields Option<Result<Row,DbError<E>>>. Each active advance checks retained query control before selecting even a buffered row; already-requested/expired control can produce the one terminal failure, with MayHaveExecuted observation. After that preflight, completion/control races have no guaranteed winner. A streaming error is yielded once then terminal None. An already-terminal stream stays None without new token/clock failures or replacement of previously selected outcomes. EOF alone does not prove protocol synchronization/reuse. Explicit consuming result close can drain/cancel/resynchronize or report failure; disposal/early abandonment conservatively discards unless cleanup actually completed and positive safe-state evidence exists. No detached cleanup followed by premature reuse.
 
 queryOne requires exactly one row; queryOptional permits zero or one; a second row is a structured cardinality failure. Finalize local cursors and preserve operation/cleanup errors, with scoped borrow-free evidence where retained failures would otherwise depend on destroyed storage. No unlimited queryAll; larger collections are explicit budgeted loops.
 
 ## 6. Transactions and external pools
 
-Beginning a transaction returns a guard retaining exclusive session access. Queries/prepared execution use that guard; live rows prevent commit/rollback. Nested/savepoint operations are explicit optional capabilities, never simulated nested transactions. Options distinguish backend-default isolation, common explicit levels and a read-only request; unsupported requests fail, not silently substitute/ignore. Read-only is a backend transaction restriction, not proof of external-function purity. The exact options record and deadline fields remain pending integration.
+Beginning a transaction returns a guard retaining exclusive session access. Queries/prepared execution use that guard; live rows prevent commit/rollback. Nested/savepoint operations are explicit optional capabilities, never simulated nested transactions. Options distinguish backend-default isolation, common explicit levels and a read-only request; unsupported requests fail, not silently substitute/ignore. Read-only is a backend transaction restriction, not proof of external-function purity.
+
+```rill
+enum IsolationLevel { BackendDefault, ReadUncommitted, ReadCommitted, RepeatableRead, Serializable }
+type TransactionOptions = { isolation: IsolationLevel; readOnly: bool };
+enum TransactionOutcome { ConfirmedCommitted, ConfirmedRolledBack, Unknown }
+enum TransactionFailure<E,C> {
+  Operation {
+    outcome: TransactionOutcome, error: Err<DbError<E>>,
+    cleanup: Option<Err<DbError<C>>>,
+  },
+  Cleanup { outcome: TransactionOutcome, error: Err<DbError<C>> },
+}
+```
+
+readOnly=false requests no read-only restriction, not write authority. BackendDefault uses the documented backend default; explicit unsupported options are not silently substituted. Commit success confirms commit; rollback success confirms rollback. A successful finalization followed by failed cleanup uses Cleanup with the confirmed outcome. A native response that actually establishes rollback is not successful commit. Root control error selection is not replaced by a late acknowledgement, but a transaction failure can still report a subsequently confirmed outcome. Independent E/C types preserve both phases without implicit unification. An implementation retaining a phase error across mutating cleanup/destruction must establish scoped noBorrow or valid disjoint/externally rooted dependencies; independent error parameters do not authorize dangling or conflicting borrows.
 
 Commit/rollback consume the guard even on failure. Success confirms the corresponding outcome; failure separately reports ConfirmedCommitted/ConfirmedRolledBack/Unknown and preserves finalization plus cleanup errors where both occur. A failed COMMIT reply is not proof of noncommit; late rollback/close cannot undo committed effects. Abandoned active transactions mark the session unusable and safely clean up rather than queue rollback and advertise immediate reuse. No promise of acknowledged remote rollback.
 
 Managed guards own transaction control. Manual BEGIN/COMMIT/ROLLBACK/savepoint commands through ordinary execution are outside that managed contract. Std does not pretend to parse arbitrary SQL; drivers detect unexpected protocol state where possible and discard uncertainty, not manufacture a valid guard. Native escape operations have separate responsibilities.
 
 Reuse disposition distinguishes CandidateForValidationReset from Discard. An operation can fail on a usable protocol session or have unknown effects on a discarded one. Candidate is not future liveness, a reset, or clean session variables/temp state. External pools must perform their documented validation/reset before reuse and must not treat discard as retry permission. No automatic replay of writes, reads-with-possible-effects, unique failures or unknown commits. Idempotency/reconciliation is an explicit application policy.
+
+```rill
+enum ReuseDisposition { CandidateForValidationReset, Discard }
+```
+
+reuseDisposition is a local observation with no implicit ping/SQL/time operation. reset is an optional controlled driver capability restoring its documented baseline, not a universal SQL recipe or future-liveness proof. Pools require suitable validation/reset support or discard. Failed/interrupted reset requires discard; a Discard session is not silently reconnected/replayed by reset. It stays available for safe close/disposal, not ordinary new work. Reset/metadata resolution receive explicit operation control as potentially blocking work.
 
 ## 7. Limits
 
@@ -170,32 +238,62 @@ Proposed tuning values were explicitly accepted as safety defaults, not measured
 
 These bound controlled payload/metadata copies and known-size protocol allocations, not exact allocator footprint, server work, every native-engine allocation or cancellation latency. Apply checks before controlled allocation where size is known. Native SQLite engine limits need provider-specific configuration/validation. An oversized frame/row may require discarding the session, not unbounded draining or a partial owning row presented as success. Session cache budgets must be bounded and documented by the driver; no unbounded cache is implied by prepared descriptors.
 
-## 8. Deadline-independent family relationships — not final arities
+## 8. Fixed operation shapes and generic evidence
 
-The following are **schematic shapes for evidence review**. They deliberately omit unresolved #33 options/context and are not final callable declarations. Do not implement/freeze them and later silently change ordinary family arity.
+These are public fixed-arity family declarations, not repeated per-driver declarations or native ABI layouts. They replace the Q1–Q57 deadline-independent sketches. All SQL types/helpers are public std::sql exports; the following canonical identities originate in std::sql::driver and are re-exported unchanged. Q is an owned raw string or a borrowed concrete prepared descriptor; input implementations determine outputs, never expected return/error types.
 
 ```rill
-// std::sql::driver identities; appropriate names re-exported by std::sql
-connect<C,S,E>(C): Result<S,DbError<E>>
-arguments<X,A>(&X): A
-bind<A,V,E>(&mut A,V): Result<void,DbError<E>>
-prepare<X,P,E>(&mut X,string): Result<P,DbError<E>>
-execute<X,Q,A,E>(&mut X,Q,A): Result<ExecSummary,DbError<E>>
-query<X,Q,A,R,E>(&mut X,Q,A): Result<R,DbError<E>>
-begin<S,T,E>(&mut S, /* options pending */): Result<T,DbError<E>>
-cellAt<R,C,E>(&R,ColumnRef): Result<&C,DbError<E>>
-resolveUnique<M,E>(&mut M,&KeyIdentity): Result<KeyDetails,DbError<E>>
-// commit/rollback: consume T, report independent outcome and phase errors.
-// result/session close can use canonical std::io::close identity with SQL E.
+function connect<C,S,E>(connector: C, control: SqlControl): Result<S,DbError<E>>;
+function arguments<X,A>(target: &X): A;
+function bind<A,V,E>(arguments: &mut A, value: V): Result<void,DbError<E>>;
+function prepare<X,P,E>(target: &mut X, sql: string, control: SqlControl): Result<P,DbError<E>>;
+function execute<X,Q,A,E>(target: &mut X, query: Q, arguments: A, control: SqlControl)
+  : Result<ExecSummary,DbError<E>>;
+function query<X,Q,A,R,E>(target: &mut X, query: Q, arguments: A, control: SqlControl)
+  : Result<R,DbError<E>>;
+function begin<S,T,E>(session: &mut S, options: TransactionOptions, control: SqlControl)
+  : Result<T,DbError<E>>;
+function commit<T,E,C>(transaction: T, control: SqlControl): Result<void,TransactionFailure<E,C>>;
+function rollback<T,E,C>(transaction: T, control: SqlControl): Result<void,TransactionFailure<E,C>>;
+function cellAt<R,C,E>(row: &R, column: ColumnRef): Result<&C,DbError<E>>;
+function resolveUnique<M,E>(resolver: &mut M, identity: &KeyIdentity, control: SqlControl)
+  : Result<KeyDetails,DbError<E>>;
+function reuseDisposition<S>(session: &S): ReuseDisposition;
+function reset<S,E>(session: &mut S, control: SqlControl): Result<void,DbError<E>>;
 ```
 
-Input patterns determine S/A/P/R/C/E; expected result/error types never choose another implementation. No associated projection or runtime registry. Public generic requirements name exported canonical families. In particular, conceptual evidence includes connect(C,S,E), arguments(X,A), bind(A,V,E), prepare(X,P,E), query(X,Q,A,R,E), cellAt(R,C,E), and canonical next(R,Result<Row,DbError<E>>). State noBorrow(A/P/Row) explicitly where required; do not add noBorrow(Session) or sendable/shareable by analogy. Standard close's error parameter, when reused, is the **whole DbError<E>**, not E alone.
+Canonical iterate/next retain std::iter identity; canonical consuming close retains std::io identity, re-exported as appropriate, not a new SQL family. Session/cursor implementations return Result<void,DbError<E>> through close's existing single error parameter. No close control argument or generic withCancellation is added. Transaction finalization uses commit/rollback, not an implied generic close-as-rollback.
+
+Input patterns determine S/A/P/R/C/E; expected result/error types never choose another implementation. No associated projection or runtime registry. Public generic requirements name exported canonical families. Evidence includes connect(C,S,E), arguments(X,A), bind(A,V,E), prepare(X,P,E), execute(X,Q,A,E), query(X,Q,A,R,E), begin(S,T,E), commit(T,E,C), rollback(T,E,C), cellAt(R,C,E), resolveUnique(M,E), reuseDisposition(S), reset(S,E), and canonical next(R,Result<Row,DbError<E>>). SqlControl is a concrete parameter, not another generic argument in these requirements. State noBorrow(A/P/Row) explicitly where required; do not add noBorrow(Session) or sendable/shareable by analogy. Standard close's error parameter, when reused, is the **whole DbError<E>**, not E alone.
 
 For conversion-aware helpers, state into(Parameter,T) or tryInto(Parameter,T,C), plus bind(A,Parameter,E). For get<T>, state cellAt(R,C,E) and tryInto(T,&C,D); its error is GetError<E,D>. T chooses an already-approved canonical conversion, not ordinary return-only get dispatch. User errors can differ from native E and from other operations; retain separate phase parameters rather than assume equality. A helper owning local cursor/row storage must explicitly require borrow-free relevant errors/decoded outputs before destroying that storage. Concrete owned native diagnostics often satisfy this, not a general implicit rule for every E.
 
-Final native-provider shapes, transaction error payload inventory, time/deadline options, temporal values and detailed generic cleanup/candidate rules remain open work; this checkpoint is not a completed checking mechanism.
+### Helper shapes and phase-preserving failures
 
-## 9. JSON integration and native-provider gate
+bindInto<A,T,E>(&mut A,T) returns Result<void,DbError<E>> with into(Parameter,T), bind(A,Parameter,E), noBorrow(A). tryBind<A,T,C,E>(&mut A,T) returns Result<void,BindError<C,E>> with tryInto(Parameter,T,C), bind(A,Parameter,E), noBorrow(A). get<T,R,C,E,D>(&R,ColumnRef) returns Result<T,GetError<E,D>> with cellAt(R,C,E), tryInto(T,&C,D). They are generic helper bodies, not more return-only implementation sets; no extra display(E/D) is needed merely for redacted wrapper rendering.
+
+```rill
+enum QueryFailure<Q,N,C> {
+  Start(Err<DbError<Q>>),
+  Iteration { error: Err<DbError<N>>, closing: Option<Err<DbError<C>>> },
+  Cardinality { error: CardinalityError, closing: Option<Err<DbError<C>>> },
+  Close(Err<DbError<C>>),
+}
+```
+
+queryOne<X,Q,A,R,V,QE,NE,CE>(&mut X,Q,A,SqlControl) returns Result<V,QueryFailure<QE,NE,CE>>; queryOptional has the same inputs and returns Result<Option<V>,QueryFailure<QE,NE,CE>>. Both require query(X,Q,A,R,QE), next(R,Result<V,DbError<NE>>), close(R,DbError<CE>), noBorrow(A), noBorrow(V), noBorrow(NE). The last requirement permits retaining an iteration error while closing/destroying the local cursor. A start error hands no cursor to the helper (query itself finishes required release); a consuming close cannot return references into its destroyed owned cursor fields. QE/CE may still retain valid caller-target/descriptor dependencies, so no universal noBorrow(QE/CE) is added. Any implementation introducing additional local borrowed temporaries must establish the corresponding extra evidence, not assume it at monomorphization.
+
+After every started cursor, finalize it even on iteration/cardinality failure and retain the close error alongside the primary failure. A successful row/no-row result is not returned if close fails. Second-row detection is MoreThanOneRow, not silently taking the first. Intrinsic cancellation runs required cleanup instead of returning these errors. Get decodes from a caller-owned row, so T/D can retain valid row dependencies; an additional helper decoding from a local row must prove noBorrow of escaping output/errors before destroying it. These are design/checking obligations for #28, not an implemented checker proof.
+
+### Admission, races and cleanup
+
+Validate basic client inputs and domain pairing first using validateInstantDomain without reading the clock. Then observe an already-requested token; otherwise read/check an optional deadline before submitting new work. With no deadline, do not consult a clock. Invalid-domain failure wins over an already-requested token; within other simultaneously invalid basic arguments no additional broad priority is promised. After admission there is no guaranteed bias or physical completion-timestamp ordering: preserve the selected outcome, do not reclassify success from a later request/return-time check. On each active row advance apply this policy to the retained query control; execution observation remains relative to the whole query. Terminal streams do not restart preflight.
+
+Explicit token cancellation may return a concrete SQL Cancelled outcome after required native release. Intrinsic goroutine cancellation remains outside ordinary Result and does not request a token flag. Deadline expiry/native cancel requests prove neither abortion nor rollback/reuse. Mandatory unregister/discard/release and native joins ignore external control (use neverCanceledToken/non-expiring internal cleanup where needed), with intrinsic delivery deferred as required. Canonical close is uncontrolled finalization; it may safely discard rather than promise graceful reuse. A cancelled commit/rollback still consumes the guard, finishes cleanup and reports only positively known transaction outcome; NotSubmitted does not mean prior work rolled back. Return can wait indefinitely.
+
+withDeadline around an operation preserves R exactly: for SQL Result it returns nested Ok(Result), not flattening. Its intrinsic child cancellation and typed SQL token requests are different mechanisms. A returned live cursor needs its own explicitly supplied query control to budget later advancement; merely wrapping query creation does not attach the outer deadline to that cursor.
+
+## 9. JSON integration and native-provider follow-up
 
 JSON's standard representation remains std::encoding::json::Value, with owned trees/precision-preserving Number and separate parse/stringify errors. Users already may implement explicit into/tryInto to/from Value. SQL adds a deliberately named conversion-aware binding operation; this is a narrow library integration beyond #41's baseline, not automatic conversion registration. Parsing/stringifying do not discover records, invoke arbitrary conversions or gain a mandatory show(Value). Owned/borrowed conversion sources remain distinct. JSON's exact integer/float construction/extraction policies do not become SQL's semantics or vice versa.
 
@@ -203,12 +301,14 @@ The example domain module implements SQL Parameter and JSON Value conversions an
 
 A PostgreSQL-like adapter owns TCP/TLS protocol state and errors; a SQLite-like adapter needs a separately specified narrow native-provider contract for native connections/statements/bindings/reset/finalization. Ordinary families express the seam but do not implement C ABI hooks. No raw pointers, public thread pinning or general FFI is authorized. Provider operations/disposal must be valid under worker migration and retain source/native state until completion or confirmed abortion. Blocking-pool dispatch/abort request is not release; Wasm pointer stability remains #30 work.
 
-Cancellation stays outside Result, leaves possible effects and returns no progress/outcome to stopped code. Required cleanup may suspend indefinitely; no hard return bound from a timer race. #33 must settle actual deadline propagation/races and shared wall-clock/calendar choices; no competing epoch/duration/SQL temporal type is invented here.
+[Native-provider follow-up #43](https://github.com/Reilley64/rill/issues/43) now tracks that contract and the validation needed before claiming embedded support. The user explicitly approved separating it from shared-interface design closure/RFC drafting; it has not been fulfilled. A PostgreSQL/SQLite sketch remains a design target, not delivered support. No native ABI, general FFI, public pinning or provider/target guarantee is inferred from closing #40.
 
-## 10. Outstanding completion work
+#33 is closed and its confirmed types/semantics are integrated above, with the narrow domain-validation amendment recorded back to #33. Original blanket 'cancellation outside Result' SQL wording is superseded: it applies to intrinsic stopping, not explicitly token-aware SQL outcomes. No competing clock/epoch/calendar model or generic cancellation wrapper is introduced.
 
-- Keep #40 open and its #33 native dependency intact. Read #33's confirmed result when available, then interview/finalize SQL deadline and temporal integration and operation arities.
-- Specify/validate the narrow embedded native-provider prerequisite; adapter sketches are not supported driver delivery.
-- Complete transaction options/outcome/error declarations, generic row-helper cleanup evidence and optional capability/resolver payload details in the integrated contract. Current categories/relationships are confirmed, exact remaining shapes are not frozen.
-- #28 formalizes pattern specificity, selected outputs, generic evidence/error preservation, source/row/argument dependencies, limits, provenance/redaction and exactly-once state. #30 gates actual native/Wasm mechanisms. Provider/protocol/security tests remain entirely outstanding.
-- Reconcile separately prepared JSON/time/random drafts and number reservations without overwriting them. Research/prototypes/ADRs are inputs, not accepted feature RFCs. Any unworkable mechanism returns to map #1 rather than being presumed proven by this checkpoint.
+## 10. Design completion versus implementation gates
+
+#40 can close as the explicitly confirmed shared-interface design. Its #23/#32/#33 inputs are closed; no native dependency is silently removed. #43 tracks the separately approved embedded-provider prerequisite and does not block shared-interface closure or RFC drafting. Actual driver/provider delivery, protocol/security tests and supported target claims remain outstanding.
+
+#28 formalizes pattern specificity, input-determined outputs, exact helper/error/evidence transport, transitive dependencies, limits/redaction, outcome races and exactly-once cleanup. #30 retains actual native/Wasm pointer/scheduling/reclamation gates. The public family/control/error contracts are not a checker proof. Any unworkable mechanism returns to map #1, not a hidden restriction or fabricated native guarantee.
+
+Reconcile separately prepared JSON/time/random artifacts and historical number collisions without overwriting them. #33's validateInstantDomain follow-up must be merged into its clock contract; the authoritative issue handoff records it even when that separate file is absent here. Research/prototypes/ADRs are inputs, not accepted feature RFCs or implementation evidence.

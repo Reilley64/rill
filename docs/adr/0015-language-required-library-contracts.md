@@ -16,9 +16,9 @@ ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separa
 
 [ADR 0019](0019-paths-files-and-filesystem-operations.md) adds byte-preserving Path, access-mode-specific file handles, checked seek/explicit sync, focused metadata/directories/symlinks and nonrecursive temporary guards. Existing text whole-file APIs keep their guarantees and gain &Path implementations; IoErrorKind gains explicit filesystem outcomes. Native/WASI capability limits, path races, partial effects and cleanup are recorded rather than treated as a sandbox/durability proof. See catalogue/prototype 20; #28/#30 retain formal/provider validation.
 
-## Partial SQL extension checkpoint (#40)
+## SQL extension (#40)
 
-[ADR 0021](0021-partial-standard-sql-contract.md) records confirmed independent standard SQL placement/value/codec/error/resource decisions, detailed in the [partial contract](../sql-contracts.md). It is not a completed required callable surface: #40 remains open for #33 deadline/time integration, final operation arities and the unprovided embedded native bridge. External drivers/pools/ORMs remain separate. Named conversion helpers and user JSON examples preserve #41/#31 rather than adding automatic reflection/registration. #28/#30 retain formal/provider gates.
+[ADR 0021](0021-partial-standard-sql-contract.md) and the [integrated SQL contract](../sql-contracts.md) now record the explicitly confirmed shared interface, including fixed control arities and #33 temporal/token integration. External drivers/pools/ORMs remain separate; native-provider work moves to #43 without being declared fulfilled. Named conversion helpers/user JSON examples preserve #41/#31; intrinsic cancellation stays outside Result while explicit SQL tokens have typed outcomes. The narrow std::time::validateInstantDomain amendment avoids private field access. Design closure is not runtime/provider support; #28/#30 retain formal/backend gates.
 
 ## Decisions and consequences
 

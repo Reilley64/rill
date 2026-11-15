@@ -1,4 +1,4 @@
-// #40 partial contract: application-owned codecs, not a std/driver implementation.
+// #40 design contract: application-owned codecs, not a std/driver implementation.
 // This module imports no concrete database driver. JSON follows #31's published
 // Value contract; its separately prepared draft is not copied into this worktree.
 import std::convert::{into, tryInto};

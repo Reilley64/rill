@@ -29,7 +29,7 @@ Rill's owned contiguous byte sequence, distinct from List<u8>. Read-only logical
 _Avoid_: byte string, contiguous List guarantee, owning view
 
 **Cancellation**:
-A cooperative request to stop a goroutine while completing its required cleanup. It is distinct from panic and may remain pending while cleanup or another protected operation finishes.
+An intrinsic cooperative request to stop a goroutine while completing its required cleanup, outside ordinary Result. Explicit cancellation-token requests are separate observable state: token-aware operations can return typed outcomes after required release. Neither mechanism implies rollback or immediate termination.
 _Avoid_: panic, force kill, immediate termination
 
 **Character**:
@@ -76,6 +76,10 @@ _Avoid_: precondition, assert, early return
 Bytes appended to a read destination or accepted from a write input by the current stream layer. Acceptance does not imply durable storage, peer receipt or application acknowledgement.
 _Avoid_: delivered bytes, committed transaction, rollback guarantee
 
+**Instant-domain validation**:
+The std::time::validateInstantDomain check that a Clock and Instant share immutable domain identity, without reading time, registering a timer, exposing IDs or testing timeline health. It permits SQL preflight without privileged field access.
+_Avoid_: clock read, deadline wait, public domain ID
+
 **Lock guard**:
 A non-copyable value that borrows a mutex and owns responsibility for releasing its lock. Its disposer unlocks; protected borrows depend on it, and ownership stays in the locking goroutine.
 _Avoid_: shared lock owner, raw lock, OS-thread-affine guard
@@ -95,6 +99,10 @@ _Avoid_: shared mutable reference, raw pointer
 **Mutex**:
 A synchronization value granting exclusive access to a protected payload through a lock guard.
 _Avoid_: mutable Shared, runtime borrow checker
+
+**Native SQL provider**:
+A separately specified and validated platform bridge required by an embedded driver for opaque native handles and safe buffer/error/cancellation/finalization behavior. A driver-shaped fixture does not supply one or authorize general FFI or public thread pinning.
+_Avoid_: SQL interface, runtime driver registry, working SQLite support
 
 **Numeric conversion**:
 A conversion between explicitly sized numeric types. `into`/`from` are infallible, while `tryInto`/`tryFrom` return a Result; infallibility does not promise losslessness.
@@ -160,9 +168,25 @@ _Avoid_: shared owner, mutable, copyable
 A `Shared<T>` handle gives a value more than one owner by explicitly counting its owners. Ordinary values are not implicitly counted, and shared ownership alone grants no mutable access to the payload.
 _Avoid_: Arc, Rc
 
+**SQL control**:
+Owned std::sql::SqlControl: an optional clock/absolute Instant and a CancellationToken, consumed per operation. Explicit copies retain the same target and state, not a restarted timeout. Sessions and idle transactions do not inherit control; cursors retain query control and mandatory cleanup ignores external requests.
+_Avoid_: ambient context, timeout duration, transaction lifetime
+
+**SQL execution observation**:
+NotSubmitted or MayHaveExecuted for the requested operation/admitted query, carried by typed cancellation/deadline/clock errors. It does not establish the outcome of prior transaction work, rollback, replay safety or session reuse.
+_Avoid_: transaction outcome, safe retry, abortion acknowledgement
+
+**SQL phase error**:
+Independently typed query-start/iteration/close or transaction-finalization/cleanup errors, retaining original Err envelopes and both primary and cleanup failures. Scoped helpers prove required borrow-freedom before destroying local owners; direct caller-dependent errors are not universally prohibited.
+_Avoid_: unified native error, erased cause, cleanup success
+
 **SQL result stream**:
-A cursor retaining the session and execution dependencies needed to produce owning rows. Exhaustion alone does not establish safe session reuse.
+A cursor retaining the session and execution dependencies needed to produce owning rows. Active advancement checks retained query control even for buffered rows; terminal advancement stays None. Exhaustion alone does not establish safe session reuse.
 _Avoid_: owning row, materialized result list, reusable connection
+
+**SQL temporal parameter**:
+Date/Time/DateTime from std::time::civil or Timestamp from std::time, explicitly packed into Parameter with faithful checked native mapping. No silent precision/range/sentinel repair, inferred zone/unit or calendar/elapsed conversion. Checked temporal failures retain their original Err<TimeError>.
+_Avoid_: monotonic Instant, implicit zone, database interval
 
 **String**:
 An owned value of valid UTF-8 text, written `string`. Named string bindings move unless explicitly copied.

@@ -81,9 +81,9 @@ Implementations are ordinary functions: they may allocate, have permitted effect
 
 No argument coercion, implicit conversion chains, display/show registration, structural record mapping, serializer, SQL-expression capture or database mapping follows from registration. Explicit application JSON conversions may use their own typed errors. Preserve #31's distinct JSON numeric extraction/construction semantics rather than importing numeric-to-numeric rounding rules.
 
-## Partial SQL/JSON integration checkpoint (#40)
+## SQL/JSON integration (#40)
 
-[ADR 0021](0021-partial-standard-sql-contract.md) and the [partial SQL contract](../sql-contracts.md) explicitly add named bindInto/tryBind/get helpers invoking canonical conversions under declared evidence. This is not automatic framework enrollment, implicit chaining or another return-only overload exception. User SQL Parameter and JSON Value conversions live in endpoint-owning modules; Into/TryInto, ownership and selected-error relationships remain distinct. #40 stays open for #33/final interface/native-provider work; these examples do not implement a serialization framework or overwrite #31's separate JSON drafts.
+[ADR 0021](0021-partial-standard-sql-contract.md) and the [SQL contract](../sql-contracts.md) explicitly add named bindInto/tryBind/get helpers invoking canonical conversions under declared evidence. This is not automatic enrollment, implicit chaining or another return-only overload exception. User SQL Parameter/JSON Value codecs live in endpoint-owning modules; Into/TryInto, ownership and selected-error relationships remain distinct. #33 temporal types now join the SQL subset with exact checked mappings, not automatic time/string/zone conversions. #43 retains native-provider work; these examples do not implement a serialization framework or overwrite separate JSON/time drafts.
 
 ## Supersession and evidence
 
