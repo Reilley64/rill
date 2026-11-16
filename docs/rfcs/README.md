@@ -1,6 +1,6 @@
 # Rill feature RFCs
 
-**Conventions: explicitly human-confirmed in [#26](https://github.com/Reilley64/rill/issues/26), Q1–Q16 and the consolidated recording plan.** This directory is the destination for review-ready v0 language-feature and approved standard-library proposals. [#28](https://github.com/Reilley64/rill/issues/28) writes the substantive set, populates coverage and performs its final consistency review. [Map #1](https://github.com/Reilley64/rill/issues/1) defines the destination; producing or merging that set is not human acceptance, compiler/library delivery or a safety proof.
+**Conventions: explicitly human-confirmed in [#26](https://github.com/Reilley64/rill/issues/26), Q1-Q16 and the consolidated recording plan.** This directory is the destination for review-ready v0 language-feature and approved standard-library proposals. [#28](https://github.com/Reilley64/rill/issues/28) writes the substantive set, populates coverage and performs its final consistency review. [Map #1](https://github.com/Reilley64/rill/issues/1) defines the destination; producing or merging that set is not human acceptance, compiler/library delivery or a safety proof.
 
 Start from [TEMPLATE.md](TEMPLATE.md). The [primary-source format research](../research/0026-language-rfc-formats.md) compares Rust, Swift, Python, Go and Java. Rill deliberately selects a Rust-inspired guide/reference structure with explicit compatibility/adoption, security/resource and evidence prompts; it does not import those languages' governance or require Swift's runnable prototype when Rill has no compiler.
 
@@ -14,7 +14,7 @@ Use flat filenames `NNNN-short-feature-name.md`, starting at `0001`, with stable
 
 Never reuse an assigned ID. Preserve filenames after publication unless a rename is necessary; preserve the ID and repair links when renaming. Keep resolved/replaced proposals and their decision/history links discoverable rather than recycling their identity. A title change is not a new proposal identity. `README.md`, `TEMPLATE.md` and planning entries are not numbered RFCs.
 
-### Planning outline — not an RFC partition
+### Planning outline. Not an RFC partition
 
 These are navigation/work-planning themes, not six mandatory RFCs, allocations, accepted features or complete coverage:
 
@@ -47,7 +47,7 @@ Retain these main body headings, in this order; add feature-specific subsections
 12. Open/deferred questions
 13. Decision and change history
 
-Use a short **“Not applicable, because…”** where a concern genuinely does not apply. Do not leave an empty heading, invent evidence or add repetitive filler. Compatibility can address the current design even without a released compiler. Implementation/evidence can explicitly report absence; lack of implementation does not make those sections inapplicable.
+Use a short **"Not applicable, because…"** where a concern genuinely does not apply. Do not leave an empty heading, invent evidence or add repetitive filler. Compatibility can address the current design even without a released compiler. Implementation/evidence can explicitly report absence; lack of implementation does not make those sections inapplicable.
 
 Each RFC begins with a title and the compact Markdown metadata table in TEMPLATE:
 
@@ -75,7 +75,7 @@ A content snapshot must unambiguously identify the reviewed text (for example a 
 | Withdrawn | The proposal was withdrawn, not silently accepted or declared technically disproved. |
 | Superseded | Its entire normative scope was replaced by identified accepted RFCs/amendments. |
 
-Normal drafting proceeds Draft → ReviewReady → Accepted, but rejection/withdrawal and revision paths are explicit alternatives. Materially changed/incomplete ReviewReady proposals return to Draft until the affected checklist is satisfied and the new revision is recorded. Reopening or revisiting a resolved decision must be explicit, not a silent overwrite of status/history.
+A typical proposal starts as Draft, can move to ReviewReady after checking, and can become Accepted after human approval. Rejection, withdrawal and revision are separate outcomes. Materially changed/incomplete ReviewReady proposals return to Draft until the affected checklist is satisfied and the new revision is recorded. Reopening or revisiting a resolved decision must be explicit, not a silent overwrite of status/history.
 
 An agent explicitly tasked with producing review-ready proposals may prepare and mark ReviewReady **after** performing and recording the checklist, actor and revision. File creation, merge or a passing structural script alone is insufficient. The responsible owner may return it to Draft. Agents cannot infer acceptance; human authority and any delegation of that authority must be explicit.
 

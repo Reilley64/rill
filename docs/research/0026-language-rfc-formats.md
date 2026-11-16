@@ -6,7 +6,7 @@ Research date: **2026-11-15 (UTC)**. Scope: Rust RFCs, Swift Evolution, Python P
 
 ## Rill context and limits
 
-[#26](https://github.com/Reilley64/rill/issues/26) asks for organization, a shared template, linkage, example checking, and review/acceptance conventions for `docs/rfcs/`. [Repository issue-tracker guidance](../agents/issue-tracker.md#wayfinding-operations) separates that work from #28's production of the complete, consistent, **review-ready** feature RFC set. Ticket answers, research, prototypes, and ADRs are inputs; neither producing the set nor accepting a source-ticket design automatically accepts an RFC.
+[#26](https://github.com/Reilley64/rill/issues/26) asks for organization, a shared template, linkage, example checking, and review/acceptance conventions for `docs/rfcs/`. [Repository issue-tracker guidance](../agents/issue-tracker.md#wayfinding) separates that work from #28's production of the complete, consistent, **review-ready** feature RFC set. Ticket answers, research, prototypes, and ADRs are inputs; neither producing the set nor accepting a source-ticket design automatically accepts an RFC.
 
 Rill has no compiler. Existing hand-checked prototypes and standalone experiments can supply evidence, but are not compiler execution or proof of the proposed language. For example, the [#30 experiment report](0030-backend-experiments.md) explicitly leaves support gates open and distinguishes finite mechanism/model results from unimplemented compiler/runtime obligations. Provider/backend gates can remain open while documents become review-ready; their precise effects on eventual acceptance or implementation readiness need an explicit Rill decision. #26 also identifies the confirmed #24 diagnostic/LSP artifacts as inputs, not delivered tooling or accepted feature RFCs.
 
@@ -97,7 +97,7 @@ PEP 12 is both formatting guidance and a wrapper around a **separate included te
 
 `Abstract`; `Motivation`; `Specification`; `Rationale`; `Backwards Compatibility`; `Security Implications`; `How to Teach This`; `Reference Implementation`; `Rejected Ideas`; `Open Issues`; `Acknowledgements`; `Footnotes`; `Change History`; `Copyright`.
 
-PEP 1 says each successful PEP “should” have its enumerated parts, but qualifies several: backwards-incompatible proposals **must** describe severity and mitigation; security concerns should be explicit if present; teaching is helpful; change history is explicitly not mandatory. New PEPs must use the stated public-domain/CC0 dual licensing. Do not turn the whole suggested section list into equally mandatory acceptance gates. [P-P, P-T]
+PEP 1 says each successful PEP "should" have its enumerated parts, but qualifies several: backwards-incompatible proposals **must** describe severity and mitigation; security concerns should be explicit if present; teaching is helpful; change history is explicitly not mandatory. New PEPs must use the stated public-domain/CC0 dual licensing. Do not turn the whole suggested section list into equally mandatory acceptance gates. [P-P, P-T]
 
 The specification should describe syntax/semantics sufficiently for competing interoperable implementations. Rationale includes alternatives, related work, objections, and evidence of consensus. Teaching can include migration and documentation changes. The final reference implementation must include tests and appropriate language/library-reference documentation; implementation need not be complete for acceptance. Security receives its own explicit prompt, unlike the Rust/Swift templates examined. [P-P, P-T]
 
@@ -105,7 +105,7 @@ The specification should describe syntax/semantics sufficiently for competing in
 
 PEPs are UTF-8 reStructuredText files, `pep-NNNN.rst`, with RFC-2822-style metadata, not Markdown RFCs. Required headers in PEP 1 are `PEP`, `Title`, `Author`, `Discussions-To`, `Status`, `Type`, `Created`, `Post-History`; optional/conditional headers include `Sponsor`, `PEP-Delegate`, `Topic`, `Requires`, `Python-Version`, `Replaces`, `Superseded-By`, `Resolution`. Resolution is required for resolved Standards Track PEPs. Title limit: 44 characters. `Created` records number assignment, not necessarily first private drafting. [P-P]
 
-Current submission instructions let an author select the next available unused/unclaimed number for the draft; editors validate/assign the official number when approving publication, and repository writers can claim numbers directly while doing the editor's duties. Publication/number assignment is explicitly **not substantive acceptance**. This is more nuanced than “editors number it after acceptance.” [P-P, P-T]
+Current submission instructions let an author select the next available unused/unclaimed number for the draft; editors validate/assign the official number when approving publication, and repository writers can claim numbers directly while doing the editor's duties. Publication/number assignment is explicitly **not substantive acceptance**. This is more nuanced than "editors number it after acceptance." [P-P, P-T]
 
 PEP 1 strongly recommends a single key proposal, while permitting linked documents. `Requires` records dependencies; replacement should have reciprocal `Replaces`/`Superseded-By` linkage. The [PEP index](https://peps.python.org/) groups documents by status/type/topic. After resolution PEPs are normally historical records, **not living language specifications**; formal behavior belongs in maintained documentation. Accepted/provisional designs may record authorized implementation-driven changes, and active process/informational PEPs can evolve. [P-P]
 
@@ -115,7 +115,7 @@ The Steering Council has final authority, potentially exercised through a PEP de
 
 PEP 634 is Final, with Python-Version 3.10, a resolution link, and `Replaces: 622`. Its actual top-level headings are `Abstract`, `Syntax and Semantics`, `Side Effects and Undefined Behavior`, `The Standard Library`, `Appendix A -- Full Grammar`, and `Copyright`. It intentionally delegates motivation/rationale to [PEP 635](https://peps.python.org/pep-0635/) and tutorial material to [PEP 636](https://peps.python.org/pep-0636/): three linked documents replace the earlier combined PEP 622. This is concrete evidence that one conceptual feature can have a linked specification/rationale/tutorial set, **not** a universal requirement to split proposals that way. [P-E]
 
-Its reference detail includes soft keywords, full grammar, binding constraints, cases producing SyntaxError/TypeError/ValueError, and deliberately unspecified side effects or partial bindings. A “specification” can explicitly bound implementation freedom; it need not pretend every observable behavior is fixed. The current page links onward to canonical language-reference documentation, consistent with PEP 1's historical-record policy. [P-E, P-P]
+Its reference detail includes soft keywords, full grammar, binding constraints, cases producing SyntaxError/TypeError/ValueError, and deliberately unspecified side effects or partial bindings. A "specification" can explicitly bound implementation freedom; it need not pretend every observable behavior is fixed. The current page links onward to canonical language-reference documentation, consistent with PEP 1's historical-record policy. [P-E, P-P]
 
 ## Go proposals and design documents
 
@@ -129,7 +129,7 @@ The separately named **Go 2 language change template** is an official questionna
 
 ### Identity, review, implementation
 
-A design document uses `design/NNNN-shortname.md`, where NNNN is the **Go proposal issue number**, already available before writing the document. It is reviewed through Gerrit; design discussion belongs on the issue, while Gerrit comments should focus on preparation/editorial/procedural matters. Multiple checked-in revisions are expected. The issue/project serves as the proposal index/state surface, rather than a document header reproducing all governance. [G-P]
+A design document uses `design/NNNN-shortname.md`, where NNNN is the **Go proposal issue number**, already available before writing the document. It is reviewed through Gerrit; design discussion belongs on the issue, while Gerrit comments should focus on preparation/editorial/procedural matters. Multiple checked-in revisions are expected. The issue/project is the proposal index/state surface, rather than a document header reproducing all governance. [G-P]
 
 The proposal review group seeks consensus and guides issues through Incoming, Active, Likely Accept/Likely Decline, Accepted/Declined, with Hold and specific decline reasons available. Normally a week in a likely state precedes the decision; exceptions/fast-tracking are allowed. If the group cannot find consensus or a next step, the process escalates to Go architects, then an arbiter if needed. Acceptance adds Proposal-Accepted and repurposes the issue to implementation tracking in a work milestone, often Backlog: it does **not** promise a release or completed implementation. [G-P]
 
@@ -149,7 +149,7 @@ JEP 2 defines the **Markdown body in JBS**, version 2.0. Exact headings/order:
 
 `Summary`; `Goals`; `Non-Goals`; `Success Metrics`; `Motivation`; `Description`; `Alternatives`; `Testing`; `Risks and Assumptions`; `Dependencies`.
 
-**Only `Summary` and `Description` are marked REQUIRED.** All other sections are optional: omit unused ones rather than write “None”; retain order and do not add sections beyond the template. Drafts need not initially fill everything. This is materially stricter about shape, but lighter about required sections, than simply importing a Rust template. [J-T]
+**Only `Summary` and `Description` are marked REQUIRED.** All other sections are optional: omit unused ones rather than write "None"; retain order and do not add sections beyond the template. Drafts need not initially fill everything. This is materially stricter about shape, but lighter about required sections, than simply importing a Rust template. [J-T]
 
 Description covers what changes and intended implementation, modified Java APIs/command-line switches/library-JVM interfaces/file formats, failure diagnosis in development and production, and open design issues. Testing asks for work beyond mandatory unit tests and special hardware/platform needs. Success Metrics applies when measurable numerical goals exist. Dependencies should appear both in text and JBS issue links. The body evolves to describe the delivered result, potentially linking additional detailed documents. [J-T]
 
@@ -191,12 +191,12 @@ Sources for the matrix: [R-T, R-E, S-T, S-E, P-P, P-T, P-E, G-T, G-L, G-E, J-T, 
 ### Choices that cannot be imported as a package
 
 - **IDs:** Rust uses proposal PR number; Go uses proposal issue number; PEP uses an independently administered number; Swift uses a prefix sequence with allocation timing not established here; JEP gets a number on candidacy distinct from its issue ID. Stable linkage is useful evidence; none establishes Rill's preferred namespace or allocation time. [R-P, G-P, P-P, S-P, J-P]
-- **Granularity:** single-key-proposal guidance (PEP), focused but usable proposals/roadmaps (Swift), companion spec/rationale/tutorial documents (PEP 634–636), and preview/finalization lineage (JEP 444) coexist. There is no sourced universal “one ticket = one RFC” or “one feature = exactly one file” rule. [P-P, P-E, S-T, J-E]
+- **Granularity:** single-key-proposal guidance (PEP), focused but usable proposals/roadmaps (Swift), companion spec/rationale/tutorial documents (PEP 634-636), and preview/finalization lineage (JEP 444) coexist. There is no sourced universal "one ticket = one RFC" or "one feature = exactly one file" rule. [P-P, P-E, S-T, J-E]
 - **Authority:** Rust sub-team/FCP, Swift evolution workgroup/review manager, Python council/delegate, Go consensus review/escalation, and OpenJDK roadmap/targeting/JCP roles solve different governance problems. Document headings do not choose an authority or voting rule for Rill. [R-P, S-P, P-P, G-P, J-P]
-- **Acceptance versus execution:** all distinguish some form of design/roadmap decision from later delivery, but Swift's pre-review prototype gate is a significant counterexample to “no execution needed for review.” Rill cannot honestly claim that gate today. Neither review-ready nor accepted should silently imply compiler correctness, provider readiness, tests passing, or release. [R-P, S-P, P-P, G-P, J-P; Rill context above]
+- **Acceptance versus execution:** all distinguish some form of design/roadmap decision from later delivery, but Swift's pre-review prototype gate is a significant counterexample to "no execution needed for review." Rill cannot honestly claim that gate today. Neither review-ready nor accepted should silently imply compiler correctness, provider readiness, tests passing, or release. [R-P, S-P, P-P, G-P, J-P; Rill context above]
 - **Record versus living specification:** Python normally freezes a resolved proposal as history; Rust expects substantial changes in new RFCs; Swift records reviewed revisions/amendments; JEP bodies evolve toward the delivered result. Rill needs to decide where current normative truth lives and how amendments are approved rather than accidentally mix these models. [P-P, R-P, S-T, J-T]
 
-## Plausible Rill options — advisory, not approved
+## Plausible Rill options. Advisory, not approved
 
 These are alternatives for #26 to evaluate, not RFCs or a decision interview. All would need explicit ownership of review/acceptance, a coverage index for #28, typed links to supporting inputs, and honest evidence/readiness labels because #26 asks for those outcomes. An index can record source ticket → RFC section(s), and feature → RFC section(s), without forcing the ID scheme or cardinality in advance.
 
@@ -210,7 +210,7 @@ Possible convention: one reviewable behavior unit per document, with related RFC
 
 ### B. Linked specification plus explanatory companions
 
-**Possible primary headings:** Summary; Scope/dependencies; Grammar and semantics; Static errors/dynamic failures; Interactions/compatibility; Conformance examples; Open normative questions; Decision/change history. A companion rationale/guide holds Motivation; User examples; Alternatives/prior art; Evidence; Implementation implications/deferred work. This adapts the **observed PEP 634–636 split**, not a PEP-wide mandate.
+**Possible primary headings:** Summary; Scope/dependencies; Grammar and semantics; Static errors/dynamic failures; Interactions/compatibility; Conformance examples; Open normative questions; Decision/change history. A companion rationale/guide holds Motivation; User examples; Alternatives/prior art; Evidence; Implementation implications/deferred work. This adapts the **observed PEP 634-636 split**, not a PEP-wide mandate.
 
 Possible convention: a family directory or an index grouping individually identified documents, with one declared normative owner for each rule; acceptance names the exact companion revisions it covers. Ticket-to-document links remain explicit, whether one-to-one or many-to-many in a particular family.
 

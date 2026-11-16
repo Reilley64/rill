@@ -1,4 +1,4 @@
-# TLS native boundary — semantic contract v1
+# TLS native boundary. Semantic contract v1
 
 This is the **closed toolchain-owned operation/data/ownership contract** selected by #38 Q5/Q9/Q27/Q56/Q76/Q79 and explicit consolidated approval. The [public TLS contract](tls-contracts.md) governs behavior; [#44](https://github.com/Reilley64/rill/issues/44) must implement and validate bindings, layouts, C shim and native integration. **No working ABI, native extension format, C header implementation or security proof is delivered here.** A declaration, schema, reference calculation or another provider's fixture is not implementation evidence.
 
@@ -61,7 +61,7 @@ Potentially blocking initialization/entropy/parser/crypto/free work runs on admi
 
 For each foreign step: establish error-queue preconditions; execute the relevant SSL operation; save relevant native system-error state; perform required SSL_get_error/classification on the **same native thread without intervening unrelated OpenSSL calls**; drain/capture safe numeric facts before migration/re-entry. Keep native error, outer TLS operation/phase and original managed transport cause distinct. Native strings/file paths/data dumps are not public messages.
 
-Private SNI/ALPN/verification callbacks inspect only retained native state and bounded admitted data. No arbitrary Rill closure re-entry, suspending callback, app retrieval/signing/password/keylog callback or success override of failed verification. Where an extra restriction cannot be enforced safely in the chosen maintained provider, use reviewed upstream support/patches or return to the decision—not assume a callback flag proves it.
+Private SNI/ALPN/verification callbacks inspect only retained native state and bounded admitted data. No arbitrary Rill closure re-entry, suspending callback, app retrieval/signing/password/keylog callback or success override of failed verification. Where an extra restriction cannot be enforced safely in the chosen maintained provider, use reviewed upstream support/patches or return to the decision. Not assume a callback flag proves it.
 
 Certificate time comes from checked wall acquisition, not unchecked native time() or OCSP_check_validity convenience paths. Native parameter inheritance/application, floor-to-seconds, native range and [notBefore,notAfter) behavior need fixtures. Local admission checks and peer verification phases use fresh samples; immutable config never contains frozen now.
 
@@ -82,7 +82,7 @@ Before admission an effect-free borrowed-operation rejection preserves a healthy
 
 Intrinsic stopping stays outside Result and masked through required installation/replacement/disposal/joins. Mandatory release ignores external cancellation and can wait indefinitely. No selected success/error reclassification after cleanup, rollback, replay, healthy-session reuse after poison or error-envelope cloning. Failed/poisoned disposal does not perform graceful TLS I/O.
 
-## 7. Conformance and acceptance inventory — all NOT RUN
+## 7. Conformance and acceptance inventory. All NOT RUN
 
 Required #44 evidence includes:
 - Actual LLVM23/Rill metadata consumer, trusted lowering/marshalling and C shim; immutable configuration copy and generic RE/WE/FE/CE evidence; no orphan interception of protected native obligations.

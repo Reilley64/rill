@@ -1,10 +1,10 @@
 # RFC NNNN: <Feature title>
 
-> **Template only — not an assigned RFC or accepted proposal.** Copy to a newly assigned `NNNN-short-feature-name.md` only when creating an actual draft, register that draft in [README](README.md#proposal-register), and replace all placeholders before ReviewReady. Follow the [conventions](README.md), [status rules](README.md#status-and-authority) and single [readiness checklist](README.md#canonical-reviewready-checklist). Authoring prompts below are not proposed feature semantics; replace them with the actual proposal.
+> **Template only. It is not an assigned RFC or accepted proposal.** Copy to a newly assigned `NNNN-short-feature-name.md` only when creating an actual draft, register that draft in [README](README.md#proposal-register), and replace all placeholders before ReviewReady. Follow the [conventions](README.md), [status rules](README.md#status-and-authority) and single [readiness checklist](README.md#canonical-reviewready-checklist). Authoring prompts below are not proposed feature semantics; replace them with the actual proposal.
 
 | Field | Value |
 | --- | --- |
-| ID | NNNN — unassigned in this template |
+| ID | NNNN, unassigned in this template |
 | Status | Draft |
 | Owner | <Responsible proposal owner; not automatic acceptance authority> |
 | Source inputs | <Tickets/contracts/ADRs/research/prototypes with decision links and identifiable revisions> |
@@ -63,7 +63,7 @@ Name the proposed RFC revisions jointly required for review, if any. Dependencie
 
 Discuss effects on existing **designs and source examples** even if there is no released compiler. Cover parsing/name resolution/type checking, source/API/ABI compatibility, runtime/library/client adoption, tooling/documentation and reversibility as applicable.
 
-Identify superseded syntax/contracts and migration steps, unsupported targets/versions and deployment constraints. Distinguish changed design, source breakage, implementation work and released behavior. Say “Not applicable, because…” for truly irrelevant concerns rather than assuming all compatibility is irrelevant before implementation.
+Identify superseded syntax/contracts and migration steps, unsupported targets/versions and deployment constraints. Distinguish changed design, source breakage, implementation work and released behavior. Say "Not applicable, because…" for truly irrelevant concerns rather than assuming all compatibility is irrelevant before implementation.
 
 ## Security/resource implications
 
@@ -92,7 +92,7 @@ Separate **actual evidence** from the **future checking plan**. Use multiple row
 
 Allowed labels: NotChecked, HandChecked, ToolChecked, ReferenceExecuted, RillExecuted. See [their definitions](README.md#examples-and-evidence). Empty tables here record no evidence. Source inspection is not execution; standalone/native/model execution is not the relevant Rill compiler/runtime/library. Counts are not proof.
 
-### Planned checks — not executed evidence
+### Planned checks. Not executed evidence
 
 Specify later parsing/static/borrow/diagnostic/runtime/interaction checks and target/provider matrices as relevant, with expected results and prerequisites. Name unimplemented or unavailable mechanisms honestly. Do not put planned passes in the evidence table or hide failed/inconclusive results.
 
@@ -104,7 +104,7 @@ Classify remaining work explicitly:
 - **Implementation/validation gates:** mechanisms/tests/support evidence still needed without inventing or weakening the proposed behavior.
 - **Future/out-of-scope work:** separately bounded possibilities, not commitments or missing required current semantics.
 
-If there are no unanswered in-scope choices, state that after checking; do not pre-fill a false “None.” An open provider/backend gate is not automatically a drafting blocker, but cannot conceal an unanswered semantic question.
+If there are no unanswered in-scope choices, state that after checking; do not pre-fill a false "None." An open provider/backend gate is not automatically a drafting blocker, but cannot conceal an unanswered semantic question.
 
 ## Decision and change history
 

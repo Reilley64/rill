@@ -102,7 +102,7 @@ Existing ownership, copying, disposal, retained/result dependencies, callable mo
 
 ## Evidence and follow-through
 
-See `prototypes/12-enums.rill` and `prototypes/12-enums.md` for intended-valid expectations and independent rejection/adversarial cases. They are hand-checked design artifacts, not executed compiler tests. The prototype README identifies older examples whose literal/union forms are historical; do not treat their previous validity claims as v0 acceptance of removed syntax.
+See `prototypes/12-enums.rill` and `docs/prototypes/12-enums.md` for intended-valid expectations and independent rejection/adversarial cases. They are hand-checked design artifacts, not executed compiler tests. The prototype README identifies older examples whose literal/union forms are historical; do not treat their previous validity claims as v0 acceptance of removed syntax.
 
 #23 must reconcile Option/Result, trace/cause wrappers, tagged selection/message results and all required public library signatures. #24 owns diagnostics for removed literal/union syntax, non-exhaustive matching, missing whole-enum implementations, nominal/variant mismatches, generic inference, visibility and mutable-widening errors. #28 must reconcile earlier source tickets and fixtures, formalize variant typing/joins, widening/layout and borrow safety, generic/function-value selection, metadata and exhaustive checking, and include accepted/rejected adversarial examples. Resolve any unworkable interface/checking rule through the map rather than claim this direction proves a checker sound.
 

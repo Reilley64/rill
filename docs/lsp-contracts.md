@@ -1,6 +1,6 @@
 # Complete Rill LSP support for OpenIDEA v0.1.44
 
-Confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](adr/0016-structured-diagnostics-and-complete-openidea-lsp.md); [prioritized delivery gate #42](https://github.com/Reilley64/rill/issues/42). This is a **design contract and unpassed acceptance matrix**, not a working compiler/server/client certification. [Diagnostic/report contracts](diagnostic-contracts.md) define the common model. [Pinned research](research/openidea-language-server-capabilities.md#release-baseline-addendum--openidea-v0144) distinguishes release facts from older development evidence.
+Confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](adr/0016-structured-diagnostics-and-complete-openidea-lsp.md); [prioritized delivery gate #42](https://github.com/Reilley64/rill/issues/42). This is a **design contract and unpassed acceptance matrix**, not a working compiler/server/client certification. [Diagnostic/report contracts](diagnostic-contracts.md) define the common model. [Pinned research](research/openidea-language-server-capabilities.md#release-baseline-addendum-openidea-v0144) distinguishes release facts from older development evidence.
 
 ## 1. Scope, protocol and readiness
 
@@ -124,4 +124,4 @@ Honor project trust and process approval/pinning. Discover configured origins/ap
 | Notebook/kernel/cross-cell execution, Run/Test/DAP, non-LSP syntax/grammar | Explicitly outside current language/file-model commitment, not new Rill semantics |
 | Windows-native server/all remote combinations | Not implicit host acceptance targets; additional deliberate scope |
 
-No row is passed by this document or [hand-authored prototype 17](../prototypes/17-diagnostics/README.md). #42 must carry every outstanding obligation until complete or explicitly transferred to an open successor with human scope approval. Missing mechanisms return to the map; RFC drafting and future RFC acceptance remain distinct from delivered tooling.
+No row is passed by this document or [hand-authored prototype 17](prototypes/17-diagnostics.md). #42 must carry every outstanding obligation until complete or explicitly transferred to an open successor with human scope approval. Missing mechanisms return to the map; RFC drafting and future RFC acceptance remain distinct from delivered tooling.

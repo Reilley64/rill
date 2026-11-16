@@ -1,13 +1,21 @@
+# Agent guide
+
+Write agent instructions with the `writing-for-agents` skill. Write reader-facing documentation with `unslop`. Preserve language rules, code/data examples and recorded results during editorial changes.
+
 ## Agent skills
 
 ### Issue tracker
 
-Issues and specs are tracked as GitHub issues in `Reilley64/rill`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+For tickets, dependencies, claims and wayfinding, follow [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 
 ### Triage labels
 
-Uses the five default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+When assigning a triage role, use [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
 
 ### Domain docs
 
-Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Before changing language or library behavior, follow [docs/agents/domain.md](docs/agents/domain.md).
+
+### Repository maintenance
+
+Before moving examples, experiments or evidence, follow [docs/agents/repository.md](docs/agents/repository.md).

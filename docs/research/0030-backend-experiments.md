@@ -2,7 +2,7 @@
 
 2026-11-15. **Disposition: support gate OPEN.** These finite standalone experiments provide positive mechanism evidence and reproducible counterexamples; they neither implement Rill nor prove arbitrary-depth behavior, the checker, complete ABI/runtime semantics, provider integrations or accepted RFCs. No target or contract has been dropped, weakened or silently replaced.
 
-See the [pinned official-source audit](0030-backend-mechanisms.md), [reproduction instructions and source inventory](../../prototypes/backend-30/README.md), [recorded observations/hashes](../../prototypes/backend-30/evidence/results.json) and [exact issued commands/exit codes](../../prototypes/backend-30/evidence/commands.json). Commands generate the IR/assembly/WAT and retain full stdout/stderr in the selected output directory. The issue publication archives those text artifacts and the source snapshot, excluding binaries/tools. GitHub publication is not a claim the local branch has been committed or pushed.
+See the [pinned official-source audit](0030-backend-mechanisms.md), [reproduction instructions and source inventory](../../experiments/backend-30/README.md), [recorded observations/hashes](../../experiments/backend-30/evidence/results.json) and [exact issued commands/exit codes](../../experiments/backend-30/evidence/commands.json). Commands generate the IR/assembly/WAT and retain full stdout/stderr in the selected output directory. The issue publication archives those text artifacts and the source snapshot, excluding binaries/tools. GitHub publication is not a claim the local branch has been committed or pushed.
 
 ## Toolchain and execution scope
 
@@ -15,7 +15,7 @@ See the [pinned official-source audit](0030-backend-mechanisms.md), [reproductio
 
 ## Pass/fail/untested matrix
 
-“PASS” below means the specified finite standalone mechanism/assertion passed, **not target support**. “FAIL” means an actual incompatible mechanism or contract counterexample. “UNTESTED” is not success.
+"PASS" below means the specified finite standalone mechanism/assertion passed, **not target support**. "FAIL" means an actual incompatible mechanism or contract counterexample. "UNTESTED" is not success.
 
 | Mechanism / target | Development / optimized result | Boundary |
 | --- | --- | --- |

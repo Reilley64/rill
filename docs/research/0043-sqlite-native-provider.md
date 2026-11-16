@@ -1,6 +1,6 @@
 # #43 primary-source evidence: SQLite native-provider constraints
 
-Research and selected-source audit informed the explicitly confirmed [contract](../sqlite-provider-contracts.md); they did not choose a general FFI, dependency before confirmation, or certify native support. Read-only delegated investigations made no issue/file changes; the final confirmed phase added the reproducible [reference harness/report](../../prototypes/26-sqlite-provider/reference/results.md). All claims below have narrower scope than a Rill integration proof.
+Research and selected-source audit informed the explicitly confirmed [contract](../sqlite-provider-contracts.md); they did not choose a general FFI, dependency before confirmation, or certify native support. Read-only delegated investigations made no issue/file changes; the final confirmed phase added the reproducible [reference harness/report](../../experiments/sqlite-provider/reference/results.md). All claims below have narrower scope than a Rill integration proof.
 
 ## Verified pin and release-specific findings
 
@@ -49,6 +49,6 @@ Source references: [pragma.c](https://sqlite.org/src/file/src/pragma.c?ci=versio
 
 ## Evidence actually executed versus not run
 
-See [exact reference report](../../prototypes/26-sqlite-provider/reference/results.md): 98 native fixture checks plus integrity/prefix/hidden-object audits on one macOS arm64/Clang21 host. 276 prefixed globals; lower native limits 2000 columns/32766 parameters. Successful host SINGLETHREAD reconfiguration unavailable (SQLITE_ERROR), basic dual-TU coexistence only. No archive/engine/binary checked into the repo. The [protocol inventory](../../prototypes/26-sqlite-provider/README.md) separately records Python model/header syntax checks.
+See [exact reference report](../../experiments/sqlite-provider/reference/results.md): 98 native fixture checks plus integrity/prefix/hidden-object audits on one macOS arm64/Clang21 host. 276 prefixed globals; lower native limits 2000 columns/32766 parameters. Successful host SINGLETHREAD reconfiguration unavailable (SQLITE_ERROR), basic dual-TU coexistence only. No archive/engine/binary checked into the repo. The [protocol inventory](../../experiments/sqlite-provider/README.md) separately records Python model/header syntax checks.
 
 No actual Rill compiler/driver/binding consumer/native leases/job queues/adoption/wake epochs, other native cells, WASI, production migration, crash/fault/sanitizer/security or power-loss validation ran. All those gates remain unfulfilled. This note does not replace the human-confirmed contract with researcher choices or close #43/#30.

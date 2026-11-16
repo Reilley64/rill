@@ -1,6 +1,6 @@
 """Validate hand-authored data/source coordinates, NOT Rill syntax or execution.
 
-Run with jsonschema==4.25.1; see README.md for an isolated uv command.
+Run with jsonschema==4.25.1; see docs/prototypes/17-diagnostics.md for the uv command.
 """
 from copy import deepcopy
 import hashlib
@@ -16,7 +16,7 @@ PREFIX = "file:///workspace/rill/prototypes/17-diagnostics/"
 schema = json.loads((REPO / "docs/diagnostic-report.schema.json").read_text())
 Draft202012Validator.check_schema(schema)
 validator = Draft202012Validator(schema, format_checker=FormatChecker())
-codes = set(re.findall(r"^### (R[0-9]+) —", (REPO / "docs/diagnostic-codes.md").read_text(), re.M))
+codes = set(re.findall(r"^### (R[0-9]+)\.", (REPO / "docs/diagnostic-codes.md").read_text(), re.M))
 
 
 def source(location):

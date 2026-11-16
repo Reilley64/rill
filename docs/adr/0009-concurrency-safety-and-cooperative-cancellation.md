@@ -103,10 +103,10 @@ Sequential tests do not isolate explicit background work, roll back filesystem e
 
 ## Alternatives and validation
 
-- **Channels only:** simpler public surface, but disallows useful synchronized shared state. Not adopted.
+- **Channels only:** simpler public API, but disallows useful synchronized shared state. Not adopted.
 - **Callback-only `withLock`:** initially considered, then replaced by guards to reuse ownership/disposal and ordinary borrow dependencies instead of special callback escape/result rules.
 - **Public raw unlock, escapable untracked views, or automatic shared mutation:** rejected; a guard owns the release responsibility and borrows control its views.
 - **Immediate return after selecting a helper winner, abandoned native jobs, or force-kill cleanup:** rejected because borrowed sources and resource invariants must remain valid.
 - **Public atomics, OS-thread pinning, or general deadlock prevention:** out of v0 scope.
 
-`prototypes/09-concurrency-safety.rill` illustrates guards and scoped/background work; `prototypes/09-concurrency-safety.md` records expected accept/reject cases and runtime-state obligations. These are hand-checked design inputs, not executed tests. ADR 0010 records #17's module visibility/scoping policy; #23 owns library module placement, factory spelling, complete generic/callable signatures, protected-operation interfaces, and evidence through interfaces; #28 owns explicit checking/cleanup/commit rules and adversarial validation. Those obligations remain before implementation readiness and do not constitute a safety proof or automatic RFC acceptance.
+`prototypes/09-concurrency-safety.rill` illustrates guards and scoped/background work; `docs/prototypes/09-concurrency-safety.md` records expected accept/reject cases and runtime-state obligations. These are hand-checked design inputs, not executed tests. ADR 0010 records #17's module visibility/scoping policy; #23 owns library module placement, factory spelling, complete generic/callable signatures, protected-operation interfaces, and evidence through interfaces; #28 owns explicit checking/cleanup/commit rules and adversarial validation. Those obligations remain before implementation readiness and do not constitute a safety proof or automatic RFC acceptance.

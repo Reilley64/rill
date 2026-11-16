@@ -13,19 +13,19 @@ The initial [backend experiments](0030-backend-experiments.md) and [portable exp
 Assertions are required; do not use `python -O` or define `NDEBUG`.
 
 ```sh
-python3 prototypes/backend-30/native-capacity/run.py --out /tmp/rill-30-native-capacity
-python3 prototypes/backend-30/native-lifecycle/run.py --out /tmp/rill-30-native-lifecycle
+python3 experiments/backend-30/native-capacity/run.py --out /tmp/rill-30-native-capacity
+python3 experiments/backend-30/native-lifecycle/run.py --out /tmp/rill-30-native-lifecycle
 # Lifecycle stages pinned Linux C++/UAPI headers required by the mixed ABI runner.
-python3 prototypes/backend-30/native-abi/run.py --out /tmp/rill-30-native-abi
-python3 prototypes/backend-30/portable/run.py --out /tmp/rill-30-portable
+python3 experiments/backend-30/native-abi/run.py --out /tmp/rill-30-native-abi
+python3 experiments/backend-30/portable/run.py --out /tmp/rill-30-portable
 ```
 
 Full instructions, exact scope, source citations and checked-in JSON:
 
-- [Native capacity/packet control](../../prototypes/backend-30/native-capacity/README.md).
-- [Mixed-layout owned tail ABI](../../prototypes/backend-30/native-abi/README.md).
-- [Native lifecycle/recursive admission](../../prototypes/backend-30/native-lifecycle/README.md).
-- [Portable records/foreign work](../../prototypes/backend-30/portable/README.md).
+- [Native capacity/packet control](../../experiments/backend-30/native-capacity/README.md).
+- [Mixed-layout owned tail ABI](../../experiments/backend-30/native-abi/README.md).
+- [Native lifecycle/recursive admission](../../experiments/backend-30/native-lifecycle/README.md).
+- [Portable records/foreign work](../../experiments/backend-30/portable/README.md).
 
 The new native code uses LLVM/Clang **23.1.5**, upstream `392dfff97d29b59d77e5cac6d4b6ef2585fe7117`, for **all mechanism bodies including Linux**. GCC only builds the capacity fixture's POSIX host or links LLVM-produced objects. Mach-O uses Apple ld **27037.1**; Linux uses GNU ld **2.44** / glibc **2.41** from immutable image digests. Inventoried Rust compilers do not build these mechanisms. Native context primitives are source/digest-pinned Boost.Context **1.92.0**, `cc1b9e02cd530d6607becc984e1e5bfa4f7b3600`; only the plain make/jump assembly ABI is used, not its C++ fiber/destructor wrapper. Original source/license notices stay intact in the external cache.
 
@@ -79,10 +79,10 @@ Native lifecycle uses a fixed non-moving **1 MiB logical usable region per conte
 - A real native job retains a pointer into a real automatic aligned buffer while its owning context migrates at least **10,000 times**. Native work itself has a checked **256 KiB automatic frame on a separate OS-thread stack**, not extra capacity secretly added to the managed stack. An exclusive-output case writes the buffer only while its owner is parked; the owner observes output after actual join.
 - Required join/cleanup does not finish at handle drop or cancellation request. A real C++ disposer suspends/migrates while masked and finishes only after acknowledgement. Completed status handles outlive stack release without owning execution storage.
 - A real scoped child context borrows its parent's automatic buffer. Parent exit waits while the child's own destructor is suspended, then permits parent disposal only after child body/cleanup completion and loan release.
-- An iterative worklist handles **200,000 nodes**, **133,333 initialized owning payloads**, partial-init slots and checked child-before-parent order. Actual non-inlined formatter/destructor callbacks yield **180 times** with local state live. Complete cause-like identifier formatting matches independent checksum **56,866,720**. Sampled callback-frame address spans are **4–52 bytes**, not claimed peak stack usage. This is not the Rill `Err<E>` implementation.
+- An iterative worklist handles **200,000 nodes**, **133,333 initialized owning payloads**, partial-init slots and checked child-before-parent order. Actual non-inlined formatter/destructor callbacks yield **180 times** with local state live. Complete cause-like identifier formatting matches independent checksum **56,866,720**. Sampled callback-frame address spans are **4-52 bytes**, not claimed peak stack usage. This is not the Rill `Err<E>` implementation.
 - Native worklist allocation failure escapes terminally without recursive fallback; the earlier C control separately fails during worklist growth.
 
-The recursive admission case adds real **8192-byte / 4096-aligned** bodies with live post-call work. Every child body goes through a small entry before its prologue. Eight successful edges complete nine bodies; a million-edge request then reaches the checked boundary and terminates without another body prologue or logical-canary corruption. Generated static body/entry frames plus the audited acyclic emergency helper graph, per-node allowance and context-save/headroom reserves determine the requirement (**41,656–67,216 bytes** in these fixtures). This is per-edge admission of a recursive graph, not an assertion that the recursive graph is acyclic.
+The recursive admission case adds real **8192-byte / 4096-aligned** bodies with live post-call work. Every child body goes through a small entry before its prologue. Eight successful edges complete nine bodies; a million-edge request then reaches the checked boundary and terminates without another body prologue or logical-canary corruption. Generated static body/entry frames plus the audited acyclic emergency helper graph, per-node allowance and context-save/headroom reserves determine the requirement (**41,656-67,216 bytes** in these fixtures). This is per-edge admission of a recursive graph, not an assertion that the recursive graph is acyclic.
 
 The terminal path preserves all suspended scopes. The outstanding native job subsequently reads the original buffer; only its independent backing lease remains after execution ownership is dropped. The mapping releases once foreign access ends. Healthy fatal escape and normal top-level-exit/background retention have the same lifetime discipline, without global joining or user-disposer promises. No normal return/unwind ends an automatic buffer's lifetime before that read. Ordinary escape edges are verified as `notail call`/`invoke`; sibling-call removal of the owning scope is disabled, not used to invalidate its borrower.
 

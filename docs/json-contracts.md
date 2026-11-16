@@ -27,7 +27,7 @@ The copy family supplies `copy(&Number):Number`, `copy(&Object):Object`, and `co
 
 All standard parse/format/copy/dispose paths, partial-tree/error cleanup and displaced-value destruction use bounded call stacks per #22. Loops/worklists may grow on the heap; allocation failure remains fatal. Parse depth caps do not protect directly constructed trees by themselves. No recursive cleanup fallback, unsafe reference cast, total-memory quota or bounded completion latency is promised.
 
-## 2. Public surface
+## 2. Public API
 
 These are interface signatures, not complete source files or implementations. Opaque type layouts are deliberately unspecified. One body-less declaration owns an ordinary overload family; repeated shapes below list its supplied implementations, not duplicate declarations or return-only overloads. Family bodies use #41's explicit implement spelling.
 
@@ -101,7 +101,7 @@ Input is already valid UTF-8 because it is &string. Raw Bytes callers explicitly
 
 Recognize JSON escapes `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t` and `\u` plus exactly four hex digits. Do not accept Rill's `\u{...}`, `\xNN` or other language-literal spellings. Decode high/low surrogate pairs to a scalar. Reject lone low/high surrogates, reversed or mismatched pairs rather than replace them silently. Incomplete/invalid escape syntax and a completed but invalid scalar sequence are distinct reasons. Accept other Unicode scalars, including noncharacters; no normalization, case folding or I-JSON noncharacter restriction.
 
-String quotes, backslashes and raw U+0000–U+001F need the proper JSON escape. Other valid scalars such as DEL/U+0085/U+2028/U+2029 are legal string data, not additional outside-string whitespace.
+String quotes, backslashes and raw U+0000-U+001F need the proper JSON escape. Other valid scalars such as DEL/U+0085/U+2028/U+2029 are legal string data, not additional outside-string whitespace.
 
 This is strict JSON grammar with **explicit receiver restrictions** for unique decoded names, representable scalar strings, BOM and configured limits. RFC 8259's grammar admits duplicate names and lone surrogate escapes; do not falsely claim it prohibits them or that this is unrestricted acceptance of all grammar-admitted texts. It is not the full I-JSON profile.
 
@@ -161,7 +161,7 @@ Return independent owned UTF-8 strings or an error, not input/tree views. Values
 
 Compact output has no insignificant whitespace or terminal newline. Pretty defaults to two spaces per level, LF, one space after colons, one member/element per line for nonempty containers, inline `[]`/`{}`, no trailing comma or terminal newline. Scalars are inline. Configurable indent is a u64 count of ASCII spaces, including zero; no tabs/arbitrary indentation strings or template mini-language. Empty containers emit no indentation. Formats preserve array/member order and exact Number tokens, not source whitespace or original string escape spelling.
 
-Escape quote/backslash, use `\b`, `\t`, `\n`, `\f`, `\r` for their controls and lowercase `\u00xx` for remaining U+0000–U+001F. Leave slash and other valid non-ASCII scalars unescaped, including U+2028/U+2029 and allowed noncharacters. This is JSON UTF-8, **not HTML/JavaScript embedding escaping**; another-language/transport boundary needs its own handling. Parsed `"\u0061"` formats as `"a"`, while `1E+01` remains `1E+01`. Sorted/canonical output, numeric normalization and semantic equality are deferred.
+Escape quote/backslash, use `\b`, `\t`, `\n`, `\f`, `\r` for their controls and lowercase `\u00xx` for remaining U+0000-U+001F. Leave slash and other valid non-ASCII scalars unescaped, including U+2028/U+2029 and allowed noncharacters. This is JSON UTF-8, **not HTML/JavaScript embedding escaping**; another-language/transport boundary needs its own handling. Parsed `"\u0061"` formats as `"a"`, while `1E+01` remains `1E+01`. Sorted/canonical output, numeric normalization and semantic equality are deferred.
 
 Under sufficient compatible limits, formatting then parsing preserves the owned JSON data/order/number spelling; compact parse/format reaches the chosen escaping/whitespace representation, not original document bytes. Do not express this as unavailable generic Value equality or promise pretty output fits the defaults merely because parse succeeded.
 
@@ -214,15 +214,15 @@ Other syntax identifies an unexpected byte or EOF; a completed invalid scalar es
 
 ## 8. Evidence, scope and follow-through
 
-`prototypes/19-json.rill` contains intended-valid calls and independent expectations; `prototypes/19-json.md` contains rejection, numeric-conversion and adversarial/resource cases. They are **hand-checked design artifacts, not executed tests**, a parser implementation or a claim that #28/#30 implementation/checker/backend gates are cleared.
+`prototypes/19-json.rill` contains intended-valid calls and independent expectations; `docs/prototypes/19-json.md` contains rejection, numeric-conversion and adversarial/resource cases. They are **hand-checked design artifacts, not executed tests**, a parser implementation or a claim that #28/#30 implementation/checker/backend gates are cleared.
 
 Use #41's confirmed conversion registration/error-evidence/naming reconciliation; #24 owns compiler diagnostics; #28 integrates exact JSON algorithms/invariants, byte positions and scalar spans, float/integer boundary behavior, quota accounting, callee exits/transitive views, deep copy/partial cleanup/cancellation/native lifetime rules and eventual executable suites. #30 still validates backend/proper-tail/Wasm mechanisms. If an accepted operation cannot be specified/checked consistently, return that blocker through the map; do not assert that privacy or iterative intent proves memory safety. #32/#39 and other application foundations must compose these owned values/errors rather than assume a streaming/reflected serializer.
 
 ## Primary sources
 
-- [RFC 8259 §§2–4](https://www.rfc-editor.org/rfc/rfc8259.html#section-2): complete value grammar, whitespace, arrays/objects and duplicate-name interoperability.
+- [RFC 8259 §§2-4](https://www.rfc-editor.org/rfc/rfc8259.html#section-2): complete value grammar, whitespace, arrays/objects and duplicate-name interoperability.
 - [RFC 8259 §6](https://www.rfc-editor.org/rfc/rfc8259.html#section-6): number grammar, permitted range/precision limits and binary64 interoperability cautions; not mandatory f64 storage.
-- [RFC 8259 §§7–8](https://www.rfc-editor.org/rfc/rfc8259.html#section-7): escapes, UTF-8/BOM, surrogate hazards and decoded-string comparison.
-- [RFC 8259 §§9–10](https://www.rfc-editor.org/rfc/rfc8259.html#section-9): implementation limits and strict generator output.
+- [RFC 8259 §§7-8](https://www.rfc-editor.org/rfc/rfc8259.html#section-7): escapes, UTF-8/BOM, surrogate hazards and decoded-string comparison.
+- [RFC 8259 §§9-10](https://www.rfc-editor.org/rfc/rfc8259.html#section-9): implementation limits and strict generator output.
 - [RFC 7493 §2](https://www.rfc-editor.org/rfc/rfc7493.html#section-2): stricter I-JSON Unicode/number/duplicate-name profile; not automatically Rill's selected policy.
-- [RFC 3629 §§3–4](https://www.rfc-editor.org/rfc/rfc3629.html#section-3): scalar-valid UTF-8, distinct from ASCII text spelling a surrogate escape.
+- [RFC 3629 §§3-4](https://www.rfc-editor.org/rfc/rfc3629.html#section-3): scalar-valid UTF-8, distinct from ASCII text spelling a surrogate escape.

@@ -1,4 +1,4 @@
-# Jiff checked arithmetic — final fact audit for Rill #33
+# Jiff checked arithmetic. Final fact audit for Rill #33
 
 **Status:** primary-source research, not a Rill specification or implementation/backend selection.
 
@@ -29,7 +29,7 @@ For an already-valid Date `d`, the source computes:
 - With a fixed duration `q`: `whole_days = q.as_secs() / 86400`, integer division **toward zero**. Fractional nanoseconds cannot contribute another whole day because SignedDuration's components have consistent signs. Add `whole_days`; discard the remainder. [D, DAYS]
 - With Span: apply calendar fields as in §2, then convert the **sum of all Hour-and-smaller fields** to a duration and use the same whole-day extraction. It does not discard each field separately: `23h + 60m` contributes one day. The clock portion's leftover is discarded, not carried into any hidden clock. [D, DAYS, SP-FIXED]
 
-**Deductions for either equivalent time-only Span or SignedDuration:** `d + 23h = d`; `d + 24h = d + 1 day`; `d + 47h = d + 1 day`; `d + (−23h) = d`; `d + (−47h) = d − 1 day`. Likewise ±1ns is a no-op. Exactly 24h counts: prose saying time that does not “exceed” a day is ignored must not be read as excluding the equality case. `Date::MAX + 23h` and `Date::MIN − 1ns` succeed unchanged, whereas adding/subtracting a whole day past the corresponding endpoint errors. [D, DAYS]
+**Deductions for either equivalent time-only Span or SignedDuration:** `d + 23h = d`; `d + 24h = d + 1 day`; `d + 47h = d + 1 day`; `d + (−23h) = d`; `d + (−47h) = d − 1 day`. Likewise ±1ns is a no-op. Exactly 24h counts: prose saying time that does not "exceed" a day is ignored must not be read as excluding the equality case. `Date::MAX + 23h` and `Date::MIN − 1ns` succeed unchanged, whereas adding/subtracting a whole day past the corresponding endpoint errors. [D, DAYS]
 
 This is **not** equivalent to inserting midnight, doing full DateTime arithmetic, then extracting the date: at midnight, −1ns would move into the preceding date. Nor does an explicit one-sign Span preserve any discarded remainder in the result. Pure time remainders may be lost even when calendar fields also change the date. [D, DT]
 
@@ -69,7 +69,7 @@ A useful deduced discriminator is `2021-01-30T23:00 + {1 month, 2 hours}` → `2
 
 The calendar portion is Year through Day. Add that entire portion to the local DateTime (hence the combined-year/month single constraint above), then resolve the resulting civil datetime in the **retained zone** with **Compatible** handling; only then add Hour through Nanosecond on its Timestamp. If there are no calendar fields, directly use timestamp arithmetic, avoiding re-resolution of an already-selected fold occurrence. Fixed SignedDuration always takes that direct path. [Z]
 
-Calendar days can span 23/25 hours or other transition lengths; checked does not mean “reject gaps/folds.” Compatible means earlier occurrence in a fold and forward shift in a gap, not an error. The source performs one calendar-result zone resolution here, not separate resolution after every year/month/week/day component. Range or resolution errors can still occur. These facts do not select a different Rill ambiguity policy, nor license reordering calendar and fixed portions. [Z, DISAMBIG]
+Calendar days can span 23/25 hours or other transition lengths; checked does not mean "reject gaps/folds." Compatible means earlier occurrence in a fold and forward shift in a gap, not an error. The source performs one calendar-result zone resolution here, not separate resolution after every year/month/week/day component. Range or resolution errors can still occur. These facts do not select a different Rill ambiguity policy, nor license reordering calendar and fixed portions. [Z, DISAMBIG]
 
 ## 3. Standalone Span checked addition/subtraction
 
@@ -77,7 +77,7 @@ This is **not fieldwise vector addition**, and opposite signs between operands a
 
 ### Context and actual algorithm
 
-- Let `largest` be the largest nonzero unit in either Span. With no context, Hour and smaller use invariant arithmetic; **any nonzero Day-or-larger field in either operand requires context before cancellation**. Thus `1 day + (−1 day)` and `1 month + zero` still error without context. No “same units” or “zero final answer” exemption is implemented. [SP-ADD]
+- Let `largest` be the largest nonzero unit in either Span. With no context, Hour and smaller use invariant arithmetic; **any nonzero Day-or-larger field in either operand requires context before cancellation**. Thus `1 day + (−1 day)` and `1 month + zero` still error without context. No "same units" or "zero final answer" exemption is implemented. [SP-ADD]
 - Explicit `days_are_24_hours` permits days and seven-day weeks, **not months/years**. A Date reference means a civil midnight DateTime, not Date's lossy arithmetic; a DateTime reference means civil 24-hour days; a Zoned reference incorporates transitions. [SP-REL, SP-ADD]
 - Invariant case: convert both operands to exact fixed durations, checked-add them, then decompose into a single-sign Span capped at `largest`. No automatic promotion above that cap: `90 minutes + 30 minutes` yields 120 minutes, not 2 hours. A provided reference is ignored when `largest` is invariant. [SP-ADD, SP-FIXED, SP-REL]
 - Real relative context: compute **`mid = start + left; end = mid + right; result = start.until(end, largest)`**. For Span ± SignedDuration, apply the left Span, then the full fixed duration, then take that difference; its output cap is the left Span's largest unit (a duration is treated as Nanosecond for this purpose). Subtraction follows the same algorithm after negating the right operand through the duration adapter. [SP-ADD, ADAPTER]
@@ -88,7 +88,7 @@ The relative algorithm is ordered and may be noncommutative; it does not merge c
 
 Invariant arithmetic determines the result's net sign and redistributes magnitudes: `1 hour + (−90 minutes)` → −30 minutes; cancellation → zero. Relative arithmetic determines the endpoint first and obtains a one-sign difference from the start. A hypothetical intermediate fieldwise result such as `+1 hour, −90 minutes` is **not** a stored result and is not itself a reason to reject the operation. Input construction is separate: signed Jiff builder fields change the whole Span sign; Rill's approved explicit sign+magnitudes avoids treating those builders as mixed-sign algebra. [SP-ADD, SP-FIXED, SP-SIGN]
 
-Errors include missing/inadequate context, unrepresentable fixed sum or resulting Span field, intermediate/final datetime overflow, zone resolution/representation failure, and failure to represent the requested largest-unit difference. Rebalancing means this is **not** simply “reject if the raw sum of corresponding fields exceeds a field bound.” `i64::MAX nanoseconds + 1 nanosecond` errors because the cap stays Nanosecond; choosing operands whose largest unit is Second can instead represent such a total distributed across fields. Conversely, calendar cancellation does not rescue an out-of-range **intermediate** application. [SP-ADD, SP-FIXED]
+Errors include missing/inadequate context, unrepresentable fixed sum or resulting Span field, intermediate/final datetime overflow, zone resolution/representation failure, and failure to represent the requested largest-unit difference. Rebalancing means this is **not** simply "reject if the raw sum of corresponding fields exceeds a field bound." `i64::MAX nanoseconds + 1 nanosecond` errors because the cap stays Nanosecond; choosing operands whose largest unit is Second can instead represent such a total distributed across fields. Conversely, calendar cancellation does not rescue an out-of-range **intermediate** application. [SP-ADD, SP-FIXED]
 
 **Implementation-specific civil context limit:** Jiff's private `RelativeCivil` converts the reference and intermediate/final civil datetimes to UTC Timestamps as well. A valid civil DateTime near an endpoint can therefore fail in standalone calendar Span arithmetic even where direct civil arithmetic would fit. This is a real pinned source boundary, not a need for tzdb or wall-clock access and not proof that Rill must narrow its civil context range. [SP-CIVIL]
 
@@ -104,9 +104,9 @@ SignedDuration is a normalized, sign-consistent seconds/fraction pair with nanos
 
 - `checked_neg` returns None whenever **seconds == `i64::MIN`**, including fractional values above the single absolute MIN. Every such value's positive magnitude really is outside SignedDuration's range. [SD-NEG]
 - `abs` is **not checked**; its documented panic boundary is the same entire `i64::MIN`-seconds band. `unsigned_abs` returns Rust's unsigned Duration and can represent every magnitude, including MIN. The checked Rill surface cannot simply expose upstream `abs` as universally safe. [SD-NEG]
-- Integer `checked_mul(i32)` preserves an exact nanosecond product if representable. `checked_div(i32)` rejects zero and the `i64::MIN`-seconds / −1 overflow band, but **truncates any sub-nanosecond remainder toward zero**: 1ns / 2 → zero. “Checked” division is not an exact-divisibility check. Floats, rounding and explicit saturating methods are separate operations, not implicit parts of integer addition/subtraction. [SD-MULDIV]
+- Integer `checked_mul(i32)` preserves an exact nanosecond product if representable. `checked_div(i32)` rejects zero and the `i64::MIN`-seconds / −1 overflow band, but **truncates any sub-nanosecond remainder toward zero**: 1ns / 2 → zero. "Checked" division is not an exact-divisibility check. Floats, rounding and explicit saturating methods are separate operations, not implicit parts of integer addition/subtraction. [SD-MULDIV]
 
-The asymmetric minimum is a genuine representation limit; rejecting `MIN − MIN` is an implementation consequence of how subtraction is written. Whether a Rill contract promises exact subtraction whenever the final result fits, or explicitly inherits this extra failure boundary, must be made explicit rather than hidden behind “copy Jiff.” This note selects neither. #28 can formalize the chosen arithmetic contract; #30 cannot decide it by choosing a backend.
+The asymmetric minimum is a genuine representation limit; rejecting `MIN − MIN` is an implementation consequence of how subtraction is written. Whether a Rill contract promises exact subtraction whenever the final result fits, or explicitly inherits this extra failure boundary, must be made explicit rather than hidden behind "copy Jiff." This note selects neither. #28 can formalize the chosen arithmetic contract; #30 cannot decide it by choosing a backend.
 
 ## 5. Basic civil queries really present upstream
 
@@ -126,14 +126,14 @@ This is an availability audit, **not** a proposal requiring every helper in Rill
 **The narrow arithmetic choices exposed here:**
 
 1. **Date remainder treatment:** faithfully retain Jiff whole-day truncation/no-ops, reject nonzero subday remainders, or require an explicit lossy step/operation. Specify equivalent Span and fixed-duration behavior. Neither parse strictness nor checked overflow already answers this.
-2. **Source/prose edge fidelity:** decide the contract for SignedDuration subtraction's representable-result/failed-negation cases and, if integer division is included, fractional-nanosecond truncation versus exact-divisibility failure. Do not accidentally inherit those from an implementation shortcut or the word “checked.” Also record whether Jiff's private UTC-Timestamp civil-reference limitation is part of the intended contract or merely an upstream implementation artifact.
+2. **Source/prose edge fidelity:** decide the contract for SignedDuration subtraction's representable-result/failed-negation cases and, if integer division is included, fractional-nanosecond truncation versus exact-divisibility failure. Do not accidentally inherit those from an implementation shortcut or the word "checked." Also record whether Jiff's private UTC-Timestamp civil-reference limitation is part of the intended contract or merely an upstream implementation artifact.
 3. **Any still-unconfirmed defaults:** the precise once-constrained composite calendar order and Compatible zoned arithmetic above must be recorded as upstream facts. If the coherent-core approval did not already include those defaults, confirm them; do not silently replace them with per-unit clamping or reject-all ambiguity. Earlier wire/snapshot/grammar choices remain in the prior note, not reopened or resolved here.
 
 **Not new human API requirements:** naming/shape for a minimal subset of the available pure query helpers. Availability does not force broad convenience parity.
 
-**#28 — algorithm formalization:** once policy is explicit, specify normalized representations, exact checked-success domains, composite application order, invariants and adversarial/property cases (including negative truncation, endpoints, one-sign balancing and intermediate failure). That is algorithm/spec work, not a reason to ask a human to pick algorithms already determined by a semantic contract.
+**#28. Algorithm formalization:** once policy is explicit, specify normalized representations, exact checked-success domains, composite application order, invariants and adversarial/property cases (including negative truncation, endpoints, one-sign balancing and intermediate failure). That is algorithm/spec work, not a reason to ask a human to pick algorithms already determined by a semantic contract.
 
-**#30 — backend:** feasibility, representation, linkage, host/zone-data integration and validation remain separate. No dependency, FFI, port, backend or implementation was chosen, and no upstream source fact proves Rill runtime support. This arithmetic audit does not settle the separate monotonic-clock/deadline/wait/cancellation policies in #33.
+**#30. Backend:** feasibility, representation, linkage, host/zone-data integration and validation remain separate. No dependency, FFI, port, backend or implementation was chosen, and no upstream source fact proves Rill runtime support. This arithmetic audit does not settle the separate monotonic-clock/deadline/wait/cancellation policies in #33.
 
 ## Primary-source references
 

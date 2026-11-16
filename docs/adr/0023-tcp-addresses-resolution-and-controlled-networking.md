@@ -1,6 +1,6 @@
 # Numeric addresses, owned TCP directions and explicit network control
 
-[#34](https://github.com/Reilley64/rill/issues/34) defines `std::net` as the v0 TCP/address/system-host-resolution foundation. The user explicitly confirmed consolidated Q1–Q92 and Q93's binding-based mutability clarification. The [networking contract](../networking-contracts.md) is authoritative; [prototype 25](../../prototypes/25-networking.rill) and its [independent inventory](../../prototypes/25-networking.md) are hand-checked design evidence, not an implemented library, Rill execution, native acceptance, security/safety proof or accepted RFC.
+[#34](https://github.com/Reilley64/rill/issues/34) defines `std::net` as the v0 TCP/address/system-host-resolution foundation. The user explicitly confirmed consolidated Q1-Q92 and Q93's binding-based mutability clarification. The [networking contract](../networking-contracts.md) is authoritative; [prototype 25](../../prototypes/25-networking.rill) and its [independent inventory](../prototypes/25-networking.md) are hand-checked design evidence, not an implemented library, Rill execution, native acceptance, security/safety proof or accepted RFC.
 
 ## Value identity is not resolution or connection identity
 

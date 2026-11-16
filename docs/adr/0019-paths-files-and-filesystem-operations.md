@@ -1,6 +1,6 @@
 # Native paths, owned files and focused filesystem operations
 
-[Issue #35](https://github.com/Reilley64/rill/issues/35) extends #23/#32 with paths, file handles and focused directory/temporary operations. The user approved Q1–Q44 and explicitly confirmed the consolidated contract. This records API/behavior design, not a filesystem implementation, security/soundness proof, backend validation or acceptance of #28's future RFCs. Use ADRs 0017/0018 for `implement` syntax and streaming/evidence semantics.
+[Issue #35](https://github.com/Reilley64/rill/issues/35) extends #23/#32 with paths, file handles and focused directory/temporary operations. The user approved Q1-Q44 and explicitly confirmed the consolidated contract. This records API/behavior design, not a filesystem implementation, security/soundness proof, backend validation or acceptance of #28's future RFCs. Use ADRs 0017/0018 for `implement` syntax and streaming/evidence semantics.
 
 ## Native path values and lexical operations
 
@@ -139,4 +139,4 @@ Cancellation remains outside Result. Paths, buffers, handles, callback/native st
 
 ## Evidence and follow-through
 
-[Prototype 20](../../prototypes/20-filesystem.rill) includes pure lexical expectations and application workflows; its [case inventory](../../prototypes/20-filesystem.md) supplies bounded copy/config/certificate/directory/temporary examples and independent rejection/partial/symlink/cancellation/WASI traces. All are hand-checked, not Rill or OS execution. Primary platform sources and their limits are linked in the inventory. #28 must specify ordinary family/result inference, dependency transport, path/component edge behavior, native namespace/error fidelity and exactly-once state transitions. #33/#36/#38/#39/#40 receive integration constraints without reopening their choices. Unworkable mechanisms return to map #1; closure is human design approval only.
+[Prototype 20](../../prototypes/20-filesystem.rill) includes pure lexical expectations and application workflows; its [case inventory](../prototypes/20-filesystem.md) supplies bounded copy/config/certificate/directory/temporary examples and independent rejection/partial/symlink/cancellation/WASI traces. All are hand-checked, not Rill or OS execution. Primary platform sources and their limits are linked in the inventory. #28 must specify ordinary family/result inference, dependency transport, path/component edge behavior, native namespace/error fidelity and exactly-once state transitions. #33/#36/#38/#39/#40 receive integration constraints without reopening their choices. Unworkable mechanisms return to map #1; closure is human design approval only.
