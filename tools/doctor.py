@@ -46,8 +46,15 @@ def check():
         raise ValueError("Cargo does not match the selected Rust toolchain")
     if not capture("uv", "--version").startswith("uv " + uv + " "):
         raise ValueError(f"uv {uv} is required; check user-global mise overrides")
-    for tool in ("rustc", "cargo", "uv"):
-        expected = Path(capture("mise", "which", tool)).resolve()
+    selected_tools = {
+        "rustc": "core:rust@" + rust,
+        "cargo": "core:rust@" + rust,
+        "uv": "aqua:astral-sh/uv@" + uv,
+    }
+    for tool, selected in selected_tools.items():
+        # The explicit selector avoids a mise 2026.11 macOS/AArch64 shim bug where
+        # `mise which rustc` reports an installed configured tool as inactive.
+        expected = Path(capture("mise", "which", tool, "--tool", selected)).resolve()
         actual = Path(shutil.which(tool) or "/missing-tool").resolve()
         if actual != expected:
             raise ValueError(f"{tool} is outside the selected mise environment")

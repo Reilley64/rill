@@ -56,7 +56,9 @@ class ToolSelectionTests(unittest.TestCase):
             ("rustc", "--print", "sysroot"): str(root),
             ("cargo", "--version"): f"cargo {rust} (fixture)",
             ("uv", "--version"): f"uv {uv_version or uv} (fixture)",
-            **{("mise", "which", tool): str(path) for tool, path in paths.items()},
+            ("mise", "which", "rustc", "--tool", "core:rust@" + rust): str(paths["rustc"]),
+            ("mise", "which", "cargo", "--tool", "core:rust@" + rust): str(paths["cargo"]),
+            ("mise", "which", "uv", "--tool", "aqua:astral-sh/uv@" + uv): str(paths["uv"]),
         }
         with patch.object(doctor, "capture", side_effect=lambda *args: answers[args]), \
                 patch.object(doctor.platform, "system", return_value="Linux"), \
