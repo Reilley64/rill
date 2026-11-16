@@ -877,6 +877,30 @@ mod tests {
     }
 
     #[test]
+    fn reactor_failure_wakes_waiter_and_stops_driver() {
+        let reactor = Reactor::new().unwrap();
+        let (client, _server) = pair();
+        let mut progress = tcp_progress(client, reactor.handle());
+        assert_eq!(progress.admit_read(8), Admission::Admitted);
+        assert_eq!(progress.advance().schedule, ProgressSchedule::Waiting);
+        let (notifier, wake_receiver) = wake_channel();
+        let wait = progress.register_wait(notifier).unwrap();
+        reactor.fail_for_test(io::Error::other("injected poll failure"));
+        assert_eq!(wait_for_wake(&wake_receiver), WakeAttempt::Item);
+        wait.withdraw().unwrap();
+
+        let step = progress.advance();
+        assert!(step.stop_finished);
+        assert!(matches!(
+            step.read,
+            Some(ReadOutcome::Interrupted(Interruption::DriverFailed))
+        ));
+        let failures = step.driver_failures.expect("driver failure retained");
+        assert_eq!(failures.primary.phase, DriverFailurePhase::WaitRegistration);
+        assert_eq!(failures.primary.error.kind(), io::ErrorKind::Other);
+    }
+
+    #[test]
     fn duplicate_wait_registration_is_rejected_without_replacing_first() {
         let reactor = Reactor::new().unwrap();
         let (client, _server) = pair();

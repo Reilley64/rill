@@ -81,6 +81,11 @@ impl Reactor {
             shared: Arc::clone(&self.shared),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn fail_for_test(&self, error: io::Error) {
+        self.shared.fail(error);
+    }
 }
 
 impl Drop for Reactor {
@@ -177,6 +182,24 @@ struct Shared {
     failure: Mutex<Option<ReactorFailure>>,
 }
 
+impl Shared {
+    fn fail(&self, error: io::Error) {
+        let mut failure = lock(&self.failure);
+        if failure.is_some() {
+            return;
+        }
+        *failure = Some(ReactorFailure::capture(error));
+        drop(failure);
+        let registrations: Vec<_> = lock(&self.registrations)
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for registration in registrations {
+            registration.fire();
+        }
+    }
+}
+
 struct RegistrationState {
     active: Mutex<RegistrationActivity>,
     quiescent: Condvar,
@@ -229,14 +252,7 @@ fn run(poll: &mut Poll, shared: &Shared) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => {
-                *lock(&shared.failure) = Some(ReactorFailure::capture(error));
-                let registrations: Vec<_> = lock(&shared.registrations)
-                    .values()
-                    .filter_map(Weak::upgrade)
-                    .collect();
-                for registration in registrations {
-                    registration.fire();
-                }
+                shared.fail(error);
                 return;
             }
         }
