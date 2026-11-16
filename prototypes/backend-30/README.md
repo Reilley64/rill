@@ -1,6 +1,10 @@
 # #30 backend mechanism experiments
 
-These are **executed standalone LLVM IR/C/Wasm probes**, not Rill programs, a compiler, a runtime implementation, or accepted target support. [Report and matrix](../../docs/research/0030-backend-experiments.md); [pinned source audit](../../docs/research/0030-backend-mechanisms.md). **#30 remains open.**
+These are **executed standalone LLVM IR/C/Wasm probes**, not Rill programs, a compiler, a runtime implementation, or accepted target support. [Report and matrix](../../docs/research/0030-backend-experiments.md); [pinned source audit](../../docs/research/0030-backend-mechanisms.md). **#30's standalone mechanism stage is complete; production/formal support acceptance remains gated by #28.** See the follow-up disposition below; historical JSON `gate: OPEN` fields are not being rewritten as production support.
+
+## Runtime-validation follow-up
+
+The [combined follow-up report](../../docs/research/0030-runtime-validation.md) links actual [native pre-write admission](native-capacity/README.md), [mixed-layout owned tail transfers](native-abi/README.md), [native recursive admission/M:N/borrower and scoped-cleanup lifetimes](native-lifecycle/README.md), and [portable terminal guest teardown with outstanding native work](portable/README.md). The baseline below remains its historical snapshot, including explicit containment failures; follow-up success does not erase those failures or assert a complete compiler/runtime.
 
 ## Reproduce
 
@@ -48,4 +52,4 @@ Only the first row has a lowered live-local control here; the other source-rule 
 | Scoped child or native borrower still requires join | Ordinary call; retain backing and join to completion/confirmed abortion before release. Owner/cancel request is not that completion. |
 | Explicit error wrapping after call | Ordinary call with wrapper construction afterward. Unchanged #29 propagation does not automatically add trace/cleanup work and must be considered independently. |
 
-Unsupported lowering of a genuinely eligible call must reject, not silently use any of these ordinary-call exceptions. Complete ABI classification, native M:N migration, generated pre-write bounds/probes, production cleanup/masking/joins and independently accounted managed Wasm budgets are still open work.
+Unsupported lowering of a genuinely eligible call must reject, not silently use any of these ordinary-call exceptions. Complete Rill ABI/checker classification, automatic generated admission and production runtime/provider acceptance remain unimplemented. Actual standalone M:N migration, pre-write admission, suspended cleanup/scoped joins and separately accounted portable budgets now have follow-up evidence linked above; they are no longer merely deferred experiments. These manually coded mechanisms are not source-checker tests.

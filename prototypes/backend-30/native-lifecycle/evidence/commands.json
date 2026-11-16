@@ -1,0 +1,908 @@
+[
+  {
+    "name": "version-clang",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-sdk",
+    "argv": [
+      "xcrun",
+      "--show-sdk-path"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-host",
+    "argv": [
+      "uname",
+      "-a"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-os",
+    "argv": [
+      "sw_vers"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-linker",
+    "argv": [
+      "xcrun",
+      "ld",
+      "-version_details"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-rosetta",
+    "argv": [
+      "pkgutil",
+      "--pkg-info",
+      "com.apple.pkg.RosettaUpdateAuto"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "version-docker",
+    "argv": [
+      "docker",
+      "version",
+      "--format",
+      "{{json .Server}}"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "asm-make-arm-macos",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=arm64-apple-darwin27.0.0",
+      "-c",
+      "/private/tmp/rill-30-lifecycle-tools/context/make_arm64_aapcs_macho_gas.S",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/make-arm-macos.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "asm-jump-arm-macos",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=arm64-apple-darwin27.0.0",
+      "-c",
+      "/private/tmp/rill-30-lifecycle-tools/context/jump_arm64_aapcs_macho_gas.S",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/jump-arm-macos.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "compile-arm-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=arm64-apple-darwin27.0.0",
+      "-std=c++17",
+      "-O0",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-fstack-usage",
+      "-MD",
+      "-MF",
+      "/private/tmp/rill-30-combined-lifecycle/arm-macos-O0.d",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/body-arm-macos-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-arm-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=arm64-apple-darwin27.0.0",
+      "-std=c++17",
+      "-O0",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/arm-macos-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-arm-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-combined-lifecycle/arm-macos-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "link-arm-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=arm64-apple-darwin27.0.0",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-pthread",
+      "/private/tmp/rill-30-combined-lifecycle/body-arm-macos-O0.o",
+      "/private/tmp/rill-30-combined-lifecycle/make-arm-macos.o",
+      "/private/tmp/rill-30-combined-lifecycle/jump-arm-macos.o",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/lifecycle-arm-macos-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "execute-arm-macos-0",
+    "argv": [
+      "/private/tmp/rill-30-combined-lifecycle/lifecycle-arm-macos-O0",
+      "62928"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "compile-arm-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=arm64-apple-darwin27.0.0",
+      "-std=c++17",
+      "-O2",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-fstack-usage",
+      "-MD",
+      "-MF",
+      "/private/tmp/rill-30-combined-lifecycle/arm-macos-O2.d",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/body-arm-macos-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-arm-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=arm64-apple-darwin27.0.0",
+      "-std=c++17",
+      "-O2",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/arm-macos-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-arm-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-combined-lifecycle/arm-macos-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "link-arm-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=arm64-apple-darwin27.0.0",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-pthread",
+      "/private/tmp/rill-30-combined-lifecycle/body-arm-macos-O2.o",
+      "/private/tmp/rill-30-combined-lifecycle/make-arm-macos.o",
+      "/private/tmp/rill-30-combined-lifecycle/jump-arm-macos.o",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/lifecycle-arm-macos-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "execute-arm-macos-2",
+    "argv": [
+      "/private/tmp/rill-30-combined-lifecycle/lifecycle-arm-macos-O2",
+      "41680"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "asm-make-x86-macos",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=x86_64-apple-darwin27.0.0",
+      "-c",
+      "/private/tmp/rill-30-lifecycle-tools/context/make_x86_64_sysv_macho_gas.S",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/make-x86-macos.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "asm-jump-x86-macos",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=x86_64-apple-darwin27.0.0",
+      "-c",
+      "/private/tmp/rill-30-lifecycle-tools/context/jump_x86_64_sysv_macho_gas.S",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/jump-x86-macos.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "compile-x86-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-apple-darwin27.0.0",
+      "-std=c++17",
+      "-O0",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-fstack-usage",
+      "-MD",
+      "-MF",
+      "/private/tmp/rill-30-combined-lifecycle/x86-macos-O0.d",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/body-x86-macos-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-x86-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-apple-darwin27.0.0",
+      "-std=c++17",
+      "-O0",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/x86-macos-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-x86-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-combined-lifecycle/x86-macos-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "link-x86-macos-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-apple-darwin27.0.0",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-pthread",
+      "/private/tmp/rill-30-combined-lifecycle/body-x86-macos-O0.o",
+      "/private/tmp/rill-30-combined-lifecycle/make-x86-macos.o",
+      "/private/tmp/rill-30-combined-lifecycle/jump-x86-macos.o",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/lifecycle-x86-macos-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "execute-x86-macos-0",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-combined-lifecycle/lifecycle-x86-macos-O0",
+      "62856"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "compile-x86-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-apple-darwin27.0.0",
+      "-std=c++17",
+      "-O2",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-fstack-usage",
+      "-MD",
+      "-MF",
+      "/private/tmp/rill-30-combined-lifecycle/x86-macos-O2.d",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/body-x86-macos-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-x86-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-apple-darwin27.0.0",
+      "-std=c++17",
+      "-O2",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/x86-macos-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-x86-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-combined-lifecycle/x86-macos-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "link-x86-macos-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-apple-darwin27.0.0",
+      "-isysroot",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+      "-pthread",
+      "/private/tmp/rill-30-combined-lifecycle/body-x86-macos-O2.o",
+      "/private/tmp/rill-30-combined-lifecycle/make-x86-macos.o",
+      "/private/tmp/rill-30-combined-lifecycle/jump-x86-macos.o",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/lifecycle-x86-macos-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "execute-x86-macos-2",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-combined-lifecycle/lifecycle-x86-macos-O2",
+      "41656"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "asm-make-arm-linux",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=aarch64-unknown-linux-gnu",
+      "-c",
+      "/private/tmp/rill-30-lifecycle-tools/context/make_arm64_aapcs_elf_gas.S",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/make-arm-linux.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "asm-jump-arm-linux",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=aarch64-unknown-linux-gnu",
+      "-c",
+      "/private/tmp/rill-30-lifecycle-tools/context/jump_arm64_aapcs_elf_gas.S",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/jump-arm-linux.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "compile-arm-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=aarch64-unknown-linux-gnu",
+      "-std=c++17",
+      "-O0",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "--sysroot=/private/tmp/rill-30-lifecycle-tools/headers-arm",
+      "-nostdinc++",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/aarch64-linux-gnu/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/c++/14/backward",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/aarch64-linux-gnu",
+      "-fstack-usage",
+      "-MD",
+      "-MF",
+      "/private/tmp/rill-30-combined-lifecycle/arm-linux-O0.d",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/body-arm-linux-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-arm-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=aarch64-unknown-linux-gnu",
+      "-std=c++17",
+      "-O0",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "--sysroot=/private/tmp/rill-30-lifecycle-tools/headers-arm",
+      "-nostdinc++",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/aarch64-linux-gnu/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/c++/14/backward",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/aarch64-linux-gnu",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/arm-linux-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-arm-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-combined-lifecycle/arm-linux-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "linux-link-execute-arm-linux-0",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-combined-lifecycle,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "set -ex; c++ --version; ld --version; getconf GNU_LIBC_VERSION; uname -a; c++ -pthread /out/body-arm-linux-O0.o /out/make-arm-linux.o /out/jump-arm-linux.o -o /out/lifecycle-arm-linux-O0; /out/lifecycle-arm-linux-O0 67216"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "compile-arm-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=aarch64-unknown-linux-gnu",
+      "-std=c++17",
+      "-O2",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "--sysroot=/private/tmp/rill-30-lifecycle-tools/headers-arm",
+      "-nostdinc++",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/aarch64-linux-gnu/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/c++/14/backward",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/aarch64-linux-gnu",
+      "-fstack-usage",
+      "-MD",
+      "-MF",
+      "/private/tmp/rill-30-combined-lifecycle/arm-linux-O2.d",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/body-arm-linux-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-arm-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=aarch64-unknown-linux-gnu",
+      "-std=c++17",
+      "-O2",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "--sysroot=/private/tmp/rill-30-lifecycle-tools/headers-arm",
+      "-nostdinc++",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/aarch64-linux-gnu/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/c++/14/backward",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-arm/usr/include/aarch64-linux-gnu",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/arm-linux-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-arm-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-combined-lifecycle/arm-linux-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "linux-link-execute-arm-linux-2",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-combined-lifecycle,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "set -ex; c++ --version; ld --version; getconf GNU_LIBC_VERSION; uname -a; c++ -pthread /out/body-arm-linux-O2.o /out/make-arm-linux.o /out/jump-arm-linux.o -o /out/lifecycle-arm-linux-O2; /out/lifecycle-arm-linux-O2 41680"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "asm-make-x86-linux",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=x86_64-unknown-linux-gnu",
+      "-c",
+      "/private/tmp/rill-30-lifecycle-tools/context/make_x86_64_sysv_elf_gas.S",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/make-x86-linux.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "asm-jump-x86-linux",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang",
+      "--target=x86_64-unknown-linux-gnu",
+      "-c",
+      "/private/tmp/rill-30-lifecycle-tools/context/jump_x86_64_sysv_elf_gas.S",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/jump-x86-linux.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "compile-x86-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-unknown-linux-gnu",
+      "-std=c++17",
+      "-O0",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "--sysroot=/private/tmp/rill-30-lifecycle-tools/headers-x86",
+      "-nostdinc++",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/x86_64-linux-gnu/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/c++/14/backward",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/x86_64-linux-gnu",
+      "-fstack-usage",
+      "-MD",
+      "-MF",
+      "/private/tmp/rill-30-combined-lifecycle/x86-linux-O0.d",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/body-x86-linux-O0.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-x86-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-unknown-linux-gnu",
+      "-std=c++17",
+      "-O0",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "--sysroot=/private/tmp/rill-30-lifecycle-tools/headers-x86",
+      "-nostdinc++",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/x86_64-linux-gnu/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/c++/14/backward",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/x86_64-linux-gnu",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/x86-linux-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-x86-linux-0",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-combined-lifecycle/x86-linux-O0.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "linux-link-execute-x86-linux-0",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-combined-lifecycle,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "set -ex; c++ --version; ld --version; getconf GNU_LIBC_VERSION; uname -a; c++ -pthread /out/body-x86-linux-O0.o /out/make-x86-linux.o /out/jump-x86-linux.o -o /out/lifecycle-x86-linux-O0; /out/lifecycle-x86-linux-O0 67152"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "compile-x86-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-unknown-linux-gnu",
+      "-std=c++17",
+      "-O2",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "--sysroot=/private/tmp/rill-30-lifecycle-tools/headers-x86",
+      "-nostdinc++",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/x86_64-linux-gnu/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/c++/14/backward",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/x86_64-linux-gnu",
+      "-fstack-usage",
+      "-MD",
+      "-MF",
+      "/private/tmp/rill-30-combined-lifecycle/x86-linux-O2.d",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/body-x86-linux-O2.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "ir-x86-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang++",
+      "--target=x86_64-unknown-linux-gnu",
+      "-std=c++17",
+      "-O2",
+      "-fno-stack-protector",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread",
+      "--sysroot=/private/tmp/rill-30-lifecycle-tools/headers-x86",
+      "-nostdinc++",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/x86_64-linux-gnu/c++/14",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/c++/14/backward",
+      "-isystem",
+      "/private/tmp/rill-30-lifecycle-tools/headers-x86/usr/include/x86_64-linux-gnu",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-lifecycle/lifecycle.cpp",
+      "-o",
+      "/private/tmp/rill-30-combined-lifecycle/x86-linux-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "verify-x86-linux-2",
+    "argv": [
+      "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-combined-lifecycle/x86-linux-O2.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  },
+  {
+    "name": "linux-link-execute-x86-linux-2",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-combined-lifecycle,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "set -ex; c++ --version; ld --version; getconf GNU_LIBC_VERSION; uname -a; c++ -pthread /out/body-x86-linux-O2.o /out/make-x86-linux.o /out/jump-x86-linux.o -o /out/lifecycle-x86-linux-O2; /out/lifecycle-x86-linux-O2 41656"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0
+  }
+]

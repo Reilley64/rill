@@ -123,7 +123,7 @@
       "-emit-llvm",
       "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.ll"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.ll"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -134,7 +134,7 @@
       "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
       "-passes=verify",
       "-disable-output",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.ll"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.ll"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -162,7 +162,7 @@
       "-c",
       "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.o"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.o"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -188,9 +188,9 @@
       "--export=inspect",
       "--export=test_reserve",
       "--export=test_blocked_tail",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.o",
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.o",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.wasm"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -199,9 +199,9 @@
     "name": "dis-0",
     "argv": [
       "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm",
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.wasm",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.wat"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.wat"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -211,9 +211,9 @@
     "argv": [
       "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
       "--mvp-features",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm",
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.wasm",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/validated-O0.wasm"
+      "/private/tmp/rill-30-runtime-portable-final/validated-O0.wasm"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -223,7 +223,7 @@
     "argv": [
       "node",
       "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/check.mjs",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.wasm"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -245,7 +245,7 @@
       "-lwasmtime",
       "-Wl,-rpath,/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/host-O0"
+      "/private/tmp/rill-30-runtime-portable-final/host-O0"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -253,8 +253,8 @@
   {
     "name": "wasmtime-0",
     "argv": [
-      "/private/tmp/rill-30-portable-reviewed/host-O0",
-      "/private/tmp/rill-30-portable-reviewed/machine-O0.wasm",
+      "/private/tmp/rill-30-runtime-portable-final/host-O0",
+      "/private/tmp/rill-30-runtime-portable-final/machine-O0.wasm",
       "0"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
@@ -284,7 +284,7 @@
       "-emit-llvm",
       "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.ll"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.ll"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -295,7 +295,7 @@
       "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt",
       "-passes=verify",
       "-disable-output",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.ll"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.ll"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -323,7 +323,7 @@
       "-c",
       "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.o"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.o"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -349,9 +349,9 @@
       "--export=inspect",
       "--export=test_reserve",
       "--export=test_blocked_tail",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.o",
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.o",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.wasm"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -360,9 +360,9 @@
     "name": "dis-2",
     "argv": [
       "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm",
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.wasm",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.wat"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.wat"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -372,9 +372,9 @@
     "argv": [
       "/private/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-opt",
       "--mvp-features",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm",
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.wasm",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/validated-O2.wasm"
+      "/private/tmp/rill-30-runtime-portable-final/validated-O2.wasm"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -384,7 +384,7 @@
     "argv": [
       "node",
       "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/check.mjs",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm"
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.wasm"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -406,7 +406,7 @@
       "-lwasmtime",
       "-Wl,-rpath,/private/tmp/rill-backend-30-tools/wasmtime-v50.0.1-aarch64-macos-c-api/lib",
       "-o",
-      "/private/tmp/rill-30-portable-reviewed/host-O2"
+      "/private/tmp/rill-30-runtime-portable-final/host-O2"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
     "exit": 0
@@ -414,8 +414,8 @@
   {
     "name": "wasmtime-2",
     "argv": [
-      "/private/tmp/rill-30-portable-reviewed/host-O2",
-      "/private/tmp/rill-30-portable-reviewed/machine-O2.wasm",
+      "/private/tmp/rill-30-runtime-portable-final/host-O2",
+      "/private/tmp/rill-30-runtime-portable-final/machine-O2.wasm",
       "2"
     ],
     "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
