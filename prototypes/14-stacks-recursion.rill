@@ -1,7 +1,7 @@
 // #22 source examples, not executed stack/backend tests or depth measurements.
 // Uses current #19 enums, not the superseded singleton/union model.
-// Sized-spawn path/spelling and full capture/mode/evidence interfaces are provisional
-// for #23. Small expectations do not prove TCO, overflow containment or reclamation.
+// Sized spawning and capture requirements follow the published library catalogue.
+// Small expectations do not prove TCO, overflow containment or reclamation.
 
 import std::{spawnWithStack, stop};
 import std::routine::Routine;
@@ -58,7 +58,7 @@ function viaStage(stage: Stage): u64 {
 function iterativeTotal(numbers: &List<u64>): u64 {
   let mut total: u64 = 0;
   for (let value of numbers) {
-    total += value;
+    total += *value;
   }
   return total;
 }
@@ -83,7 +83,7 @@ function readLocal(value: u64): u64 {
 }
 
 function copyText(view: &string): string {
-  return copy(*view);
+  return copy(view);
 }
 
 function copyLocalOwner(text: string): string {

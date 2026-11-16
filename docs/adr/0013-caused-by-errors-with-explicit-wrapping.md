@@ -2,7 +2,7 @@
 
 **Later interface and safety refinement:** [ADR 0015](0015-language-required-library-contracts.md) (#23) retains this origin/explicit-cause model but requires display/noBorrow/sendable/shareable when erasing a payload as a retained cause. Primary borrowed errors may still propagate directly. It defines opaque Err<E>/Cause, closed canonical construction, explicit default `error(message)` and non-copyable standard envelopes; older message conveniences/layout sketches below are historical where they conflict. No propagation traces are restored.
 
-[Issue #29](https://github.com/Reilley64/rill/issues/29) confirms that recoverable errors carry causes automatically, including user-defined typed errors, but propagation is not a report-building operation. Keep `Result<T, E = Error>`: `Err` carries the typed value, its construction location, and an optional cause of any other error type. Messages and special fields/interfaces on user types are not required. This replaces the propagation-trace decisions in #2, #7, #9, #11, and #13; cause support remains universal rather than moving exclusively into the default `Error` type.
+[Issue #29](https://github.com/Reilley64/rill/issues/29) confirms that recoverable errors carry causes automatically, including user-defined typed errors, but propagation does not build a report. Keep `Result<T, E = Error>`: `Err` carries the typed value, its construction location, and an optional cause of any other error type. Messages and special fields/interfaces on user types are not required. This replaces the propagation-trace decisions in #2, #7, #9, #11, and #13; cause support remains universal rather than moving exclusively into the default `Error` type.
 
 ## Values, causes, and formatting
 
@@ -16,7 +16,7 @@ function display<T>(error: &T): string;
 
 Each error type provides its own implementation; generic error construction requires `where display(E)`, checked before monomorphization. The default `Error` supplies an implementation. There is no required message field, automatic reflected record dump, per-instance formatter argument, or new trait. Normal family identity, visibility, and orphan rules apply. The library path belongs to #23; this is not another implicit prelude name.
 
-`display` formats only its typed error value. Standard formatting renders that text, its construction location, and every caused-by node recursively, using each node's own formatter. Ordinary printing/interpolation of the wrapper shows the full chain without converting it into a separate report. The canonical `show` interpolation family from ADR 0011 remains unchanged; #23 supplies the standard wrapper-formatting bridge to `display`. Formatting borrows rather than consumes error values, and output text retains no input borrow. As with ordinary formatting, existing suspension/effect, evaluation-order, and cleanup rules apply.
+`display` formats only its typed error value. Standard formatting renders that text and its construction location, then traverses every caused-by node using each node's own formatter. Ordinary printing/interpolation of the wrapper shows the full chain without converting it into a separate report. The canonical `show` interpolation family from ADR 0011 remains unchanged; #23 supplies the standard wrapper-formatting bridge to `display`. Formatting borrows rather than consumes error values, and output text retains no input borrow. As with ordinary formatting, existing suspension/effect, evaluation-order, and cleanup rules apply.
 
 ## Caused-by wrapping expression
 
@@ -42,7 +42,7 @@ guard let config = readConfig(&path) else (cause) {
 
 The success type comes from `inner`; the returned error type comes from `outer` and must fit the enclosing function's Result error type. Inner and outer error types may differ; the cause preserves the inner type rather than implicitly converting it. The enclosing function must permit that Result early return. Postfix `inner?` still requires matching error types and propagates unchanged. Option's existing postfix `?` stays; infix caused-by wrapping is not defined on `none`. Explicitly convert an Option to a Result when an error is needed.
 
-Roc's infix `?` inspired the shape, but Roc calls a mapping handler. Rill deliberately takes a lazy error value and automatically retains the cause instead. Compound pipe/operator examples should parenthesize their operands until #28 specifies the complete grammar, precedence, and associativity alongside #12; no ternary or handler form is introduced.
+Roc's infix `?` inspired the shape, but Roc calls a mapping handler. Rill evaluates an error value only on failure and automatically retains the cause instead. Compound pipe/operator examples should parenthesize their operands until #28 specifies the complete grammar, precedence, and associativity alongside #12; no ternary or handler form is introduced.
 
 ## Alternatives and follow-through
 

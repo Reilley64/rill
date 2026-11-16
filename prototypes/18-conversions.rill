@@ -1,5 +1,4 @@
 // #41 / ADR 0017: hand-checked intended-valid examples, not executable tests.
-// Prototype 17 is reserved by #24's separately prepared diagnostics artifacts.
 import std::convert::{into, from, tryInto, tryFrom, ConversionError};
 import std::result::{Result, Ok, Err};
 import std::error::{display, value};

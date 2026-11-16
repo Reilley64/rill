@@ -2,16 +2,16 @@
 
 Read the source examples in [`prototypes/17-diagnostics`](../../prototypes/17-diagnostics).
 
-Confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md), [report contracts/schema](../diagnostic-contracts.md) and [LSP matrix](../lsp-contracts.md). The [batch-report program](16-batch-report.md) is a separate application example.
+These examples follow confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md), the [report contracts/schema](../diagnostic-contracts.md) and the [LSP matrix](../lsp-contracts.md). The [batch-report program](16-batch-report.md) is a separate application example.
 
-**Nothing here was emitted by a Rill compiler or executed as Rill.** The report files are hand-authored protocol examples; only coordinates/hashes/ordinary data calculations are mechanically checked. There is no Rill compiler/runtime/server yet. [#42](https://github.com/Reilley64/rill/issues/42) owns actual full-scope LSP delivery/acceptance; #28/#30 retain checker/backend evidence. Static checks are not inference, borrow safety, snapshot noninterference or client proof.
+No Rill compiler emitted these reports, and no example ran as Rill. The report files are hand-authored protocol examples. Mechanical checks cover only coordinates, hashes and ordinary data calculations. There is no Rill compiler, runtime or server yet. [#42](https://github.com/Reilley64/rill/issues/42) owns full-scope LSP delivery and acceptance; #28/#30 retain the requirements for checker and backend evidence. Static checks do not prove inference, borrow safety, snapshot noninterference or client behavior.
 
 ## Files and intended outcomes
 
 | File | Intended status, not execution evidence |
 | --- | --- |
-| `valid.rill` | 8 intended-valid, intended-passing expectations: explicit borrowed generic copy, enums, named record, short-circuit calls, minimum i8, shift and owned UTF-8 |
-| `expect-failures.rill` | Source-valid with 3 intentionally false expectations; probe called once, skipped never called, ordinary false continues |
+| `valid.rill` | 8 intended-valid, intended-passing expectations cover explicit borrowed generic copy, enums, a named record, short-circuit calls, minimum i8, a shift and owned UTF-8. |
+| `expect-failures.rill` | Source-valid with 3 intentionally false expectations. probe is called once, skipped is never called, and an ordinary false result permits execution to continue. |
 | `locations.rill` | Intentional CRLF/leading tab/astral text: 2 source-valid expectations, one false; not part of the passing fixture |
 | `rejections/*.rill` | 9 separate intended-rejection programs; never concatenate them and claim compiler execution |
 | `check-report.jsonl` / `.txt` | Illustrative one-use-after-move report and completed rejected front-end check |
@@ -24,7 +24,7 @@ Confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](../adr/
 
 Report counts describe the authored fixture context, not an assertion about an eventual toolchain's additional loaded standard-module expectations. Source declaration counts are local to the named files.
 
-All report URIs use the **fictitious normalized fixture prefix** `file:///workspace/rill/`. The checker maps it to this repo for byte/hash checks. Real integration must use real properly encoded host/client URIs, not copy these paths into an editor configuration.
+All report URIs use the fictitious normalized fixture prefix `file:///workspace/rill/`. The checker maps it to this repo for byte/hash checks. Real integration must use real properly encoded host/client URIs, not copy these paths into an editor configuration.
 
 ### Rejection contract inventory
 
@@ -40,33 +40,35 @@ All report URIs use the **fictitious normalized fixture prefix** `file:///worksp
 | `duplicate-body.rill` | R0304: renamed type parameter does not distinguish bodies, even with no calls |
 | `protected-overlap.rill` | R0500: genuine guard release cannot be displaced through nested Payload ownership |
 
-Later confirmed [#41](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679) requires implement / implement<T> name for family bodies. The 3 affected rejection files use that syntax; standalone functions and body-less declarations retain function. The ordinary nested-payload orphan permission remains relevant to protected-overlap; conversion-specific endpoint permission does not replace it. Future conversion cases must cover canonical (To, From) duplicate/overlap/orphan selection, protected numeric/identity behavior, camelCase aliases and selected symbolic E equality without fallback-by-error selection. No new conversion implementation is executed here.
+The later confirmed [#41](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679) requires implement / implement<T> name for family bodies. The 3 affected rejection files use that syntax. Standalone functions and declarations without bodies retain function. The ordinary nested-payload orphan permission remains relevant to protected-overlap; conversion-specific endpoint permission does not replace it.
+
+Future conversion cases must cover duplicate detection, overlap and orphan selection for canonical (To, From) pairs. They must also cover protected numeric/identity behavior, camelCase aliases and selected symbolic E equality without choosing a fallback by its error type. No new conversion implementation is executed here.
 
 Additional compiler messages/cascades are not asserted absent. Exact source/rule checking is future #28 work. The registry freezes problem meanings, not these precise English strings. Removed literal types/unions, visibility/import ambiguity, closed numeric availability, inner-cause display/noBorrow/sendable/shareable, noncapturing named functions and unsupported eligible-tail lowering also need full later suites; these 9 programs are representative, not exhaustive coverage.
 
 ## Reproduce the static checks
 
-Use an isolated Python validator environment (no project dependency or lockfile change):
+Use an isolated Python validator environment without changing project dependencies or the lockfile:
 
 ```sh
 uv run --no-project --with jsonschema==4.25.1 python prototypes/17-diagnostics/check-fixtures.py
 ```
 
-This validates the Draft 2020-12 schema, typed records/negative data mutations, lossless decimal fields, sequence/counters, snapshot hashes/original UTF-8 locations, token substrings and independently recomputed Unicode-scalar/UTF-16 mappings. It checks declaration counts, rejection headers and delimiters only; it does not parse/type-check Rill or implement an emitter. The JSONL records are explicitly authored from the contract. No final summary in a real stream means completion was not observed; an external tool cannot infer success from the last diagnostic alone.
+The validator checks the Draft 2020-12 schema, typed records and negative data mutations. It also checks lossless decimal fields, sequence numbers and counters, snapshot hashes, original UTF-8 locations and token substrings. It independently recomputes Unicode-scalar and UTF-16 mappings. For Rill source, it checks only declaration counts, rejection headers and delimiters. It does not parse or type-check Rill or implement an emitter. The JSONL records were authored from the contract. No final summary in a real stream means completion was not observed; an external tool cannot infer success from the last diagnostic alone.
 
 ## Required future expectation-observation tests
 
-1. Compare callback/log counters with and without instrumentation; exactly one original call/comparison, skipped branches uncalled, no retries. `probe()` has one log effect by inspection; no log trace was observed here.
-2. Custom show/display/copy/iterator/disposer bodies increment counters or panic: reporting must not call them. An explicit such operation inside the original expression still runs normally once. Generic expectations acquire no added formatting/copy requirements.
-3. Owned/noncopyable values, borrowed text extents, exclusive handles, private/opaque records, unique Err/Cause and remaining initialized fields: no moved owner, retained user loan, early/late unlock or extra disposal. Current #23 copy(&value) and retained-cause boundaries control.
-4. Snapshot before original value release/mutation where safe; unavailable marker where not. Do not keep the source alive just to print it after failure. Never peek through Mutex/Shared/guard/native internals or lock a value for diagnostics.
-5. Deep/cyclic/huge aggregates, many Boolean operands, long text/bytes and type names: bound observation/work/storage before whole-graph capture; 4 levels/8 children/shared 4096 rendered bytes by default. Explicit truncated/unavailable/not-evaluated distinctions; no addresses, whole-map sorting or unbounded diff. Ordinary captures can be truncated; standard runtime explicit cause-chain rendering remains full and separate.
-6. Float widths/signed zero/NaN, i128/u128 extrema, UTF-8 boundaries/combining/astral text and invalid bytes: descriptive exact typed previews, no f64 coercion or invalid JSON nonfinite numbers. Literal minima remain syntactically valid; formatter must not change literal spelling to invalid syntax.
-7. False continues after normal cleanup; actual panic/overflow/required-worklist allocation failure remains fatal without unwind/guaranteed final report. Fatal cases are separate processes/instances, not assertions inside the passing fixture or a new panic-catching helper.
-8. Canonical module/test dedup, deterministic source order, duplicate expression text at different sites, empty suites, startup not executed, no hidden global join/background isolation/FS rollback. Deliberately parallel user work keeps ordinary effects and no hard latency promise.
+1. Compare callback/log counters with and without instrumentation. The original call or comparison must run exactly once, skipped branches must remain uncalled, and instrumentation must not retry. `probe()` has one log effect by inspection; no log trace was observed here.
+2. Use custom show/display/copy/iterator/disposer bodies that increment counters or panic. Reporting must not call them. An explicit such operation inside the original expression still runs normally once. Generic expectations acquire no added formatting/copy requirements.
+3. Test owned/noncopyable values, borrowed text extents, exclusive handles, private/opaque records, unique Err/Cause and remaining initialized fields. Observation must not move an owner, retain a user loan, unlock early or late, or add disposal. Current #23 copy(&value) and retained-cause boundaries apply.
+4. Take a snapshot before releasing or mutating the original value where safe. Otherwise, record an unavailable marker. Do not keep the source alive just to print it after failure. Never inspect Mutex/Shared/guard/native internals or lock a value for diagnostics.
+5. Test deep, cyclic and huge aggregates, many Boolean operands, long text/bytes and type names. Bound observation, work and storage before capturing the whole graph. Defaults are 4 levels, 8 children and a shared limit of 4096 rendered bytes. Distinguish truncated, unavailable and not-evaluated values explicitly. Do not expose addresses, sort whole maps or produce unbounded diffs. Ordinary captures can be truncated; standard runtime explicit cause-chain rendering remains full and separate.
+6. Test float widths, signed zero, NaN, i128/u128 extrema, UTF-8 boundaries, combining/astral text and invalid bytes. Previews must describe exact typed values without f64 coercion or invalid JSON nonfinite numbers. Literal minima remain syntactically valid; the formatter must not change their spelling to invalid syntax.
+7. A false expectation continues after normal cleanup. Actual panic, overflow or required-worklist allocation failure remains fatal, without unwinding or a guaranteed final report. Run fatal cases in separate processes/instances, not as assertions inside the passing fixture or through a new panic-catching helper.
+8. Test canonical module/test dedup, deterministic source order, duplicate expression text at different sites, empty suites and the absence of startup execution. There is no hidden global join, background isolation or filesystem rollback. Deliberately parallel user work retains ordinary effects and has no hard latency promise.
 
 ## Required future client/driver tests
 
-The [complete LSP matrix](../lsp-contracts.md#7-versioned-acceptance-matrix) is **NOT RUN** throughout. In particular test stale pull/push/resolve across dependency/context/open-close/restart races, rich-message fallback, eager ranges/hints, hierarchy source re-preparation, alias/coupled-namespace rename, graph-preserving imports, meaningful refactor workflows and adverse non-atomic edits. No source-wired menu or mocked RPC acknowledgment clears #42.
+The [complete LSP matrix](../lsp-contracts.md#7-versioned-acceptance-matrix) is NOT RUN throughout. Test stale pull/push/resolve responses across dependency, context, open-close and restart races. Also test rich-message fallback, eager ranges/hints, hierarchy source re-preparation, alias/coupled-namespace rename, graph-preserving imports, meaningful refactor workflows and adverse non-atomic edits. Wiring a menu to source code or mocking an RPC acknowledgment does not clear #42.
 
-Test human stderr versus clean JSONL sink, raw app stdout/stderr unchanged, run build-phase summary versus application exit, invalid/report-I/O/internal/cancel statuses, partial output without a summary, source/destination alias refusal, omitted diagnostics/counters and color/control-character safety. No automatic tool/user-code execution for check/LSP, no new manifest/notebook/Windows/Run-Test-DAP scope, and no backend certification from front-end success.
+Test human stderr separately from the clean JSONL sink, and verify that raw application stdout/stderr remain unchanged. Distinguish run's build-phase summary from application exit. Cover invalid/report-I/O/internal/cancel statuses, partial output without a summary, source/destination alias refusal, omitted diagnostics/counters and color/control-character safety. check/LSP must not automatically execute tools or user code. These tests add no manifest/notebook/Windows/Run-Test-DAP scope, and front-end success does not certify a backend.

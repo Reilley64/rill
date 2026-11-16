@@ -34,7 +34,7 @@ Links to source files point at the default branch of each project as read on 202
 
 ### How blocking parks a goroutine
 
-- `gopark` is the common primitive. It records a wait reason and an unlock callback, takes the goroutine off its M, and the M picks another G. `goready` makes the G runnable again ([runtime/proc.go](https://github.com/golang/go/blob/master/src/runtime/proc.go)).
+- `gopark` is the common suspension operation. It records a wait reason and an unlock callback, takes the goroutine off its M, and the M picks another G. `goready` makes the G runnable again ([runtime/proc.go](https://github.com/golang/go/blob/master/src/runtime/proc.go)).
 - Channels: a send that cannot proceed builds a `sudog` (the waiting goroutine plus a pointer to the value), enqueues it on the channel's `sendq`, and calls `gopark`. The receiver that later matches it copies the value and readies the sender ([runtime/chan.go](https://github.com/golang/go/blob/master/src/runtime/chan.go)).
 - Network I/O: sockets are non-blocking and registered with an edge-triggered poller (epoll, kqueue, event ports, and a Windows implementation). When a read would block, `netpollblock` stores the G pointer in the fd's `pollDesc` and parks it. The scheduler calls `netpoll` and readies the Gs whose fds became ready ([runtime/netpoll.go](https://github.com/golang/go/blob/master/src/runtime/netpoll.go)).
 - System calls that may block (including files and cgo): the goroutine calls `entersyscall` and keeps its M. `sysmon` runs `retake` to take the P away from Ms stuck in syscalls and hands it to another M (`handoffp`), so other goroutines keep running ([runtime/proc.go](https://github.com/golang/go/blob/master/src/runtime/proc.go)). The cost is one OS thread per blocked syscall.
@@ -70,7 +70,7 @@ Links to source files point at the default branch of each project as read on 202
 
 ### Scheduler and preemption
 
-- One scheduler thread per logical processor by default (`+S`) ([erl command flags](https://www.erlang.org/doc/apps/erts/erl_cmd.html)).
+- BEAM starts one scheduler thread per logical processor by default (`+S`) ([erl command flags](https://www.erlang.org/doc/apps/erts/erl_cmd.html)).
 - Each scheduler has its own run queue. "When a scheduler thread runs out of work it tries to steal work from another scheduler threads run queue" ([ProcessManagementOptimizations.md](https://github.com/erlang/otp/blob/master/erts/emulator/internal_doc/ProcessManagementOptimizations.md)).
 - Preemption counts reductions. A process is swapped out after `CONTEXT_REDS 4000` reductions ([erl_vm.h](https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_vm.h)). In BeamAsm a register holds the remaining reductions, and the return instruction decrements it and jumps to a shared yield fragment when it goes negative ([BeamAsm.md](https://github.com/erlang/otp/blob/master/erts/emulator/internal_doc/BeamAsm.md)). This is compiler-inserted preemption with no OS signals.
 
@@ -89,7 +89,7 @@ Links to source files point at the default branch of each project as read on 202
 
 ### Scheduler
 
-- Worker threads with local queues, global queues and work stealing (`work_steal` is a default feature), plus event loop threads and a timer thread ([scheduler.rs](https://github.com/Xudong-Huang/may/blob/master/src/scheduler.rs); [Cargo.toml](https://github.com/Xudong-Huang/may/blob/master/Cargo.toml)).
+- `may` uses worker threads with local queues, global queues and work stealing (`work_steal` is a default feature). It also has event loop threads and a timer thread ([scheduler.rs](https://github.com/Xudong-Huang/may/blob/master/src/scheduler.rs); [Cargo.toml](https://github.com/Xudong-Huang/may/blob/master/Cargo.toml)).
 - Scheduling is cooperative only: "if a running coroutine doesn't yield out, it will occupy the running thread". Long CPU-bound code should call `coroutine::yield_now()` ([may_caveat.md](https://github.com/Xudong-Huang/may/blob/master/docs/may_caveat.md)).
 
 ### How blocking parks a coroutine
@@ -124,7 +124,7 @@ Rust once had this model. Its green threads were M:N with their own stacks. Segm
 
 ### Stack growth options
 
-1. **Fixed stacks with a guard page** (`may`). Simple. Overflow is fatal and the user picks the size ([may_caveat.md](https://github.com/Xudong-Huang/may/blob/master/docs/may_caveat.md)).
+1. **Fixed stacks with a guard page** (`may`). This avoids stack growth machinery. Overflow is fatal and the user picks the size ([may_caveat.md](https://github.com/Xudong-Huang/may/blob/master/docs/may_caveat.md)).
 2. **Segmented stacks.** LLVM supports them with the `"split-stack"` function attribute: the prologue compares the stack pointer with a limit in the thread control block and calls libgcc's `__morestack`, which links a new "stacklet" ([LLVM Segmented Stacks](https://llvm.org/docs/SegmentedStacks.html)). Go and Rust both dropped this because of the hot split cost ([Go 1.3](https://go.dev/doc/go1.3#stacks); [RFC 230](https://github.com/rust-lang/rfcs/blob/master/text/0230-remove-runtime.md)).
 3. **Copying stacks** (Go). Needs every pointer into the stack to be findable and rewritable, which Go gets from escape analysis plus precise stack maps ([contiguous stacks design](https://go.dev/s/contigstacks)). LLVM's statepoint support records pointers held in frames so a relocating GC can update them ([LLVM Statepoints](https://llvm.org/docs/Statepoints.html)). Inference: LLVM does not track pointers to `alloca` slots in the same way, so a Rill compiler would have to forbid or box any stack address that could survive a growth point, and emit its own maps.
 4. **Frame copying on suspend** (Loom). Run on a large per-thread stack and copy frames to the heap when a goroutine suspends ([continuationFreezeThaw.cpp](https://github.com/openjdk/jdk/blob/master/src/hotspot/share/runtime/continuationFreezeThaw.cpp)). Inference: this has the same "no stack addresses that outlive their frame position" requirement as option 3, and the cost grows with the number of frames copied, which lazy thawing reduces.
@@ -134,7 +134,7 @@ Each stackful option also needs a prologue check (options 2 and 3) or a guard pa
 ### LLVM coroutine intrinsics (stackless)
 
 - An LLVM coroutine is a function with `llvm.coro.suspend` points. The coroutine passes split it into a ramp function and resume functions, and "any state which must persist across suspensions is stored in the coroutine frame". Suspension returns "control ... back to its caller" ([LLVM Coroutines](https://llvm.org/docs/Coroutines.html)).
-- Lowerings: switched-resume (`llvm.coro.id`; one resume function that switches on a stored suspend index), returned-continuation (`llvm.coro.id.retcon`), and async (`llvm.coro.id.async`, frontend-controlled context and one resume function per suspend point) ([LLVM Coroutines](https://llvm.org/docs/Coroutines.html)). The allocation protocol is designed so the frame allocation can be elided after inlining ([LLVM Coroutines](https://llvm.org/docs/Coroutines.html)). The doc warns that "compatibility across LLVM releases is not guaranteed".
+- LLVM supports switched-resume lowering with `llvm.coro.id`, which uses one resume function that switches on a stored suspend index. It also supports returned-continuation lowering with `llvm.coro.id.retcon`, and async lowering with `llvm.coro.id.async`. Async lowering uses a frontend-controlled context and one resume function per suspend point ([LLVM Coroutines](https://llvm.org/docs/Coroutines.html)). The allocation protocol is designed so the frame allocation can be elided after inlining ([LLVM Coroutines](https://llvm.org/docs/Coroutines.html)). The doc warns that "compatibility across LLVM releases is not guaranteed".
 - Inference: to hide this from users, the compiler would lower every function that can transitively reach a suspension point as a coroutine, and every call to such a function as "call, and if it suspended, suspend too". In Rill, where every function can suspend, that is all functions unless whole-program analysis proves otherwise. Calls through function values and calls into foreign code make that analysis conservative. Asyncify's measurements show the same effect on WebAssembly (below).
 - There is no stack to grow in this design, and no per-goroutine stack memory beyond the frames that are alive. Recursion depth is bounded by heap rather than by a stack size.
 
@@ -162,13 +162,13 @@ These are options and trade-offs for the follow-up grilling ticket. This file do
 1. **Suspension mechanism.**
    - Stackful with fixed stacks and guard pages. Least compiler work, one assembly switch per target. Memory per goroutine is the chosen stack size, and overflow is fatal.
    - Stackful with segmented stacks (`split-stack`). LLVM support exists. Go and Rust both left it because of hot splits.
-   - Stackful with copying stacks (Go) or frame copying (Loom). Small initial stacks and growth. Requires the compiler to know every pointer into the stack, which Rill has no GC metadata for today, or a language rule that stack addresses never escape.
-   - Stackless via LLVM coroutines on every function that may suspend. No stacks and no growth problem, and it maps onto Wasm without stack switching. Costs: a frame per suspending call unless elided, code size, conservative analysis around function values and FFI, and reliance on intrinsics without cross-release stability.
+   - Stackful with copying stacks (Go) or frame copying (Loom). These start with small stacks and allow growth. The compiler must know every pointer into the stack, which Rill has no GC metadata for today. Alternatively, the language must prohibit stack addresses from escaping.
+   - Stackless via LLVM coroutines on every function that may suspend. No stacks and no growth problem, and it maps onto Wasm without stack switching. The costs include a frame per suspending call unless elided, larger code and conservative analysis around function values and FFI. The intrinsics also lack cross-release stability.
    - A mix: stackless on Wasm and stackful on native, at the price of two code generation paths.
 2. **Preemption.** None (Loom, `may`), compiler-inserted checks at calls and loop back edges with a budget (BEAM, Go before 1.14), or signal-based (Go 1.14+). Inserted checks also work on Wasm; signals do not exist there.
 3. **Blocking syscalls and FFI.** Hand the worker slot to another thread (Go), grow the pool (Loom), route to separate blocking threads (BEAM dirty schedulers), or forbid or wrap them (`may`). Rill controls its standard library, so it can avoid the `may` problem of a scheduler-unaware std, but foreign code stays a risk.
 4. **I/O integration.** An integrated poller that parks goroutines on fd readiness is common to all four. Decide whether the scheduler polls (Go) or a separate thread polls (`may`, BEAM).
 5. **Channels.** All four park the waiter in a queue on the channel or mailbox and wake it on match. The choice is between Go-style typed channels with `select` and BEAM-style mailboxes. That is a language question as much as a runtime one.
-6. **Scheduler shape.** Per-worker queues with work stealing are used by all four; there is little to decide beyond queue sizes and fairness rules such as Go's every-61-ticks global check.
-7. **WebAssembly target.** Single-threaded scheduler for now. Pick between Go-style unwinding with resume points, Asyncify, stackless lowering, or waiting for the stack switching proposal (phase 3). JSPI covers host async calls at the boundary in browsers.
+6. **Scheduler shape.** All four use per-worker queues with work stealing. Choices include queue sizes and fairness rules such as Go's every-61-ticks global check.
+7. **WebAssembly target.** Use a single-threaded scheduler for now. Pick between Go-style unwinding with resume points, Asyncify, stackless lowering, or waiting for the stack switching proposal (phase 3). JSPI covers host async calls at the boundary in browsers.
 8. **Goroutine-local state and TLS.** Decide whether Rill exposes thread-local storage at all, since goroutines move between threads.

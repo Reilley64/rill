@@ -1,99 +1,103 @@
 # Concurrency and cancellation safety cases
 
-Read the source examples in [`prototypes/09-concurrency-safety.rill`](../../prototypes/09-concurrency-safety.rill).
+Read [the source examples](../../prototypes/09-concurrency-safety.rill). They combine the earlier channel/worker demonstration with the guard and cancellation cases from [#16](https://github.com/Reilley64/rill/issues/16) and [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md).
 
-Inputs for [#16](https://github.com/Reilley64/rill/issues/16) and [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md). These are expected outcomes checked by inspection, not an executed compiler/runtime suite or a soundness proof. `09-concurrency-safety.rill` supplies seven intended-valid top-level expectations; its new library module/factory spellings are provisional for #23.
+The source contains 11 intended-valid expectations. They have been inspected, not executed by a Rill compiler or runtime. Library names and call shapes follow the [published catalogue](../standard-library-contracts.md). These cases do not prove scheduling, synchronization or cancellation safety.
 
-Snippets below are independent cases using the corresponding prototype's types/helpers. Named functions receive state explicitly; record values use the named construction rule from #21.
+## Source coverage
+
+The first seven expectations cover scoped mutation, early unlocking, last-use release, read-only guard sharing, disjoint payload loans, suspension while holding a lock and explicit background completion. The remaining four cover a producer and two workers, channel/timer selection, heterogeneous plain results and the fallible scoped helpers.
+
+`queuedSquares` transfers owned messages through unbuffered queues and shares a receiver explicitly. Sender disposal closes each queue. The parent drains results and joins all three routines. `selectedPulse` accepts either a heartbeat or a timer; it never asserts a scheduling winner or a completion deadline. `helperOutcomes` distinguishes `join`, `all`, `allSettled`, `race` and `any` without guessing execution order.
 
 ## Guard-dependent access
 
-Accept normal scope-exit unlocking and explicit early disposal after the last dependent use. Reject early disposal while a protected loan is still needed:
+A scope exit or explicit disposal unlocks the mutex. A dependent loan must reach its last use first. Reject this independent example:
 
-```ts
+```rill
 let mut held = lock(&counter);
 let value = &mut *held;
 dispose(held); // Rejected: value retains the guard's protected-access obligation.
 *value += 1;
 ```
 
-The guard borrows the mutex source; it does not secretly clone a shared owner:
+A guard borrows its mutex source; it does not clone a shared owner. Reject returning a guard whose source handle is local:
 
-```ts
+```rill
 function invalidGuard(): LockGuard<i32> {
   let counter = shared(mutex<i32>(0));
-  return lock(&counter); // Rejected: the source handle is local.
+  return lock(&counter);
 }
 ```
 
-A payload reference depends on the lock lease, not just on the allocation holding the payload:
+A payload reference also depends on the lock lease. Keeping the allocation alive is not sufficient:
 
-```ts
+```rill
 function invalidView(counter: &Shared<Mutex<i32>>): &i32 {
   let held = lock(counter);
   return &*held; // Rejected: held would unlock on return.
 }
 ```
 
-Accept returning a guard borrowing a caller-provided mutex when its ordinary input dependencies remain valid. Accept returning a payload borrow from a function borrowing a caller-owned guard when the guard remains needed for that borrow. Guard disposal/movement and source cleanup must remain restricted through all transitive holders and disposer uses.
+A returned guard may borrow a caller-owned mutex. A returned payload view may borrow a caller-owned guard. In both cases the caller must retain every source and protected-access obligation through the result's last use, including transitive holders and disposer uses.
 
-Reject `copy(held)`, moving a non-copying payload out with `*held`, forging a guard through private fields, or granting built-in dereference to an unrelated record merely named `LockGuard`. [ADR 0010](../adr/0010-file-modules-explicit-exports-and-privacy.md) additionally protects required built-in release/ownership mechanics from overload interception: owning a nested Payload cannot authorize replacement of a genuine guard's required disposal. Ordinary generic defaults remain specializable; this is not a blanket outermost-type placement rule. Payload replacement is allowed only under the existing borrow and exactly-once disposal rules. Use explicit `(*held).field` in these examples; no additional user-defined dereference/projection mechanism is being specified.
+Reject `copy(&held)`, moving a non-copying payload through `*held`, constructing a guard through private fields or granting built-in dereference to an unrelated record named LockGuard. [ADR 0010](../adr/0010-file-modules-explicit-exports-and-privacy.md) protects required guard release from overload interception. Owning a nested Payload does not authorize replacing a genuine guard's disposal. Ordinary generic defaults remain specializable; there is no blanket outermost-type placement rule. Payload replacement still follows borrow and exactly-once disposal rules. Use `(*held).field` for payload projection; these examples add no user-defined dereference mechanism.
 
 ## Guard ownership versus scoped loans
 
-- **Accept:** `sharedGuardReads`, since `LockGuard<i32>` is shareable through read-only scoped access. This does not permit child mutation, unlocking, or ownership transfer.
-- **Accept:** `scopedPayloadWrites`, where disjoint exclusive payload loans transfer to children and all execution/cleanup finishes before guard release. The guard itself stays in the parent goroutine.
-- **Reject:** transferring an owned guard to another goroutine, even via a scoped helper or wrapper; it is not sendable. Background spawn also fails its borrow-free capture requirement.
-- **Reject:** a read-only shared view of `&mut T` used to move out/copy that reference or obtain competing mutable access. Q11's sharing rule is not a way to duplicate exclusivity.
-- **Accept:** suspension/worker migration of the goroutine owning a guard. This does not transfer ownership to another goroutine or require OS-thread pinning.
+- `sharedGuardReads` permits read-only scoped sharing because i32 is shareable. Children cannot mutate or unlock the guard, or take ownership of it.
+- `scopedPayloadWrites` transfers disjoint exclusive payload loans to children. The guard stays in the parent, which joins all child work and cleanup before releasing it.
+- Reject moving an owned guard to another goroutine, including through a scoped helper or wrapper. It is not sendable. Background capture also requires noBorrow.
+- A read-only view of `&mut T` cannot copy that reference or obtain competing mutable access. Sharing a handle does not duplicate exclusivity.
+- The owning goroutine may suspend or migrate between OS workers while holding its guard. This does not transfer the guard to another goroutine or require thread pinning.
 
-A child waiting for a lock retained by a parent that is joining that child can deadlock. That is not permission to unlock early or abandon the child. A same-goroutine reacquisition instead follows the specified self-lock panic policy.
+A parent that retains a lock while joining a child waiting for that lock can deadlock. The runtime cannot fix that by unlocking early or abandoning the child. Reacquisition by the same goroutine instead follows the self-lock panic policy.
 
-## Payloads, messages, and generic evidence
+## Payloads, messages and generic evidence
 
-Reject `mutex<&i32>(&source)` and `channel<&i32>()`: v0 payload/message types require noBorrow and sendable. Ordinary reference-containing records and scoped inputs/results remain available. A sendable but non-shareable owned value can be protected by a mutex or transferred as a channel message; synchronized endpoint use does not share access to an individual message.
+Reject `mutex<&i32>(&source)` and `channel<&i32>(0u64)`. Payloads and messages require noBorrow and sendable. Scoped inputs/results and ordinary reference-containing records remain available. A sendable but non-shareable owned value may be protected by a mutex or transferred as a message. Synchronized endpoints do not grant shared access to that message.
 
-The RFC must include accepted/rejected generic cases establishing `sendable(T)`/`shareable(T)` from structure or explicit requirements, not eventual instantiations. Erased callable annotations cannot invent capture evidence, and noBorrow/copy/invocation mode cannot substitute for transfer or sharing requirements. Test trusted exceptions such as goroutine-affine guards as well as ordinary recursive derivation through records, tuples, lists, unions, and captures.
+The RFC needs accepted and rejected generic cases for structural or explicit `sendable(T)` and `shareable(T)` evidence. Eventual instantiations are not evidence for an unchecked generic body. Callable erasure cannot invent capture properties; noBorrow, copy and invocation mode do not substitute for transfer or sharing requirements. Cover goroutine-affine guards and recursive derivation through records, tuples, lists, enums and captures.
 
-Scoped helper results may retain valid caller-owned borrows. Reject results borrowing destroyed child-owned storage, and preserve any exclusive restriction until the returned dependency's last use. A guard cannot be released merely because a helper has selected a winner; all child work and cleanup using it must finish first.
+Scoped results may retain valid caller-owned borrows, but cannot borrow destroyed child-local storage. Preserve exclusive restrictions through the result's last use. Selecting a winner does not permit guard release while any child or cleanup still uses it.
 
 ## No hidden named-function captures
 
-Reject access to outer/top-level runtime bindings from a named function:
+Reject access to an outer or top-level runtime binding from a named function:
 
-```ts
+```rill
 let mut counter: i32 = 0;
 function hiddenMutation(): void {
-  counter += 1; // Rejected: named functions do not implicitly capture runtime lets.
+  counter += 1;
 }
 ```
 
-The same restriction applies to immutable runtime lets even if constant-foldable, indirect calls, and dispose overloads. Types and function declarations remain visible under module rules. Explicit parameters and checked arrow captures are allowed. Trusted runtime services such as logging need synchronization contracts, not an unchecked user-level global-state escape hatch.
+The restriction also covers immutable or constant-foldable runtime lets, indirect calls and dispose implementations. Types and function declarations remain visible under module rules. Use explicit parameters or checked arrow captures for state. Logging and other trusted runtime services need synchronization contracts, not an unchecked user-global escape.
 
 ## Runtime and cancellation state-machine cases
 
-#23/#28 must make these cases explicit and eventually executable. No timing-only tests may stand in for ownership/termination assertions.
+These are obligations for later executable tests, not results from this source. Timing alone cannot establish ownership or termination.
 
 | Case | Required outcome |
 | --- | --- |
-| Contended lock acquisition. | Park the goroutine, not its OS worker. |
-| Lock release/acquisition or message handoff publishes prior writes. | Justify synchronization visibility/publication as well as exclusion; owner counts alone do not grant mutable payload access. |
-| Cancellation races with lock acquisition/guard initialization. | Own release responsibility throughout the handoff: withdraw before grant, or release a granted acquisition through initialized/registered cleanup. Never leak or double-unlock. |
-| A guard leaves scope or is explicitly disposed. | Unlock exactly once, without disposing the payload; do not unlock merely at its last explicit mention. |
-| Same-goroutine mutex reacquisition or self-stop. | Panic under ADR 0005; no self-wait. |
-| Concurrent/repeated stop. | Shared termination state, cleanup once, all completed joins observe termination. Freeing the handle still does not stop the target. |
-| A helper selects a winner or all fails early. | Cancel/join remaining children and cleanup before return; selection time is not a hard return deadline. |
-| Cancellation arrives during a scoped helper or stop's required join. | Retain sources and join children/target; defer further delivery during required cleanup rather than abandon the wait. |
-| A cancellation request arrives during dispose or another deferred wait. | Keep it pending. Do not withdraw that operation's wait while delivery is disabled; scheduling/completion continue. |
-| Cancellation during destination/RHS evaluation. | Clean up values actually owned at that point; old storage is still valid. |
-| Cancellation during old-value disposal or installation. | Defer delivery through installation; keep the replacement owned, track initialized/disposed state, then clean up the valid installed value once if cancellation is delivered. |
-| A disposer or child still needs a protected loan. | Preserve the guard and its mutex source through those uses and joins, then release it. |
-| A native blocking job still uses a buffer, resource state, callback data, or handle. | Retain the required source until completion or confirmed abort; an abort request alone cannot permit cleanup. |
-| A send/receive races with cancellation. | One owner for pending messages and committed results. Do not roll back a committed transfer; a canceled committed receive may dispose its result. |
-| select has multiple registrations. | Exactly one winning commit; withdraw the rest. A separate race of receives still may consume losing messages. |
-| Cleanup/native work never completes or a wait cycle exists. | No bounded stop/helper latency or force-kill guarantee. |
-| Normal top-level completion or panic. | No implicit global background join; panic has no cleanup guarantee. Do not confuse either with cooperative stop. |
+| A lock acquisition contends. | Park the goroutine, not its OS worker. |
+| A lock or message handoff publishes prior writes. | Establish memory visibility as well as exclusion. Owner counts alone grant no mutable payload access. |
+| Cancellation races with lock acquisition or guard initialization. | Withdraw before grant, or release a granted acquisition through registered cleanup. Keep one release owner; never leak or double-unlock. |
+| A guard leaves scope or is explicitly disposed. | Unlock exactly once without disposing the payload. Its last explicit mention is not an early-unlock instruction. |
+| A goroutine reacquires its mutex or stops itself. | Panic under ADR 0005 rather than wait for itself. |
+| Stop calls repeat or run concurrently. | Share termination state and perform cleanup once. Every completed join observes termination. Dropping the handle does not stop the target. |
+| A helper selects a winner or all fails early. | Cancel and join remaining children and cleanup before returning. Selection time is not a hard return deadline. |
+| Cancellation arrives during a scoped helper or stop's required join. | Retain sources and join the children or target. Defer delivery during required cleanup instead of abandoning the wait. |
+| A request arrives during dispose or another deferred wait. | Keep the request pending and the wait registered. Scheduling and completion continue while delivery is disabled. |
+| Cancellation interrupts destination or replacement-expression evaluation. | Clean up values owned at that point. The old storage remains valid. |
+| Cancellation arrives during old-value disposal or installation. | Defer delivery through installation, track initialized/disposed state and clean up the valid replacement once if delivery follows. |
+| A disposer or child still needs a protected loan. | Retain the guard and its mutex source through those uses and joins. |
+| A native job still uses a buffer, resource, callback or handle. | Retain its sources until completion or confirmed abort. An abort request is not a release acknowledgement. |
+| Send or receive races with cancellation. | Maintain one owner for pending messages and committed results. Do not roll back a committed transfer; a canceled committed receive may dispose its result. |
+| Select has multiple registrations. | Commit one receive and withdraw the rest. Racing independent receives can consume losing messages and is not equivalent. |
+| Cleanup or native work never completes, or a wait cycle exists. | No bounded stop/helper latency or force-kill guarantee applies. |
+| Top-level execution ends normally or panics. | Do not join background work implicitly. Panic has no cleanup guarantee and is distinct from cooperative stop. |
 
-Cancellation cleanup must have compiler/runtime paths distinct from fatal panic, with initialization state and dependency-sensitive disposal/guard release. The existing no-panic-unwinding policy is not an excuse to skip cooperative cleanup. ADR 0010 records #17's module/scoping/privacy policy; #23 still owns complete signatures, protected-operation contracts, and evidence-preserving interface rules; #28 must resolve any v0-blocking checking/commit inconsistency rather than declare this list a proof.
+Cancellation cleanup needs compiler/runtime paths distinct from fatal panic, including initialization tracking, dependency-sensitive disposal and protected guard release. The no-panic-unwinding rule does not remove cooperative cleanup. The catalogue defines public signatures and protected operations; #28 still owes formal checking and implementation validation. Return a blocking inconsistency to the language map rather than treating these examples as proof.
 
-The guard interface supersedes the earlier callback-only withLock proposal: there is no special callback-result noBorrow rule or callback-scoped mutex compiler contract left to implement.
+The guard API replaces the old callback-only withLock proposal. No callback-result noBorrow rule or callback-scoped mutex compiler contract remains.

@@ -17,7 +17,7 @@
 
 Mutability does not change copy classification. Existing implicitly copied scalar, record, and tuple values still copy; other owned values move unless explicitly copied. Values carrying exclusive borrows cannot implicitly copy. Existing owned-record rebuilding guarantees remain. Loops can update mutable accumulators instead of requiring recursive accumulation.
 
-Replacement evaluates the destination and right-hand side once, keeping the old value alive while the replacement is computed; it then frees/disposes the old value and installs the replacement. Reject a replacement leaving references into freed old storage. The replacement remains owned while disposal runs, and cleanup must track initialization/disposal state. ADR 0009 now defers cancellation delivery from old-value disposal through replacement installation, while permitting suspension/scheduling and retaining the replacement's ownership. Deliver pending cancellation only after a valid destination is installed, then clean it up exactly once; destination/RHS evaluation remains normally cancellable. Track initialized/disposed states and retain all dependencies needed through disposal. ADR 0005's non-unwinding panic policy is unchanged.
+Replacement evaluates the destination and right-hand side once. It keeps the old value alive while computing the replacement, then frees/disposes the old value and installs the replacement. Reject a replacement leaving references into freed old storage. The replacement remains owned while disposal runs, and cleanup must track initialization/disposal state. ADR 0009 now defers cancellation delivery from old-value disposal through replacement installation, while permitting suspension/scheduling and retaining the replacement's ownership. Deliver pending cancellation only after a valid destination is installed, then clean it up exactly once; destination/RHS evaluation remains normally cancellable. Track initialized/disposed states and retain all dependencies needed through disposal. ADR 0005's non-unwinding panic policy is unchanged.
 
 ## Dependencies and escaping references
 
@@ -54,10 +54,10 @@ Add `where noBorrow(T)` as a compiler-recognized intrinsic, not a user-implement
 
 ## Alternatives and follow-through
 
-- **References only in parameters, or no references in mutable positions:** simpler checking, but narrows ADR 0002's expressiveness. Rejected for this design direction.
+- **References only in parameters, or no references in mutable positions.** These simplify checking but exclude programs allowed by ADR 0002. Rejected for this design direction.
 - **Programmer-written lifetime/source annotations:** more precise contracts, but changes the no-lifetime-syntax commitment. Rejected.
 - **Runtime borrow checks, implicit mutable sharing, or automatic shared downgrades:** avoid some static restrictions but introduce different runtime/access rules. Not adopted.
-- **Caller inspection of callee bodies:** potentially more precise, but makes contracts implementation-dependent. Not adopted.
+- **Caller inspection of callee bodies.** This could make checking more precise, but would make contracts implementation-dependent. Not adopted.
 
 `prototypes/07-mutation.rill` illustrates the approved syntax and `docs/prototypes/07-mutation-safety.md` records hand-checked expectations and remaining validation obligations. These are design artifacts, not executed compiler tests or a proof.
 

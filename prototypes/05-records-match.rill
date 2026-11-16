@@ -1,0 +1,117 @@
+// Nominal records, enum-wrapped shapes, matching and owned rebuilding.
+// Design examples only. These expectations have not run in a Rill toolchain.
+import std::collection::{List, map, sum};
+
+type Point = { x: f64; y: f64 };
+type ScreenPoint = { x: f64; y: f64 };
+type Box<T> = { value: T };
+type Circle = { center: Point; radius: f64 };
+type Rect = { corner: Point; width: f64; height: f64 };
+
+enum Shape {
+  Circle(Circle),
+  Rect(Rect),
+  Empty,
+}
+
+function area(shape: &Shape): f64 {
+  return match (shape) {
+    Shape.Circle(circle) => 3.14 * circle.radius * circle.radius,
+    Shape.Rect(rect) => rect.width * rect.height,
+    Shape.Empty => 0.0,
+  };
+}
+
+function describe(shape: &Shape): string {
+  return match (shape) {
+    Shape.Circle({ center: { x: 0.0, y: 0.0 } }) => "a circle at the origin",
+    Shape.Circle(circle) if circle.radius > 10.0 => "a big circle",
+    Shape.Circle(circle) => "a circle",
+    Shape.Rect(rect) if rect.width == rect.height => "a square",
+    Shape.Rect(rect) => "a rectangle",
+    _ => "nothing",
+  };
+}
+
+function grow(shape: Shape, by: f64): Shape {
+  return match (shape) {
+    Shape.Circle(circle) => Shape.Circle(Circle { ...circle, radius: circle.radius * by }),
+    Shape.Rect(rect) => Shape.Rect(Rect { ...rect, width: rect.width * by, height: rect.height * by }),
+    Shape.Empty => Shape.Empty,
+  };
+}
+
+function totalAfterGrowing(): f64 {
+  let shapes: List<Shape> = [
+    Shape.Circle(Circle { center: Point { x: 5.0, y: 5.0 }, radius: 12.0 }),
+    Shape.Rect(Rect { corner: Point { x: 1.0, y: 1.0 }, width: 2.0, height: 2.0 }),
+    Shape.Empty,
+  ];
+  let bigger = map(shapes, (shape) => grow(shape, 2.0));
+  let areas = map(&bigger, (shape) => area(shape));
+  return sum(&areas);
+}
+
+function origin(): Point {
+  return Point { x: 0.0, y: 0.0 };
+}
+
+function xOf(point: &Point): f64 {
+  return point.x;
+}
+
+function inferredX(): f64 {
+  let point = origin(); // Infer from this typed expression, not later uses.
+  return point.x;
+}
+
+function annotatedX(): f64 {
+  let point: Point = Point { x: 4.0, y: 5.0 };
+  return point.x; // An annotation checks identity; it does not create it.
+}
+
+function rebuiltX(): f64 {
+  let point = Point { x: 1.0, y: 2.0 };
+  let rebuilt = Point { ...point, x: 3.0 };
+  return rebuilt.x;
+}
+
+function boxedValue(): i32 {
+  let box = Box<i32> { value: 7 };
+  return box.value;
+}
+
+expect area(&Shape.Empty) == 0.0;
+expect area(&Shape.Rect(Rect {
+  corner: Point { x: 0.0, y: 0.0 }, width: 2.0, height: 3.0,
+})) == 6.0;
+expect describe(&Shape.Circle(Circle {
+  center: Point { x: 0.0, y: 0.0 }, radius: 1.0,
+})) == "a circle at the origin";
+expect area(&grow(Shape.Rect(Rect {
+  corner: Point { x: 0.0, y: 0.0 }, width: 2.0, height: 3.0,
+}), 2.0)) == 24.0;
+expect describe(&Shape.Circle(Circle {
+  center: Point { x: 5.0, y: 5.0 }, radius: 12.0,
+})) == "a big circle";
+expect describe(&Shape.Rect(Rect {
+  corner: Point { x: 1.0, y: 1.0 }, width: 2.0, height: 2.0,
+})) == "a square";
+expect describe(&Shape.Empty) == "nothing";
+// Avoid an exact decimal-string claim about a binary floating-point sum.
+expect totalAfterGrowing() > 1824.63 && totalAfterGrowing() < 1824.65;
+expect xOf(&Point { x: 2.0, y: 3.0 }) == 2.0;
+expect inferredX() == 0.0;
+expect annotatedX() == 4.0;
+expect rebuiltX() == 3.0;
+expect boxedValue() == 7;
+
+// Independent rejection cases, not active declarations:
+// let anonymous = { x: 0.0, y: 0.0 };
+// let contextual: Point = { x: 0.0, y: 0.0 };
+// xOf(&{ x: 0.0, y: 0.0 });
+// let wrong: Point = ScreenPoint { x: 0.0, y: 0.0 };
+// function anonymousParameter(point: { x: f64; y: f64 }): f64 { return point.x; }
+// let rebuilt = { ...origin(), x: 1.0 };
+// type BadShape = { kind: "circle"; radius: f64 } | { kind: "empty" };
+// Shape wraps named records explicitly; matching fields do not create membership.

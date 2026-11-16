@@ -15,14 +15,12 @@ I read all sources on 2026-10-21. Links to source code point at the commit I rea
 
 | Language | Ownership in source | In-place update of unique data | Closures | Sharing across threads |
 | --- | --- | --- | --- | --- |
-| Koka | Hidden. Optional `^` borrow mark and `fip`/`fbip` checks. | Reuse analysis: a matched constructor with count 1 is reused for a new one of the same size. | Heap object that owns its free variables. | Values are marked thread-shared when they cross; shared counts use atomics and are never reused. |
-| Lean 4 | Hidden. `@&` borrow only on `extern` functions. | Reset/reuse for constructors; primitive `Array` and `String` ops update in place when the count is 1. | Heap closure object with captured values. | `markMT` walks the value before a task starts; shared objects use atomic counts and are never treated as unique. |
-| Roc | Hidden. | Builtins (for example `List.set`) update in place when the count is 1, else shallow clone. | Defunctionalized into tag unions (lambda sets); no heap allocation, except across the platform boundary. | Roc has no threads of its own; values the host can see use atomic counts. |
+| Koka | Ownership is hidden. Optional `^` borrow marks and `fip`/`fbip` checks expose some control. | Reuse analysis: a matched constructor with count 1 is reused for a new one of the same size. | Heap object that owns its free variables. | Values are marked thread-shared when they cross; shared counts use atomics and are never reused. |
+| Lean 4 | Hidden. `@&` borrow only on `extern` functions. | The compiler resets/reuses constructors. Primitive `Array` and `String` operations update in place when the count is 1. | Heap closure object with captured values. | `markMT` walks the value before a task starts; shared objects use atomic counts and are never treated as unique. |
+| Roc | Hidden. | Builtins such as `List.set` update in place when the count is 1. Otherwise they make a shallow clone. | Defunctionalized into tag unions (lambda sets); no heap allocation, except across the platform boundary. | Roc has no threads of its own; values the host can see use atomic counts. |
 | Swift | Hidden by default. Optional `borrowing`, `consuming`, `consume`, `~Copyable`, `weak`, `unowned`. | Value types mutate in place; library types use copy-on-write with `isKnownUniquelyReferenced`. | Reference type; heap context when escaping, stack context when not. | Counts are stored atomically in every heap object. `Sendable` and region checks are compile-time only. |
 | Rust | Visible: moves, `&`, `&mut`, lifetimes. | Owned or `&mut` data is mutated directly; `Rc::make_mut` / `Arc::make_mut` for shared data. | Unboxed anonymous struct per closure; `Fn`/`FnMut`/`FnOnce`; `Box<dyn Fn>` for dynamic. | `Send`/`Sync` checked at compile time. `Rc` cannot cross threads; `Arc` uses atomics. Scoped threads can borrow. |
-| Hylo | Visible: `let`/`inout`/`sink`/`set` conventions, explicit `.copy()`. | `inout` gives exclusive access, so updates are always in place; no reference counts in the model. | Lambda types carry their environment; closures may capture projections; capture lists copy. | Design in progress; structured `spawn` passes projections; no counts to synchronize. |
-
-The rest of the note gives the detail and sources.
+| Hylo | Visible: `let`/`inout`/`sink`/`set` conventions, explicit `.copy()`. | `inout` gives exclusive access, so updates are always in place; no reference counts in the model. | Lambda types record their environment. Closures may capture projections; capture lists copy values. | Design in progress; structured `spawn` passes projections; no counts to synchronize. |
 
 ## Koka: Perceus reference counting with reuse
 
@@ -91,7 +89,7 @@ Roc's compiler is being rewritten in Zig. The links below point at the `main` br
 
 ### Ownership in the source
 
-None. Strings, lists, boxes, and recursive tag unions live on the heap, and Roc counts references to them automatically. Numbers, records, tuples, and non-recursive tag unions are stored inline and have no count ([Roc langref, reference counting](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/docs/langref/expressions.md)). The compiler infers when a function only reads an argument, and then passing it does not touch the count ([Roc langref, functions performance](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/docs/langref/functions.md)).
+Roc source has no ownership syntax. Strings, lists, boxes, and recursive tag unions live on the heap, and Roc counts references to them automatically. Numbers, records, tuples, and non-recursive tag unions are stored inline and have no count ([Roc langref, reference counting](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/docs/langref/expressions.md)). The compiler infers when a function only reads an argument, and then passing it does not touch the count ([Roc langref, functions performance](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/docs/langref/functions.md)).
 
 ### In-place updates
 
@@ -101,7 +99,7 @@ The runtime check is `isUnique`, which tests for a count of 1 ([utils.zig](https
 
 ### Closures
 
-Roc uses lambda set specialization, a form of defunctionalization. By code generation time a closure is a tagged union: the tag names the procedure, the payload holds the captures, and a call becomes a `match` on the tag ([lambda set design doc](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/design/lambda-set-specialization.md)). The user docs list the effects. Function values need no heap allocation. A value that is always one known function with no captures takes no space. The compiler can inline every target ([Roc langref, function values](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/docs/langref/functions.md)). The exception is functions that cross into the separately compiled platform, which are boxed as a heap allocation with a function pointer and captures ([Roc langref, function values](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/docs/langref/functions.md)).
+Roc uses lambda set specialization, a form of defunctionalization. By code generation time a closure is a tagged union. The tag names the procedure, the payload holds the captures, and a call becomes a `match` on the tag ([lambda set design doc](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/design/lambda-set-specialization.md)). The user docs list the effects. Function values need no heap allocation. A value that is always one known function with no captures takes no space. The compiler can inline every target ([Roc langref, function values](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/docs/langref/functions.md)). The exception is functions that cross into the separately compiled platform, which are boxed as a heap allocation with a function pointer and captures ([Roc langref, function values](https://github.com/roc-lang/roc/blob/534956997e8e5c62888bc14cbc763f60109d0b72/docs/langref/functions.md)).
 
 ### Sharing across threads
 
@@ -186,7 +184,7 @@ These are the questions the follow-up grilling ticket needs to settle. This note
 
 - **Hidden, with reference counting, as in Koka, Lean, and Roc.** This fits immutable data and keeps the source free of ownership syntax. The costs are a count in every heap object, count traffic that the compiler must work to remove, and performance that depends on whether a value happens to be shared. Roc's docs tell users not to keep old versions alive. Lean ships a debug helper to find aliasing.
 - **Visible, with static ownership, as in Rust and Hylo.** Most values need no count, and cost is predictable. The cost is syntax and checking that a functional-first language with TypeScript-style syntax may not want. Rill also has no mutation, so `inout` or `&mut` would exist only as an optimization.
-- **Hidden by default, with opt-in annotations.** Examples are Koka's `^` and `fip`, Swift's `borrowing` and `consuming`, and Lean's `@&` for FFI. This keeps the common case simple and gives experts a tool. It still adds syntax that the spec must define.
+- **Hidden by default, with opt-in annotations.** Examples are Koka's `^` and `fip`, Swift's `borrowing` and `consuming`, and Lean's `@&` for FFI. These annotations let programmers control borrowing or check in-place behavior without requiring annotations in ordinary code. They still add syntax that the spec must define.
 
 ### 2. How in-place updates are guaranteed or reported
 
@@ -199,7 +197,7 @@ These are the questions the follow-up grilling ticket needs to settle. This note
 
 - Heap-allocated, counted closure objects, as in Koka, Lean, and escaping Swift closures. This is simple, works with separate compilation, and costs one allocation per closure.
 - Defunctionalization through lambda sets, as in Roc. There is no allocation and calls can inline. It needs whole-program knowledge, it interacts with Rill's generics and overloading, and it falls back to boxing at boundaries the compiler cannot see.
-- A unique unboxed type per closure, as in Rust. It is fast, but the type system needs some way to talk about "a callable", and Rill has no traits.
+- A unique unboxed type per closure, as in Rust. This avoids boxing, but the type system needs a way to express a callable requirement, and Rill has no traits.
 - Stack contexts for non-escaping closures, as in Swift. This would need an escaping/non-escaping distinction.
 
 ### 4. Counts and goroutines

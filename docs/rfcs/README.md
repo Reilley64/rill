@@ -8,7 +8,7 @@ Start from [TEMPLATE.md](TEMPLATE.md). The [primary-source format research](../r
 
 ## Organization and identity
 
-One RFC covers a cohesive feature or tightly related contract that reviewers can understand and decide together. Do not force one issue/ADR/prototype into one file or place the entire language in one proposal. One input may feed several RFCs, and a proposal may reconcile several inputs. Give every shared rule one owning RFC section; reference it elsewhere rather than maintain competing copies.
+One RFC covers a feature or closely related contract that reviewers can understand and decide together. Do not force one issue/ADR/prototype into one file or place the entire language in one proposal. One input may feed several RFCs, and a proposal may reconcile several inputs. Give every shared rule one owning RFC section; reference it elsewhere rather than maintain competing copies.
 
 Use flat filenames `NNNN-short-feature-name.md`, starting at `0001`, with stable independently allocated decimal IDs. Issue, PR, ADR and prototype numbers are separate namespaces. Check both the register and existing numbered files when choosing the next unused ID; coordinate concurrent creation with the responsible owner. Allocate only when an actual draft enters the collection, and register it at the same time. Do not reserve a whole feature sequence or create empty stubs merely to establish a plan.
 
@@ -27,7 +27,7 @@ These are navigation/work-planning themes, not six mandatory RFCs, allocations, 
 | Concurrency and structured work | Goroutines, transfer/sharing, channels, joins, cancellation and scoped work. |
 | Standard-library and platform/tooling contracts | Collections/iteration, I/O/files, environment/randomness, JSON/time/network/TLS/HTTP/SQL, runtime/backend and editor contracts. |
 
-#28 chooses the exact split using reviewability and single-rule-owner criteria. The last theme especially needs several coherent proposals, not one universal library/platform RFC. Cross-cutting rules live in their owning sections with dependencies elsewhere. Large families can justify linked companions; a companion does not silently become normative merely because it is linked.
+#28 chooses the exact split so each proposal can be reviewed as a unit and each rule has one owner. The last theme needs several proposals, not one universal library/platform RFC. Cross-cutting rules live in their owning sections with dependencies elsewhere. Large families can justify linked companions; a companion does not silently become normative merely because it is linked.
 
 ## Document shape and metadata
 
@@ -47,7 +47,7 @@ Retain these main body headings, in this order; add feature-specific subsections
 12. Open/deferred questions
 13. Decision and change history
 
-Use a short **"Not applicable, because…"** where a concern genuinely does not apply. Do not leave an empty heading, invent evidence or add repetitive filler. Compatibility can address the current design even without a released compiler. Implementation/evidence can explicitly report absence; lack of implementation does not make those sections inapplicable.
+Use a short "Not applicable, because..." where a concern does not apply. Do not leave an empty heading, invent evidence or add repetitive filler. Compatibility can address the current design even without a released compiler. Implementation/evidence can explicitly report absence; lack of implementation does not make those sections inapplicable.
 
 Each RFC begins with a title and the compact Markdown metadata table in TEMPLATE:
 
@@ -56,13 +56,13 @@ Each RFC begins with a title and the compact Markdown metadata table in TEMPLATE
 | ID | Stable assigned RFC ID, matching filename and register. |
 | Status | Exactly one proposal status below; never implementation status. |
 | Owner | Responsible proposal owner, not automatic acceptance authority. |
-| Source inputs | Identifiable tickets/contracts/ADRs/research/prototypes and their decision/revision provenance. |
-| RFC dependencies | Owning normative RFC sections/revisions and any named joint review set. Identify implementation/provider gates separately. |
+| Source inputs | Identifiable tickets, contracts, ADRs, research and prototypes, with their decisions and revisions. |
+| RFC dependencies | Sections and revisions that own the required normative rules, and any named joint review set. Identify implementation/provider gates separately. |
 | Replaces / superseded by | Reciprocal RFC/section links with decision provenance, or an explicit none. |
 | Decision | Explicit human decision link, or **Not yet decided**. Merging, assigning an ID or checking a file is not acceptance. |
 | Reviewed revision | Exact reviewed commit or explicitly identified content snapshot; distinguish readiness checking from human acceptance. Before either occurs, say Not yet reviewed. |
 
-A content snapshot must unambiguously identify the reviewed text (for example a published snapshot plus content digest), not just a moving branch or mutable latest file. An acceptance record can identify the prior reviewed draft; a subsequent status-only edit need not pretend to reference its own not-yet-created commit. Keep earlier decision/revision records in history when the current table changes. Do not mistake a source-ticket approval for an RFC decision.
+A content snapshot must unambiguously identify the reviewed text, for example through a published snapshot and content digest. A moving branch or mutable latest file is insufficient. An acceptance record can identify the prior reviewed draft; a subsequent status-only edit need not pretend to reference its own not-yet-created commit. Keep earlier decision/revision records in history when the current table changes. Do not mistake a source-ticket approval for an RFC decision.
 
 ## Status and authority
 
@@ -106,14 +106,14 @@ Keep expected outcomes distinct from observations. A rejected program needs its 
 | Evidence label | Meaning / required record |
 | --- | --- |
 | NotChecked | No check claimed. State the expected outcome and work still needed. |
-| HandChecked | Manual check against named rules/revisions; record checker, scope, reasoning/result and limits. Not compiler execution. |
-| ToolChecked | Limited structural validation, such as syntax/schema/link checks; record tool, command, revision, observed result and what was not checked. |
+| HandChecked | A manual check against named rules/revisions. Record the checker, scope, reasoning, result and limits. This is not compiler execution. |
+| ToolChecked | Limited structural validation, such as syntax/schema/link checks. Record the tool, command, revision, observed result and what was not checked. |
 | ReferenceExecuted | A standalone experiment/model/native reference ran, not the relevant Rill implementation. Record exact commands/environment/artifacts, positive/negative/unavailable outcomes and limits. |
 | RillExecuted | The relevant Rill compiler/runtime/library actually exercised the case. Record exact implementation revision, target, command and result, with the scope of the claim. |
 
 One artifact can have several evidence rows for distinct checks/layers. A Python state model can be ReferenceExecuted while a declaration-only C header is ToolChecked; neither establishes real Rill native ownership. Source inspection is not execution. Aggregate counts or green rows do not erase untested/failing layers or prove soundness/security.
 
-**Planned checks are separate**, not another pass or an observed result. Name later parsing/type/borrow/diagnostic/runtime/interaction tests and target/provider matrices once their implementations exist. Preserve relevant failed/inconclusive/unavailable experiments, not just successes. Review-readiness need not invent executable evidence where only HandChecked or NotChecked material exists; it must provide an honest, relevant evidence and checking plan.
+Planned checks are separate. They are not passes or observed results. Name later parsing/type/borrow/diagnostic/runtime/interaction tests and target/provider matrices once their implementations exist. Preserve relevant failed/inconclusive/unavailable experiments, not just successes. Review-readiness need not invent executable evidence where only HandChecked or NotChecked material exists; it must provide an honest, relevant evidence and checking plan.
 
 ## Canonical ReviewReady checklist
 
@@ -157,7 +157,7 @@ Accepted text may be maintained through these explicit approvals, with earlier r
 | Source / identifiable revision | Requirement or scope | Owning RFC section(s) / revision | Disposition and rationale | Supporting decision/evidence links |
 | --- | --- | --- | --- | --- |
 
-Use explicit dispositions in prose: incorporated at the linked sections, pending/missing, or deferred/out of scope with the authorized boundary and rationale. A source link alone is not incorporated coverage; a source ticket's Closed state is not RFC acceptance. Distinguish rule provenance from supporting experiments. Pending in-scope semantics prevents the affected ReviewReady proposal/set; unpassed implementation tests remain separately labeled gates, not falsely completed coverage.
+State each disposition in prose. Say whether the requirement is incorporated at the linked sections, pending/missing, or deferred/out of scope with the authorized boundary and rationale. A source link alone is not incorporated coverage; a source ticket's Closed state is not RFC acceptance. Distinguish rule provenance from supporting experiments. Pending in-scope semantics prevents marking the affected proposal/set ReviewReady. Unpassed implementation tests remain separately labeled gates, not completed coverage.
 
 ## #26 versus #28 completion
 

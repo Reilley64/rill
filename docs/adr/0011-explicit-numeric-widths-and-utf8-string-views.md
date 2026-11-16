@@ -2,7 +2,7 @@
 
 **Later refinements:** [ADR 0012](0012-enums-replace-unions-and-literal-overloads.md) (#19) removes the historical singleton types/literal refinements and their copy exceptions below, without restoring default widths or changing numeric availability/UTF-8 semantics. [ADR 0015](0015-language-required-library-contracts.md) (#23) finalizes byte/parser/conversion/format interfaces and `copy(&value)`; for an existing `&string` view, `copy(view)` copies its text. Historical examples remain design inputs where not superseded, not executed tests.
 
-[Issue #18](https://github.com/Reilley64/rill/issues/18) adopts explicit-width numbers, checked integer operations, and one primary owned `string` spelling with borrowed text views. This takes Rust's explicitness without default numeric widths, a public String/str split, conversion traits, or programmer-written lifetimes. The consolidated interview and two consistency follow-ups are approved; the combined checker/runtime remains a proposal, not an implementation or proof.
+[Issue #18](https://github.com/Reilley64/rill/issues/18) adopts explicit-width numbers, checked integer operations, and one primary owned `string` spelling with borrowed text views. Numbers require explicit widths. There is no public String/str split, conversion trait system, or programmer-written lifetime syntax. The consolidated interview and two consistency follow-ups are approved; the combined checker/runtime remains a proposal, not an implementation or proof.
 
 ## Numeric types and inference
 
@@ -16,7 +16,7 @@ Use decimal integers, `0b`/`0o`/`0x`, underscores, decimal floating fractions/ex
 
 Already-typed numeric values do not implicitly convert. Ordinary arithmetic operands use the same concrete numeric type; literal refinement to its established base is not a cross-width conversion.
 
-Integer arithmetic is checked in every build. Overflow, division/remainder by zero, and signed MIN divided/remainder by -1 panic. Division truncates toward zero and remainder has the dividend's sign. Wrapping/saturation require explicitly named operations, not optimization-mode changes.
+Integer arithmetic is checked in every build. Overflow, division/remainder by zero, and signed MIN division/remainder with divisor -1 panic. Division truncates toward zero and remainder has the dividend's sign. Wrapping/saturation require explicitly named operations, not optimization-mode changes.
 
 Integer bit operations are `&`, `|`, `^`, `~`, `<<`, `>>`. Shift counts have type `u32`, providing context for literal counts without a numeric default. A count at least the left type's width panics. Left shifts discard outgoing bits; signed right shifts are arithmetic and unsigned right shifts logical.
 
@@ -60,7 +60,7 @@ Precise string-literal constants remain cheaply copyable/re-materializable, pres
 
 ## Text operations and parsing
 
-Lengths and byte offsets are `u64`. Checked slicing functions return `Option<&string>` and validate order, bounds, and scalar endpoints. Explicitly named panicking convenience can exist; no string range-indexing syntax or integer character indexing. Byte/scalar traversal borrows; checked byte lookup returns `Option<u8>` and may read continuation bytes. Owned byte output copies unless a consuming transfer is explicitly specified. No fabricated `&List<u8>` temporary header or assumed List contiguity: #23 must give genuine byte/view/container interfaces.
+Lengths and byte offsets are `u64`. Checked slicing functions return `Option<&string>` and validate order, bounds, and scalar endpoints. Explicitly named panicking convenience can exist; no string range-indexing syntax or integer character indexing. Byte/scalar traversal borrows; checked byte lookup returns `Option<u8>` and may read continuation bytes. Owned byte output copies unless a consuming transfer is explicitly specified. Do not fabricate a `&List<u8>` temporary header or assume List contiguity. #23 must specify byte/view/container interfaces.
 
 Strict UTF-8 decoding returns `Result`; explicitly lossy decoding substitutes U+FFFD, never silently drops bad bytes. Borrowed zero-copy validation needs suitable contiguous storage and retains its source; allocation reuse is not assumed. String equality is exact UTF-8 equality and ordering lexicographic, without consuming operands or normalizing/case-folding/collating implicitly. Canonically equivalent different scalar sequences are distinct.
 
@@ -74,7 +74,7 @@ Evaluate and format once, left-to-right, before the next expression. Observe exi
 
 [ADR 0013](0013-caused-by-errors-with-explicit-wrapping.md) adds a separate canonical `display(&E): string` contract for error payloads. It does not rename or replace template `show`: standard wrapper formatting bridges to each error's display and renders its caused-by chain and origins. #23 defines that interface; plain numeric/text formatting here is unchanged.
 
-Default display: strings/chars as text without added quotes/escaping, lowercase booleans, decimal integers without width suffixes, finite floats in shortest round-tripping decimal for the same explicitly known width, and NaN/inf/-inf/-0. No NaN-payload roundtrip promise. Special formatting uses explicit functions, not a template mini-language.
+Default display renders strings/chars as text without added quotes/escaping, booleans in lowercase, and integers in decimal without width suffixes. Finite floats use the shortest round-tripping decimal for the same explicitly known width. Special float values use NaN/inf/-inf/-0. NaN payloads need not round-trip. Special formatting uses explicit functions, not a template mini-language.
 
 ## Reconciliation and remaining evidence
 

@@ -33,7 +33,7 @@ function shifted(point: Point): Point {
 function total(numbers: &List<i32>): i32 {
   let mut result: i32 = 0;
   for (let n of numbers) {
-    result += n;
+    result += *n;
   }
   return result;
 }

@@ -6,11 +6,11 @@ No existing research-note directory/convention was present in this checkout; thi
 
 ## Short answer: must `From` be specified?
 
-**In the generic contract, the source/destination relationship must be established; it need not use the `From` trait specifically. At a call, the source type usually need not be written explicitly.** Distinguish three meanings:
+The generic contract must establish the source/destination relationship, but it need not use the `From` trait specifically. At a call, the source type usually need not be written explicitly. The question has three meanings:
 
-- **Trait name:** Rust recommends implementing `From`/`TryFrom`; blanket implementations supply `Into`/`TryInto`. For generic consumers it recommends `Into`/`TryInto` bounds, which also accept direct implementations of those traits. `Src: Into<To>` is valid evidence without an explicit `To: From<Src>` bound; the implication is not reversible. [S1-S4]
-- **Source in the requirement:** `To: From<Src>` or `Src: Into<To>` relates **both endpoints**, with one endpoint on the left of `:`. A bare destination is not a promise to convert from every source. The source may be a concrete type rather than another generic parameter. Trait bounds generally are not inferred from a function body; Rust checks the body using its declared/otherwise established evidence. A universally available blanket impl can itself establish an obligation without an extra bound. [S5, S8]
-- **Source at the call:** inference commonly determines it from the argument. `u16::from(7u8)`, `let n: u16 = 7u8.into()`, and `Into::<u16>::into(7u8)` do not spell the source type as a generic argument. Explicit disambiguation is possible: `<u16 as From<u8>>::from(7u8)`. Without enough information to determine a target, annotation/disambiguation is needed. For a free Rust function declaring two ordinary type parameters, explicitly supplying type arguments requires both positions: `into::<u16, _>(7u8)`, **not** `into::<u16>(7u8)`. Rill's proposed leading-only syntax is a separate language choice. [S1-S3, S6]
+- For the trait name, Rust recommends implementing `From`/`TryFrom`; blanket implementations supply `Into`/`TryInto`. For generic consumers it recommends `Into`/`TryInto` bounds, which also accept direct implementations of those traits. `Src: Into<To>` is valid evidence without an explicit `To: From<Src>` bound; the implication is not reversible. [S1-S4]
+- A requirement must relate both endpoints. `To: From<Src>` and `Src: Into<To>` each do so, with one endpoint on the left of `:`. A bare destination is not a promise to convert from every source. The source may be a concrete type rather than another generic parameter. Trait bounds generally are not inferred from a function body; Rust checks the body using its declared/otherwise established evidence. A universally available blanket impl can itself establish an obligation without an extra bound. [S5, S8]
+- At a call, inference commonly determines the source from the argument. `u16::from(7u8)`, `let n: u16 = 7u8.into()`, and `Into::<u16>::into(7u8)` do not spell the source type as a generic argument. Explicit disambiguation is possible: `<u16 as From<u8>>::from(7u8)`. Without enough information to determine a target, annotation/disambiguation is needed. A free Rust function declaring two ordinary type parameters requires both positions when type arguments are explicit. Write `into::<u16, _>(7u8)`, not `into::<u16>(7u8)`. Rill's proposed leading-only syntax is a separate language choice. [S1-S3, S6]
 
 Rust permits contextual inference beyond Rill's proposed immediate-context rules; these examples do not establish identical inference scope in the two languages.
 
@@ -35,9 +35,9 @@ trait TryInto<To>: Sized {
 }
 ```
 
-`Error` is an **associated type**, not another trait input parameter. For a fixed implementing type and trait argument, coherence permits one implementation and hence one associated error; different endpoint pairs can have different errors. The traits do not require `Error: std::error::Error`, `Display`, or a universal conversion-error type. [S1-S4, S7]
+`Error` is an associated type, not another trait input parameter. For a fixed implementing type and trait argument, coherence permits one implementation and hence one associated error. Different endpoint pairs can have different errors. The traits do not require `Error: std::error::Error`, `Display`, or a universal conversion-error type. [S1-S4, S7]
 
-Stable blanket relationships are ordinary generic implementations, **not specialization**: [S1-S4]
+Stable blanket relationships use ordinary generic implementations, not specialization: [S1-S4]
 
 - `To: From<Src>` supplies `Src: Into<To>`.
 - `To: TryFrom<Src>` supplies `Src: TryInto<To>` with the **same** associated error.
@@ -78,13 +78,13 @@ where
 }
 ```
 
-The `TryInto` equivalents use `Src: TryInto<To>` and `<Src as TryInto<To>>::Error`, or `Src: TryInto<To, Error = E>`. Equality is checked against the selected implementation's error: it does not create an alternative conversion for the same endpoints with a requested error. A caller can leave `E` inferred when the endpoint evidence determines it. `?` on `Result` converts errors using `From::from`; it does not silently coerce an arbitrary error into any requested `E`. [S3-S5, S9]
+The `TryInto` equivalents use `Src: TryInto<To>` and `<Src as TryInto<To>>::Error`, or `Src: TryInto<To, Error = E>`. The compiler checks equality against the selected implementation's error. This does not create an alternative conversion for the same endpoints with a requested error. A caller can leave `E` inferred when the endpoint evidence determines it. `?` on `Result` converts errors using `From::from`; it does not silently coerce an arbitrary error into any requested `E`. [S3-S5, S9]
 
 ## Evidence is checked before monomorphization
 
 Rust checks generic bodies with a parameter environment containing their assumptions. Calling a trait operation generates an obligation; a declared bound can discharge that obligation even when no concrete implementation can yet be chosen. Callers must satisfy the bounds. An unused generic function with an unsupported conversion is still rejected: future concrete calls cannot repair its missing evidence. [S5, S8]
 
-The compiler guide distinguishes this check from code generation: type checking establishes that trait selection will succeed; selection can be repeated with concrete types at codegen to obtain the implementation. Its pipeline places type checking and generic MIR before monomorphization. This is **not** a claim that every Rust compile-time check occurs before monomorphization, nor that the guide's old-style solver internals define every new-solver detail. [S8]
+The compiler guide distinguishes this check from code generation. Type checking establishes that trait selection will succeed. Code generation can repeat selection with concrete types to obtain the implementation. Its pipeline places type checking and generic MIR before monomorphization. This is **not** a claim that every Rust compile-time check occurs before monomorphization, nor that the guide's old-style solver internals define every new-solver detail. [S8]
 
 ## Stable coherence versus unstable specialization
 
@@ -92,7 +92,7 @@ Stable Rust allows generic and concrete impls **when they do not overlap**. It r
 
 [RFC 1210](https://rust-lang.github.io/rfcs/1210-impl-specialization.html) describes **unstable specialization**, not stable conversion behavior. Its "Hazard: interactions with type checking" example is directly relevant: if a generic implementation reports `Output = Box<T>` but a specialization reports `Output = bool`, a generic body cannot assume the former and later execute the latter. The RFC's item-level `default` design treats an overridable associated type opaquely rather than normalizing it to the fallback definition in generic code. Non-default items are final; specializing methods is not automatically permission to change an associated type. [S10]
 
-This mechanism is not a settled stable precedent to copy wholesale. Tracking issue #31844 remains open, explicitly records soundness problems in full specialization, and lists unresolved associated-type specialization/projection questions. `min_specialization` is a restricted unstable subset, not a solution for arbitrary error-type overrides: rustc's feature gate permits its default specialization of functions, **not `default type Error = ...`**. Do not confuse associated-type defaults in trait definitions (another unstable feature) with specializing an associated type in an impl. [S11-S13]
+This mechanism is not a stable precedent that Rill can adopt unchanged. Tracking issue #31844 remains open, explicitly records soundness problems in full specialization, and lists unresolved associated-type specialization/projection questions. `min_specialization` is a restricted unstable subset, not a solution for arbitrary error-type overrides: rustc's feature gate permits its default specialization of functions, **not `default type Error = ...`**. Do not confuse associated-type defaults in trait definitions (another unstable feature) with specializing an associated type in an impl. [S11-S13]
 
 ## Implications/options for Rill, not decisions
 

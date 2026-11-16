@@ -25,13 +25,13 @@ Describe concrete user/program problems and why the current design or doing noth
 
 ## Guide-level explanation
 
-Teach the proposed feature as a coherent user model, clearly labeling it **proposed**, not already shipped. Introduce concepts/terminology, representative syntax or APIs, normal use and important limitations. Explain how users discover, adopt and reason about it.
+Explain how users would use the feature and label it **proposed**, not already shipped. Introduce concepts/terminology, representative syntax or APIs, normal use and important limitations. Explain how users discover, adopt and reason about it.
 
 Use concrete examples with the context/evidence record required below. Link shared rule owners rather than introducing slightly different ownership, error, concurrency or conversion rules here. Use [the glossary](../../GLOSSARY.md) consistently or explicitly propose a terminology change.
 
 ## Syntax and reference semantics
 
-State the precise proposed rules needed by non-authors to derive implementation work without inventing further in-scope v0 design decisions. As applicable, include:
+State the precise proposed rules so readers other than the authors can determine implementation work without inventing further in-scope v0 design decisions. As applicable, include:
 
 - Grammar, declarations/import/module identities, public API/family signatures, input/output types and generic/evidence relationships.
 - Static validity/selection/inference/ownership/dependency rules, aliases and interaction with existing constructs.
@@ -57,13 +57,13 @@ For rejected cases, state the invalidity rule and expected diagnostic meaning; u
 
 Explain meaningful interactions with other language/library/tooling contracts, especially cases that change validity, inference, ownership, cleanup, error behavior or concurrency. Link each shared semantic owner; state the proposed resolution of conflicts rather than leaving two incompatible sources.
 
-Name the proposed RFC revisions jointly required for review, if any. Dependencies can be reviewed as a set; an unwritten proposal or unaccepted draft does not magically supply binding semantics. Include interaction cases above or link their exact inventory rows.
+Name the proposed RFC revisions jointly required for review, if any. Dependencies can be reviewed as a set. An unwritten proposal or unaccepted draft does not supply binding semantics. Include interaction cases above or link their exact inventory rows.
 
 ## Compatibility and migration
 
 Discuss effects on existing **designs and source examples** even if there is no released compiler. Cover parsing/name resolution/type checking, source/API/ABI compatibility, runtime/library/client adoption, tooling/documentation and reversibility as applicable.
 
-Identify superseded syntax/contracts and migration steps, unsupported targets/versions and deployment constraints. Distinguish changed design, source breakage, implementation work and released behavior. Say "Not applicable, because…" for truly irrelevant concerns rather than assuming all compatibility is irrelevant before implementation.
+Identify superseded syntax/contracts and migration steps, unsupported targets/versions and deployment constraints. Distinguish changed design, source breakage, implementation work and released behavior. Say "Not applicable, because..." for concerns that do not apply. Do not assume all compatibility is irrelevant before implementation.
 
 ## Security/resource implications
 

@@ -1,8 +1,9 @@
 # #30: native pre-write admission and a packet tail-ABI candidate
 
-**Executed standalone C/LLVM23 mechanisms, not a Rill compiler/runtime or target
-support approval. #30's standalone mechanism stage is complete; #28's production/formal gate remains OPEN.** See the [combined disposition](../../../docs/research/0030-runtime-validation.md). This supplements,
-not replaces, `../README.md` and ADR 0014 / #22. Native `tailcc`/`musttail` remains
+These executed standalone C/LLVM23 mechanisms are not a Rill compiler/runtime or
+target support approval. #30's standalone mechanism stage is complete; #28's
+production/formal gate remains OPEN. See the [combined disposition](../../../docs/research/0030-runtime-validation.md).
+This supplements, rather than replaces, `../README.md` and ADR 0014 / #22. Native `tailcc`/`musttail` remains
 the direction. No public ABI/architecture adoption is implied.
 
 ## Reproduce
@@ -45,8 +46,8 @@ clear a support gate. The runner never writes evidence into the checkout.
 physical guards outside it. `switch_stack` enters at a fixed address 3 MiB into
 that backing. The logical managed `NativeStack` is `[top-capacity, top)`, default
 **1 MiB usable**. Sixty-four-byte canaries immediately below and above the logical
-region are **inside writable physical backing**, not behind guard pages. Thus a
-logical-region write can be detected even when physical guard pages do nothing.
+region are **inside writable physical backing**, not behind guard pages. This detects writes outside the
+logical region even when physical guard pages do nothing.
 The larger backing is deliberate test instrumentation, not extra usable capacity.
 OS main stack, host scheduler state, mapping metadata and bootstrap saved
 registers remain outside the guest region; there is **no pthread stack/TLS
@@ -130,9 +131,9 @@ Rill `Result`, guest recovery, guest continuation, unwind or user cleanup. The
 normal-looking C integer is a harness scheduler ABI, not a recoverable language
 API. Invalid settings follow the same isolated external termination convention;
 Rill's build-setting diagnostic vs dynamic panic distinction remains unimplemented.
-This uses the task's allowed scheduler-termination alternative: **no signal
-handler is installed**, no allocation occurs in a handler, and no exhausted-stack
-printf is attempted. A production trap/sigaltstack emergency report is NOT tested.
+This uses scheduler termination instead of a signal handler. No signal handler is
+installed, no allocation occurs in a handler, and no exhausted-stack printf is
+attempted. A production trap/sigaltstack emergency report is NOT tested.
 
 ## Private ABI candidate: uniform earlier-owned packet / result buffer
 
@@ -193,7 +194,7 @@ large/high-alignment fields, overlapping argument/result aliasing, polymorphic
 indirect dispatch, larger cross-signature transitions, native/public interop,
 escaping packet pointers, source drop elaboration and admission of those copies
 still require design/checker/lowering work. No scalarized-SSA candidate is tested.
-No current-callee alloca can be rescued by calling it a packet.
+Calling a current-callee alloca a packet does not extend its lifetime.
 
 ## Primary rules and remaining gate
 

@@ -2,18 +2,18 @@
 
 Read the source examples in [`prototypes/22-sql-codecs`](../../prototypes/22-sql-codecs).
 
-**Human-confirmed shared-interface design, not implementation.** [The contract](../sql-contracts.md) and [ADR 0021](../adr/0021-partial-standard-sql-contract.md) integrate #33 and Q58-Q77, replacing the partial checkpoint. [Research](../research/0040-standard-sql-and-unique-errors.md) remains source input. [#43](https://github.com/Reilley64/rill/issues/43) separately gates actual embedded-provider support, not #40 design closure/RFC drafting. The [JSON](../json-contracts.md) and [time](../time-contracts.md) contracts define the value behavior used here.
+This is the human-confirmed shared-interface design, not an implementation. [The contract](../sql-contracts.md) and [ADR 0021](../adr/0021-partial-standard-sql-contract.md) integrate #33 and Q58-Q77 and replace the partial checkpoint. [Research](../research/0040-standard-sql-and-unique-errors.md) remains source input. [#43](https://github.com/Reilley64/rill/issues/43) separately gates actual embedded-provider support, not #40 design closure/RFC drafting. The [JSON](../json-contracts.md) and [time](../time-contracts.md) contracts define the value behavior used here.
 
-[main.rill](../../prototypes/22-sql-codecs/main.rill) has **20 intended-valid expectations** and loads [domain.rill](../../prototypes/22-sql-codecs/domain.rill). [control.rill](../../prototypes/22-sql-codecs/control.rill) is a separate entry with **12 control/temporal expectations**, for **32 total**. All are hand-checked, not Rill/clock/token/database/native/WASI/protocol/security execution. The memory argument encoder, immediate counter and cell fixtures are **not SQL drivers** and do not prove PostgreSQL/SQLite integration or race/abortion behavior.
+[main.rill](../../prototypes/22-sql-codecs/main.rill) has 20 intended-valid expectations and loads [domain.rill](../../prototypes/22-sql-codecs/domain.rill). [control.rill](../../prototypes/22-sql-codecs/control.rill) is a separate entry with 12 control/temporal expectations, for 32 total. Reviewers checked all of them by hand. They did not execute Rill, clocks, tokens, databases, native/WASI code or protocol/security tests. The memory argument encoder, immediate counter and cell fixtures are not SQL drivers. They do not prove PostgreSQL/SQLite integration or race/abortion behavior.
 
 ## What the source actually demonstrates
 
-- Email is an exported application-owned nominal type with private text, constructed by a checked conversion. Its fixture validation is **only nonempty**, not a real email grammar/security validator.
+- Email is an exported application-owned nominal type with private text, constructed by a checked conversion. The fixture checks only that the text is nonempty. It is not a real email grammar or security validator.
 - Into<Parameter> represents Email as one text slot. TryInto<Parameter> for EmailInput preserves a distinct validation error. A memory-only canonical bind implementation tests explicit bindInto/tryBind wiring and unchanged argument count after conversion failure; no automatic conversion discovery.
 - The same domain module explicitly encodes/decodes JSON Value.String. Owned and borrowed JSON sources have separate implementations; the latter copies observed text. parse/stringify and Number semantics are unchanged. No automatic reflection/record mapping or mandatory show(Value).
-- A generic `tryInto<Email>(&C)` states `tryInto(string,&C,E)`. Its cell and validation error envelopes remain typed. The domain module imports no concrete driver. NetworkCell supplies checked UTF-8 byte decoding; EmbeddedCell supplies tagged text/null/integer distinctions. They test the seam with different data representations, not actual wire/native APIs.
+- A generic `tryInto<Email>(&C)` states `tryInto(string,&C,E)`. Its cell and validation error envelopes remain typed. The domain module imports no concrete driver. NetworkCell supplies checked UTF-8 byte decoding; EmbeddedCell supplies tagged text/null/integer distinctions. They test the common conversion interface with different data representations, not actual wire/native APIs.
 - Explicit nullable EmbeddedCell conversion maps NULL to None and checks non-null T normally; nonnullable Email fails and an integer does not become formatted text. No automatic infallible-to-fallible adapter.
-- Typed parameter NULL and signed/unsigned width preservation; exact decimal spelling, invalid leading zero, bounded token rejection without exponent expansion.
+- Parameter cases cover typed NULL and signed/unsigned width preservation. Decimal cases cover exact spelling, an invalid leading zero and bounded token rejection without exponent expansion.
 - Synthetic unique errors distinguish unavailable details from a declared ordered composite key. Raw native diagnostics deliberately contain sensitive text; default wrapper rendering must omit it while the original typed payload remains available.
 - Expression/partial-key descriptions remain explicit, not ordinary columns, and their SQL is omitted from default diagnostics. DeclaredSchema provenance is a fixture assertion, not evidence about a real server snapshot.
 
@@ -21,25 +21,27 @@ These tests do not check actual field/row/frame limits, metadata lookup, cardina
 
 ## Control/temporal source coverage and limits
 
-control.rill uses actual #33 types plus the explicitly approved std::time::validateInstantDomain consumer amendment. It checks immediate-fixture admission with uncontrolled/requested/expired/mismatched controls, copied token/clock state, all four temporal parameter variants, retained temporal constructor errors and exact-microsecond rejection. No source code reads private clock/Instant fields. The counter only completes immediately; it is not a pending-I/O cancellation or timer-race implementation. Setup may read a manual clock to construct an Instant; a successful source expectation cannot prove the domain validator avoided a read internally. That needs a private call-count harness, not a public clock-provider override.
+control.rill uses actual #33 types plus the explicitly approved std::time::validateInstantDomain consumer amendment. Its immediate fixture checks admission with uncontrolled, requested, expired and mismatched controls. Other cases cover copied token/clock state, all four temporal parameter variants, retained temporal constructor errors and exact-microsecond rejection.
+
+No source code reads private clock/Instant fields. The counter only completes immediately; it does not implement pending-I/O cancellation or a timer race. Setup may read a manual clock to construct an Instant. A successful source expectation cannot prove that the domain validator avoided a read internally. That needs a private call-count harness, not a public clock-provider override.
 
 ## Two actual adapter obligations (implementation sketches only)
 
-The following roles are **not implemented types/native hooks**. Fixed public operation declarations are in docs/sql-contracts.md; the earlier deadline-independent sketches are superseded. #33 is confirmed, not an unresolved excuse for alternate arities.
+The following roles are not implemented types or native hooks. Fixed public operation declarations are in docs/sql-contracts.md and supersede the earlier deadline-independent sketches. #33 is confirmed; its status does not permit alternate arities.
 
 ### PostgreSQL-like network adapter
 
-- PgConnector/config -> PgSession/PgError; ordinary input type selects the relationship, not a driver name registry.
-- Session/transaction target -> owning PgArguments, PgPrepared descriptor, PgRows cursor, PgRow owner and PgCell type. Bind encodes ordered parameter values with type evidence; unsupported native values remain typed errors.
+- A PgConnector/config produces PgSession/PgError. The ordinary input type selects this relationship, not a driver name registry.
+- A session or transaction target determines the owning PgArguments, PgPrepared descriptor, PgRows cursor, PgRow owner and PgCell type. Bind encodes ordered parameter values with type evidence. Unsupported native values remain typed errors.
 - Cursor owns/retains protocol and encoded-storage obligations while exclusively depending on its session/descriptor. Each returned row copies transient buffers into independent ownership. Common text decoding checks encoding; decimal/integer paths never detour through f64.
 - Native/server statement cache resources belong to bounded session state. An owning descriptor is not a pointer into that cache; eviction/session mismatch/schema change causes checked reprepare/error, not stale-handle use.
 - 23505 is classified from actual native evidence. Qualified optional object fields can be preserved; a complete composite list is not assumed. Explicit enrichment can be impossible in an aborted transaction and later metadata is not failure-time proof.
 - EOF/local row close/cancel request do not establish reuse. Observe actual protocol completion/transaction status or discard. Commit reply loss can mean Unknown even if a later cleanup succeeds.
-- COPY/notifications/extra result modes/codecs remain concrete capabilities, not a lowest-common-denominator lie.
+- COPY, notifications, extra result modes and codecs remain concrete driver capabilities. The common interface does not pretend every driver supports them.
 
 ### SQLite-like embedded adapter
 
-- A typed connector would produce an opaque session via a **separately specified native provider**. No SQLite C pointer/public extern declaration/OS-thread-pinned public object is supplied here.
+- A typed connector would produce an opaque session via a separately specified native provider. No SQLite C pointer/public extern declaration/OS-thread-pinned public object is supplied here.
 - Owning arguments/native binding storage, compiled statement state, stepping/reset/finalization and session closure need exactly-once retention through completion/confirmed abortion under worker migration. Native memory/cancellation limits require real provider validation.
 - Public owning descriptors cannot outlive a closed session while secretly owning dangling sqlite3_stmt pointers. The session owns bounded native preparation state; values copied into a row survive step/reset/finalize.
 - Extended codes distinguish primary/unique/rowid rejection where available, but there is no universal native structured failing-key identity/column list. Native diagnostic strings must be copied before connection error state changes, not parsed into guaranteed columns.
@@ -83,7 +85,7 @@ An external builder/generator can select backend SQL/placeholder spelling and ca
 | Backend hard limit lower than configured limit | Error, not truncation/narrowing or an authority to exceed native limits. |
 | Allocation/native-engine work | Payload caps are not exact allocator/server/native-total-memory bounds or recoverable allocation guarantees. |
 
-Defaults are exactly those confirmed in docs/sql-contracts.md: parameter/field 16 MiB, row/frame 64 MiB, metadata/decimal token 1 MiB, 4,096 columns and 32,767 parameters. They are accepted safety defaults, not benchmarked optimal settings. Native statement caches must also be bounded/documented; no infinite collection/cache is implied.
+The defaults match those confirmed in docs/sql-contracts.md. Parameter and field limits are 16 MiB; row and frame limits are 64 MiB; metadata and decimal token limits are 1 MiB. The count limits are 4,096 columns and 32,767 parameters. These are accepted safety defaults, not benchmarked optimal settings. Native statement caches must also be bounded/documented; no infinite collection/cache is implied.
 
 ## Independent uniqueness/provenance/privacy cases
 
@@ -129,13 +131,13 @@ Defaults are exactly those confirmed in docs/sql-contracts.md: parameter/field 1
 | Commit request not submitted | Does not prove prior transaction work rolled back; consuming guard cleanup and explicit outcome still apply. |
 | Commit acknowledged after expiry selected | Failure can still report ConfirmedCommitted; never retry or replace selected control failure with success. |
 | Failed/interrupted pool reset | Discard, not silent reconnect/replay; successful reset is documented baseline, not future liveness. |
-| nanoseconds not divisible by 1,000 for microsecond backend | Precision error with original TimeError where used, not truncation. |
+| Nanoseconds not divisible by 1,000 for microsecond backend | Return a precision error with the original TimeError where used, not a truncated value. |
 | Native invalid date/24:00/leap second/infinity/out-of-range epoch | Checked error, not repair/normalization. |
-| Civil DateTime -> instant; Zoned -> instant; calendar interval -> elapsed | No implicit zone/context/unit/rules loss. Use explicit/schema-native mappings; common subset does not promise faithful zone/interval storage. |
+| Civil DateTime or Zoned converted to an instant; calendar interval converted to elapsed time | Do not implicitly lose zone, context, units or rules. Use explicit/schema-native mappings. The common subset does not promise faithful zone/interval storage. |
 | withDeadline around query creation | R stays nested Result; outer expiry is not a token request or rollback proof. A returned cursor needs its own explicit control for future advances. |
 | Row-helper iteration error borrows local cursor | noBorrow(NE) required before retaining it across close; caller-owned-row get keeps valid borrowed outputs/errors. |
 | Different query/next/close or finalization/cleanup errors | Preserve independent types and both envelopes; no expected-error-selected implementation or implicit unification. |
 
 ## Remaining implementation and validation work
 
-The explicitly confirmed design permits #40 closure. Native embedded-provider work is tracked in #43 and is not fulfilled by a fixture; no general FFI/pinning or working adapter is claimed. #28 owes checker/candidate/dependency/redaction/limit/cleanup/race formalization and #30 real native/Wasm retention/pointer/scheduling validation. Merge the narrow validateInstantDomain amendment into #33's separate clock artifacts and reconcile JSON/time/random numbering without overwriting drafts. Any unworkable mechanism returns to map #1; design closure is not an accepted RFC or runtime/provider/security proof.
+The explicitly confirmed design permits #40 closure. #43 tracks native embedded-provider work; this fixture does not fulfill it or supply general FFI, pinning or a working adapter. #28 still owes formal rules for checking, candidate selection, dependencies, redaction, limits, cleanup and races. #30 retains real native/Wasm retention, pointer and scheduling validation. The linked SQL and clock contracts record the validateInstantDomain consumer amendment. Return any unworkable mechanism to map #1. Design closure is not an accepted RFC or proof of runtime, provider or security behavior.

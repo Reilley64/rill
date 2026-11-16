@@ -29,7 +29,18 @@ Owned Path storage supplies standard noBorrow/sendable/shareable metadata; borro
 
 Join replaces the base with an absolute child; an empty child preserves the base and an empty base preserves the child. Insert one separator only when needed; preserve existing spelling, including repeated separators. Join is not confinement. Components distinguish a leading Root carrying the exact slash count, literal `.`/`..`, and borrowed ordinary names. Interior repeated/trailing separators delimit components rather than yielding empty names; source spelling remains unchanged. Components uses canonical iterate/next and ordinary source/dependency rules, not a new variadic or lifetime facility. POSIX may treat exactly two leading slashes specially; do not reduce them to one or claim all filesystems interpret them identically.
 
-fileName returns the final ordinary-name bytes, ignoring trailing separators; a final `.`/`..` or root has no fileName. parent returns an owned prefix before the last component and its separator run (preserving a leading root run), ignoring trailing separators, without resolving `..` or symlinks. Examples: `a/b/` -> parent `a`, filename `b`; `a` -> parent empty; `/a` -> parent `/`; `//a` -> parent `//`; `a/.` and `a/..` -> parent `a`, no filename; `/` and empty have no parent. Retained interior spelling is not normalized (`a//b/c` -> parent `a//b`).
+fileName returns the final ordinary-name bytes and ignores trailing separators. A final `.`/`..` or root has no fileName. parent ignores trailing separators and returns an owned prefix before the last component and its separator run, preserving a leading root run. It does not resolve `..` or symlinks.
+
+| Path | Lexical result |
+| --- | --- |
+| `a/b/` | parent is `a`; fileName is `b`. |
+| `a` | parent is empty. |
+| `/a` | parent is `/`. |
+| `//a` | parent is `//`. |
+| `a/.` or `a/..` | parent is `a`; there is no fileName. |
+| `/` or empty | There is no parent. |
+
+Retained interior spelling is not normalized. For example, parent of `a//b/c` is `a//b`.
 
 ## File opens and capabilities
 
@@ -91,7 +102,7 @@ rename(source: &Path, destination: &Path): Result<void, IoError>
 syncDirectory(&Path): Result<void, IoError>
 ```
 
-Metadata size is Some(byte length) for regular files only, with no portable size for other kinds. No timestamp type competing with #33, ownership-ID/ACL/permission-management API, identity token or exists helper. Metadata/entries are observations, not reservations/snapshots or locks. Native currentDir observes the process directory and can fail; no setCurrentDir is added. External embedding/native changes can still affect relative paths. Retaining an absolute spelling is not retaining authority or immunity to renames/symlinks.
+Metadata size is Some(byte length) for regular files only, with no portable size for other kinds. This adds no timestamp type competing with #33, ownership-ID/ACL/permission-management API, identity token or exists helper. Metadata/entries are observations, not reservations/snapshots or locks. Native currentDir observes the process directory and can fail; no setCurrentDir is added. External embedding/native changes can still affect relative paths. Retaining an absolute spelling is not retaining authority or immunity to renames/symlinks.
 
 Ordinary opens and directory lookup follow native symlink traversal. symlinkMetadata/readLink inspect the final link; intermediate components may still traverse links. A relative link target resolves against the link's parent when later used. removeFile/rename operate on a final link, not its target; removeDir does not recursively follow a link to delete a target tree. No all-components no-symlink open or hard-link API is added. Inspection-then-open, normalization and prefix checks are not sandbox/security boundaries.
 
@@ -121,9 +132,9 @@ enum TempFileCloseError {
 
 Constructors require an explicit parent; no automatic environment/global temporary-directory policy. Reserve fresh names exclusively with a finite provider collision-retry bound, failing rather than looping forever. Use faithful native temporary-creation facilities/private creation requests; names are not secrecy tokens or a new cryptographic API. Do not add a hidden insecure fallback when host support is insufficient. This is not permission to trust an attacker-controlled parent directory or claim complete path-race protection.
 
-TempFile owns its ReadWriteFile and cleanup path; delegates I/O/seek/sync without implicit copying. TempDir owns its cleanup path, not a promised directory capability. Borrowed tempPath depends on the guard; copy it explicitly before close/keep if needed afterward. keep consumes/disarms deletion and returns ordinary ownership; it does not rename/sync/close or promise persistence. Distinct input patterns determine the output R, not caller return dispatch.
+TempFile owns its ReadWriteFile and cleanup path. It delegates I/O/seek/sync without implicit copying. TempDir owns its cleanup path, not a promised directory capability. Borrowed tempPath depends on the guard; copy it explicitly before close/keep if needed afterward. keep consumes/disarms deletion and returns ordinary ownership; it does not rename/sync/close or promise persistence. Distinct input patterns determine the output R, not caller return dispatch.
 
-Explicit TempFile close closes its handle, then attempts unlink even on close failure, preserving close-only/remove-only/both original envelopes. TempDir close attempts empty-directory removal. Both consume the guard even on recoverable failure. Disposal attempts best-effort deletion and required native cleanup without recoverable errors; it never recursively deletes children or guarantees the name disappeared. External unlink/rename/replacement can affect path-based cleanup; no unforgeable name authority is claimed. Move/clear initialized handle fields when delegated close consumes them so remaining-field cleanup cannot close them twice. Fatal panic/program exit retain existing lack of universal cleanup guarantees.
+Explicit TempFile close closes its handle, then attempts unlink even on close failure. It preserves the original envelopes for close-only, remove-only or combined failures. TempDir close attempts empty-directory removal. Both consume the guard even on recoverable failure. Disposal attempts best-effort deletion and required native cleanup without recoverable errors; it never recursively deletes children or guarantees the name disappeared. External unlink/rename/replacement can affect path-based cleanup; no unforgeable name authority is claimed. Move/clear initialized handle fields when delegated close consumes them so remaining-field cleanup cannot close them twice. Fatal panic/program exit retain existing lack of universal cleanup guarantees.
 
 ## Errors, WASI namespace and native retention
 

@@ -2,13 +2,15 @@
 
 Read the source examples in [`prototypes/18-conversions.rill`](../../prototypes/18-conversions.rill).
 
-[ADR 0017](../adr/0017-user-implementable-conversions.md) is the confirmed decision; [companion source](../../prototypes/18-conversions.rill) contains 14 intended-valid expectations. Neither these expectations nor the independent cases below have been executed by a Rill compiler. The [diagnostic case notes](17-diagnostics.md) and [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md) describe #24's diagnostic work. [Rust research](../research/0041-q19-rust-conversion-evidence.md) is comparative evidence, not a Rill implementation proof.
+[ADR 0017](../adr/0017-user-implementable-conversions.md) records the confirmed decision. The [companion source](../../prototypes/18-conversions.rill) contains 14 intended-valid expectations. Neither these expectations nor the independent cases below have been executed by a Rill compiler. The [diagnostic case notes](17-diagnostics.md) and [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md) describe #24's diagnostic work. [Rust research](../research/0041-q19-rust-conversion-evidence.md) is comparative evidence, not a Rill implementation proof.
 
 ## Intended-valid coverage
 
-The companion covers two destinations from string, explicit/inferred destinations, from/tryFrom alias identity, record and enum conversions, consumed and borrowed sources with explicit copying, a custom displayed typed error, generic wrappers/defaults and a concrete specialization choosing another error, exact generic error evidence, concrete function values, protected infallible identity and standard numeric widening/range/truncation/safe fallible compatibility. Borrowed source storage is still usable after copying. Numeric tests inspect failures rather than assuming Result/Err equality or copying envelopes.
+The companion converts string to two destinations and covers both explicit and inferred destinations. It checks from/tryFrom alias identity, record and enum conversions, consumed sources and explicitly copied borrowed sources. Borrowed source storage remains usable after copying.
 
-Additional independent intended-valid cases (schematic signatures, not additional declarations to load into the companion):
+Other cases cover a custom displayed typed error, generic wrappers and defaults, and a concrete specialization that chooses another error. They also cover exact generic error evidence, concrete function values and protected infallible identity. Numeric cases cover standard widening, range checks, truncation and safe fallible compatibility. They inspect failures rather than assuming Result/Err equality or copying envelopes.
+
+The following are additional independent intended-valid cases. Their signatures are schematic; do not load them as additional declarations in the companion:
 
 ```rill
 // In the module defining Counter; explicit exclusive source access.
@@ -48,11 +50,11 @@ Each case is isolated. Rejection means a static diagnostic unless explicitly des
 | Implicit error propagation | Returning a conversion failure via `?` into another E rejects; use explicit mapErr or causal wrapping with normal requirements. |
 | Duplicate pair | Two bodies for `into<UserId>` from string reject during collection, even without a call. |
 | Alias duplicate | Registering the same pair through into and from is also a duplicate. |
-| Renamed generic duplicate | Box<T> -> Wrapped<T> and Box<U> -> Wrapped<U> bodies are identical after normalization. |
+| Renamed generic duplicate | A body converting Box<T> to Wrapped<T> is identical after normalization to one converting Box<U> to Wrapped<U>. |
 | Constraint/error duplicate | Changing only requirements or fallible E does not distinguish pair patterns. |
 | Incomparable overlap | Local `Pair<T,i32> -> string` and `Pair<i32,U> -> string` are ambiguous at Pair<i32,i32>; neither pattern is more specific. Generic/concrete overlap alone is valid, not a rejection. |
-| Foreign pair | An unrelated module cannot register string -> u32 by defining a local error or importing the family. |
-| Nested-local orphan | Owning Local does not authorize ForeignBox<Local> -> string. |
+| Foreign pair | An unrelated module cannot register a conversion from string to u32 by defining a local error or importing the family. |
+| Nested-local orphan | Owning Local does not authorize conversion from ForeignBox<Local> to string. |
 | Bare-generic orphan | Owning neither outer endpoint prohibits `implement<T> into<string>(value:T)`, even with a local constraint. |
 | Protected numeric override | Any user replacement of numeric pairs rejects; matching public spellings does not grant trusted status. |
 | Protected identity override | Explicit user into<UserId> from UserId rejects. Generic wrappers matching identity cannot displace the standard action. |
@@ -64,13 +66,15 @@ Each case is isolated. Rejection means a static diagnostic unless explicitly des
 | Borrowed error escape | A failure referring into consumed local input storage rejects just like a borrowed success. |
 | Exclusive dependency retained | A returned view depending on &mut source blocks conflicting source access until the result dies, even if the view itself is read-only. |
 | Borrow is not noBorrow | A converted externally backed reference retains its dependency; wrapping it does not allow sending it as a noBorrow message or erasing it as a cause. |
-| No automatic chaining | Registered A -> B and B -> C do not establish A -> C. |
+| No automatic chaining | Registered conversions from A to B and B to C do not establish a conversion from A to C. |
 | No argument coercion | A function taking UserId does not accept string merely because an explicit conversion exists. |
 | Ordinary return-only duplicate | Two ordinary family bodies with identical parameter patterns still reject despite different return types or explicit family arguments. |
 | Unresolved function value | A bare conversion family without enough endpoint context does not become a dynamic converter. |
 | Numeric compatibility | into<u8>(300u16) rejects; tryInto<u8>(300u16) is valid and fails at runtime, even for a constant. |
-| Distinct numeric semantics | Numeric float -> integer truncation does not authorize truncating fractional JSON integer extraction; #31 remains separate. |
+| Distinct numeric semantics | Truncation when converting a numeric float to an integer does not authorize truncating fractional JSON integer extraction. #31 remains separate. |
 
 ## RFC/checker follow-through
 
-#28 must formalize pattern subsumption/intersection, constraint applicability without constraint-priority ranking, selected-error inference/equality and evidence transport through generic/specific implementations. In particular, an abstract generic body cannot treat a fallback's error as final when a specialization can change it. Preserve identity/numeric protection, loaded-graph visibility, first-class signature selection, nested owned/borrowed error dependencies and local-source escape checking. These notes do not establish a checker proof. An unworkable mechanism returns to map #1 rather than silently selecting by E or abandoning approved specificity.
+#28 must formalize pattern subsumption and intersection, constraint applicability without constraint-priority ranking, and selected-error inference and equality. It must specify how evidence passes through generic and specific implementations. In particular, an abstract generic body cannot treat a fallback's error as final when a specialization can change it.
+
+The rules must preserve identity/numeric protection, loaded-graph visibility, first-class signature selection, nested owned/borrowed error dependencies and local-source escape checking. These notes do not establish a checker proof. If a necessary mechanism is unworkable, return it to map #1 rather than silently selecting by E or abandoning approved specificity.

@@ -1,18 +1,15 @@
-// #18 design artifacts, not executed compiler tests.
-// All new std paths/helper spellings and Result error types are illustrative for #23.
-// #41 / docs/adr/0017-user-implementable-conversions.md supersedes closed-only conversions.
-// Conversion names and generic evidence below follow #41; unrelated #18 helper sketches
-// remain historical where #23 supersedes them. No implicit error conversion is added.
-// decodeUtf8/decodeUtf8Lossy below are COPYING operations on List<u8>, not borrowed
-// decoders and not a claim that List has contiguous storage. No byte-view ABI is assumed.
+// Numeric widths, UTF-8 views, copying, parsing and ordered formatting.
+// Design examples only. Library names follow #23 and conversions follow #41.
+// Decoding reads Bytes; no List contiguity is assumed.
 
 import std::convert::{from, into, tryFrom, tryInto};
 import std::format::show;
 import std::result::Result;
 import std::error::display;
-import std::string::{slice, byteAt, byteLength, parse, decodeUtf8, decodeUtf8Lossy};
+import std::string::{slice, bytes, length as byteLength, decodeUtf8, decodeLossy};
+import std::bytes::{Bytes, get as byteAt};
+import std::number::parseNumber as parse;
 import std::char::{codePoint, fromCodePoint};
-import std::collection::List;
 
 type Point = { x: i32; y: i32 };
 
@@ -75,7 +72,7 @@ function skippedTrap(): i8 {
 }
 
 function cloneGeneric<T>(value: &T): T where copy(T) {
-  return copy(*value); // Logical read access, including a headerless string view.
+  return copy(value); // Copy borrows logical T, including a substring view.
 }
 
 function middle(): string {
@@ -95,7 +92,7 @@ function badBoundary(): bool {
 }
 
 function continuationByte(): u8 {
-  guard let value = byteAt(&"é", 1) else {
+  guard let value = byteAt(bytes(&"é"), 1u64) else {
     return 0;
   }
   return value;
@@ -110,7 +107,7 @@ function throughDescriptor(): string {
   let owner: string = "source";
   let view = relay(&owner);
   let descriptor = &view;
-  return copy(**descriptor);
+  return copy(*descriptor);
 }
 
 function remember(slot: &mut &string, source: &string): void {
@@ -122,7 +119,7 @@ function retainedView(): string {
   let second: string = "second";
   let mut selected = &first;
   remember(&mut selected, &second);
-  return copy(*selected); // The destination retains second beyond the call loan.
+  return copy(selected); // The destination retains second beyond the call loan.
 }
 
 function literalView(): &string {
@@ -135,7 +132,7 @@ function needsOwned<T>(value: T): T where noBorrow(T) {
 
 function repeatedLiteral(): string {
   let tag = "ready";
-  let again = tag; // Exact literal re-materialization, not an owning-header clone.
+  let again = copy(&tag); // Named string bindings need an explicit owner copy.
   return `${tag}/${again}`;
 }
 
@@ -203,7 +200,7 @@ function parsedNegativeZero(): string {
 }
 
 function decoded(): bool {
-  let bytes: List<u8> = [0xc3, 0xa9];
+  let bytes = Bytes([0xc3u8, 0xa9u8]);
   guard let text = decodeUtf8(&bytes) else {
     return false;
   }
@@ -211,7 +208,7 @@ function decoded(): bool {
 }
 
 function rejectsUtf8(): bool {
-  let bytes: List<u8> = [0xff];
+  let bytes = Bytes([0xffu8]);
   guard decodeUtf8(&bytes) else {
     return true;
   }
@@ -219,8 +216,8 @@ function rejectsUtf8(): bool {
 }
 
 function lossy(): string {
-  let bytes: List<u8> = [0xff];
-  return decodeUtf8Lossy(&bytes);
+  let bytes = Bytes([0xffu8]);
+  return decodeLossy(&bytes);
 }
 
 // No ordinary startup state is captured by any expectation.
@@ -243,7 +240,7 @@ expect continuationByte() == 0xa9;
 expect byteLength(&"aé") == 3u64;
 expect throughDescriptor() == "source";
 expect retainedView() == "second";
-expect needsOwned(copy(*literalView())) == "ready";
+expect needsOwned(copy(literalView())) == "ready";
 expect repeatedLiteral() == "ready/ready";
 expect observeExclusive() == "before/after";
 expect snapshots() == "before:2:after";

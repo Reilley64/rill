@@ -1,8 +1,8 @@
 # #30: stronger native fixed-layout tail-ABI mechanism matrix
 
-**Executed candidate mechanisms, not a production ABI, checker, compiler,
+These executed candidate mechanisms are not a production ABI, checker, compiler,
 architecture adoption or production support closure. #30's standalone mechanism
-stage is complete; #28's production/formal gate remains OPEN.** See the
+stage is complete; #28's production/formal gate remains OPEN. See the
 [combined disposition](../../../docs/research/0030-runtime-validation.md).
 Source rules, public callable APIs and intended targets are unchanged.
 This extends the single-packet evidence in [`../native-capacity/`](../native-capacity/README.md),
@@ -64,9 +64,10 @@ checked-in JSON.
 
 ## Layout, value and ownership matrix
 
-Every source-like body has the **same** `Result` record. Its private lowering uses
-uniform result storage, not mismatched C aggregate return conventions. Three
-**different fixed record layouts** are actually constructed and transitioned:
+Every source-like body has the same `Result` record. Its private lowering uses
+uniform result storage, not mismatched C aggregate return conventions. The fixture
+constructs values in three different fixed record layouts and transfers them
+between those layouts:
 
 | Record | Size | Alignment | `Value` offset | Distinct shape |
 | --- | ---: | ---: | ---: | --- |
@@ -143,7 +144,8 @@ destroyed before free. This is a manual fixture, not a general soundness proof.
 
 ## Native transfer mechanism and execution
 
-The root ordinary-calls the dispatcher; root's objects remain alive throughout.
+The root makes an ordinary call to the dispatcher. The root's objects remain alive
+throughout.
 All tail bodies share this legal private signature:
 
 ```llvm
@@ -185,7 +187,8 @@ unknown external or indirect helper, allocation, or dynamic `.su` frame is
 accepted. Individual per-transfer helper frames are static and at most 512
 bytes. This finite acyclic helper graph plus frame-replacing native transfers
 establishes bounded fixture stack/storage independent of the transfer count;
-the million-step execution corroborates, not proves arbitrary program behavior.
+the million-step execution supports this fixture-specific conclusion but does not
+prove arbitrary program behavior.
 
 `-fno-optimize-sibling-calls` on C++ prevents hidden helper tail edges; the audit
 checks the corresponding IR attributes. Only manually emitted native tail IR
@@ -202,8 +205,9 @@ earlier ordinary owner, then use uniform typed-private pointer-based tail
 lowering. Different source argument layouts need not be encoded with incompatible
 LLVM `byval`, scalar register splits or C `sret` signatures. This matrix executes
 three differing layouts/alignments, field transport, independent-copy lifetime,
-borrowed earlier storage and two distinct owned resources; it removes the
-**single tested packet layout** gap, not the need for a compiler/ABI design.
+borrowed earlier storage and two distinct owned resources; it tests
+more than a single packet layout but does not remove the need for a compiler/ABI
+design.
 
 **No native-capacity validation is claimed here.** These are deliberately small
 records/alignment, executed on the process's existing OS stack, not a managed

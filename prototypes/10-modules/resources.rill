@@ -31,18 +31,16 @@ implement show(value: &Hidden): string {
   return `hidden ${value.value}`;
 }
 
-type On = { kind: "on" };
-type Off = { kind: "off" };
-type HiddenState = On | Off;
+enum HiddenState { On, Off }
 
 export function makeState(on: bool): HiddenState {
-  return if (on) On { kind: "on" } else Off { kind: "off" };
+  return if (on) HiddenState.On else HiddenState.Off;
 }
 
 export function isOn(state: &HiddenState): bool {
   return match (state) {
-    { kind: "on" } => true,
-    { kind: "off" } => false,
+    HiddenState.On => true,
+    HiddenState.Off => false,
   };
 }
 

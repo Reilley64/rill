@@ -1,0 +1,32 @@
+// Hello world, pure functions, recursion and top-level expectations.
+// Design examples only. No Rill compiler or test runner is included.
+import std::log;
+
+function add(a: i32, b: i32): i32 {
+  return a + b;
+}
+
+function fib(n: i32): i32 {
+  return match (n) {
+    0 => 0,
+    1 => 1,
+    _ => fib(n - 1) + fib(n - 2),
+  };
+}
+
+log("hello world");
+
+// A future rill test runs expectations in imported modules once and skips
+// ordinary startup code. These expectations do not capture startup bindings.
+expect add(2, 3) == 5;
+expect add(-1, 1) == 0;
+expect add(0, 0) == 0;
+expect fib(0) == 0;
+expect fib(1) == 1;
+expect fib(10) == 55;
+
+// Independent failure example: expect add(2, 3) == 6;
+// A future report identifies this expression and the values 5 and 6.
+// Independent rejection examples:
+// expect add(2, 3); // An expectation must produce bool, not i32.
+// function invalid(): void { expect add(2, 3) == 5; } // Top level only.

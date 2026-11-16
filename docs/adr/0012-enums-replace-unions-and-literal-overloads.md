@@ -6,7 +6,7 @@ This is a confirmed language-design direction, not a compiler implementation, sa
 
 ## Later library refinement (#23)
 
-[ADR 0015](0015-language-required-library-contracts.md) supplies the complete [library contract catalogue](../standard-library-contracts.md), including the metadata-bearing Err<E> payload behind Result.Err, callable/iteration requirements and structural enum implicit-copy eligibility. Error origins/explicit causes follow #29 rather than automatic propagation traces. Heterogeneous retained causes additionally require display/noBorrow/sendable/shareable; they cannot hide a borrowed or affine payload. Earlier illustrative Option/Result forms below are not final library layouts.
+[ADR 0015](0015-language-required-library-contracts.md) supplies the complete [library contract catalogue](../standard-library-contracts.md), including the metadata-bearing Err<E> payload behind Result.Err, callable/iteration requirements and structural enum implicit-copy eligibility. Error origins/explicit causes follow #29 rather than automatic propagation traces. Heterogeneous retained causes also require display/noBorrow/sendable/shareable. They cannot hide a borrowed or affine payload. Earlier illustrative Option/Result forms below are not final library layouts.
 
 ## Declarations, construction, and variant types
 
@@ -40,7 +40,7 @@ enum Result<T, E = Error> {
 }
 ```
 
-These illustrate generic enum syntax, not complete standard-library definitions: #23 still owns canonical paths, Error, cause/trace storage, constructors/helpers, and the contracts of `?`/`guard`. Payload-free constructors require an expected type or explicit type arguments when generic arguments cannot otherwise be inferred. Existing numeric-width inference from #18 still applies; enum inference cannot invent a numeric width.
+These illustrate generic enum syntax, not complete standard-library definitions. #23 still owns canonical paths, Error, cause/trace storage, constructors/helpers, and the contracts of `?`/`guard`. Payload-free constructors require an expected type or explicit type arguments when generic arguments cannot otherwise be inferred. Existing numeric-width inference from #18 still applies; enum inference cannot invent a numeric width.
 
 ## Static selection and inference
 
@@ -63,7 +63,7 @@ let language: Language = Language.French { crazy: "bonjour" };
 
 A constructor/inferred binding preserves its variant type. An explicit parent-enum annotation widens it. A join of different variants of the same enum has the parent enum type, not an implicit subset union. Function boundaries use their declared parameter/return types; optimizer knowledge of a particular runtime variant does not narrow them.
 
-Filter candidates by the argument's static type, then apply the existing all-parameter most-specific order: a variant beats its parent enum, concrete types beat type parameters, and more-specific generic patterns beat less-specific patterns. A whole-enum argument does not make a variant-only implementation applicable. A general implementation remains usable even when variant implementations exist. Missing applicable implementations and incomparable best matches remain errors. Even a complete set of variant implementations does not synthesize a whole-enum implementation or runtime dispatcher.
+Filter candidates by the argument's static type, then apply the existing all-parameter most-specific order. A variant beats its parent enum, concrete types beat type parameters, and more-specific generic patterns beat less-specific patterns. A whole-enum argument does not make a variant-only implementation applicable. A general implementation remains usable even when variant implementations exist. Missing applicable implementations and incomparable best matches remain errors. Even a complete set of variant implementations does not synthesize a whole-enum implementation or runtime dispatcher.
 
 Existing body-less declarations, parameter/reference shape rules, return rules, explicit generic requirements, expected-type selection of overloaded function values, canonical collection/duplicates, visibility, and protected operations are unchanged. Neither generic monomorphization nor an indirect call may introduce runtime dispatch or rediscover a variant from a payload value. #28 must spell out these interactions and check them with examples.
 
@@ -102,7 +102,7 @@ Existing ownership, copying, disposal, retained/result dependencies, callable mo
 
 ## Evidence and follow-through
 
-See `prototypes/12-enums.rill` and `docs/prototypes/12-enums.md` for intended-valid expectations and independent rejection/adversarial cases. They are hand-checked design artifacts, not executed compiler tests. The prototype README identifies older examples whose literal/union forms are historical; do not treat their previous validity claims as v0 acceptance of removed syntax.
+The [combined overload/enum source](../../prototypes/03-overloads.rill) retains the original enum expectations. Its [case notes](../prototypes/03-overloads.md) preserve independent rejection and adversarial cases. These are inspected design artifacts, not executed compiler tests. The [consolidation record](../prototypes/consolidation.md) maps older programs to current sources. Historical snapshots and independent rejection snippets do not establish acceptance of removed syntax.
 
 #23 must reconcile Option/Result, trace/cause wrappers, tagged selection/message results and all required public library signatures. #24 owns diagnostics for removed literal/union syntax, non-exhaustive matching, missing whole-enum implementations, nominal/variant mismatches, generic inference, visibility and mutable-widening errors. #28 must reconcile earlier source tickets and fixtures, formalize variant typing/joins, widening/layout and borrow safety, generic/function-value selection, metadata and exhaustive checking, and include accepted/rejected adversarial examples. Resolve any unworkable interface/checking rule through the map rather than claim this direction proves a checker sound.
 

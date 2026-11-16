@@ -1,6 +1,6 @@
 # Diagnostic code registry. Version 1
 
-Confirmed [#24](https://github.com/Reilley64/rill/issues/24); [contracts](diagnostic-contracts.md), [schema](diagnostic-report.schema.json). These initial assignments identify **problem kinds**, not exact prose, compiler stages or severities. Future distinct kinds receive new codes; published meanings are not recycled. This is not an exhaustive grammar/checker rejection catalogue or emitted compiler output. `rill explain <code>` provides these meanings offline; future additions require documentation, not a new language rule.
+[#24](https://github.com/Reilley64/rill/issues/24) confirms these assignments; see the [contracts](diagnostic-contracts.md) and [schema](diagnostic-report.schema.json). These initial assignments identify problem kinds, not exact prose, compiler stages or severities. Future distinct kinds receive new codes; published meanings are not recycled. This is not an exhaustive grammar/checker rejection catalogue or emitted compiler output. `rill explain <code>` provides these meanings offline; future additions require documentation, not a new language rule.
 
 ### R0001. Invalid syntax
 A source construct cannot be parsed as permitted Rill syntax. Distinguish removed literal-type/general-union spelling from valid literal expressions and enum syntax in the explanation.
@@ -15,7 +15,7 @@ No annotation, suffix or known parameter/return context establishes the necessar
 An operation has incompatible known types, including distinct named types or invalid access-mode/variant-parent conversion. Identify the actual identities and relationship, not only matching field shapes.
 
 ### R0101. Non-Boolean expectation
-A top-level expectation expression is not bool; no truthiness conversion.
+A top-level expectation expression is not bool. There is no truthiness conversion.
 
 ### R0102. Misplaced expectation
 An expect declaration appears outside module top level.
@@ -24,13 +24,13 @@ An expect declaration appears outside module top level.
 A Result is discarded without the explicit handling/intent permitted by #11. This is a hard language error, not the optional unused-binding warning policy.
 
 ### R0200. Use after ownership transfer
-An owning value is used after a move/consuming operation. Show the original transfer and invalid use; no implicit copy remedy.
+An owning value is used after a move/consuming operation. Show the original transfer and invalid use. Implicit copying is not a remedy.
 
 ### R0201. Conflicting access
-A read/write/borrow conflicts with live exclusive or retained access. Show origin and why the restriction remains needed.
+A read/write/borrow conflicts with live exclusive or retained access. Show the access origin and why the restriction remains needed.
 
 ### R0202. Escaping dependency
-A result or retained caller storage would carry a dependency on an invalid source, including callee-local storage. Show the actual source/path.
+A result or retained caller storage would carry a dependency on an invalid source, including callee-local storage. Show the actual source and dependency path.
 
 ### R0203. Required source released
 A source/guard/owner would be disposed, replaced or moved while a dependent value/native operation still needs it. Do not shorten required retention for TCO.
@@ -42,16 +42,16 @@ No loaded implementation fits the call's independently established static parame
 Required type arguments/result context are missing or not unique. Suggest an appropriate annotation, not an arbitrary numeric/default candidate.
 
 ### R0302. Missing operation/property requirement
-A selected operation or generic body lacks canonical family/callable/copy/noBorrow/sendable/shareable/display/other required evidence. Identify the real inner dependency and distinguish it from an overload tie-breaker.
+A selected operation or generic body lacks required evidence, such as canonical family/callable/copy/noBorrow/sendable/shareable/display evidence. Identify the real inner dependency and distinguish it from an overload tie-breaker.
 
 ### R0303. Incomparable applicable implementations
-Distinct applicable parameter patterns lack a unique most-specific implementation. Do not choose by import order/return/constraint truth.
+Distinct applicable parameter patterns lack a unique most-specific implementation. Do not choose by import order, return type or constraint truth.
 
 ### R0304. Duplicate canonical implementation
 Distinct ordinary bodies have identical canonical parameter patterns during collection, even if aliases, generic parameter names, returns or constraints differ. Repeated routes to the same body are deduplicated instead.
 
 ### R0310. Duplicate canonical conversion pair
-Under later #41, distinct conversion bodies have the same canonical destination/source pair pattern. E does not distinguish bodies; permitted generic/specific pairs are not automatically duplicates.
+Under the later #41 decision, distinct conversion bodies have the same canonical destination/source pair pattern. E does not distinguish bodies; permitted generic/specific pairs are not automatically duplicates.
 
 ### R0311. Protected conversion overlap
 A user implementation displaces protected numeric conversion behavior or the standard infallible identity rule. This is a conversion-specific boundary, not sealing all ordinary families.
@@ -63,10 +63,10 @@ An implementation is outside the canonical family module and both reference-peel
 A concrete caller's E is incompatible with the winning conversion implementation's selected E. Do not select a fallback to satisfy E or assume an overridable generic default's error. Generic evidence preserves symbolic E.
 
 ### R0314. No applicable conversion pair
-No implementation fits the established destination/source pair. Targets need explicit/immediate unique concrete context and independently established source widths; no candidate-count/default/later-use target guess or automatic conversion chaining.
+No implementation fits the established destination/source pair. Targets need explicit or immediate unique concrete context, and source widths must be independently established. Do not guess targets from candidate counts, defaults or later uses, or chain conversions automatically.
 
 ### R0400. Unresolved name or import
-A required source binding/import cannot resolve under the actual origin/graph. Hidden metadata is not a source import.
+A required source binding/import cannot resolve under the actual origin and graph. Hidden metadata is not a source import.
 
 ### R0401. Inaccessible declaration or representation
 A declaration/field/opaque representation is private or not constructible from the use site. Import/re-export aliases do not grant access.
@@ -87,7 +87,7 @@ Alias-only resolution cannot acquire a declaration identity; distinguish valid a
 Recursive value structure cannot have a valid finite layout; source cycles alone are not the error.
 
 ### R0500. Protected ownership overlap
-A non-trusted implementation could replace/tie a required canonical ownership action, including nested-payload/generic/alias routes. Checked even without calls; not blanket sealing of defaults.
+A non-trusted implementation could replace/tie a required canonical ownership action, including nested-payload/generic/alias routes. Check this even without calls. It does not seal all defaults.
 
 ### R0501. Forbidden capability
 An operation attempts a negative/prohibited capability such as copying/forging/transferring a genuine guard. An added user overload/annotation cannot manufacture it.
@@ -96,7 +96,7 @@ An operation attempts a negative/prohibited capability such as copying/forging/t
 A named function or expectation reaches enclosing startup/runtime lets without explicit permitted inputs. Constant folding does not grant capture.
 
 ### R0600. Unsupported eligible-tail lowering
-A semantically eligible transfer cannot be honored by the selected ABI/backend. Identify call/target; do not silently relabel it ordinary. An ineligible final-looking call is not this error.
+A semantically eligible transfer cannot be honored by the selected ABI/backend. Identify the call and target; do not silently relabel the transfer as ordinary. An ineligible final-looking call is not this error.
 
 ### R0601. Invalid build setting
 A build-time option violates its contract (capacity bounds/alignment/representation or saved-state option on native, for example). A dynamically invalid spawn capacity remains runtime panic, not this static diagnostic.
@@ -105,19 +105,19 @@ A build-time option violates its contract (capacity bounds/alignment/representat
 The requested target/context/toolchain facts cannot be supplied. Distinguish configuration failure from source invalidity and later unsupported call lowering.
 
 ### R0603. Invalid driver invocation
-Arguments/report destination mode/code lookup are invalid. Explain usage without a fake source location.
+Arguments, report destination mode or code lookup are invalid. Explain usage without a fabricated source location.
 
 ### R0604. Driver I/O/report failure
-Reading/writing the requested inputs/artifacts/report failed. Nonzero operation failure, not successful analysis and not automatically an internal compiler defect.
+Reading or writing the requested inputs, artifacts or report failed. This is a nonzero operation failure, not successful analysis or automatically an internal compiler defect.
 
 ### R0700. Unreachable executable statement
-Required flow analysis establishes a statement cannot execute. Advisory only; declarations are not runtime statements and unreachable code is still checked.
+Required flow analysis establishes that a statement cannot execute. This is advisory only. Declarations are not runtime statements, and unreachable code is still checked.
 
 ### R0701. Safely proven runtime trap
-Optional advisory explanation of an otherwise well-typed operation that would trap if executed. No mandatory constant evaluator, acceptance change or IEEE/infallible-rounding confusion.
+This optionally explains an otherwise well-typed operation that would trap if executed. It does not require a constant evaluator or change acceptance. Do not confuse IEEE behavior or infallible rounding with a runtime trap.
 
 ### R9000. Internal tool failure
-The compiler/server cannot trust its own analysis operation/state. Not a source type error, successful checking or a caught Rill panic. Controlled reporting is best effort; fatal host failure may produce no report.
+The compiler/server cannot trust its own analysis operation/state. This is not a source type error, successful checking or a caught Rill panic. Controlled reporting is best effort; fatal host failure may produce no report.
 
 ## Compatibility and examples
 

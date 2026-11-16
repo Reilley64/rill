@@ -1,8 +1,12 @@
 # Portable explicit-record candidate. Throwaway mechanism probes
 
-**Question:** can a portable Wasm lowering combine proper tails, suspension and independently checked retained-state/addressable regions without Asyncify or a parked engine fiber?
+This experiment asks whether a portable Wasm lowering can combine proper tails,
+suspension and independently checked retained-state/addressable regions without
+Asyncify or a parked engine fiber.
 
-**Answer for this finite manually lowered machine:** yes. This is **not adoption of a Rill architecture**, automated compiler/checker output, complete owned-value ABI or production runtime support. See the [experiment/proposal report](../../../docs/research/0030-portable-suspension-experiments.md) and [pinned candidate research](../../../docs/research/0030-portable-suspension-candidates.md). Earlier #30 evidence is untouched; the support gate remains OPEN.
+The finite manually lowered machine does so. This is not adoption of a Rill
+architecture, automated compiler/checker output, a complete owned-value ABI or
+production runtime support. See the [experiment/proposal report](../../../docs/research/0030-portable-suspension-experiments.md) and [pinned candidate research](../../../docs/research/0030-portable-suspension-candidates.md). Earlier #30 evidence is untouched; the support gate remains OPEN.
 
 ## Reproduce
 
@@ -22,8 +26,8 @@ The first runner accepts `--llvm`, `--linker`, and `--tools` overrides like the 
 A routine has a fixed addressable arena, saved arena, charged control header and bounded argument staging. An iterative dispatcher invokes one step at a time through a private fixed function table:
 
 - Ordinary calls push a record and retain caller storage/return progress.
-- Eligible self/mutual/indirect transfers replace the current record. Records vary from 64-256 bytes with 16-64 byte alignment; replacement preserves the earlier ordinary caller and charges padding/staging before writes.
-- A suspended step stores its PC/token/state and returns through `poll` to the host. Wake resumes the actual current function/PC, not the original tail-entry path. Effects are checked once, including across repeated polls and yields.
+- Eligible self/mutual/indirect transfers replace the current record. Records vary from 64-256 bytes with 16-64 byte alignment. Replacement preserves the earlier ordinary caller and charges padding/staging before writes.
+- A suspended step stores its PC/token/state and returns through `poll` to the host. On wake, the dispatcher resumes the actual current function/PC, not the original tail-entry path. Effects are checked once, including across repeated polls and yields.
 - Arguments, return/result state, links, PC/function IDs, token generation, live scratch, observational counters and allocator bookkeeping all reside in charged records/header. The 256-byte staging packet is in the **416-byte header**, not an exempt allocation.
 - The complete header is charged from routine initialization. Ordinary records are charged even before a yield. These conservative admission/layout policies are experimental architecture choices, not already approved implementation rules.
 - Per-routine maximum array backing is fixed, not allocated per transfer. Each fixture routine reserves **2,097,728 bytes** for maximum arena backing/header/alignment; unused capacity is not live activation data. Logical Saved includes the header and actual record/padding extents. The fixture's fixed backing does not establish production allocation/reclamation or a total heap quota.
@@ -40,7 +44,7 @@ The module reserves a shared **64 KiB** compiler/runtime linear stack, placed fi
 
 - `check.mjs` runs tail/ordinary/multi-routine, exact-fit, malformed-protocol and capacity cases in Node/V8. Fatal cases use fresh instances; after fatal escape, only external memory reads inspect pre-recorded canaries. No source routine or diagnostic Wasm export is re-entered.
 - `host.c` runs the same module synchronously in Wasmtime/Cranelift with tail calls disabled. No async call future or fiber exists at a logical yield. Between completed `poll` calls it legally forces ordinary-memory relocation while a pthread worker owns an independent input/output copy. Copyback uses fresh memory/extent and the retained destination, after actual worker join. Token/cancel-request/handle models cannot release the slot or wake it early. This is not zero-copy pinning or production Rill cancellation.
-- `host.c` also injects terminal guest failure while copied native work remains pending, destroys the guest store without re-entering it, then lets the real worker access its independent copy. It joins before freeing that copy and never performs post-fatal copyback. Host-created traps may surface as a Wasmtime C-API error rather than a core trap; both are treated as terminal to the invocation, not a normal source result. This extends the original candidate run; the earlier report/snapshots describe their original scope.
+- `host.c` also injects terminal guest failure while copied native work remains pending, destroys the guest store without re-entering it, then lets the real worker access its independent copy. It joins before freeing that copy and never performs post-fatal copyback. Host-created traps may appear as a Wasmtime C-API error rather than a core trap. Both terminate the invocation; neither is a normal source result. This extends the original candidate run; the earlier report/snapshots describe their original scope.
 - Borrowed ordinary slots and modeled guard/join/wrapping phases remain live through child return/yield. A malformed tail effect with an outstanding obligation traps before replacement. These are manually chosen source-like cases, **not checker eligibility evidence**. Cancellation/masking/cleanup/joins are modeled phases; no canonical Err or disposer implementation is claimed.
 
 ## Secondary LLVM retcon probe

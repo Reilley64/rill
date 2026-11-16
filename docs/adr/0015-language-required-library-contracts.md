@@ -1,6 +1,6 @@
 # Explicit, evidence-preserving v0 library contracts
 
-[Issue #23](https://github.com/Reilley64/rill/issues/23) confirms the language-required standard-library surface in [the public contract catalogue](../standard-library-contracts.md). Use owned collections, explicit access/copying, generic callable evidence and canonical protected ownership actions rather than persistent snapshots, erased capture assumptions, return-only dispatch or a broad implicit prelude. The complete interview (Q1-Q53) and consolidated summary were explicitly confirmed; this records design input, not an implemented library, accepted feature RFC or checker/backend proof.
+[Issue #23](https://github.com/Reilley64/rill/issues/23) confirms the language-required standard-library APIs in [the public contract catalogue](../standard-library-contracts.md). Use owned collections, explicit access/copying, generic callable evidence and canonical protected ownership actions rather than persistent snapshots, erased capture assumptions, return-only dispatch or a broad implicit prelude. The complete interview (Q1-Q53) and consolidated summary were explicitly confirmed; this records design input, not an implemented library, accepted feature RFC or checker/backend proof.
 
 ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separate sessions. This decision follows both, including when a separately prepared artifact is not yet present in a checkout.
 
@@ -22,17 +22,17 @@ ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separa
 
 ## Decisions and consequences
 
-- `List`/hash `Map` are owned, explicitly mutable and independently copied; u64 counts/indices, Option queries, read-only keys and explicit eq/hash contracts. Map insertion retains an existing equal key and returns its displaced value. List transformations are eager, sequential and support both consumed and borrowed input.
+- `List` and hash `Map` own their data, support explicit mutation and produce independent copies. They use u64 counts/indices, Option queries, read-only keys and explicit eq/hash contracts. Map insertion retains an existing equal key and returns its displaced value. List transformations are eager, sequential and support both consumed and borrowed input.
 - Add compiler-recognized callable(F,[Args],R), callableMut and callableOnce requirements, with weakening but no forged invocation/capture evidence. Keep callbacks generic and check before monomorphization; ordinary arrow erasure cannot invent noBorrow/sendable/copy properties.
 - Canonical copying is `copy(&value)` with `copy<T>(&T):T`; disposal consumes T. This supersedes the older copy(value) convenience. Extend implicit-copy eligibility structurally to enums, never from a current runtime payload or a literal refinement.
 - Protect genuine guard release, counted ownership/endpoint maintenance and native source retention from user interception, including otherwise orphan-permitted nested specializations. Ordinary unprotected defaults remain specializable. After a custom disposer, compiler cleanup disposes remaining initialized owned fields without duplicating moved/disposed fields or recursively reinvoking the outer disposer. This newly approves remaining-field semantics; #17 had not settled a mandatory nested cleanup mechanism.
 - Use ordinary canonical iterate/next families for for-of, including user-defined containers. Borrowed traversal retains sources; exclusive yielded access ends before the next advance. No general disjoint-index proof or mutable stored-map-key access.
-- Finalize explicit library module/factory paths; primitive string/char already exist in the fixed prelude, helpers do not. Source panic is std::panic; compiler panic machinery is not redirected by lexical shadowing. Log is synchronized, text-only, void-returning and fatal on output failure; fallible I/O is separate.
+- Use explicit library module/factory paths. Primitive string/char already exist in the fixed prelude; helpers do not. Source panic is std::panic; compiler panic machinery is not redirected by lexical shadowing. Log is synchronized, text-only, void-returning and fatal on output failure; fallible I/O is separate.
 - Spawn and fixed-arity spawnWithStack preserve owned once-callable/noBorrow/sendable evidence. Follow #22's addressable/saved-stack defaults/options, target validation, actual borrower completion and bounded standard traversal/default cleanup; #30 still gates backend support.
 - Scoped join/all/allSettled/race/any take tuples of 2-4 jobs; no variadic generics or dynamic-sized combinators. Plain join and fallible all are separate to avoid callback-return-type dispatch. Preserve common-type requirements and all child cleanup before return. Any's total failure stores all original envelopes in AllFailed<E>.
 - Channels take explicit u64 capacity; failed send returns its undelivered T in SendError<T>. Select takes receiver/handler tuples, commits exactly one receive and invokes only that handler. Closed/drained sources are ready with None; priority/fairness is not promised. Retire singleton string tags. Sleep/after use monotonic u64 milliseconds, not hard deadlines.
 - Follow #29's typed Err<E> wrappers, origins and explicit causes, not propagation reports. Canonical Err construction preserves the agreed one-/two-argument forms as a closed, location-capturing exception; adapt it with an arrow for first-class use. Ordinary type/value namespaces share the name Err. Default text Error construction is explicit error(message); raw strings do not implicitly convert to Error.
-- **Refine #29's erased-cause boundary:** primary E may carry checked borrows, but retaining/erasing it as a cause needs display/noBorrow/sendable/shareable evidence. Unique Cause nodes preserve all original data/origins/formatters without public dyn/downcasts, hidden counts or a general Err/Result copy. Postfix propagation is unchanged; infix wrapping creates one new origin. mapErr preserves existing metadata while changing the payload; it does not add a causal layer.
+- **Refine #29's erased-cause boundary.** Primary E may carry checked borrows, but retaining/erasing it as a cause needs display/noBorrow/sendable/shareable evidence. Unique Cause nodes preserve all original data/origins/formatters without public dyn/downcasts, hidden counts or a general Err/Result copy. Postfix propagation is unchanged; infix wrapping creates one new origin. mapErr preserves existing metadata while changing the payload; it does not add a causal layer.
 - Bytes supplies genuine contiguous owned storage/logical borrowed subranges, separate from unspecified List layout. Distinguish source-retaining viewUtf8 from copying decodeUtf8/decodeLossy; no writable UTF-8 escape or mutable substring. Provide explicit Unicode queries/traversal and structured decoding errors.
 - Finalize closed numeric conversions and parseNumber, six explicit wrapping/saturating integer helpers, typed errors and non-recursive canonical primitive formatter bootstrap. No as/assertions, implicit numeric/error conversions or default widths.
 - Required I/O is direct stdio and whole-file byte operations with typed owned errors. Writes can be partial on failure/cancellation; no rollback, atomic replacement, durable-sync, general reader/writer or networking promise. Allocation failure remains fatal.
@@ -43,7 +43,14 @@ ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separa
 
 ## Alternatives and supersession
 
-Rejected persistent collection defaults, implicit callback copying, once-only map callbacks, erased arrows as spawn evidence, trait-based invocation/iteration, broad ownership sealing/outermost-type orphan restrictions, runtime overload dispatch, variable-arity ordinary helpers, hidden return-based all flattening, string-tagged select, reflection-based error formatting, report/trace-by-propagation, unsafe byte views and recoverable allocation errors everywhere.
+The rejected alternatives are:
+
+- Persistent collection defaults, implicit callback copying and once-only map callbacks.
+- Erased arrows as spawn evidence and trait-based invocation/iteration.
+- Broad ownership sealing/outermost-type orphan restrictions.
+- Runtime overload dispatch, variable-arity ordinary helpers, hidden return-based all flattening and string-tagged select.
+- Reflection-based error formatting and report/trace-by-propagation.
+- Unsafe byte views and recoverable allocation errors everywhere.
 
 This supersedes relevant interface sketches in #7/#8/#10/#15/#16/#17/#18/#19/#21 and refines #29. It does not undo nominal enum/record rules, explicit numeric widths, UTF-8 validity, ordinary family identity/collection, no named constraint groups, ownership/dependency/concurrency policy, proper-tail eligibility or fatal panic. Older fixtures are historical where spellings/contracts conflict, not silently declared fully migrated.
 

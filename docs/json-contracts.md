@@ -1,10 +1,10 @@
 # Rill v0 JSON contracts
 
-Confirmed design input for [#31](https://github.com/Reilley64/rill/issues/31), summarized by [ADR 0018](adr/0018-owned-precision-preserving-json.md). The user explicitly confirmed the consolidated policy after the interview. This is **not** a parser implementation, executed compiler/library test suite, accepted feature RFC, or checker/backend proof. #28 integrates and validates the RFCs; #30 remains a backend gate.
+This is confirmed design input for [#31](https://github.com/Reilley64/rill/issues/31), summarized by [ADR 0018](adr/0018-owned-precision-preserving-json.md). The user explicitly confirmed the consolidated policy after the interview. This is **not** a parser implementation, executed compiler/library test suite, accepted feature RFC, or checker/backend proof. #28 integrates and validates the RFCs; #30 remains a backend gate.
 
-Public home: `std::encoding::json`. Reuse the [core library contracts](standard-library-contracts.md), nominal enums/records, explicit borrowing/copying and origin/explicit-cause error model. JSON is transport-independent: streaming I/O (#32), HTTP (#39), TLS/networking and database mapping are consumers/separate designs, not parsing prerequisites. No reflection, derive system, serialization traits, public dyn facility, schema mapping, JSONPath, streaming events or JSON Lines is introduced.
+The public module is `std::encoding::json`. Reuse the [core library contracts](standard-library-contracts.md), nominal enums/records, explicit borrowing/copying and origin/explicit-cause error model. JSON is transport-independent. Streaming I/O (#32), HTTP (#39), TLS/networking and database mapping are consumers/separate designs, not parsing prerequisites. No reflection, derive system, serialization traits, public dyn facility, schema mapping, JSONPath, streaming events or JSON Lines is introduced.
 
-**Conversion boundary:** canonical conversion machinery is separately [confirmed in #41](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), including into/from, tryInto/tryFrom, selected implementation error evidence and explicit implement syntax. This document specifies JSON number semantics; it does **not** re-decide registration, generic ordering, aliases, endpoint permissions, coherence or protected primitive pairs. #41's later decision controls over older closed-conversion/snake-case examples; its separate working-tree migration is not duplicated here. #28 must integrate both confirmed inputs and the JSON implementations' concrete error metadata; neither design is executed or proven by these fixtures.
+Canonical conversion machinery is separately [confirmed in #41](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), including into/from, tryInto/tryFrom, selected implementation error evidence and explicit implement syntax. This document specifies JSON number semantics. It does not change registration, generic ordering, aliases, endpoint permissions, coherence or protected primitive pairs. #41's later decision controls over older closed-conversion/snake-case examples; its separate working-tree migration is not duplicated here. #28 must integrate both confirmed inputs and the JSON implementations' concrete error metadata; neither design is executed or proven by these fixtures.
 
 ## 1. Owned values and invariants
 
@@ -29,7 +29,7 @@ All standard parse/format/copy/dispose paths, partial-tree/error cleanup and dis
 
 ## 2. Public API
 
-These are interface signatures, not complete source files or implementations. Opaque type layouts are deliberately unspecified. One body-less declaration owns an ordinary overload family; repeated shapes below list its supplied implementations, not duplicate declarations or return-only overloads. Family bodies use #41's explicit implement spelling.
+These are interface signatures, not complete source files or implementations. Opaque type layouts are deliberately unspecified. One body-less declaration owns an ordinary overload family; repeated shapes below list its supplied implementations, not duplicate declarations or return-only overloads. Family bodies use #41's explicit implement syntax.
 
 | Area | Required public operations/types |
 | --- | --- |
@@ -52,7 +52,7 @@ function number<S>(token: S): Result<Number, NumberError>;
 text(value: &Number): &string
 ```
 
-The owned form consumes text; the borrowed form copies validated text into independent ownership. Both validate **exactly one numeric token**, with no whitespace before/after. A token is ASCII:
+The owned form consumes text; the borrowed form copies validated text into independent ownership. Both validate exactly one numeric token, with no whitespace before or after it. A token is ASCII:
 
 ```text
 [minus] (0 | nonzero-digit *digit) [ . 1*digit ] [ (e | E) [ + | - ] 1*digit ]
@@ -60,7 +60,7 @@ The owned form consumes text; the borrowed form copies validated text into indep
 
 No leading plus/zeros, hex, separators, suffixes, NaN, Infinity or missing fraction/exponent digits. Preserve spelling, including `-0`, `1.0`, `1E+01` and exponent leading zeros. Grammar checking need not evaluate an arbitrarily large exponent. The constructor imposes no fixed numeric magnitude or document quota: parsing applies its configured token cap before construction, while formatting caps emitted bytes. Owned input can be reused as storage; no allocation-reuse guarantee is made. Invalid text returns NumberError.InvalidSyntax with the unexpected byte or EOF offset relative to that token input.
 
-text exposes a read-only logical string view. A caller may explicitly compare it lexically, but the library does not call this numeric equality. No arithmetic, semantic Value/Number/Object equality/hash contract, normalization or canonical JSON is in the required v0 surface.
+text exposes a read-only logical string view. A caller may explicitly compare it lexically, but the library does not call this numeric equality. The required v0 interface includes no arithmetic, semantic Value/Number/Object equality/hash contract, normalization or canonical JSON.
 
 ### Objects and iteration
 
@@ -73,7 +73,7 @@ insert(&mut Object, string, Value): Option<Value>
 remove(&mut Object, &string): Option<Value>
 ```
 
-The type/factory share the exported Object name in the existing separate namespaces. No runtime exported singleton or new constructor syntax. Parsing rejects duplicate names; ordinary **programmatic insertion** deliberately replaces an equal name's value, retains the old name and position, disposes the incoming unused name and returns the displaced value. New names append. Builder names/Value.String payloads are already decoded data: insert never reparses backslash escapes or embedded JSON. Removal disposes the stored name, returns the value and preserves remaining relative order. Reinsertion after removal appends. No parser quota is attached to a constructed object.
+The type/factory share the exported Object name in the existing separate namespaces. There is no runtime exported singleton or new constructor syntax. Parsing rejects duplicate names; ordinary programmatic insertion deliberately replaces an equal name's value, retains the old name and position, disposes the incoming unused name and returns the displaced value. New names append. Builder names/Value.String payloads are already decoded data. The insert operation never reparses backslash escapes or embedded JSON. Removal disposes the stored name, returns the value and preserves remaining relative order. Reinsertion after removal appends. A constructed object has no attached parser quota.
 
 Names compare by decoded UTF-8 content, with no normalization/case folding. `"a"` and `"\u0061"` are duplicates; `"é"` and `"e\u0301"` are distinct. Ordinary Map's unspecified iteration order does not become a JSON order promise. Private storage may use an index, list or other implementation but must preserve the public invariants.
 
@@ -85,7 +85,7 @@ export type MemberRef = { name: &string; value: &Value };
 export type MemberMut = { name: &string; value: &mut Value };
 ```
 
-Object consumes into OwnedObjectIter yielding Member; &Object gives ObjectIter/MemberRef; &mut Object gives ObjectIterMut/MemberMut. Exclusive results reach last use before advancing; structure cannot change under live iterator/element views. Names stay read-only. Existing array List iteration/mutation is reused, not a second JSON array container. Wrapping/copying a view never erases dependencies or creates a writable invariant-bearing field.
+Consuming Object produces OwnedObjectIter, which yields Member. Borrowing &Object produces ObjectIter, which yields MemberRef. Borrowing &mut Object produces ObjectIterMut, which yields MemberMut. Exclusive results reach last use before advancing; structure cannot change under live iterator/element views. Names stay read-only. Existing array List iteration/mutation is reused, not a second JSON array container. Wrapping/copying a view never erases dependencies or creates a writable invariant-bearing field.
 
 ## 3. Parsing contract and Unicode
 
@@ -95,7 +95,7 @@ parseWithLimits(&string, ParseLimits): Result<Value, ParseError>
 defaultParseLimits(): ParseLimits
 ```
 
-Accept exactly one complete value of any kind with surrounding JSON whitespace: only SP, TAB, LF and CR. Reject empty/whitespace-only input, comments, trailing commas, uppercase keywords, a second document and trailing non-whitespace. No prefix parser or error recovery. A leading U+FEFF at input offset zero is LeadingBom; U+FEFF elsewhere outside strings is not whitespace. Inside strings it is ordinary content. Output never adds a BOM.
+Accept exactly one complete value of any kind with surrounding JSON whitespace. Only SP, TAB, LF and CR are JSON whitespace. Reject empty/whitespace-only input, comments, trailing commas, uppercase keywords, a second document and trailing non-whitespace. There is no prefix parser or error recovery. A leading U+FEFF at input offset zero is LeadingBom; U+FEFF elsewhere outside strings is not whitespace. Inside strings it is ordinary content. Output never adds a BOM.
 
 Input is already valid UTF-8 because it is &string. Raw Bytes callers explicitly use std::string::viewUtf8 and retain that source through parsing. Invalid byte encoding is Utf8Error at that boundary, not JSON ParseError. There is no required parseBytes/reader adapter. JSON's input cap does not bound prior transport allocation, read or UTF-8 validation. Runtime input newlines are not normalized by Rill's source-file newline rules.
 
@@ -103,19 +103,19 @@ Recognize JSON escapes `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t` and `\u` p
 
 String quotes, backslashes and raw U+0000-U+001F need the proper JSON escape. Other valid scalars such as DEL/U+0085/U+2028/U+2029 are legal string data, not additional outside-string whitespace.
 
-This is strict JSON grammar with **explicit receiver restrictions** for unique decoded names, representable scalar strings, BOM and configured limits. RFC 8259's grammar admits duplicate names and lone surrogate escapes; do not falsely claim it prohibits them or that this is unrestricted acceptance of all grammar-admitted texts. It is not the full I-JSON profile.
+This is strict JSON grammar with explicit receiver restrictions for unique decoded names, representable scalar strings, BOM and configured limits. RFC 8259's grammar admits duplicate names and lone surrogate escapes; do not falsely claim it prohibits them or that this is unrestricted acceptance of all grammar-admitted texts. It is not the full I-JSON profile.
 
 ## 4. Precision and conversion semantics supplied to #41
 
 Preserving tokens such as `9007199254740993`, `1e400` and long decimals needs neither f64 storage nor bigint/decimal arithmetic primitives. It does not guarantee an external consumer avoids binary64 rounding.
 
-Required **borrowed Number → primitive** semantics:
+Conversions from borrowed Number to primitive types require the following semantics:
 
-- Integers: exact mathematical integrality, then destination-range checking, with no f64 intermediate. `1.0` and `1e2` can become 1 and 100; `1.5` must not truncate. Negative zero becomes integer zero, including unsigned zero.
+- Integer extraction requires exact mathematical integrality, then destination-range checking, with no f64 intermediate. `1.0` and `1e2` can become 1 and 100; `1.5` must not truncate. Negative zero becomes integer zero, including unsigned zero.
 - Exponent syntax must not be parsed through an overflowing native exponent just to classify a conversion. Zero coefficients remain zero even with a very large exponent. Finite non-integral tiny values remain non-integral for integer extraction, not rounded-to-zero first.
-- Floats: nearest/ties-to-even rounding for the requested width, allowing precision loss and underflow to zero, rejecting finite input that rounds to infinity, preserving negative zero. Original Number storage is unchanged.
+- Float extraction uses nearest/ties-to-even rounding for the requested width. It allows precision loss and underflow to zero, rejects finite input that rounds to infinity, and preserves negative zero. Original Number storage is unchanged.
 
-Required **primitive → Number** semantics:
+Conversions from primitive types to Number require the following semantics:
 
 - Typed integers produce exact ordinary decimal text without width suffixes; result remains fallible/uniform even when that case always succeeds.
 - Finite floats use canonical shortest text that round-trips to the same source width, preserving negative zero. Reject NaN/infinities. Do not promise exact binary-rational decimal expansion or identical cross-width interpretation (e.g. shortest f32 text re-read as f64).
@@ -138,7 +138,7 @@ export type FormatLimits = { maxDepth: u64; maxOutputBytes: u64 };
 export type PrettyOptions = { indent: u64; limits: FormatLimits };
 ```
 
-Default ParseLimits are respectively **16,777,216 bytes (16 MiB), 128, 1,000,000, 1,048,576 decoded bytes (1 MiB), and 1,024 token bytes**. Default FormatLimits are depth **128** and output **16,777,216 bytes**. defaultPrettyOptions uses indent **2** and defaultFormatLimits(). Defaults are functions, not exported runtime global records. Callers can rebuild named records from defaults; no optional/named arguments or manifest/env configuration.
+Default ParseLimits are respectively 16,777,216 bytes (16 MiB), 128, 1,000,000, 1,048,576 decoded bytes (1 MiB), and 1,024 token bytes. Default FormatLimits are depth 128 and output 16,777,216 bytes. defaultPrettyOptions uses indent 2 and defaultFormatLimits(). Defaults are functions, not exported runtime global records. Callers can rebuild named records from defaults; there are no optional/named arguments or manifest/environment configuration.
 
 All caps are inclusive; zero is a valid restrictive value. Root scalars have depth 0, root containers depth 1, and each nested array/object increases path depth by 1. Values count as nodes: root, array elements and object member values; names are not separate nodes. Empty containers count once. String cap applies per decoded UTF-8 value/name, not source escape bytes; number cap counts its original ASCII token bytes. Input cap includes surrounding whitespace. A depth-zero profile permits scalars, while a zero-node profile permits no complete document. Empty strings/names fit a zero string cap. There is no implicit relationship between the independently configurable caps.
 
@@ -157,11 +157,11 @@ defaultFormatLimits(): FormatLimits
 defaultPrettyOptions(): PrettyOptions
 ```
 
-Return independent owned UTF-8 strings or an error, not input/tree views. Values are already grammar-valid: Number/Object privacy and scalar strings prevent malformed numeric tokens, duplicate stored names or invalid string scalars. Formatting checks resource budgets; it does not repair invalid nodes, insert null, serialize NaN/Infinity or catch allocation failure. No implicit Value-to-string conversion or required canonical show(Value) adapter is added: the infallible show signature must not silently swallow a fallible formatting limit. Handle the explicit formatting Result before logging/interpolation.
+Return independent owned UTF-8 strings or an error, not input/tree views. Values are already grammar-valid: Number/Object privacy and scalar strings prevent malformed numeric tokens, duplicate stored names or invalid string scalars. Formatting checks resource budgets; it does not repair invalid nodes, insert null, serialize NaN/Infinity or catch allocation failure. No implicit Value-to-string conversion or required canonical show(Value) adapter is added. The infallible show signature must not silently discard a fallible formatting limit. Handle the explicit formatting Result before logging/interpolation.
 
-Compact output has no insignificant whitespace or terminal newline. Pretty defaults to two spaces per level, LF, one space after colons, one member/element per line for nonempty containers, inline `[]`/`{}`, no trailing comma or terminal newline. Scalars are inline. Configurable indent is a u64 count of ASCII spaces, including zero; no tabs/arbitrary indentation strings or template mini-language. Empty containers emit no indentation. Formats preserve array/member order and exact Number tokens, not source whitespace or original string escape spelling.
+Compact output has no insignificant whitespace or terminal newline. Pretty output defaults to two spaces per level, LF, one space after colons and one member/element per line for nonempty containers. It uses inline `[]`/`{}` and has no trailing comma or terminal newline. Scalars are inline. Configurable indent is a u64 count of ASCII spaces, including zero; no tabs/arbitrary indentation strings or template mini-language. Empty containers emit no indentation. Formats preserve array/member order and exact Number tokens, not source whitespace or original string escape spelling.
 
-Escape quote/backslash, use `\b`, `\t`, `\n`, `\f`, `\r` for their controls and lowercase `\u00xx` for remaining U+0000-U+001F. Leave slash and other valid non-ASCII scalars unescaped, including U+2028/U+2029 and allowed noncharacters. This is JSON UTF-8, **not HTML/JavaScript embedding escaping**; another-language/transport boundary needs its own handling. Parsed `"\u0061"` formats as `"a"`, while `1E+01` remains `1E+01`. Sorted/canonical output, numeric normalization and semantic equality are deferred.
+Escape quote/backslash, use `\b`, `\t`, `\n`, `\f`, `\r` for their controls and lowercase `\u00xx` for remaining U+0000-U+001F. Leave slash and other valid non-ASCII scalars unescaped, including U+2028/U+2029 and allowed noncharacters. This is JSON UTF-8, not HTML/JavaScript embedding escaping. Another-language/transport boundary needs its own handling. Parsed `"\u0061"` formats as `"a"`, while `1E+01` remains `1E+01`. Sorted/canonical output, numeric normalization and semantic equality are deferred.
 
 Under sufficient compatible limits, formatting then parsing preserves the owned JSON data/order/number spelling; compact parse/format reaches the chosen escaping/whitespace representation, not original document bytes. Do not express this as unavailable generic Value equality or promise pretty output fits the defaults merely because parse succeeded.
 
@@ -205,16 +205,16 @@ Positions are zero-based byte offsets relative to the supplied view, including l
 
 Required limit positions:
 
-- InputBytes: maxInputBytes, the first disallowed source byte (checked before grammar).
-- Depth/Nodes: offending container/value start.
-- StringBytes: the source scalar/escape whose decoded output would exceed the per-string cap; a surrogate pair identifies its first escape.
-- NumberBytes: first source token byte beyond the cap.
+- InputBytes identifies maxInputBytes, the first disallowed source byte, checked before grammar.
+- Depth/Nodes identifies the offending container/value start.
+- StringBytes identifies the source scalar/escape whose decoded output would exceed the per-string cap. A surrogate pair identifies its first escape.
+- NumberBytes identifies the first source token byte beyond the cap.
 
 Other syntax identifies an unexpected byte or EOF; a completed invalid scalar escape identifies the relevant escape start (e.g. the unpaired high/low surrogate). Incomplete escape syntax can report EOF; invalid hex/escape spelling can identify the bad source byte. Reasons describe the detected parsing failure, not an obligation to find all problems or classify every malformed numeric prefix under one universal lexer policy. TrailingInput means data remained after a complete value and surrounding whitespace. LeadingBom applies at view offset zero; U+FEFF after other outside-string input is ordinary invalid syntax. Errors are fail-fast; partially constructed owned state still cleans up with bounded stack use.
 
 ## 8. Evidence, scope and follow-through
 
-`prototypes/19-json.rill` contains intended-valid calls and independent expectations; `docs/prototypes/19-json.md` contains rejection, numeric-conversion and adversarial/resource cases. They are **hand-checked design artifacts, not executed tests**, a parser implementation or a claim that #28/#30 implementation/checker/backend gates are cleared.
+`prototypes/19-json.rill` contains intended-valid calls and independent expectations; `docs/prototypes/19-json.md` contains rejection, numeric-conversion and adversarial/resource cases. They are hand-checked design artifacts, not executed tests or a parser implementation. They do not establish that #28/#30 implementation/checker/backend gates are cleared.
 
 Use #41's confirmed conversion registration/error-evidence/naming reconciliation; #24 owns compiler diagnostics; #28 integrates exact JSON algorithms/invariants, byte positions and scalar spans, float/integer boundary behavior, quota accounting, callee exits/transitive views, deep copy/partial cleanup/cancellation/native lifetime rules and eventual executable suites. #30 still validates backend/proper-tail/Wasm mechanisms. If an accepted operation cannot be specified/checked consistently, return that blocker through the map; do not assert that privacy or iterative intent proves memory safety. #32/#39 and other application foundations must compose these owned values/errors rather than assume a streaming/reflected serializer.
 

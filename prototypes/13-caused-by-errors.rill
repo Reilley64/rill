@@ -1,8 +1,10 @@
-// ADR 0013: design examples, not compiled/executed fixtures.
-// Result/Err accessors and the canonical display module path remain #23 work.
-// This file uses ordinary nominal records; it does not settle #19's Result enum layout.
-import std::result::{Result, Ok, Err};
-import std::error::display;
+// Typed errors, explicit causes, guard, propagation and Result pipelines.
+// Design examples only. Library names follow the published #23 contracts.
+import std::log;
+import std::result::{Result, Ok, Err, andThen, map};
+import std::error::{display, cause};
+import std::option::Option;
+import std::number::parseNumber;
 
 type ReadFailed = { code: u32 };
 type ConfigLoadFailed = {};
@@ -79,6 +81,56 @@ function started(result: Result<u32, StartFailed>): bool {
   return true;
 }
 
+type PortError = { detail: string };
+
+implement display(error: &PortError): string {
+  return copy(&error.detail);
+}
+
+function parsePort(text: string): Result<i32, PortError> {
+  let port = parseNumber<i32>(&text) ? PortError { detail: `not a port: ${text}` };
+  guard port > 0 && port < 65536 else {
+    return Err(PortError { detail: `out of range: ${port}` });
+  }
+  return Ok(port);
+}
+
+function rejectReserved(port: i32): Result<i32, PortError> {
+  guard port >= 1024 else {
+    return Err(PortError { detail: `reserved port: ${port}` });
+  }
+  return Ok(port);
+}
+
+function toAddress(port: i32): string {
+  return `localhost:${port}`;
+}
+
+function portMessage(text: string): string {
+  let address = text |> parsePort |> andThen(rejectReserved) |> map(toAddress);
+  guard let listening = address else (error) {
+    return `error: ${error}`;
+  }
+  return `listening on ${listening}`;
+}
+
+function parseFailureHasCause(): bool {
+  guard let port = parsePort("80x0") else (error) {
+    return match (cause(&error)) {
+      Option.Some(inner) => true,
+      Option.None => false,
+    };
+  }
+  return false;
+}
+
+log(portMessage("8080"));
+log(portMessage("80x0")); // Renders the ParseError cause, not an invented digit/index API.
+
+expect portMessage("8080") == "listening on localhost:8080";
+expect portMessage("1024") == "listening on localhost:1024";
+expect portMessage("65535") == "listening on localhost:65535";
+expect parseFailureHasCause();
 expect loadedPort(loadConfig(true)) == 8080u32;
 expect loadedPort(loadConfig(false)) == 0u32;
 expect loadedPort(loadExplicit(false)) == 0u32;

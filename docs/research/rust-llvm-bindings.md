@@ -4,7 +4,7 @@ Research for [issue #6](https://github.com/Reilley64/rill/issues/6). Facts were 
 
 ## LLVM release context
 
-- The latest LLVM release is 23.1.4, published 2026-10-20. LLVM 23.1.0 shipped on 2026-08-25 and 22.1.0 on 2026-02-24. ([llvm-project releases](https://github.com/llvm/llvm-project/releases))
+- At the research date, the latest LLVM release was 23.1.4, published 2026-10-20. LLVM 23.1.0 shipped on 2026-08-25 and 22.1.0 on 2026-02-24. ([llvm-project releases](https://github.com/llvm/llvm-project/releases))
 - LLVM calls its C API stability "best effort". Calls such as "create this type of instruction" are expected to be less stable than "take this IR file and JIT it". ([LLVM Developer Policy, C API changes](https://llvm.org/docs/DeveloperPolicy.html#c-api-changes))
 - The textual IR format (`.ll`) is not backwards compatible. Bitcode (`.bc`) is: current LLVM loads any bitcode since version 3.0. ([LLVM Developer Policy, IR backwards compatibility](https://llvm.org/docs/DeveloperPolicy.html#ir-backwards-compatibility))
 
@@ -14,7 +14,7 @@ Research for [issue #6](https://github.com/Reilley64/rill/issues/6). Facts were 
 
 **LLVM versions.** Each crate major version targets one LLVM release. The crate version is the LLVM version times ten, so `llvm-sys` 191 is for LLVM 19.1.x. The build script accepts any LLVM at least as new as the target unless the `strict-versioning` feature is on, and it blocks versions known to be binary-incompatible. ([README, LLVM compatibility](https://gitlab.com/taricorp/llvm-sys.rs/-/blob/main/README.md#llvm-compatibility)) The newest release is 231.0.1 (LLVM 23.1), published 2026-10-09. Releases 160 through 221 got patch releases the same day. ([crates.io API](https://crates.io/api/v1/crates/llvm-sys))
 
-**Finding and linking LLVM.**
+Finding and linking LLVM requires the following:
 - The build needs `llvm-config` for the chosen LLVM version. It looks on `PATH`, or in `<prefix>/bin` when `LLVM_SYS_<version>_PREFIX` is set (for example `LLVM_SYS_221_PREFIX`). ([README, build requirements](https://gitlab.com/taricorp/llvm-sys.rs/-/blob/main/README.md#build-requirements))
 - The README says most binary LLVM distributions, including the official release packages, do not ship `llvm-config`. It names apt.llvm.org packages, Fedora `llvm-devel`, and Arch `llvm` as ones that do. Otherwise it suggests building LLVM from source. ([README, build requirements](https://gitlab.com/taricorp/llvm-sys.rs/-/blob/main/README.md#build-requirements))
 - Linking is chosen with one of four features: `prefer-dynamic`, `force-dynamic`, `prefer-static`, `force-static`. The default has been `prefer-static` since crate version 191; before that it was `force-static`. ([README, cargo features](https://gitlab.com/taricorp/llvm-sys.rs/-/blob/main/README.md#cargo-features))
@@ -42,7 +42,7 @@ Research for [issue #6](https://github.com/Reilley64/rill/issues/6). Facts were 
 
 ### llvm-sys plus a project-owned C++ shim (the rustc approach)
 
-rustc does not use `llvm-sys` or inkwell. `rustc_llvm` compiles its own C++ files (`PassWrapper.cpp`, `RustWrapper.cpp`, and others) with the `cc` crate. ([rustc_llvm build.rs](https://github.com/rust-lang/rust/blob/main/compiler/rustc_llvm/build.rs)) The wrapper README says the LLVM C++ ABI breaks between versions and must never be exposed to Rust. Only C-style `LLVMXyz` or `LLVMRustXyz` types cross the boundary. ([llvm-wrapper README](https://github.com/rust-lang/rust/blob/main/compiler/rustc_llvm/llvm-wrapper/README)) With this approach a project can reach C++ APIs that the C API lacks, but it must compile and maintain C++ against each LLVM version.
+rustc does not use `llvm-sys` or inkwell. `rustc_llvm` compiles its own C++ files (`PassWrapper.cpp`, `RustWrapper.cpp`, and others) with the `cc` crate. ([rustc_llvm build.rs](https://github.com/rust-lang/rust/blob/main/compiler/rustc_llvm/build.rs)) The wrapper README says the LLVM C++ ABI breaks between versions and must never be exposed to Rust. Only C-style `LLVMXyz` or `LLVMRustXyz` types cross the boundary. ([llvm-wrapper README](https://github.com/rust-lang/rust/blob/main/compiler/rustc_llvm/llvm-wrapper/README)) This lets a project call C++ APIs that the C API lacks. The project must compile and maintain its wrapper against each LLVM version.
 
 ### Emit textual IR and run LLVM tools
 
@@ -50,7 +50,7 @@ A compiler can write `.ll` text and pass it to `clang`, `llc`, or `opt`. The Rus
 
 ### Emit bitcode directly (the Zig approach)
 
-Zig writes LLVM bitcode itself and then hands it to LLVM. Roc's rewrite notes say this makes LLVM upgrades "trivial", because bitcode is backwards compatible and the API is not. The cost they cite is about 5% more LLVM codegen time for Zig. In early 2025 Roc wrote that Zig had "the only known implementation of that approach", so a Rust compiler would need to write its own bitcode writer. ([Roc rewrite notes](https://gist.github.com/rtfeldman/77fb430ee57b42f5f2ca973a3992532f)) LLVM is still needed to optimize and generate machine code from the bitcode.
+Zig writes LLVM bitcode itself and then hands it to LLVM. Roc's rewrite notes call LLVM upgrades "trivial" with this approach because bitcode is backwards compatible and the API is not. The notes also report about 5% more LLVM codegen time for Zig. In early 2025 Roc wrote that Zig had "the only known implementation of that approach", so a Rust compiler would need to write its own bitcode writer. ([Roc rewrite notes](https://gist.github.com/rtfeldman/77fb430ee57b42f5f2ca973a3992532f)) LLVM is still needed to optimize and generate machine code from the bitcode.
 
 ### llvm-ir
 
@@ -84,9 +84,9 @@ Zig writes LLVM bitcode itself and then hands it to LLVM. Roc's rewrite notes sa
 
 ## Guaranteed tail calls (`musttail`)
 
-**What LLVM guarantees.** `tail` is a hint that can be ignored. `musttail` means the call must be tail-call optimized for the program to be correct, even under `"disable-tail-calls"`. It guarantees no unbounded stack growth in recursive cycles. ([LangRef, call instruction](https://llvm.org/docs/LangRef.html#call-instruction))
+**What LLVM guarantees.** LLVM can ignore the `tail` hint. `musttail` means the call must be tail-call optimized for the program to be correct, even under `"disable-tail-calls"`. It guarantees no unbounded stack growth in recursive cycles. ([LangRef, call instruction](https://llvm.org/docs/LangRef.html#call-instruction))
 
-**Rules for `musttail`.** ([LangRef](https://llvm.org/docs/LangRef.html#call-instruction))
+The following rules apply to `musttail`. ([LangRef](https://llvm.org/docs/LangRef.html#call-instruction))
 - The call must come right before `ret`, and `ret` must return its value (or `undef`, or void).
 - Caller and callee must use the same calling convention, and both or neither must be varargs.
 - For conventions other than `tailcc` and `swifttailcc`, prototypes and ABI attributes must match.
@@ -95,13 +95,13 @@ Zig writes LLVM bitcode itself and then hands it to LLVM. Roc's rewrite notes sa
 
 **`tailcc`.** Under `tailcc`, calls in tail position are always optimized when the platform allows it. It does not support varargs. ([LangRef, calling conventions](https://llvm.org/docs/LangRef.html#calling-conventions)) A call marked `tail` is guaranteed to be optimized when both sides use `fastcc` or `tailcc`, plus `-tailcallopt` or `tailcc`. ([LangRef](https://llvm.org/docs/LangRef.html#call-instruction)) The C API enum has no named constant for `tailcc`. Its number is 18 in `CallingConv.h`. ([Core.h](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Core.h), [CallingConv.h](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm/IR/CallingConv.h))
 
-**C API and bindings.**
+The C API and bindings expose tail calls as follows:
 - `LLVMSetTailCallKind` and `LLVMGetTailCallKind` were added to the C API in LLVM 18. They set `tail`, `musttail`, or `notail`. ([LLVM 18 release notes](https://releases.llvm.org/18.1.0/docs/ReleaseNotes.html#changes-to-the-c-api), [Core.h](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Core.h))
 - Before LLVM 18 the C API had only `LLVMSetTailCall(bool)`, which sets `tail` and not `musttail`. ([Core.h](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Core.h))
 - inkwell exposes `CallSiteValue::set_tail_call_kind` and `get_tail_call_kind` only with `#[llvm_versions(18..)]`. ([call_site_value.rs](https://github.com/TheDan64/inkwell/blob/master/src/values/call_site_value.rs))
 - So `musttail` through the C API, `llvm-sys`, or inkwell needs LLVM 18 or newer.
 
-**Backend support.**
+Backend support varies by target:
 - LLVM's code generator docs list tail-call optimization on x86/x86-64, PowerPC, AArch64, and WebAssembly. Each has its own limits, such as no varargs; on x86-64 PIC, only module-local calls. ([CodeGenerator, tail call optimization](https://llvm.org/docs/CodeGenerator.html#tail-call-optimization))
 - rustc's explicit tail calls (`become`) lower to `LLVMSetTailCallKind(call, MustTail)`. ([rustc_codegen_llvm builder.rs](https://github.com/rust-lang/rust/blob/main/compiler/rustc_codegen_llvm/src/builder.rs), [become-musttail.rs test](https://github.com/rust-lang/rust/blob/main/tests/codegen-llvm/become-musttail.rs))
 - rustc's build test for tail calls with stack-passed arguments passes on these targets: i686, x86-64 (Linux and Windows), ARM, Thumb, AArch64, s390x, SPARC, PowerPC64, BPF, m68k, NVPTX, RISC-V, and Wasm.
@@ -109,19 +109,19 @@ Zig writes LLVM bitcode itself and then hands it to LLVM. Roc's rewrite notes sa
 
 ## Emitting WebAssembly
 
-**Target setup.**
+WebAssembly target setup has these requirements:
 - The LLVM build must include the WebAssembly target. Homebrew builds all targets. ([llvm.rb](https://github.com/Homebrew/homebrew-core/blob/main/Formula/l/llvm.rb))
 - In inkwell, `Target::initialize_webassembly` sits behind the `target-webassembly` feature. Target features are passed as a string to `Target::create_target_machine`. ([targets.rs](https://github.com/TheDan64/inkwell/blob/master/src/targets.rs))
 - LLVM 22 renamed the `wasm32-wasi` triple to `wasm32-wasip1`. The old name still works but warns. ([LLVM 22 release notes](https://releases.llvm.org/22.1.0/docs/ReleaseNotes.html#changes-to-the-webassembly-backend))
 - LLVM 23 changed reference types to `target("wasm.externref")` and `target("wasm.funcref")`. They used to be pointers in address spaces 10 and 20. ([LLVM 23 release notes](https://releases.llvm.org/23.1.0/docs/ReleaseNotes.html#changes-to-the-webassembly-backend))
 
-**Linking.**
+WebAssembly linking is a separate step:
 - LLVM emits Wasm object files for `wasm32-unknown-unknown`, and `wasm-ld` (the Wasm port of lld) links them into a module. ([lld WebAssembly docs](https://lld.llvm.org/WebAssembly.html))
 - lld can also be embedded by calling the C++ function `lld::lldMain`. ([lld docs](https://lld.llvm.org/)) This is C++, so a Rust compiler would need its own shim to embed it. That is an inference: no lld C API was found.
 - `lld` is packaged apart from LLVM: Homebrew formula `lld`, apt.llvm.org package `lld-<N>`. ([lld formula JSON](https://formulae.brew.sh/api/formula/lld.json), [apt.llvm.org](https://apt.llvm.org/))
 - The old Roc compiler linked Wasm by running `zig build-exe` with target `wasm32-wasi-musl`. ([Roc link.rs](https://github.com/roc-lang/roc/blob/alpha4-rolling/crates/compiler/build/src/link.rs))
 
-**Tail calls on Wasm.**
+Tail calls on Wasm have additional constraints:
 - The default `generic` CPU does not enable the `tail-call` feature, on both `main` and `release/23.x`. Only `bleeding-edge` does. ([WebAssembly.td on main](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/WebAssembly/WebAssembly.td), [on release/23.x](https://github.com/llvm/llvm-project/blob/release/23.x/llvm/lib/Target/WebAssembly/WebAssembly.td))
 - Without `+tail-call`, a `musttail` call fails with "WebAssembly 'tail-call' feature not enabled". With the feature on, `musttail` still fails in these cases ([WebAssemblyISelLowering.cpp](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/WebAssembly/WebAssemblyISelLowering.cpp)):
   - varargs calls
@@ -157,7 +157,7 @@ These are the open choices for the follow-up grilling ticket. Nothing here is de
    - inkwell: safe, typed API covering LLVM 12 to 23, used by Roc and Inko. But it is pre-1.0 with breaking changes, and Roc found LLVM upgrades through it costly.
    - Raw `llvm-sys`: fewer layers, but every call is `unsafe` and mostly undocumented.
    - `llvm-sys` plus a Rill-owned C++ shim: reaches C++-only APIs, such as embedding lld. The cost is C++ code that must be kept in step with each LLVM version.
-   - A Rill-owned bitcode writer: insulates codegen from LLVM API churn and relies on bitcode compatibility. There is no Rust implementation to reuse, and LLVM is still needed for optimization and codegen.
+   - A Rill-owned bitcode writer: avoids calls to changing LLVM APIs by relying on bitcode compatibility. There is no Rust implementation to reuse, and LLVM is still needed for optimization and codegen.
    - Textual `.ll` plus external tools: the simplest start, but there is no compatibility promise, and users need LLVM tools installed.
 2. **LLVM version policy.**
    - Option A: pin one major and upgrade on purpose (Roc and Inko stayed on 18).

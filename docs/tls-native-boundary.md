@@ -1,23 +1,23 @@
 # TLS native boundary. Semantic contract v1
 
-This is the **closed toolchain-owned operation/data/ownership contract** selected by #38 Q5/Q9/Q27/Q56/Q76/Q79 and explicit consolidated approval. The [public TLS contract](tls-contracts.md) governs behavior; [#44](https://github.com/Reilley64/rill/issues/44) must implement and validate bindings, layouts, C shim and native integration. **No working ABI, native extension format, C header implementation or security proof is delivered here.** A declaration, schema, reference calculation or another provider's fixture is not implementation evidence.
+This is the closed toolchain-owned operation/data/ownership contract selected by #38 Q5/Q9/Q27/Q56/Q76/Q79 and explicit consolidated approval. The [public TLS contract](tls-contracts.md) governs behavior; [#44](https://github.com/Reilley64/rill/issues/44) must implement and validate bindings, layouts, C shim and native integration. This document delivers no working ABI, native extension format, C header implementation or security proof. A declaration, schema, reference calculation or another provider's fixture is not implementation evidence.
 
 ## 1. Authority and status
 
 The standard module is trusted compiler/runtime support, not an external-provider plugin. Only toolchain-owned, allowlisted TLS operations can enter this boundary. No project-provided symbols/build hooks/metadata grant authority; no arbitrary library loading, C/Rust extern source syntax, Rill callbacks, public raw pointer/FD/pinning or forgeable native handle is introduced.
 
-Native targets: Linux/macOS × x86-64/AArch64, all acceptance **NOT RUN**. Standard wasm32-wasip1 has portable values/signatures but provider-dependent operations Unsupported; no imports/capabilities inferred. #30's approved portable activation-record/nonrecursive dispatcher direction is current, while its complete typed/owned ABI, executor, leases, wake/reclamation and target acceptance remain OPEN. #43's SQL data/binding/wire design is not a TLS ABI or general FFI permission; reuse only justified common runtime invariants, never its wire format by assumption.
+Native targets are Linux/macOS × x86-64/AArch64, with all acceptance NOT RUN. Standard wasm32-wasip1 has portable values/signatures, but provider-dependent operations return Unsupported. No imports/capabilities are inferred. #30's approved portable activation-record/nonrecursive dispatcher direction is current, while its complete typed/owned ABI, executor, leases, wake/reclamation and target acceptance remain OPEN. #43's SQL data/binding/wire design is not a TLS ABI or general FFI permission; reuse only justified common runtime invariants, never its wire format by assumption.
 
 Semantic v1 fixes operations, effects and ownership below. Actual ABI version negotiation, concrete byte layouts, alignments, generated marshalling and private C declarations must be pinned to the delivered compiler/runtime under #44. Never reinterpret Rill enum/record/List/string/Bytes/Err layouts as C structures or presume LLVM23 alone establishes a C ABI. Unsupported or unsafe expressibility returns to map #1/provider selection before support, not relaxed semantics.
 
 ## 2. Controlled dependency and initialization profile
 
-- Selected line OpenSSL3.5 LTS; inspected3.5.9 commit `45e844fa2a14ec92d146bd8f5778ac130b6625fb`. Pin complete source/toolchain/build/patch/dependency closure and effective features. Security updates are deliberate maintained-line updates; no permanent vulnerable freeze, unreviewed major upgrade or systemlib substitution.
-- Controlled private static libssl/libcrypto instance, with actual symbol isolation/coexistence tests. Static linking alone does not hide symbols or prevent earlier initialization by another consumer. Inventory constructors, global state, thread-local queues, callbacks, shutdown ordering and foreign dependencies.
+- The selected line is OpenSSL 3.5 LTS; the inspected version is 3.5.9 at commit `45e844fa2a14ec92d146bd8f5778ac130b6625fb`. Pin complete source/toolchain/build/patch/dependency closure and effective features. Security updates are deliberate maintained-line updates; do not permanently freeze a vulnerable version, make an unreviewed major upgrade or substitute a system library.
+- Use a controlled private static libssl/libcrypto instance, with actual symbol isolation/coexistence tests. Static linking alone does not hide symbols or prevent earlier initialization by another consumer. Inventory constructors, global state, thread-local queues, callbacks, shutdown ordering and foreign dependencies.
 - Suppress automatic configuration loading; disable engines, dynamic providers/DSOs, optional key logging and provider-owned HTTP/socket paths. Review applicable no-autoload-config/no-dso/no-engine/no-sslkeylog/no-http/no-sock build controls and explicit context APIs; their actual effects are source/target-specific, not a universal environment sandbox.
-- Approved built-in default/base facilities needed by the fixed algorithm/decoder profile only; no legacy/FIPS/custom-provider mode or validated-FIPS claim. Use an independent library context and explicit configuration, no default trust paths/URI/directory lookups, RAND files or native network callbacks.
-- Retain reviewed platform acceleration. Residual x86/ARM CPU-capability and host-loader environment inputs are documented deployment assumptions, not controlled by Rill startup Inputs. A late init cannot undo constructor reads or another consumer's earlier state. No per-call getenv/setenv dance/Rill-only lock claim.
-- Built-in DRBG with reviewed Linux/macOS getrandom/getentropy secure seeding closure, no device/file/jitter/unreviewed-provider fallback/manual weak seed. This is not std::random-hook injection or a claim to use #37's exact macOS SecRandomCopyBytes path. Validate readiness/blocking/reseed/error/fork/initialization behavior reachable in the delivered profile.
+- Use only approved built-in default/base facilities needed by the fixed algorithm/decoder profile. There is no legacy/FIPS/custom-provider mode or validated-FIPS claim. Use an independent library context and explicit configuration, no default trust paths/URI/directory lookups, RAND files or native network callbacks.
+- Retain reviewed platform acceleration. Residual x86/ARM CPU-capability and host-loader environment inputs are documented deployment assumptions, not controlled by Rill startup Inputs. Late initialization cannot undo constructor reads or another consumer's earlier state. Do not claim that per-call getenv/setenv changes or a Rill-only lock control those inputs.
+- Use a built-in DRBG with a reviewed Linux/macOS getrandom/getentropy secure seeding dependency closure. Do not use device/file/jitter/unreviewed-provider fallbacks or manual weak seeds. This is not std::random-hook injection or a claim to use #37's exact macOS SecRandomCopyBytes path. Validate readiness/blocking/reseed/error/fork/initialization behavior reachable in the delivered profile.
 - Rill maintainers own advisory monitoring, provenance, source-specific notices/license review, review of any integration patch, rebuilding and redistribution. No root bundle is shipped by this decision. No legal/security certification follows.
 
 ## 3. Closed operation catalogue
@@ -26,23 +26,23 @@ Names identify semantic operations, not callable Rill externs, numeric opcodes o
 
 | Operation | Input / result ownership | Effect and gate |
 | --- | --- | --- |
-| Bootstrap | Pinned trusted build description → runtime-private provider state | Check required effective algorithms, suppressed features, initialization and isolation; no network/default trust loading. |
-| LoadCredentials | Owned native copies of bounded certificate/key inputs → unpublished credential result | Complete strict framing/DER/key checks, no password prompt, validate key match/material. Not own trust/status certification. |
-| LoadAnchors | Owned bounded input + ServerAuth/ClientAuth purpose → unpublished root snapshot | Explicit root-only grants, self-signature/CA/KU/role restrictions and narrow SHA1-selfsig exception, no AUX/partial roots. |
-| LoadCrls | Owned bounded input + exact positive whole-second age → unpublished CRL snapshot | Number/scope/form/conflict parsing, not authenticated peer status. Reject partial/unsupported input; no fetching. |
-| BuildClientConfig / BuildServerConfig | Retained credential/anchor/CRL snapshot references + closed policy data → unpublished config | Freeze logical inputs, validate role/purpose/ALPN/profile and native effective inventory. No ambient overrides. |
-| CreateClient / CreateServer | Retained config + client reference/SNI data → unpublished engine | One engine, private input/output buffers and fresh local key state. No transport object/callback enters C. |
-| FeedCiphertext | Stable owned input span → exact consumed ciphertext count | Prefix before managed transport reads, bounded ingress; strict record/work accounting. Not plaintext progress. |
-| AcceptPlaintext | Stable owned pending plaintext → exact private-stage acceptance/processing facts | Public acceptance was TLS-owned queue admission, not native return value; preserve retry identity and cursors. |
-| Advance | Engine, action and checked time/control admission context → completion/WANT/failure facts | Handshake, record read/write, pending control, flush or send-notify; serialized foreign step, no managed suspension/re-entry. |
-| TakeCiphertext | Engine output → retained/copyable owned output span and exact count | Managed S.write/S.flush outside C; short writes retain unaccepted tail. No replay or native FD calls. |
-| TakePlaintext | Authenticated engine output → bounded owned plaintext/count | Managed append into caller Bytes; never unauthenticated fragment. Preserve tail before pending terminal fault. |
-| CapturePublication | Successful verified engine → owned negotiated/authenticated metadata | Include actual built peer path, reference/SNI distinction, ALPN/version/cipher. No publication before policy and final handoff. |
-| Adopt / Release | Unpublished result or owned resource + runtime identity → one completed transition | Atomic ownership adoption or loser cleanup; release waits for every lease/callback/job use, not cancel/drop alone. |
-| RetainSnapshot | Owned immutable snapshot → protected retained ownership | Implements explicit public copy semantics, not fresh time/trust or duplicated mutable engine. |
-| CaptureFailure | Native operation result + saved native facts → owned bounded diagnostic | Same-thread classification/error capture before migration; original managed transport errors stay #23 causes outside native marshalling. |
+| Bootstrap | Takes a pinned trusted build description and returns runtime-private provider state. | Check required effective algorithms, suppressed features, initialization and isolation; no network/default trust loading. |
+| LoadCredentials | Takes owned native copies of bounded certificate/key inputs and returns an unpublished credential result. | Complete strict framing/DER/key checks without a password prompt, and validate key match/material. This does not certify local trust/status. |
+| LoadAnchors | Takes owned bounded input and ServerAuth/ClientAuth purpose, then returns an unpublished root snapshot. | Require explicit root-only grants, self-signature/CA/KU/role restrictions and the narrow SHA1-selfsig exception. Do not accept AUX/partial roots. |
+| LoadCrls | Takes owned bounded input and an exact positive whole-second age, then returns an unpublished CRL snapshot. | Parse number/scope/form/conflict data without claiming authenticated peer status. Reject partial/unsupported input without fetching. |
+| BuildClientConfig / BuildServerConfig | Takes retained credential/anchor/CRL snapshot references and closed policy data, then returns an unpublished config. | Freeze logical inputs, validate role/purpose/ALPN/profile and native effective inventory. No ambient overrides. |
+| CreateClient / CreateServer | Takes retained config and client reference/SNI data, then returns an unpublished engine. | Create one engine with private input/output buffers and fresh local key state. No transport object/callback enters C. |
+| FeedCiphertext | Takes a stable owned input span and returns the exact consumed ciphertext count. | Process the prefix before managed transport reads, with bounded ingress and strict record/work accounting. This is not plaintext progress. |
+| AcceptPlaintext | Takes stable owned pending plaintext and returns exact private-stage acceptance/processing facts. | Public acceptance was TLS-owned queue admission, not native return value; preserve retry identity and cursors. |
+| Advance | Takes an engine, action and checked time/control admission context, then returns completion/WANT/failure facts. | Perform a handshake, record read/write, pending control, flush or send-notify as a serialized foreign step. Do not suspend/re-enter managed code. |
+| TakeCiphertext | Takes engine output and returns a retained/copyable owned output span and exact count. | Perform managed S.write/S.flush outside C. Short writes retain the unaccepted tail. Do not replay or make native FD calls. |
+| TakePlaintext | Takes authenticated engine output and returns bounded owned plaintext/count. | Append managed data into caller Bytes, never an unauthenticated fragment. Preserve the tail before a pending terminal fault. |
+| CapturePublication | Takes a successful verified engine and returns owned negotiated/authenticated metadata. | Include actual built peer path, reference/SNI distinction, ALPN/version/cipher. No publication before policy and final handoff. |
+| Adopt / Release | Takes an unpublished result or owned resource and runtime identity, then completes one transition. | Adopt ownership atomically or clean up a losing result. Release waits for every lease/callback/job use, not cancel/drop alone. |
+| RetainSnapshot | Takes an owned immutable snapshot and returns protected retained ownership. | Implements explicit public copy semantics, not fresh time/trust or duplicated mutable engine. |
+| CaptureFailure | Takes a native operation result and saved native facts, then returns an owned bounded diagnostic. | Classify and capture errors on the same thread before migration. Original managed transport errors stay #23 causes outside native marshalling. |
 
-Managed read/write/flush/close are **not native opcodes**. Their independently selected RE/WE/FE/CE evidence is checked in Rill; the provider never sees S, its arbitrary object layout, error representation or callback. A borrowed S retains normal dependencies. Only owned copies/leases cross the boundary.
+Managed read/write/flush/close are not native opcodes. Their independently selected RE/WE/FE/CE evidence is checked in Rill; the provider never sees S, its arbitrary object layout, error representation or callback. A borrowed S retains normal dependencies. Only owned copies/leases cross the boundary.
 
 WANT is continuation of the same engine operation, not success, transport health, EOF, cancellation completion or a new handshake/reconnect. Preserve the original plaintext buffer identity/length/content and internal native cursor until that retry obligation actually ends. Do not infer cancellation-abortability from memory BIO support.
 
@@ -57,11 +57,11 @@ WANT is continuation of the same engine operation, not success, transport health
 
 ## 5. Execution, error capture and callbacks
 
-Potentially blocking initialization/entropy/parser/crypto/free work runs on admitted joined native work, not by blocking a managed M:N worker indefinitely or detaching cleanup. No managed suspension while foreign frames retain managed storage. Native work may block; no hard CPU/return bound is asserted. Worker stacks are distinct from #22 managed 1MiB stacks and need their own evidence.
+Potentially blocking initialization/entropy/parser/crypto/free work runs on admitted joined native work, not by blocking a managed M:N worker indefinitely or detaching cleanup. Managed code must not suspend while foreign frames retain managed storage. Native work may block; no hard CPU/return bound is asserted. Worker stacks are distinct from #22 managed 1MiB stacks and need their own evidence.
 
-For each foreign step: establish error-queue preconditions; execute the relevant SSL operation; save relevant native system-error state; perform required SSL_get_error/classification on the **same native thread without intervening unrelated OpenSSL calls**; drain/capture safe numeric facts before migration/re-entry. Keep native error, outer TLS operation/phase and original managed transport cause distinct. Native strings/file paths/data dumps are not public messages.
+For each foreign step, establish error-queue preconditions and execute the relevant SSL operation. Save relevant native system-error state. Perform required SSL_get_error/classification on the same native thread without intervening unrelated OpenSSL calls. Drain/capture safe numeric facts before migration/re-entry. Keep native error, outer TLS operation/phase and original managed transport cause distinct. Native strings/file paths/data dumps are not public messages.
 
-Private SNI/ALPN/verification callbacks inspect only retained native state and bounded admitted data. No arbitrary Rill closure re-entry, suspending callback, app retrieval/signing/password/keylog callback or success override of failed verification. Where an extra restriction cannot be enforced safely in the chosen maintained provider, use reviewed upstream support/patches or return to the decision. Not assume a callback flag proves it.
+Private SNI/ALPN/verification callbacks inspect only retained native state and bounded admitted data. No arbitrary Rill closure re-entry, suspending callback, app retrieval/signing/password/keylog callback or success override of failed verification. Where an extra restriction cannot be enforced safely in the chosen maintained provider, use reviewed upstream support/patches or return to the decision. Do not assume a callback flag proves enforcement.
 
 Certificate time comes from checked wall acquisition, not unchecked native time() or OCSP_check_validity convenience paths. Native parameter inheritance/application, floor-to-seconds, native range and [notBefore,notAfter) behavior need fixtures. Local admission checks and peer verification phases use fresh samples; immutable config never contains frozen now.
 
@@ -69,18 +69,18 @@ Certificate time comes from checked wall acquisition, not unchecked native time(
 
 Semantic lifecycle:
 
-1. **Prepared:** managed arguments/control validated; native buffers/snapshots retained; no public result yet.
-2. **Admitted:** runtime owns execution/lease identity and cleanup responsibility. Completion/control select once with unspecified ready ties.
-3. **Running / WANT / awaiting transport:** stable buffers and config/engine uses remain owned; managed transport I/O happens outside foreign calls under normal exclusive/dependency rules.
-4. **Result pending adoption:** a newly created native object is still unpublished, held by exactly one protected result owner.
-5. **Adopted** only if successful selected result is atomically installed in one managed owner. Otherwise **loser release** cleans it exactly once, including late success after cancellation.
-6. **Quiescent release:** execution finished or confirmed aborted, callbacks/registrations unwound or unregistered with quiescence, wake identities retired, then storage reclaimed.
+1. In Prepared, managed arguments/control are validated and native buffers/snapshots are retained. There is no public result yet.
+2. In Admitted, the runtime owns execution/lease identity and cleanup responsibility. Completion/control select once with unspecified ready ties.
+3. In Running / WANT / awaiting transport, stable buffers and config/engine uses remain owned. Managed transport I/O happens outside foreign calls under normal exclusive/dependency rules.
+4. In Result pending adoption, a newly created native object is still unpublished and held by exactly one protected result owner.
+5. The object is Adopted only if the successful selected result is atomically installed in one managed owner. Otherwise loser release cleans it exactly once, including late success after cancellation.
+6. In Quiescent release, execution has finished or is confirmed aborted, callbacks/registrations have unwound or unregistered with quiescence, and wake identities have retired. Only then is storage reclaimed.
 
 Wake events carry the real operation/activation identity and generation; stale/duplicate/late events cannot resume reused storage or adopt a second owner. Keep actual surviving managed activation/loans valid through join, not a guessed reconstructed continuation. #30/#43 source models do not implement these obligations for TLS.
 
 Before admission an effect-free borrowed-operation rejection preserves a healthy stream; a consuming handshake/close still releases inputs. After admission abandonment poisons TLS but does not authorize force-killing a worker/closing a borrowed lower operation/freeing its source to fake completion. Select token/deadline/clock outcome once and finalize real late public plaintext prefixes after required cleanup. Late native ciphertext is not itself a public plaintext append.
 
-Intrinsic stopping stays outside Result and masked through required installation/replacement/disposal/joins. Mandatory release ignores external cancellation and can wait indefinitely. No selected success/error reclassification after cleanup, rollback, replay, healthy-session reuse after poison or error-envelope cloning. Failed/poisoned disposal does not perform graceful TLS I/O.
+Intrinsic stopping stays outside Result and masked through required installation/replacement/disposal/joins. Mandatory release ignores external cancellation and can wait indefinitely. Do not reclassify selected success/error after cleanup. Cleanup provides no rollback. Do not replay, reuse a poisoned session as healthy or clone error envelopes. Failed/poisoned disposal does not perform graceful TLS I/O.
 
 ## 7. Conformance and acceptance inventory. All NOT RUN
 

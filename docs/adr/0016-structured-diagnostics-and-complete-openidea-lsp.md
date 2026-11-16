@@ -1,6 +1,6 @@
 # Structured diagnostics and complete OpenIDEA-used LSP support
 
-[Issue #24](https://github.com/Reilley64/rill/issues/24) explicitly confirmed 52 interview decisions and the consolidated design. Use one structured diagnostic model for human, versioned JSONL and LSP adapters, with effect-preserving bounded expectation snapshots. Prioritize complete applicable LSP support used by OpenIDEA v0.1.44, not a diagnostics-only milestone, because readable errors and reliable editor assistance need the same source identities, contexts and checking facts.
+[Issue #24](https://github.com/Reilley64/rill/issues/24) explicitly confirmed 52 interview decisions and the consolidated design. Use one structured diagnostic model for human, versioned JSONL and LSP adapters, with effect-preserving bounded expectation snapshots. Prioritize complete applicable LSP support used by OpenIDEA v0.1.44 rather than a diagnostics-only milestone. Errors and editor assistance depend on the same source identities, contexts and checking facts.
 
 ## Contracts and boundaries
 
@@ -12,7 +12,7 @@
 
 ## Consequences and evidence
 
-The selected client drops some rich diagnostic fields, retains some stale display state and negotiates abort rather than transactional edits. Preserve rich data, supply essential message fallbacks and test actual application paths instead of assuming advertisements prove behavior. The [source research](../research/openidea-language-server-capabilities.md) is not runtime validation.
+The selected client drops some detailed diagnostic fields, retains some stale display state and negotiates abort rather than transactional edits. Preserve the full diagnostic data, supply essential message fallbacks and test actual application paths. Advertised capabilities do not prove behavior. The [source research](../research/openidea-language-server-capabilities.md) is not runtime validation.
 
 [Delivery/acceptance #42](https://github.com/Reilley64/rill/issues/42) carries the entire prioritized scope as a **v0 tooling-readiness gate**. No matrix row has passed. Closing #24 approves design only; completed server delivery is not a prerequisite for drafting #28 RFCs. #28 retains exact checking/cleanup/observation/lowering rules; #30 retains backend evidence. An inconsistent required contract returns to the map, not silent feature reduction or an assumed new architecture.
 

@@ -21,7 +21,7 @@ Calls wait by suspending the current routine when progress is not available. Pub
 
 ## Read, write and failure semantics
 
-Read appends at most maxBytes to the existing destination, preserving its old contents. `Some(n)` with positive maxBytes has `1 <= n <= maxBytes`; `None` is EOF and appends nothing. A short positive read is neither EOF nor a message boundary. A zero request returns Some(0) without consuming input or testing EOF. The request is an upper bound, not a promise to allocate that amount; implementation-sized reads must not narrow/wrap public u64 counts.
+Read appends at most maxBytes to the existing destination and preserves its old contents. `Some(n)` with positive maxBytes has `1 <= n <= maxBytes`; `None` is EOF and appends nothing. A short positive read is neither EOF nor a message boundary. A zero request returns Some(0) without consuming input or testing EOF. The request is an upper bound, not a promise to allocate that amount; implementation-sized reads must not narrow/wrap public u64 counts.
 
 Write accepts a prefix of its supplied logical Bytes extent. Nonempty input succeeds with a positive count no greater than its length; empty input succeeds immediately with zero. Unavailability suspends; inability to proceed fails rather than reporting successful zero progress. Accepted bytes belong to the receiving layer, not necessarily the disk, peer or application. Failed writes must not be retried from the beginning without respecting their progress.
 
@@ -29,7 +29,7 @@ Write accepts a prefix of its supplied logical Bytes extent. Nonempty input succ
 type IoFailure<E> = { transferred: u64; error: Err<E> };
 ```
 
-Failures preserve exact progress relative to this operation: bytes appended by read or accepted from this write's input. Read's visible destination-length increase equals transferred, even on failure; no garbage/unreported initialized bytes or rollback is allowed. The original typed Err<E> retains origin/cause data and actual dependencies. Standard display requires display(E); storing this typed envelope does not erase it into Cause or require blanket noBorrow/sendable/shareable. Normal cause erasure, exact-E propagation, explicit error adaptation and fatal panic rules remain.
+Failures preserve exact progress relative to this operation. For read, this is the number of bytes appended. For write, it is the number accepted from this call's input. Read's visible destination-length increase equals transferred, even on failure; no garbage/unreported initialized bytes or rollback is allowed. The original typed Err<E> retains origin/cause data and actual dependencies. Standard display requires display(E); storing this typed envelope does not erase it into Cause or require blanket noBorrow/sendable/shareable. Normal cause erasure, exact-E propagation, explicit error adaptation and fatal panic rules remain.
 
 Helpers must validate counts before arithmetic/slicing: impossible bounds, successful no-progress reports, EOF with appended data, or read progress inconsistent with length change are fatal adapter-contract bugs, not invented values of arbitrary E. Do not promise expensive byte-for-byte validation of preserved prefixes. No memory-safety guarantee may depend on an unchecked adapter count. Implementations remain responsible for their semantic contract and safe native registration.
 
@@ -115,16 +115,16 @@ Cooperative cancellation remains outside Result. It may leave consumed input/com
 
 ## Scoped borrow-free errors confirmed after artifact validation (Q36)
 
-Recording exposed a concrete conservative-borrow gap: readToEnd's local probe and adapters' internal buffers cannot be destroyed/mutated while an unknown error retains their exclusive dependency. Buffered consuming close also cannot return a flush error borrowing the resource it destroys. display(E) alone does not rule these out. The user explicitly approved these conservative requirements:
+Recording the contract exposed a conservative-borrow gap. readToEnd's local probe and adapters' internal buffers cannot be destroyed or mutated while an unknown error retains their exclusive dependency. Buffered consuming close also cannot return a flush error borrowing the resource it destroys. display(E) alone does not rule these out. The user explicitly approved these conservative requirements:
 
 | Operation | Scoped requirement beyond capability/display evidence |
 | --- | --- |
-| readToEnd | noBorrow(E) |
-| BufferedReader read | noBorrow of underlying read E |
-| BufferedWriter write / flush | noBorrow of underlying write WE |
-| BufferedWriter consuming close | noBorrow(WE), noBorrow(FE) |
+| readToEnd | Requires noBorrow(E). |
+| BufferedReader read | Requires noBorrow for the underlying read error E. |
+| BufferedWriter write / flush | Requires noBorrow for the underlying write error WE. |
+| BufferedWriter consuming close | Requires noBorrow(WE) and noBorrow(FE). |
 
-These are deliberately stronger than the theoretically minimal dependency conditions, using existing evidence rather than inventing selective lifetime/dependency annotations. No blanket restriction is added to primitive read/write/flush/close errors, readExact/writeAll over caller-owned buffers, or buffered-reader close delegated to consuming close(R,CE). No sendable/shareable requirement follows. A generic readToEnd caller must state noBorrow(E) even when some concrete instantiations would be borrow-free; MemoryError in prototype 19 satisfies it structurally. Applications needing borrowed errors can use direct operations/caller-buffer helpers or explicitly adapt errors to an owned form before these restricted adapters. #28 still owes formal checking/evidence transport and must not treat this approval or examples as a soundness proof.
+These requirements are deliberately stronger than the theoretically minimal dependency conditions. They use existing evidence rather than new selective lifetime/dependency annotations. No blanket restriction is added to primitive read/write/flush/close errors, readExact/writeAll over caller-owned buffers, or buffered-reader close delegated to consuming close(R,CE). No sendable/shareable requirement follows. A generic readToEnd caller must state noBorrow(E) even when some concrete instantiations would be borrow-free; MemoryError in prototype 19 satisfies it structurally. Applications needing borrowed errors can use direct operations/caller-buffer helpers or explicitly adapt errors to an owned form before these restricted adapters. #28 still owes formal checking/evidence transport and must not treat this approval or examples as a soundness proof.
 
 ## Later filesystem realization (#35)
 

@@ -1,3 +1,0 @@
-import std::log;
-
-log("hello world");

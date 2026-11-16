@@ -5,7 +5,7 @@ Rill is a functional-first programming language with TypeScript-style syntax. It
 ## Language
 
 **Analysis context**:
-A selected Rill entry file, target and compiler-option combination that determines the loaded program graph and meaning of editor results. A workspace folder or search index is not that context.
+A combination of a selected Rill entry file, target and compiler options that determines the loaded program graph and meaning of editor results. A workspace folder or search index is not that context.
 _Avoid_: guessed project root, merged program, workspace folder
 
 **Borrow**:
@@ -33,7 +33,7 @@ Rill's owned contiguous byte sequence, distinct from List<u8>. Read-only logical
 _Avoid_: byte string, contiguous List guarantee, owning view
 
 **Cancellation**:
-An intrinsic cooperative request to stop a goroutine while completing its required cleanup, outside ordinary Result. Explicit cancellation-token requests are separate observable state: token-aware operations can return typed outcomes after required release. Neither mechanism implies rollback or immediate termination.
+An intrinsic cooperative request to stop a goroutine while completing its required cleanup, outside ordinary Result. Explicit cancellation-token requests are separate observable state. Token-aware operations can return typed outcomes after required release. Neither mechanism implies rollback or immediate termination.
 _Avoid_: panic, force kill, immediate termination
 
 **Cancellation source**:
@@ -61,7 +61,7 @@ A borrowed TLS-stream view carrying explicit network control for its canonical I
 _Avoid_: owning connection, ambient context, independent TLS direction
 
 **Dispose**:
-The `dispose` overload for a type: extra cleanup followed by disposal of its remaining owned fields. Calling it directly consumes the value early; moved or already disposed fields are not disposed again.
+The `dispose` overload for a type, which performs extra cleanup before disposal of its remaining owned fields. Calling it directly consumes the value early; moved or already disposed fields are not disposed again.
 _Avoid_: drop, destructor, deinit, finalizer
 
 **Enum**:
@@ -229,7 +229,7 @@ A `Shared<T>` handle gives a value more than one owner by explicitly counting it
 _Avoid_: Arc, Rc
 
 **SQL control**:
-Owned std::sql::SqlControl: an optional clock/absolute Instant and a CancellationToken, consumed per operation. Explicit copies retain the same target and state, not a restarted timeout. Sessions and idle transactions do not inherit control; cursors retain query control and mandatory cleanup ignores external requests.
+An owned std::sql::SqlControl containing an optional clock/absolute Instant and a CancellationToken, consumed per operation. Explicit copies retain the same target and state, not a restarted timeout. Sessions and idle transactions do not inherit control. Cursors retain query control, and mandatory cleanup ignores external requests.
 _Avoid_: ambient context, timeout duration, transaction lifetime
 
 **SQL execution observation**:
@@ -241,15 +241,15 @@ Independently typed query-start/iteration/close or transaction-finalization/clea
 _Avoid_: unified native error, erased cause, cleanup success
 
 **SQL result stream**:
-A cursor retaining the session and execution dependencies needed to produce owning rows. Active advancement checks retained query control even for buffered rows; terminal advancement stays None. Exhaustion alone does not establish safe session reuse.
+A cursor retaining the session and execution dependencies needed to produce owning rows. Active advancement checks retained query control even for buffered rows. Terminal advancement stays None. Exhaustion alone does not establish safe session reuse.
 _Avoid_: owning row, materialized result list, reusable connection
 
 **SQL temporal parameter**:
-Date/Time/DateTime from std::time::civil or Timestamp from std::time, explicitly packed into Parameter with faithful checked native mapping. No silent precision/range/sentinel repair, inferred zone/unit or calendar/elapsed conversion. Checked temporal failures retain their original Err<TimeError>.
+A Date/Time/DateTime from std::time::civil or Timestamp from std::time, explicitly packed into Parameter with faithful checked native mapping. The mapping does not silently repair precision, range or sentinel values, infer a zone or unit, or convert between calendar and elapsed quantities. Checked temporal failures retain their original Err<TimeError>.
 _Avoid_: monotonic Instant, implicit zone, database interval
 
 **Span**:
-A one-sign temporal value retaining calendar and time units. It is distinct from SignedDuration: interpreting calendar units as elapsed quantities needs explicit context.
+A one-sign temporal value retaining calendar and time units. It is distinct from SignedDuration. Interpreting calendar units as elapsed quantities needs explicit context.
 _Avoid_: milliseconds, fixed duration, fieldwise sum
 
 **Signed duration**:

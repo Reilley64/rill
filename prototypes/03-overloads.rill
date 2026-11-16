@@ -1,8 +1,10 @@
-import std::log;
+// Static overload selection, enums and payload ownership.
+// Design examples only. See the enum case notes for independent rejections.
 import std::collection::{List, map, join};
 
 type Point = { x: i32; y: i32 };
 
+// This local family is separate from canonical template formatting.
 function show<T>(value: &T): string;
 
 implement show(value: &i32): string {
@@ -10,74 +12,135 @@ implement show(value: &i32): string {
 }
 
 implement show(value: &bool): string {
-  return match (value) {
-    true => "yes",
-    false => "no",
-  };
+  return if (*value) "yes" else "no";
 }
 
 implement show(point: &Point): string {
-  return `(${show(point.x)}, ${show(point.y)})`;
+  return `(${point.x}, ${point.y})`;
 }
 
 implement<T> show(items: &List<T>): string where show(T) {
-  let parts = items |> map(show) |> join(", ");
-  return `[${parts}]`;
+  let parts = map(items, (item) => show(item));
+  return `[${join(parts, &", ")}]`;
 }
 
 implement show(points: &List<Point>): string {
-  let parts = points |> map(show) |> join(" -> ");
-  return `path ${parts}`;
+  let parts = map(points, (point) => show(point));
+  return `path ${join(parts, &" -> ")}`;
 }
 
-function greeting(language: string): string;
-
-implement greeting(language: "fr"): string {
-  return "bonjour";
+enum Language {
+  English,
+  French { crazy: string },
+  German(string),
 }
 
-implement greeting(language: "es"): string {
-  return "hola";
+enum Box<T> {
+  Value(T),
+  Empty,
 }
 
-implement greeting(language: string): string {
-  return "hello";
+function greeting(language: &Language): string;
+
+implement greeting(language: &Language): string {
+  return "Hello";
 }
 
-function fib(n: i32): i32 {
-  return match (n) {
-    0 => 0,
-    1 => 1,
-    _ => fib(n - 1) + fib(n - 2),
+implement greeting(language: &Language.French): string {
+  return "Bonjour";
+}
+
+function fromRuntime(language: &Language): string {
+  return greeting(language); // Whole-enum static type selects the fallback.
+}
+
+function fromMatch(language: &Language): string {
+  return match (language) {
+    Language.English => greeting(language),
+    Language.French { crazy } => greeting(language),
+    Language.German(text) => greeting(language),
   };
 }
 
-let origin = Point { x: 0, y: 0 };
+function inferredFrench(): string {
+  let language = Language.French { crazy: "payload" };
+  return greeting(&language);
+}
 
-log(show(42i32));
-log(show(true));
-log(show(origin));
-log(show(&[1i32, 2i32, 3i32]));
-log(show(&[origin, Point { x: 3, y: 4 }]));
-log(greeting("fr"));
-log(greeting("de"));
-log(show(fib(10)));
+function annotatedFrench(): string {
+  let language: Language = Language.French { crazy: "payload" };
+  return greeting(&language);
+}
 
-// Output:
-// 42
-// yes
-// (0, 0)
-// [1, 2, 3]
-// path (0, 0) -> (3, 4)
-// bonjour
-// hello
-// 55
+function joined(chooseFrench: bool): string {
+  let language = if (chooseFrench)
+    Language.French { crazy: "payload" }
+  else Language.English;
+  return greeting(&language); // Distinct variants join at Language.
+}
 
-// Test-only expectations for overload selection and recursion.
-expect show(42i32) == "42";
-expect show(true) == "yes";
-expect greeting("fr") == "bonjour";
-expect greeting("de") == "hello";
-expect fib(0) == 0;
-expect fib(1) == 1;
-expect fib(10) == 55;
+function takeFrench(language: Language.French): string {
+  return language.crazy;
+}
+
+function takeGerman(language: Language.German): string {
+  return match (language) {
+    Language.German(text) => text,
+  };
+}
+
+function unbox(value: Box<string>): string {
+  return match (value) {
+    Box.Value(text) => text,
+    Box.Empty => "empty",
+  };
+}
+
+function emptyBox(): string {
+  let value: Box<string> = Box.Empty;
+  return unbox(value);
+}
+
+function setFrench(language: &mut Language.French): void {
+  language.crazy = "changed";
+}
+
+function replaceLanguage(language: &mut Language): void {
+  *language = Language.English;
+}
+
+function mutatedPayload(): string {
+  let mut language = Language.French { crazy: "original" };
+  setFrench(&mut language);
+  return takeFrench(language);
+}
+
+function replacedVariant(): string {
+  let mut language: Language = Language.French { crazy: "original" };
+  replaceLanguage(&mut language);
+  return fromMatch(&language);
+}
+
+// Enum cases retain their original ordering in the case inventory.
+expect greeting(&Language.English) == "Hello";
+expect greeting(&Language.French { crazy: "one" }) == "Bonjour";
+expect greeting(&Language.French { crazy: "two" }) == "Bonjour";
+expect greeting(&Language.German("hallo")) == "Hello";
+expect fromRuntime(&Language.French { crazy: "payload" }) == "Hello";
+expect fromMatch(&Language.French { crazy: "payload" }) == "Bonjour";
+expect inferredFrench() == "Bonjour";
+expect annotatedFrench() == "Hello";
+expect joined(true) == "Hello";
+expect joined(false) == "Hello";
+expect takeFrench(Language.French { crazy: "bonjour" }) == "bonjour";
+expect takeGerman(Language.German("hallo")) == "hallo";
+expect unbox(Box.Value("boxed")) == "boxed";
+expect emptyBox() == "empty";
+expect mutatedPayload() == "changed";
+expect replacedVariant() == "Hello";
+
+expect show(&42i32) == "42";
+expect show(&true) == "yes";
+expect show(&Point { x: 0, y: 0 }) == "(0, 0)";
+expect show(&[1i32, 2i32, 3i32]) == "[1, 2, 3]";
+expect show(&[Point { x: 0, y: 0 }, Point { x: 3, y: 4 }]) == "path (0, 0) -> (3, 4)";

@@ -1,12 +1,17 @@
-// Design prototype for #16, not an executed compiler/runtime test.
-// std::mutex placement and mutex(...) factory are provisional spellings for #23.
-// #17 supplies canonical dispose in the fixed prelude, without an import.
+// Channels, scoped jobs, guard-dependent access and cooperative cancellation.
+// Design examples only. No Rill compiler/runtime has executed these cases.
+// Canonical dispose and copy are available in the fixed prelude.
 
 import std::{spawn, stop};
 import std::mutex::{Mutex, LockGuard, mutex, lock};
 import std::shared::{Shared, shared};
-import std::routine::all;
-import std::channel::{Sender, channel, send, receive};
+import std::routine::{join, all, allSettled, race, any};
+import std::channel::{Sender, Receiver, channel, send, receive, after, select};
+import std::collection::{List, sum, length};
+import std::convert::into;
+import std::result::{Result, Ok, Err, isOk};
+import std::option::Option;
+import std::error::display;
 import std::time::sleep;
 
 type Counts = { first: i32; second: i32 };
@@ -32,8 +37,8 @@ function readGuard(held: &LockGuard<i32>): i32 {
 
 function scopedTotal(): i32 {
   let counter = shared(mutex<i32>(0));
-  all(() => add(&counter, 1), () => add(&counter, 2));
-  // All child execution and cleanup finished before all returned.
+  let _ = join([() => add(&counter, 1), () => add(&counter, 2)]);
+  // All child execution and cleanup finished before join returned.
   return read(&counter);
 }
 
@@ -59,7 +64,7 @@ function sharedGuardReads(): i32 {
   let counter = shared(mutex<i32>(2));
   let held = lock(&counter);
   // Read-only scoped sharing is allowed because i32 is shareable.
-  let [one, two] = all(() => readGuard(&held), () => readGuard(&held));
+  let [one, two] = join([() => readGuard(&held), () => readGuard(&held)]);
   return one + two;
 }
 
@@ -70,8 +75,7 @@ function scopedPayloadWrites(): i32 {
   let first = &mut payload.first;
   let second = &mut payload.second;
   // Disjoint payload loans can transfer to scoped children; the guard does not.
-  // #23 must give all the mutable-callback access contracts needed here.
-  all(() => increment(first), () => increment(second));
+  let _ = join([() => increment(first), () => increment(second)]);
   let total = (*held).first + (*held).second;
   dispose(held); // Children and all uses of their protected loans have finished.
   return total;
@@ -79,7 +83,7 @@ function scopedPayloadWrites(): i32 {
 
 function addAfterPause(counter: &Shared<Mutex<i32>>): void {
   let mut held = lock(counter);
-  sleep(1); // The goroutine can suspend/migrate while retaining the lock.
+  sleep(1u64); // The goroutine can suspend/migrate while retaining the lock.
   *held += 1;
 }
 
@@ -98,8 +102,8 @@ function addAndSignal(counter: Shared<Mutex<i32>>, done: Sender<i32>): void {
 
 function backgroundCompletion(): i32 {
   let counter = shared(mutex<i32>(0));
-  let workerCounter = copy(counter); // Copy before creating the owned closure.
-  let [done, doneInbox] = channel<i32>();
+  let workerCounter = copy(&counter); // Copy before creating the owned closure.
+  let [done, doneInbox] = channel<i32>(0u64);
   let worker = spawn(() => addAndSignal(workerCounter, done));
   // Synchronize on a message, not an assumed scheduling order or timer delay.
   guard receive(&doneInbox) else {
@@ -110,6 +114,95 @@ function backgroundCompletion(): i32 {
   return read(&counter);
 }
 
+function produce(jobs: Sender<i32>, numbers: List<i32>): void {
+  for (let number of &numbers) {
+    guard send(&jobs, *number) else { return; }
+  }
+}
+
+function square(inbox: Shared<Receiver<i32>>, results: Sender<i32>): void {
+  for (let number of &inbox) {
+    guard send(&results, number * number) else { return; }
+  }
+}
+
+function queuedSquares(): i32 {
+  let numbers: List<i32> = [1, 2, 3, 4];
+  let [jobs, inbox] = channel<i32>(0u64);
+  let [results, resultInbox] = channel<i32>(0u64);
+  let queue = shared(inbox);
+  let firstQueue = copy(&queue);
+  let firstResults = copy(&results);
+  let producer = spawn(() => produce(jobs, numbers));
+  let first = spawn(() => square(firstQueue, firstResults));
+  let second = spawn(() => square(queue, results));
+  let mut total = 0i32;
+  for (let number of &resultInbox) { total += number; }
+  stop(&producer);
+  stop(&first);
+  stop(&second);
+  return total; // Sender disposal closes each queue; no guessed worker ordering.
+}
+
+enum Pulse {
+  Beat(Option<string>),
+  Idle,
+}
+
+function heartbeat(beats: Sender<string>): void {
+  while (true) {
+    sleep(5u64);
+    guard send(&beats, "beat") else { return; }
+  }
+}
+
+function selectedPulse(): bool {
+  let [beats, inbox] = channel<string>(0u64);
+  let pulse = spawn(() => heartbeat(beats));
+  let timer = after(50u64);
+  let event: Pulse = select([
+    [&inbox, (message) => Pulse.Beat(message)],
+    [&timer, (done) => Pulse.Idle],
+  ]);
+  stop(&pulse); // Cancellation joins the heartbeat and its cleanup.
+  return match (event) {
+    Pulse.Beat(message) => match (message) {
+      Option.Some(text) => text == "beat",
+      Option.None => false,
+    },
+    Pulse.Idle => true, // Either ready event may win; this is not a latency test.
+  };
+}
+
+enum Shop { Closed, Open(i64) }
+enum ShopError { Closed }
+
+implement display(error: &ShopError): string { return "shop is closed"; }
+
+function quote(shop: Shop): Result<i64, ShopError> {
+  return match (shop) {
+    Shop.Closed => Err(ShopError.Closed),
+    Shop.Open(price) => Ok(price),
+  };
+}
+
+function scopedNumbers(): f64 {
+  let numbers: List<i32> = [1, 2, 3, 4];
+  let [total, count] = join([() => sum(&numbers), () => length(&numbers)]);
+  return into<f64>(total) / into<f64>(count);
+}
+
+function helperOutcomes(): bool {
+  let failed = all([() => quote(Shop.Open(30)), () => quote(Shop.Closed)]);
+  let [first, second] = allSettled([() => quote(Shop.Closed), () => quote(Shop.Open(20))]);
+  let success = any([() => quote(Shop.Closed), () => quote(Shop.Open(20))]);
+  let raced = race([() => quote(Shop.Open(30)), () => quote(Shop.Open(20))]);
+  guard let price = success else { return false; }
+  guard let firstPrice = raced else { return false; }
+  return !isOk(&failed) && !isOk(&first) && isOk(&second) && price == 20
+    && (firstPrice == 20 || firstPrice == 30);
+}
+
 // Independent top-level expectations; no timing-dependent winner assertions.
 expect scopedTotal() == 3;
 expect earlyUnlock() == 6;
@@ -118,3 +211,7 @@ expect sharedGuardReads() == 4;
 expect scopedPayloadWrites() == 2;
 expect suspendedScope() == 1;
 expect backgroundCompletion() == 3;
+expect queuedSquares() == 30;
+expect selectedPulse();
+expect scopedNumbers() == 2.5;
+expect helperOutcomes();

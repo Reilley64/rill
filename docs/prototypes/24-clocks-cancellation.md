@@ -2,7 +2,7 @@
 
 Read the source examples in [`prototypes/24-clocks-cancellation.rill`](../../prototypes/24-clocks-cancellation.rill).
 
-[Contract](../clock-cancellation-contracts.md), [temporal values](../time-contracts.md), [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `24-clocks-cancellation.rill` has **26 intended-valid, hand-checked expectations**, not executed tests. It uses manual clocks and owned token state, not measured sleeps, browser probes, native clock support or a compiler/runtime implementation. #28/#30 remain checking/backend gates.
+These examples follow the [clock/cancellation contract](../clock-cancellation-contracts.md), [temporal values contract](../time-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `24-clocks-cancellation.rill` has 26 intended-valid, hand-checked expectations, not executed tests. It uses manual clocks and owned token state. It provides no measured sleeps, browser probes, native clock support or compiler/runtime implementation. #28/#30 remain checking/backend gates.
 
 ## Active inventory
 
@@ -16,17 +16,17 @@ Read the source examples in [`prototypes/24-clocks-cancellation.rill`](../../pro
 | 23–25 | Expired helper skips owned callback invocation, completion with an unadvanced future timer, original operation error remains nested. |
 | 26 | A 1,025-edge descendant chain requests without a source-level recursive algorithm or invalidating intermediate nodes. This is not measured stack-safety evidence. |
 
-The expiry callback has an exclusive caller borrow. Its result is scalar; the helper must release that borrow through joined cleanup before the caller reads it. No noBorrow requirement is silently added to scoped F/R. Deep child replacement releases old authority while the next child retains needed parent state. No token callback/user code is invoked by cancel; no withCancellation helper is supplied.
+The expiry callback has an exclusive caller borrow. Its result is scalar. The helper must release the borrow through joined cleanup before the caller reads the borrowed value. No noBorrow requirement is silently added to scoped F/R. Deep child replacement releases old authority while the next child retains needed parent state. cancel invokes no token callback or user code. No withCancellation helper is supplied.
 
 ## Deterministic event traces. Not an executable scheduler
 
 ### T1: selected operation, late helper return
 
-1. Clock C/deadline D validated, now<D; admit F and timer.
+1. Validate clock C and deadline D. With now<D, admit F and the timer.
 2. F completes and its R is selected.
 3. Request cancellation of losing timer work; withdrawal/cleanup must finish.
 4. Clock reaches D before all cleanup finishes.
-5. Return Ok(R), **not reclassified Expired**. Actual return time is not the selection event.
+5. Return Ok(R), without reclassifying it as Expired. Actual return time is not the selection event.
 
 ### T2: expiry, unabortable operation
 
@@ -38,35 +38,35 @@ The expiry callback has an exclusive caller borrow. Its result is scalar; the he
 
 ### T3: simultaneous readiness
 
-Operation completion and expiry both ready before selection: either outcome allowed. Same for a token-aware wait where token request and due clock are ready. Exactly one commit; losing messages/results/registrations dispose correctly. Do not copy Tokio run-until completion bias or promise strict completion timestamps.
+If operation completion and expiry are both ready before selection, either outcome is allowed. The same applies to a token-aware wait where token request and the due clock are ready. Exactly one selection commits. Cleanup must dispose losing messages, results and registrations correctly. Do not copy Tokio run-until completion bias or promise strict completion timestamps.
 
 ### T4: token state, explicit outcome, intrinsic cancellation
 
 1. Source requests token. cancel returns after signal propagation; operations may still run.
-2. Plain code that does not observe that token continues (ordinary budget-point goroutine cancellation remains independent).
+2. Plain code that does not observe that token continues. Ordinary budget-point goroutine cancellation remains independent.
 3. Token-aware pending wait selects cancellation, confirms release, returns Err(WaitError.Cancelled) as normal control flow.
 4. A caller can handle that error and continue. No catchable panic, hidden goroutine attachment or generic token scope exists.
 5. stop on the caller instead performs existing intrinsic request-and-join. It is not returned as WaitError.
 
 ### T5: mask boundary
 
-A disposal/required join masks intrinsic delivery, not explicit state observation. A token query stays true; a signal wait can return normally. An explicitly token-aware operation can return its ordinary cancellation outcome only after its own safe release. Required native cleanup cannot use the request as an excuse to abandon a buffer/handle/join. Use the never token for cleanup that must ignore external token requests. No public unmask operation.
+Disposal or a required join masks intrinsic delivery, not explicit state observation. A token query stays true; a signal wait can return normally. An explicitly token-aware operation can return its ordinary cancellation outcome only after its own safe release. Required native cleanup cannot use the request as an excuse to abandon a buffer/handle/join. Use the never token for cleanup that must ignore external token requests. No public unmask operation.
 
 ### T6: linked lifetime and request races
 
-Create a child while parent request propagates: it must observe requested or register before the relevant propagation boundary, never miss the signal. Parent true/child false may be visible during propagation; cancel return guarantees affected requests, not a tree snapshot or task completion. A second cancel cannot merely see the parent's flag and return while required descendant propagation is unfinished. Child/OR graph storage and release cannot recurse unboundedly, leak permanent internal cycles or retain dangling source descriptors.
+Create a child while a parent request propagates. It must observe the requested state or register before the relevant propagation boundary, never miss the signal. During propagation, the parent may be true while the child is false. Return from cancel guarantees the affected requests, not a tree snapshot or task completion. A second cancel cannot merely see the parent's flag and return while required descendant propagation is unfinished. Storage and release of child/OR graphs cannot recurse unboundedly, leak permanent internal cycles or retain dangling source descriptors.
 
 ### T7: defaults, manual authority and failure
 
-System factory handles share one runtime domain with suspend-inclusive, rate-correctable nondecreasing readings. Missing profile is Err, not wall/exclusive fallback. Manual controller is separate authority over its shared Clock; advance marks eligible without running user jobs. Dropping all controllers cannot fake time or completion. Native timeline regression poisons the domain; invalid manual movement leaves it unchanged. Domain/range checks do not saturate.
+System factory handles share one runtime domain with suspend-inclusive, rate-correctable nondecreasing readings. A missing profile produces Err, not a fallback to wall time or a suspend-exclusive clock. A manual controller has separate authority over its shared Clock. advance marks waits eligible without running user jobs. Dropping all controllers cannot fabricate time advancement or completion. Native timeline regression poisons the domain; invalid manual movement leaves it unchanged. Domain and range checks do not saturate.
 
 ## Independent boundary cases
 
 - Full i128 coordinate endpoints: checked shift overflow, same-domain negative differences, differences outside SignedDuration range, cross-runtime/domain comparisons, ID exhaustion without reuse. There is no instant parser/numeric cast/persistence protocol.
 - Positive interval below host resolution rounds waiting upward; host early/spurious callback rechecks selected now. Native-counter fractional conversion floors, unrelated to upward waiting conversion. Repeated readings are legal. Native reported resolution may differ from accuracy; unknown is None, not 1ns inferred from representation.
 - OS suspend counts but does not grant wake permission. Context inactivity, scheduler delay, wall steps/rate corrections and cleanup delay are distinct. Browser/WASI capability names do not establish this contract; keep targets unsupported until verified. A readable clock alone does not validate its timer path.
-- Relative timeout anchors once. No wall alarm or implicit Timestamp→Instant conversion. Sampling two clocks is not atomic. Nested operations forward the same deadline rather than resetting the budget.
-- Typed wait preflight: invalid negative/domain first, then already-requested token (including expired/zero), then clock setup. Later readiness/failure ties have no priority guarantee. Notification factory error is one immediately eligible result, not nested factory Result or silent EOF.
+- Relative timeout anchors once. There is no wall alarm or implicit conversion from Timestamp to Instant. Sampling two clocks is not atomic. Nested operations forward the same deadline rather than resetting the budget.
+- Typed wait preflight checks an invalid negative interval or domain first, then an already-requested token, including for expired/zero waits, then clock setup. Later readiness/failure ties have no priority guarantee. A notification factory error is one immediately eligible result, not a nested factory Result or silent EOF.
 - Last receiving owner disposes uncommitted timer/subscription registration safely. A committed message is not undone; multiple independent subscriptions each notify, but copies of one Receiver consume one message normally. Re-subscribing after cancellation observes the persistent state.
 - Ordinary source/token/clock/Routine disposal does not cancel/join peers. CancelOnDispose owns authority and is unique/disarmable, not a mutex guard or general join guard. An empty user wrapper disposer cannot suppress its required remaining-field action.
 - Root authority gone does not dangle surviving tokens. Linked tokens retain needed state after source descriptors die; cancelling a child cannot request parents/sibling branches. Never token stays never, not a default fresh cancelable source. One-shot state never resets.
@@ -76,10 +76,19 @@ System factory handles share one runtime domain with suspend-inclusive, rate-cor
 
 ## Validation status
 
-Static local links/fences/whitespace/source widths/delimiters and the 26-case inventory passed, alongside the companion's independent arithmetic/calendar checks and preserved JSON/Serena hashes. Read-only consistency review found no blocking issue; the temporal option-home omission was fixed. No scheduler, token, timer, clock or Rill expectation ran. Event traces remain inspection cases, not measured outcomes.
+Static checks passed for local links, fences, whitespace, source widths, delimiters and the 26-case inventory. The companion's independent arithmetic/calendar checks passed, and JSON/Serena hashes remained unchanged. A read-only consistency review found no blocking issue; the temporal option-home omission was fixed. No scheduler, token, timer, clock or Rill expectation ran. The event traces remain inspection cases, not measured outcomes.
 
 ## Rejection examples and implementation gates
 
-Expected source rejections: cancel(&token) (observation is not authority); implicit copy of source/token/clock/guard; public raw state/identity construction; returning views into local handle/config slots; background borrowed captures lacking noBorrow; arbitrary F erasure followed by asserted properties; suppressing protected guard/registration release; string-tag select or an unavailable withCancellation call. These are hand-checked expectations, not compiler diagnostics or compile-fail execution.
+The expected source rejections are:
+
+- Calling cancel(&token). Observation is not authority.
+- Implicitly copying a source, token, clock or guard, or publicly constructing raw state/identity.
+- Returning views into local handle/config slots.
+- Using background borrowed captures that lack noBorrow, or erasing arbitrary F and then asserting its properties.
+- Suppressing protected guard/registration release.
+- Using string-tag select or calling the unavailable withCancellation helper.
+
+These are hand-checked expectations, not compiler diagnostics or compile-fail execution.
 
 #28 must supply callable/callee-exit/transitive-source checks, once-only ownership/commit states, intrinsic-versus-typed outcomes, concurrent DAG publication/helping, factory/subscription races, ID exhaustion, backend-capacity translation and bounded cleanup. #30 separately validates actual native/Wasm/import/tail/pointer/clock mechanisms. Existing topology research does not prove those rules; return an unworkable necessary rule to the map. No benchmark, hard timing bound or runtime safety proof follows from these fixtures.

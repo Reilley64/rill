@@ -2,9 +2,9 @@
 
 Read the source examples in [`prototypes/16-batch-report`](../../prototypes/16-batch-report).
 
-**Question:** does the current design remain coherent in a normal, non-toy workflow, and what ownership/copying friction becomes visible?
+This prototype asks whether the current design remains coherent in a normal application workflow and what ownership and copying costs it imposes.
 
-**Status:** explicitly accepted by the user as #25 prototype evidence for the RFCs. The two Rill files are **298 physical lines combined**, including **14 independent top-level expectations**. This is intended-valid source inspected by hand, not a working compiler, executed application/test suite, concurrency proof or backend validation. No JSON/HTTP/CLI API is invented. The confirmed #23 catalogue/ADR 0015 are this prototype's repository inputs, not a library implementation. Publishing these design artifacts does not establish compiler or backend support.
+The user explicitly accepted it as #25 prototype evidence for the RFCs. The two Rill files are 298 physical lines combined, including 14 independent top-level expectations. Reviewers inspected this intended-valid source by hand. They did not execute an application or test suite, prove concurrency safety or validate a backend. The prototype invents no JSON/HTTP/CLI API. It uses the confirmed #23 catalogue and ADR 0015 as design inputs, not a library implementation. Publishing these design artifacts does not establish compiler or backend support.
 
 - [main.rill](../../prototypes/16-batch-report/main.rill): native file/UTF-8 work, scoped concurrency, notifications, mutex metrics, error context and entry startup.
 - [records.rill](../../prototypes/16-batch-report/records.rill): application grammar, owned records, aggregation, generic rendering and pure expectations.
@@ -17,7 +17,7 @@ Read the source examples in [`prototypes/16-batch-report`](../../prototypes/16-b
 
 The entry driver reads two configured data files concurrently, parses labeled integer quantities, widens individual i32 quantities to i64, aggregates equal labels, and writes a numbered text report. A second scoped branch observes best-effort completion notifications or an idle timer. The report is derived only from actual loaded rows, never from notification delivery.
 
-The intended future run would use this directory as the working directory and `main.rill` as the entry file. **There is no runnable Rill command today.** Module paths are entry-directory-relative source identities; OS data paths are ordinary configured file paths, not source-import paths. No command-line argument or process-exit API is assumed. At the command boundary an application failure is formatted, then explicitly panics; all scoped work has already been joined before that failure returns.
+The intended future run would use this directory as the working directory and `main.rill` as the entry file. There is no runnable Rill command today. Module paths are entry-directory-relative source identities; OS data paths are ordinary configured file paths, not source-import paths. No command-line argument or process-exit API is assumed. At the command boundary an application failure is formatted, then explicitly panics; all scoped work has already been joined before that failure returns.
 
 The deliberately small application grammar is not CSV/JSON:
 
@@ -26,35 +26,40 @@ The deliberately small application grammar is not CSV/JSON:
 - No trimming, comments, embedded newline escaping, extra fields or inferred numeric widths.
 - Accept LF and CRLF line endings, a final unterminated nonempty record, and an entirely empty file.
 - Reject blank records, empty fields, lone CR, additional tabs and invalid/out-of-range numeric text.
-- Report rows follow **first-seen input order**: left-file rows, then right-file rows. An application-owned label list supplies this order; Map iteration is never treated as ordered or sorted.
+- Report rows follow first-seen input order, with left-file rows followed by right-file rows. An application-owned label list supplies this order; Map iteration is never treated as ordered or sorted.
 - The final numbered TOTAL line is a report footer, not an input-record parser feature. A data label may itself be TOTAL; position distinguishes the footer.
 - Individual out-of-i32 inputs are recoverable parse errors. i64 aggregate/counter arithmetic remains checked and can panic on overflow; no unsupported recoverable tryAdd or saturation policy is invented.
 - Filesystem output has the standard create/truncate/partial-write semantics, not atomic replacement or rollback.
 
-For the supplied data, coffee = 3 - 1 = 2, tea = 2 + 4 = 6, cocoa = 5, five records, two files, grand total 13. Successful report bytes are those in expected-report.txt. Progress-log ordering and whether a timer/closure wins are intentionally not a golden output contract.
+The supplied data has five records across two files. The totals are coffee = 3 - 1 = 2, tea = 2 + 4 = 6 and cocoa = 5, for a grand total of 13. The intended successful report bytes are those in expected-report.txt. Progress-log ordering and whether a timer/closure wins are intentionally not a golden output contract.
 
 ## Borrow and copy pressure
 
 Reproducible source-site counts, excluding comments, string/char/template literals, expectation statements and the test-only sampleReport/numberHasCause/rowContext helpers:
 
-- **60 `&` tokens**, including both reference-type annotations and explicit borrowing expressions.
-- **12 of those are `&mut` sites**, not twelve additional ampersands or measured runtime loans.
-- **8 explicit `copy(...)` sites**: four conditional error-path copies, the progress-path copy, the sender-owner copy, parser label materialization, and first-seen-order key ownership.
-- **3 explicit `dispose(...)` sites**: two early guard releases and disposal of a recovered, undelivered progress message. These are ownership operations, not manual heap freeing.
+- There are 60 `&` tokens, including both reference-type annotations and explicit borrowing expressions.
+- 12 of those are `&mut` sites, not twelve additional ampersands or measured runtime loans.
+- There are 8 explicit `copy(...)` sites. They cover four conditional error-path copies, the progress-path copy, the sender-owner copy, parser label materialization, and first-seen-order key ownership.
+- There are 3 explicit `dispose(...)` sites. Two release guards early; one disposes a recovered, undelivered progress message. These are ownership operations, not manual heap freeing.
 
-A successful supplied-data run would reach eleven explicit copy invocations **by inspection**: five label materializations, three first-seen key copies, two progress-path copies and one Sender owner-count copy. Four conditional error-path source sites do not run on that path. This is not profiler output, allocated-byte accounting, an inferred-constraint count or an executable ownership diagnostic measurement. Compiler-generated interpolation reads and implicit scalar/record copies are not lexical copy sites.
+By inspection, a successful supplied-data run would reach eleven explicit copy invocations. These comprise five label materializations, three first-seen key copies, two progress-path copies and one Sender owner-count copy. Four conditional error-path source sites do not run on that path. This is not profiler output, allocated-byte accounting, an inferred-constraint count or an executable ownership diagnostic measurement. Compiler-generated interpolation reads and implicit scalar/record copies are not lexical copy sites.
 
-The main costs are visible rather than hidden:
+The source shows these ownership costs and constraints:
 
 1. Parsing must copy a label that outlives its file buffer. Returning slices would change the result's lifetime contract, not eliminate the dependency.
 2. Stable first-seen order alongside an unordered map needs another owned key representation. No sort/ordered-map API is assumed.
-3. addExisting returns a non-reference bool, ending the lookup/element loan before a possible insertion. This avoids relying on branch-sensitive borrow precision inside a getMut/insert match; it is **not** a claim the final checker must reject every shorter spelling.
+3. addExisting returns a non-reference bool, so the lookup/element loan ends before a possible insertion. This avoids relying on branch-sensitive borrow precision inside a getMut/insert match. It does not claim that the final checker must reject every shorter spelling.
 4. The generic renderBlock preserves F plus callableMut evidence. A single mutable formatter is explicitly reborrowed for body and footer, retaining its numbering state without cloning the closure.
 5. Both guard releases are explicit because a guard otherwise lasts through scope exit, not merely its last mention. No guard is held while sending a potentially blocking notification or writing a file.
 
 ## Feature ledger
 
-Use these categories literally: **exercised** means represented in intended-valid source; **inspection-only** means reasoned about without execution; **known gate** is unresolved implementation/checker validation; **not exercised** is not claimed by this program.
+The ledger uses four categories:
+
+- Exercised means represented in intended-valid source.
+- Inspection-only means reasoned about without execution.
+- A known gate is unresolved implementation or checker validation.
+- Not exercised means the program makes no claim about that feature.
 
 | Decision | Evidence | Category |
 | --- | --- | --- |
@@ -93,7 +98,7 @@ caused by ParseError.InvalidSyntax     standard display text
   origin: its original construction inside the parseNumber operation
 ```
 
-These labels explain **typed nodes**, not reflected runtime output. formatError uses each supplied display implementation, preserved construction origins and the complete explicit cause chain. Exact separators, paths/line/column presentation and standard ParseError text are not frozen here. The original ParseError source-map coordinates are deliberately symbolic; no unimplemented library source location is fabricated. parseRows' postfix ?, all's selected-failure forwarding, and run's loaded? add **no locations**.
+These labels explain typed nodes, not reflected runtime output. formatError uses each supplied display implementation, preserves construction origins and renders the complete explicit cause chain. This example does not freeze exact separators, path/line/column presentation or standard ParseError text. The original ParseError source-map coordinates are deliberately symbolic; the example does not fabricate a location in an unimplemented library. parseRows' postfix ?, all's selected-failure forwarding, and run's loaded? add no locations.
 
 - parseNumber constructs the underlying error; the infix operator in parseLine adds RowError.Number.
 - parseRows uses postfix ? inside the push argument, forwarding that envelope unchanged. On failure push is not called; temporary argument loans end before owned accumulated rows are disposed.
@@ -108,11 +113,11 @@ A parent-typed AppError needs its own display implementation. Its Rows arm estab
 
 ### Notifications, cancellation and scope exit
 
-- There are exactly two owned sender handles, copied **before** closure capture and each moved into one loader. No extra parent sender remains to keep the observer waiting forever.
+- There are exactly two owned sender handles. They are copied before closure capture, and each moves into one loader. No extra parent sender remains to keep the observer waiting forever.
 - Each loader attempts at most one notification. Buffer capacity two avoids a producer depending on concurrent consumption even if the observer stops early.
 - The observer owns its receiver through its scoped closure. Each select borrows that receiver and one named timer owner; selected handlers return owned WatchEvent values, not references to callback temporaries.
 - If the timer wins, the observer may stop and drop the receiver. Later sends fail, and notify deliberately recovers/disposes the exact unsent Progress rather than failing the business job.
-- Queued messages can be deliberately disposed on receiver shutdown. That is application abandonment, **not** select consuming a losing receive. Only one selection commits and only its handler runs.
+- Queued messages can be deliberately disposed on receiver shutdown. That is application abandonment, not select consuming a losing receive. Only one selection commits and only its handler runs.
 - Closed/drained input is handled by returning, not selecting the permanently-ready None case forever. Simultaneous message/closure/timer readiness has no guaranteed winner.
 - A canceled/failed loader may never notify. Completion is determined by scoped results and handle cleanup, not by waiting for two messages.
 - all/join still wait for child execution and cleanup. Native reads, cancellation-deferred joins, locks or timers may delay completion indefinitely; the observer timer is not a timeout for run.
@@ -124,14 +129,14 @@ These are source-level obligations, not observations from a scheduler or proof o
 
 ## Friction, reconciliation and rejected alternatives
 
-**Accepted verdict:** the core pipeline fits the confirmed interfaces by inspection without a new language rule or unavoidable API blocker. Explicit ownership is workable here, but manual scanning, key duplication for ordering, lookup/insert loan boundaries and callback annotations are real ergonomic costs.
+The accepted verdict is that the core pipeline fits the confirmed interfaces by inspection without a new language rule or unavoidable API blocker. Explicit ownership is workable here. Manual scanning, key duplication for ordering, lookup/insert loan boundaries and callback annotations still impose ergonomic costs.
 
 - No split/lines/trim, sort, general string builder, tryMap/collectResults, CLI parser, HTTP or JSON API is invented. Local scanning is application code; an application with richer text needs may justify a separate library ticket.
 - A fallible map callback's ? would return from that callback, not parseRows. The explicit parsing loop handles early return without nonexistent Result-list flattening.
-- Historical `Ok()` convenience conflicts with #23's ordinary one-argument Ok signature. The final write yields a real void value and run passes **that expression** to Ok; no new zero-argument overload/void literal is invented. #28 must reconcile older examples with the current signature instead of silently adding optional arguments.
+- Historical `Ok()` convenience conflicts with #23's ordinary one-argument Ok signature. The final write yields a real void value, and run passes that expression to Ok. The prototype invents no zero-argument overload or void literal. #28 must reconcile older examples with the current signature instead of silently adding optional arguments.
 - No recoverable aggregate-overflow helper is in the required library. The prototype deliberately retains checked i64 panic behavior; requiring a typed total-overflow error would need application prechecks or an explicitly approved extra helper.
 - A literal alias/fitting value does not change numeric conversion availability, copying or cause-retention evidence.
-- Optional niceties are not v0 language blockers: richer line scanning, update/entry convenience for Map, and explicit checked-arithmetic helpers can be evaluated separately rather than quietly enlarging #23.
+- Richer line scanning, update/entry convenience for Map, and explicit checked-arithmetic helpers are not v0 language blockers. They can be evaluated separately rather than quietly enlarging #23.
 
 Rejected or gated edits to this program:
 

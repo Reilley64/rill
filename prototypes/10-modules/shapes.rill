@@ -1,7 +1,10 @@
-export type Square = { kind: "square"; size: i32 };
-export type Empty = { kind: "empty" };
-export type Shape = Square | Empty;
+export type Square = { size: i32 };
+export type Empty = {};
+export enum Shape {
+  Square(Square),
+  Empty(Empty),
+}
 
 export function empty(): Shape {
-  return Empty { kind: "empty" };
+  return Shape.Empty(Empty {});
 }

@@ -2,21 +2,23 @@
 
 Read the source examples in [`prototypes/11-numbers-strings.rill`](../../prototypes/11-numbers-strings.rill).
 
-Design artifacts for [#18](https://github.com/Reilley64/rill/issues/18) and [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md). The `.rill` companion contains 41 intended-valid expectations, checked by inspection only. There is no compiler/runtime or executable compile-fail suite. New standard-library paths/helper names and `Result<T>`'s illustrative default error are **not complete #23 interfaces**. In particular, different error types cannot silently convert for `?`, and target-only generic helpers cannot be implemented as duplicate return-only overloads.
+These examples follow [#18](https://github.com/Reilley64/rill/issues/18), [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) and the [published library contracts](../standard-library-contracts.md). The companion still contains 41 intended-valid expectations. They have been inspected, not executed by a compiler/runtime or a compile-fail runner. Library imports now use the published Bytes, parsing and string APIs. Different error types still require explicit adaptation, and ordinary return-only overloads remain invalid.
 
-**#41 supersession:** [ADR 0017](../adr/0017-user-implementable-conversions.md) replaces the closed-only conversion model with user-implementable canonical families and the `tryInto`/`tryFrom` spellings. The companion's generic fallible helper now names E and requires `tryInto(To, From, E), display(E)`; it does not assume the default Error or implicit error adaptation. Unrelated helper sketches remain historical where #23 supersedes them. Family bodies now use `implement`; body-less declarations and standalone functions remain `function`.
+[ADR 0017](../adr/0017-user-implementable-conversions.md) replaces the old closed-only conversions with user-implementable canonical families and tryInto/tryFrom. The generic fallible helper names E and requires `tryInto(To, From, E), display(E)`. It assumes neither a default error nor implicit adaptation. Family bodies use implement; declarations and standalone functions use function.
 
 ## Valid fixture coverage
 
-The companion covers width establishment and aliases, generic infallible/fallible evidence, range failure as a Result even for constant input, float rounding/truncation/non-finite rejection, signed minimum, shifts/remainder, an unexecuted integer trap, exact substring copying, byte versus scalar boundaries, descriptor and retained-storage dependencies, static literal views, literal copying, exclusive-reference formatting, sequential formatting snapshots, canonical custom show, scalar validation, strict numeric parsing, UTF-8 decoding/lossy replacement, escapes/raw strings, normalization distinctions and special float rendering.
+The numeric cases cover width inference, aliases, generic conversion evidence, constant-input range failure, rounding, truncation, non-finite rejection, signed minima, shifts and remainder. A well-typed integer trap sits in an unexecuted branch.
 
-`decodeUtf8`/`decodeUtf8Lossy` are illustrative **copying** operations from `List<u8>`: no List contiguity or borrowed byte-header representation is assumed. Borrowed validation needs a genuinely specified contiguous source in #23. Byte/scalar iterator types and exact names also remain #22/#23 work; do not manufacture a headerless `&List<u8>` by analogy with primitive string views.
+The text cases cover exact substring copies, byte/scalar boundaries, descriptor and retained-storage dependencies, static literal views and explicit copies of named owners. They also cover exclusive-reference formatting, sequential snapshots, custom canonical show, scalar validation, strict parsing, UTF-8 decoding and lossy replacement. Literal cases distinguish raw strings, escapes, normalization and special float rendering.
 
-Primitive canonical formatters must not implement themselves by recursively interpolating their own argument. Prototype 3 and module fixture 10 deliberately declare separate show families; primitive templates in those bodies use the canonical standard family, not the locally same-spelled one.
+Decoding now reads an explicitly constructed Bytes value. decodeUtf8 produces owned text; decodeLossy replaces invalid sequences. String byte lookup first obtains the canonical bytes view. Nothing assumes List contiguity or invents a borrowed List header. Generic copy borrows logical T through `copy(&T)`, including a substring view.
+
+A primitive canonical formatter cannot implement itself by interpolating the same primitive through that formatter. The [overload](../../prototypes/03-overloads.rill) and [module](../../prototypes/10-modules/formatting.rill) examples instead declare separate show families. Templates inside those bodies still use canonical standard formatting.
 
 ## Independent compile-rejection cases
 
-These are schematic snippets, not active compiler tests. Their expected rejection is a design contract; #24 owns messages and #28 explicit rules.
+Each snippet is a separate schematic rejection case, not an active compiler test. #24 owns messages and #28 formalizes the checking rules.
 
 ### Widths, refinements, and conversion availability
 
@@ -30,9 +32,9 @@ let mixed = 1i32 + 1i64;          // No implicit typed numeric conversion.
 let missingTry = into<u8>(1i32); // Base-type pair is fallible, despite this value.
 ```
 
-Reject int/float/byte/isize/usize as built-in numeric names and reject `value as u8`. Ordinary import `as` aliases remain valid; the ban concerns conversion/type-assertion syntax. Destination inference can use a unique explicit expected type, never a fallback. Partial generic arguments infer trailing parameters from already-typed inputs.
+Reject int, float, byte, isize and usize as built-in numeric names. Reject `value as u8`; ordinary import aliases using as remain valid. A unique expected type may determine a destination, but there is no fallback. Partial generic calls infer trailing parameters from already-typed inputs.
 
-The four conversion names identify **two canonical user-implementable families** under #41 / [ADR 0017](../adr/0017-user-implementable-conversions.md), with protected standard numeric pairs. Conversion-specific source/target selection does not authorize general return-only dispatch or relax ADR 0010's ordinary duplicate-pattern rule. Reject unsupported standard numeric pairs involving bool, char, records, or references; do not infer such support from the numeric table. Authorized user conversions may involve domain types under ADR 0017's rules. Unicode/byte validation remains separately specified.
+The four names identify two canonical user-implementable families under [ADR 0017](../adr/0017-user-implementable-conversions.md). Standard numeric pairs remain protected. Conversion-specific endpoint selection does not authorize general return-only dispatch or relax ordinary duplicate-pattern rules. Do not infer standard conversions for bool, char, records or references from the numeric table. Authorized user conversions may use domain types; Unicode and byte validation have their own contracts.
 
 ```ts
 function missingEvidence<To, From>(value: From): To {
@@ -40,7 +42,7 @@ function missingEvidence<To, From>(value: From): To {
 }
 ```
 
-A same-spelled local function or fabricated ordinary requirement must not prove canonical standard conversion availability. Alias pairs must give identical concrete/generic results. Conversion availability does not replace separately needed noBorrow/copy/sendable/shareable evidence.
+A local namesake or fabricated ordinary requirement cannot prove canonical conversion availability. Alias pairs must behave identically in concrete and generic calls. Conversion evidence does not replace separately required noBorrow, copy, sendable or shareable evidence.
 
 ### Owner access versus text/descriptor access
 
@@ -71,23 +73,25 @@ function invalidDuplicate(): string {
 }
 ```
 
-Reject mutation through a read-only view, mutable substring construction, writable raw-byte access bypassing UTF-8 validity, or turning `&mut &string` into mutable backing access. Descriptor reassignment must preserve references retained elsewhere, and mutable-storage call loans cannot erase the backing dependencies they stored. Reborrow `&*view` must preserve exact extent/source, not create a temporary owning header.
+Reject mutation through a read-only view, mutable substrings and writable byte access that bypasses UTF-8 validity. `&mut &string` permits descriptor reassignment, not mutation of the backing text. Reassignment must preserve references retained elsewhere. Ending a mutable-storage call loan cannot erase the backing dependencies it stored. Reborrowing `&*view` preserves the exact extent and source rather than creating an owning header.
 
-Reject owner disposal/moves/mutation while a view is still needed, returning views into temporaries/computed local templates, or returning local descriptor-slot references through generic/erased wrappers. Preserve #15's conservative exclusive restriction on a read-only view derived from exclusive input. Not every physically safe header move is a new language exception.
+Reject disposing, moving or mutating an owner while its view remains needed. Reject returning views into temporaries or computed local templates, including through generic or erased wrappers. A reference to a local descriptor slot cannot escape either. Preserve the conservative exclusive restriction on a read-only view derived from exclusive input. A physically safe header move does not itself establish a language exception.
 
-Direct `&"literal"` (including raw/uninterpolated backtick forms) can have static backing; copying that view through local descriptors is valid. A template containing an expression remains computed, even if it could fold to a constant. Neither static backing nor folding changes `noBorrow(&string)` or permits named-function captures of runtime lets. Generic/record copies of exact literal constants may re-materialize their values but must never duplicate ownership of freeable buffers; a record containing general string stays non-implicitly-copying.
+A direct literal borrow, including a raw or uninterpolated backtick form, may use static backing. Its view can pass through local descriptors. A template with an expression remains computed even if an optimizer could fold it. Static backing and folding do not change `noBorrow(&string)` or permit named functions to capture runtime lets.
+
+Literal expressions and named bindings have different ownership rules. A named string binding moves unless explicitly copied, so repeatedLiteral now calls `copy(&tag)` before using both owners. Generic and record copies still require their normal evidence; neither constants nor optimization can duplicate ownership of freeable storage.
 
 ### UTF-8, characters, and source syntax
 
-Reject malformed UTF-8 string construction, a char literal containing multiple scalars, surrogate/out-of-range Unicode escapes, non-ASCII `\xNN` text escapes, and unescaped physical newlines in ordinary quotes. Combining scalars may form one grapheme but still cannot form one char literal. Raw strings remain UTF-8 text, not an arbitrary byte container; no byte-string literals/raw identifiers are added.
+Reject malformed UTF-8 strings, multi-scalar char literals, surrogate or out-of-range escapes, non-ASCII `\xNN` text escapes and unescaped newlines in ordinary quotes. Combining scalars may form one grapheme, but not one char literal. Raw strings remain UTF-8 text rather than arbitrary byte containers. These rules add neither byte-string literals nor raw identifiers.
 
-Invalid literal scalars are compile errors; invalid **runtime** u32 scalar inputs return None from checked construction. Unassigned/non-printable/noncharacter scalar values remain valid if they are not surrogates or above U+10FFFF. UTF-8 byte encoding is not the u32 code-point representation.
+Invalid literal scalars are compile errors. Checked construction returns None for invalid runtime u32 inputs. Unassigned, non-printable and noncharacter scalars remain valid when they are neither surrogates nor above U+10FFFF. UTF-8 bytes and u32 code points are different representations.
 
-A scalar-boundary slice can still split a grapheme. Explicit byte lookup may return a continuation byte. No integer character indexing or implicit normalization/locale collation is introduced. Source CRLF normalization affects literal source line breaks; runtime decoding preserves CR/LF bytes. No automatic dedent.
+A scalar-boundary slice may split a grapheme, and byte lookup may return a continuation byte. There is no integer character indexing, implicit normalization or locale collation. Source CRLF normalization applies to literal line breaks; runtime decoding preserves CR/LF bytes. Literals do not dedent automatically.
 
 ## Isolated runtime outcomes, not live expectations
 
-A panic is whole-program fatal under ADR 0005; these cases need separate processes once a compiler exists. Never add them to the intended-valid expectation run as if panic were catchable.
+Panic ends the whole program under ADR 0005. Runtime panic tests therefore need separate processes once a compiler exists. They cannot join the intended-valid expectation run as catchable failures.
 
 | Operation with valid established types | Expected outcome |
 | --- | --- |
@@ -107,7 +111,7 @@ A panic is whole-program fatal under ADR 0005; these cases need separate process
 | Malformed/trailing/whitespace numeric input | Err under strict default parsing |
 | Finite decimal parsing rounded to infinity | Err, unlike explicitly spelled infinity |
 
-Folding cannot hoist a trap before effects, reject a well-typed program merely because it proves a trap, or drop a trap because its result is unused. `-128i8` is a valid negated literal; negating an already-established signed minimum is an ordinary checked operation. Constant arithmetic is not arbitrary const execution of user functions.
+Constant folding cannot move a trap before effects, reject a well-typed program merely because a trap is provable, or discard a trap whose result is unused. `-128i8` is a valid negated literal. Negating an already-established signed minimum is instead a checked operation. Constant arithmetic does not provide arbitrary compile-time execution of user functions.
 
 ## Interpolation, suspension, and generic-reference cases
 
@@ -120,8 +124,10 @@ Folding cannot hoist a trap before effects, reject a well-typed program merely b
 
 ## Required validation/handoffs
 
-#23 must finalize real error/signature/module contracts for conversions, parsing, scalar/byte APIs and canonical formatting, including the partial-generic-argument rule, alias identity, primitive bootstrap and supported reference forwarding. Byte APIs need genuine source representations; generic interfaces must retain evidence rather than inspect eventual instantiations.
+The published catalogue now defines error types, signatures and module homes for conversion, parsing, byte/scalar APIs and formatting. Its partial-generic-argument, alias, primitive-bootstrap and reference-forwarding rules are design inputs, not implementation proof. Byte APIs require real source representations. Generic bodies must retain evidence rather than rediscover it from eventual instantiations.
 
-#28 must write logical-reference/descriptor-storage/backing-source rules, retained mutable-storage and callee-exit checks, literal-copy/widening rules, direct-static-literal exception, dependency-sensitive cleanup, constant-trap acceptance, exact numeric availability and safe LLVM lowering. Test floating/integer boundaries near i128/u128 without lossy intermediate checks; both alias names; NaN/infinity/signed zero; fmod signs; overflow/count edges; float roundtrips including subnormals and maximum finite values. Keep fast-math/reassociation/fusion off unless explicitly requested by a defined operation.
+#28 must formalize logical references, descriptor slots and backing sources. It must cover retained mutable storage, callee exits, literal-copy and widening rules, direct static literal borrows, dependency-sensitive cleanup, constant traps, numeric availability and LLVM lowering.
 
-#19 still decides literal-overload policy. Refined knowledge cannot create missing widths or infallible narrowing pairs, duplicate ownership, bypass private representations, or depend on optimization. Hand-check these cases now; convert them into executable compiler/runtime fixtures later. Closing #18 does not prove a checker or accept the future RFCs.
+Test boundaries near i128/u128 without lossy intermediate checks. Cover both alias names, NaN, infinity, signed zero, fmod signs, overflow and shift-count edges. Float roundtrips must include subnormals and maximum finite values. Keep fast-math, reassociation and fusion disabled unless a defined operation explicitly requests them.
+
+ADR 0012 rejects primitive-literal types and overload parameters. Refined knowledge cannot create missing widths, infallible narrowing pairs, duplicate owners or access to private representations. Turn these inspected design cases into executable compiler/runtime fixtures later. Closing a source ticket proves neither a checker nor RFC acceptance.

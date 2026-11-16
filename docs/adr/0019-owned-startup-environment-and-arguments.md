@@ -4,7 +4,7 @@
 
 ## Why capture rather than live lookup
 
-Native environment data is shared mutable process state; a Rill-only lock cannot synchronize arbitrary foreign readers/writers. Capture at a controlled safe point before Rill workers, or accept owned inputs from an embedding host. After capture, library access never consults the live environment. A multithreaded embedding cannot justify capture merely by calling it startup. This is trusted runtime state, like existing standard I/O services, not a new source-level runtime global, module initializer, named-function capture rule or hidden shared owner for returned snapshots.
+Native environment data is shared mutable process state. A Rill-only lock cannot synchronize arbitrary foreign readers/writers. Capture at a controlled safe point before Rill workers, or accept owned inputs from an embedding host. After capture, library access never consults the live environment. A multithreaded embedding cannot justify capture merely by calling it startup. This is trusted runtime state, like existing standard I/O services, not a new source-level runtime global, module initializer, named-function capture rule or hidden shared owner for returned snapshots.
 
 `inputs()` returns independently owned data or a fresh error describing stored safe failure information. Ordinary acquisition/validation failure does not force pre-entry termination or masquerade as an empty snapshot. No user formatter runs during capture. Fatal allocation failures, host traps and inability to instantiate a Wasm program remain outside Result recovery. Copies returned to applications contain no borrowed startup storage; `copy(&inputs)` is explicit and independent.
 
@@ -14,7 +14,7 @@ Arguments and environment data delivered on current Linux/macOS/WASI targets nee
 
 Byte queries borrow stored data; text conveniences validate only the data requested and return independently owned strings. Missing and present-empty remain distinct. Construction fails as a whole in the specified first-error order. `EnvError` exposes kind/position, not offending contents; standard rendering must not include values or full arguments, even through retained diagnostic state. Explicit application printing is still the application's responsibility; this is not secret detection or secure-erasure support.
 
-`rill test` skips actual host capture and supplies empty inputs. Synthetic `fromParts` inputs use the same validation/ordering rules, keeping tests independent of developer/CI secrets. Linux/macOS and wasm32-wasip1 share the public contract, but WASI sees only instance-supplied inputs, never implicit host inheritance. A host may only support UTF-8 injection even though delivered guest data is byte-oriented. No Windows support or live-host testing opt-in is added.
+`rill test` skips actual host capture and supplies empty inputs. Synthetic `fromParts` inputs use the same validation/ordering rules. Tests remain independent of developer/CI secrets. Linux/macOS and wasm32-wasip1 share the public contract, but WASI sees only instance-supplied inputs, never implicit host inheritance. A host may only support UTF-8 injection even though delivered guest data is byte-oriented. No Windows support or live-host testing opt-in is added.
 
 ## Alternatives and boundaries
 
@@ -31,4 +31,4 @@ Rejected live process lookup/mutation; implicit borrowed process-global storage;
 - [WASI preview1 WITX](https://github.com/WebAssembly/WASI/blob/wasi-0.1/preview1/witx/wasi_snapshot_preview1.witx): args/environ byte buffers, host-returned failures and no ambient process-mutation interface.
 - [Rust vars_os](https://doc.rust-lang.org/std/env/fn.vars_os.html), [args_os](https://doc.rust-lang.org/std/env/fn.args_os.html), and [environment mutation safety](https://doc.rust-lang.org/std/env/fn.set_var.html): byte-oriented owned access, invocation snapshots versus live lookup and foreign-concurrency hazards. Rill does not copy Rust's malformed-entry filtering or invalid-name/missing conflation.
 
-These sources motivate the boundary; they do not establish Rill's implementation safety or every embedding host's behavior. Current provider-specific capture and host sizing/read consistency still need validation.
+These sources explain the boundary. They do not establish Rill's implementation safety or every embedding host's behavior. Current provider-specific capture and host sizing/read consistency still need validation.

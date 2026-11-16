@@ -1,10 +1,10 @@
 # #30 backend mechanism experiments
 
-These are **executed standalone LLVM IR/C/Wasm probes**, not Rill programs, a compiler, a runtime implementation, or accepted target support. [Report and matrix](../../docs/research/0030-backend-experiments.md); [pinned source audit](../../docs/research/0030-backend-mechanisms.md). **#30's standalone mechanism stage is complete; production/formal support acceptance remains gated by #28.** See the follow-up disposition below; historical JSON `gate: OPEN` fields are not being rewritten as production support.
+These executed standalone LLVM IR/C/Wasm probes are not Rill programs, a compiler, a runtime implementation, or accepted target support. See the [report and matrix](../../docs/research/0030-backend-experiments.md) and [pinned source audit](../../docs/research/0030-backend-mechanisms.md). #30's standalone mechanism stage is complete; production/formal support acceptance remains gated by #28. The follow-up disposition below does not turn historical JSON `gate: OPEN` fields into production support.
 
 ## Runtime-validation follow-up
 
-The [combined follow-up report](../../docs/research/0030-runtime-validation.md) links actual [native pre-write admission](native-capacity/README.md), [mixed-layout owned tail transfers](native-abi/README.md), [native recursive admission/M:N/borrower and scoped-cleanup lifetimes](native-lifecycle/README.md), and [portable terminal guest teardown with outstanding native work](portable/README.md). The baseline below remains its historical snapshot, including explicit containment failures; follow-up success does not erase those failures or assert a complete compiler/runtime.
+The [combined follow-up report](../../docs/research/0030-runtime-validation.md) links experiments for [native pre-write admission](native-capacity/README.md), [mixed-layout owned tail transfers](native-abi/README.md), [native recursive admission/M:N/borrower and scoped-cleanup lifetimes](native-lifecycle/README.md), and [portable terminal guest teardown with outstanding native work](portable/README.md). The baseline below remains its historical snapshot, including explicit containment failures; follow-up success does not erase those failures or assert a complete compiler/runtime.
 
 ## Reproduce
 
@@ -43,13 +43,13 @@ The recorded execution used the second form. Fresh reproduction requires availab
 
 ## Negative source eligibility inventory
 
-Only the first row has a lowered live-local control here; the other source-rule cases remain **awaiting a Rill compiler/checker**. They are not invalid mandatory-tail IR tests.
+Only the first row has a lowered live-local control here. The other source-rule cases await a Rill compiler/checker. They are not invalid mandatory-tail IR tests.
 
 | Final-looking source situation | Required lowering/evidence |
 | --- | --- |
-| Callee borrows a caller local, or caller accesses it after the call | Ordinary call; retain the local/frame. `ordinary_control` observes a live slot before and after recursion. No local pointer is passed through a mandatory-tail transfer. |
-| Pending guard disposal/protected resource release | Ordinary call with disposal afterward; never release early just to obtain TCO. Worklist model is not this source classification test. |
-| Scoped child or native borrower still requires join | Ordinary call; retain backing and join to completion/confirmed abortion before release. Owner/cancel request is not that completion. |
-| Explicit error wrapping after call | Ordinary call with wrapper construction afterward. Unchanged #29 propagation does not automatically add trace/cleanup work and must be considered independently. |
+| Callee borrows a caller local, or caller accesses it after the call | Use an ordinary call and retain the local/frame. `ordinary_control` observes a live slot before and after recursion. No local pointer passes through a mandatory-tail transfer. |
+| Pending guard disposal/protected resource release | Use an ordinary call with disposal afterward. Never release early just to obtain TCO. The worklist model does not test this source classification. |
+| Scoped child or native borrower still requires join | Use an ordinary call. Retain backing and join to completion/confirmed abortion before release. Ownership or a cancellation request does not establish completion. |
+| Explicit error wrapping after call | Use an ordinary call with wrapper construction afterward. Unchanged #29 propagation does not automatically add trace/cleanup work and must be considered independently. |
 
 Unsupported lowering of a genuinely eligible call must reject, not silently use any of these ordinary-call exceptions. Complete Rill ABI/checker classification, automatic generated admission and production runtime/provider acceptance remain unimplemented. Actual standalone M:N migration, pre-write admission, suspended cleanup/scoped joins and separately accounted portable budgets now have follow-up evidence linked above; they are no longer merely deferred experiments. These manually coded mechanisms are not source-checker tests.
