@@ -1,0 +1,279 @@
+// #32 / ADR 0018: hand-checked API examples, not compiled or executed Rill.
+// Application-owned memory adapters, not new mandatory standard memory types.
+import std::panic;
+import std::bytes::{Bytes, length, slice, append, clear, truncate, reserve};
+import std::option::Option;
+import std::result::{Result, Ok, Err};
+import std::error::{display, value};
+import std::io::{read, write, flush, close, readExact, writeAll, readToEnd,
+  IoFailure, ReadExactError, ReadToEndError, bufferedReader, bufferedWriter, intoParts};
+
+// Unit enum: noBorrow(MemoryError) is structurally available for probe/buffer paths.
+enum MemoryError { Injected }
+implement display(error: &MemoryError): string {
+  return "injected memory I/O failure";
+}
+
+function nothing(): void {}
+function injected(): Result<void, MemoryError> {
+  return Err(MemoryError.Injected);
+}
+function failed<T>(transferred: u64): Result<T, IoFailure<MemoryError>> {
+  guard injected() else (error) {
+    return Err(IoFailure<MemoryError> { transferred: transferred, error: error });
+  }
+  panic(&"injected must fail");
+}
+function extent(bytes: &Bytes, start: u64, end: u64): &Bytes {
+  guard let part = slice(bytes, start, end) else {
+    panic(&"memory adapter range invariant");
+  }
+  return part;
+}
+function smaller(left: u64, right: u64): u64 {
+  return if (left < right) left else right;
+}
+
+type MemorySource = { bytes: Bytes; offset: u64; step: u64 };
+function source(bytes: Bytes, step: u64): MemorySource {
+  if (step == 0u64) { panic(&"positive memory source step required"); }
+  return MemorySource { bytes: bytes, offset: 0u64, step: step };
+}
+implement read(input: &mut MemorySource, output: &mut Bytes, maximum: u64)
+  : Result<Option<u64>, IoFailure<MemoryError>> {
+  if (maximum == 0u64) { return Ok(Option.Some(0u64)); }
+  let available = length(&input.bytes) - input.offset;
+  if (available == 0u64) { return Ok(Option.None); }
+  let count = smaller(smaller(available, maximum), input.step);
+  append(output, extent(&input.bytes, input.offset, input.offset + count));
+  input.offset += count;
+  return Ok(Option.Some(count));
+}
+
+type MemorySink = { bytes: Bytes; step: u64 };
+function sink(step: u64): MemorySink {
+  if (step == 0u64) { panic(&"positive memory sink step required"); }
+  return MemorySink { bytes: Bytes([]), step: step };
+}
+implement write(output: &mut MemorySink, input: &Bytes)
+  : Result<u64, IoFailure<MemoryError>> {
+  if (length(input) == 0u64) { return Ok(0u64); }
+  let count = smaller(length(input), output.step);
+  append(&mut output.bytes, extent(input, 0u64, count));
+  return Ok(count);
+}
+implement flush(output: &mut MemorySink): Result<void, MemoryError> {
+  return Ok(nothing());
+}
+implement close(output: MemorySink): Result<void, MemoryError> {
+  return Ok(nothing());
+}
+
+// Inject one failure after a real prefix. The next operation can recover in this
+// memory model; that is NOT a retry guarantee for arbitrary native transports.
+type FaultSource = { inner: MemorySource; failNext: bool };
+implement read(input: &mut FaultSource, output: &mut Bytes, maximum: u64)
+  : Result<Option<u64>, IoFailure<MemoryError>> {
+  let count = read(&mut input.inner, output, maximum)?;
+  if (maximum != 0u64 && input.failNext) {
+    input.failNext = false;
+    return match (count) {
+      Option.Some(number) => failed<Option<u64>>(number),
+      Option.None => failed<Option<u64>>(0u64),
+    };
+  }
+  return Ok(count);
+}
+type FaultSink = { inner: MemorySink; failNext: bool };
+implement write(output: &mut FaultSink, input: &Bytes)
+  : Result<u64, IoFailure<MemoryError>> {
+  let count = write(&mut output.inner, input)?;
+  if (length(input) != 0u64 && output.failNext) {
+    output.failNext = false;
+    return failed<u64>(count);
+  }
+  return Ok(count);
+}
+implement flush(output: &mut FaultSink): Result<void, MemoryError> {
+  return flush(&mut output.inner);
+}
+
+function send<W,E>(output: &mut W, input: &Bytes): Result<void, IoFailure<E>>
+  where write(W,E), display(E) {
+  return writeAll(output, input);
+}
+function obtain<R,E>(input: &mut R, output: &mut Bytes, count: u64)
+  : Result<void, ReadExactError<E>> where read(R,E), display(E) {
+  return readExact(input, output, count);
+}
+
+function collect<R,E>(input: &mut R, output: &mut Bytes, maximum: u64)
+  : Result<u64, ReadToEndError<E>>
+  where read(R,E), display(E), noBorrow(E) {
+  return readToEnd(input, output, maximum);
+}
+
+function shortRead(): bool {
+  let mut input = source(Bytes([1u8, 2u8, 3u8]), 1u64);
+  let mut output = Bytes([9u8]);
+  guard let count = read(&mut input, &mut output, 3u64) else { return false; }
+  return match (count) {
+    Option.Some(number) => number == 1u64 && length(&output) == 2u64,
+    Option.None => false,
+  };
+}
+function emptyReadDoesNotTestEof(): bool {
+  let mut input = source(Bytes([]), 1u64);
+  let mut output = Bytes([]);
+  guard let count = read(&mut input, &mut output, 0u64) else { return false; }
+  return match (count) {
+    Option.Some(number) => number == 0u64 && input.offset == 0u64,
+    Option.None => false,
+  };
+}
+function eof(): bool {
+  let mut input = source(Bytes([]), 1u64);
+  let mut output = Bytes([9u8]);
+  guard let count = read(&mut input, &mut output, 1u64) else { return false; }
+  return match (count) {
+    Option.None => length(&output) == 1u64,
+    Option.Some(number) => false,
+  };
+}
+function exactAcrossShortReads(): bool {
+  let mut input = source(Bytes([1u8, 2u8, 3u8]), 1u64);
+  let mut output = Bytes([9u8]);
+  guard obtain(&mut input, &mut output, 3u64) else { return false; }
+  return length(&output) == 4u64 && input.offset == 3u64;
+}
+function earlyEof(): bool {
+  let mut input = source(Bytes([1u8, 2u8]), 1u64);
+  let mut output = Bytes([9u8]);
+  guard readExact(&mut input, &mut output, 3u64) else (error) {
+    return match (value(&error)) {
+      ReadExactError.UnexpectedEof { transferred } =>
+        transferred == 2u64 && length(&output) == 3u64,
+      ReadExactError.Read(inner) => false,
+    };
+  }
+  return false;
+}
+function writeAcrossShortWrites(): bool {
+  let mut output = sink(1u64);
+  let input = Bytes([1u8, 2u8, 3u8]);
+  guard send(&mut output, &input) else { return false; }
+  return length(&output.bytes) == 3u64;
+}
+function partialFailure(): bool {
+  let mut output = FaultSink { inner: sink(1u64), failNext: true };
+  let input = Bytes([1u8, 2u8, 3u8]);
+  guard writeAll(&mut output, &input) else (error) {
+    return value(&error).transferred == 1u64 && length(&output.inner.bytes) == 1u64;
+  }
+  return false;
+}
+function boundedAtEof(): bool {
+  let mut input = source(Bytes([1u8, 2u8]), 1u64);
+  let mut output = Bytes([9u8]);
+  guard let count = collect(&mut input, &mut output, 2u64) else { return false; }
+  return count == 2u64 && length(&output) == 3u64;
+}
+function overflowByte(): bool {
+  let mut input = source(Bytes([1u8, 2u8, 3u8]), 1u64);
+  let mut output = Bytes([9u8]);
+  guard readToEnd(&mut input, &mut output, 2u64) else (error) {
+    return match (value(&error)) {
+      ReadToEndError.Read(inner) => false,
+      ReadToEndError.LimitExceeded { transferred, extra, probeFailure } =>
+        transferred == 2u64 && length(extra) == 1u64 && length(&output) == 3u64
+          && input.offset == 3u64,
+    };
+  }
+  return false;
+}
+function overflowAndFailure(): bool {
+  let mut input = FaultSource {
+    inner: source(Bytes([7u8]), 1u64), failNext: true,
+  };
+  let mut output = Bytes([9u8]);
+  guard readToEnd(&mut input, &mut output, 0u64) else (error) {
+    return match (value(&error)) {
+      ReadToEndError.Read(inner) => false,
+      ReadToEndError.LimitExceeded { transferred, extra, probeFailure } =>
+        transferred == 0u64 && length(extra) == 1u64 && length(&output) == 1u64
+          && match (probeFailure) {
+            Option.Some(original) => value(original).transferred == 1u64,
+            Option.None => false,
+          },
+    };
+  }
+  return false;
+}
+function reusableBytes(): bool {
+  let mut output = Bytes([1u8, 2u8, 3u8]);
+  reserve(&mut output, 8u64);
+  truncate(&mut output, 2u64);
+  if (length(&output) != 2u64) { return false; }
+  clear(&mut output);
+  let mut input = source(Bytes([4u8]), 1u64);
+  guard readExact(&mut input, &mut output, 1u64) else { return false; }
+  return length(&output) == 1u64;
+}
+function bufferedAcceptance(): bool {
+  let mut output = bufferedWriter(sink(1u64), 2u64);
+  let input = Bytes([1u8, 2u8, 3u8]);
+  guard writeAll(&mut output, &input) else { return false; }
+  // Decomposition performs no I/O; accepted bytes are either passed on or pending.
+  let [underlying, pending] = intoParts(output);
+  return length(&underlying.bytes) + length(&pending) == 3u64
+    && length(&pending) <= 2u64;
+}
+function flushRetainsSuffix(): bool {
+  let inner = FaultSink { inner: sink(1u64), failNext: true };
+  let mut output = bufferedWriter(inner, 3u64);
+  let input = Bytes([1u8, 2u8, 3u8]);
+  // A primitive write may accept only a prefix, or fail after accepting some.
+  // Observe acceptance explicitly instead of assuming an eager/lazy fill policy.
+  let accepted = match (write(&mut output, &input)) {
+    Result.Ok(number) => number,
+    Result.Err(error) => value(&error).transferred,
+  };
+  // This model fails once, so retrying flush is safe here specifically.
+  let _ = flush(&mut output);
+  guard flush(&mut output) else { return false; }
+  let [underlying, pending] = intoParts(output);
+  return length(&pending) == 0u64 && length(&underlying.inner.bytes) == accepted;
+}
+function readerDecomposition(): bool {
+  let input = source(Bytes([1u8, 2u8, 3u8]), 3u64);
+  let mut buffered = bufferedReader(input, 3u64);
+  let mut output = Bytes([]);
+  guard readExact(&mut buffered, &mut output, 1u64) else { return false; }
+  let [underlying, unread] = intoParts(buffered);
+  return underlying.offset == length(&output) + length(&unread)
+    && length(&unread) <= 3u64;
+}
+function explicitClose(): bool {
+  let mut output = bufferedWriter(sink(1u64), 2u64);
+  let input = Bytes([1u8, 2u8]);
+  guard writeAll(&mut output, &input) else { return false; }
+  guard close(output) else { return false; }
+  // output is consumed on both success and failure; it is not used again.
+  return true;
+}
+
+expect shortRead();
+expect emptyReadDoesNotTestEof();
+expect eof();
+expect exactAcrossShortReads();
+expect earlyEof();
+expect writeAcrossShortWrites();
+expect partialFailure();
+expect boundedAtEof();
+expect overflowByte();
+expect overflowAndFailure();
+expect reusableBytes();
+expect bufferedAcceptance();
+expect flushRetainsSuffix();
+expect readerDecomposition();
+expect explicitClose();

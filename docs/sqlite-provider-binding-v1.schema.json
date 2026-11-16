@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rill.invalid/design/sqlite-provider-binding-v1.schema.json",
+  "title": "Rill SQLite native binding contract v1 (design, no consumer exists)",
+  "description": "Shape checks only. Real admission additionally verifies canonical module authority, target ABI, source/build/link identity, ownership and runtime mechanisms. This document grants no native capability.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifactVersion", "contract", "module", "bindings", "resourceTypes", "source", "target", "abi", "profile", "symbols", "hooks", "budgets"],
+  "properties": {
+    "artifactVersion": { "const": 1 },
+    "contract": { "const": "rill.sqlite.native/1" },
+    "module": {
+      "type": "object", "additionalProperties": false,
+      "required": ["canonicalIdentity", "sourceSha3_256", "ownershipPolicy"],
+      "properties": {
+        "canonicalIdentity": { "type": "string", "minLength": 1 },
+        "sourceSha3_256": { "$ref": "#/$defs/digest" },
+        "ownershipPolicy": { "const": "rill.sqlite.ownership/1" }
+      }
+    },
+    "bindings": {
+      "type": "object", "additionalProperties": false,
+      "required": ["serviceStart", "submit", "requestStop", "observe", "copyResult", "adopt", "releaseJob", "serviceStop"],
+      "properties": {
+        "serviceStart": { "$ref": "#/$defs/identity" }, "submit": { "$ref": "#/$defs/identity" },
+        "requestStop": { "$ref": "#/$defs/identity" }, "observe": { "$ref": "#/$defs/identity" },
+        "copyResult": { "$ref": "#/$defs/identity" }, "adopt": { "$ref": "#/$defs/identity" },
+        "releaseJob": { "$ref": "#/$defs/identity" }, "serviceStop": { "$ref": "#/$defs/identity" }
+      }
+    },
+    "resourceTypes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["connection", "statement", "job", "transactionParticipation"],
+      "properties": {
+        "connection": { "$ref": "#/$defs/identity" }, "statement": { "$ref": "#/$defs/identity" },
+        "job": { "$ref": "#/$defs/identity" }, "transactionParticipation": { "$ref": "#/$defs/identity" }
+      }
+    },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "archive", "archiveSha3_256", "sourceId", "amalgamationSha3_256"],
+      "properties": {
+        "version": { "const": "3.54.1" },
+        "archive": { "const": "https://sqlite.org/2026/sqlite-amalgamation-3540100.zip" },
+        "archiveSha3_256": { "const": "92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30" },
+        "sourceId": { "const": "2026-10-16 14:45:20 555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76" },
+        "amalgamationSha3_256": { "const": "e2b869d3003b33c942b7dd7063604fbc53553e1b66609570df39b9b7b558ee81" }
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["os", "arch", "libc", "deployment", "compiler", "linker", "compilerArguments", "linkerArguments"],
+      "properties": {
+        "os": { "enum": ["linux", "macos"] },
+        "arch": { "enum": ["x86_64", "aarch64"] },
+        "libc": { "enum": ["glibc", "libSystem"] },
+        "deployment": { "type": "string", "minLength": 1 },
+        "compiler": { "type": "string", "minLength": 1 },
+        "linker": { "type": "string", "minLength": 1 },
+        "compilerArguments": { "$ref": "#/$defs/arguments" },
+        "linkerArguments": { "$ref": "#/$defs/arguments" }
+      },
+      "allOf": [
+        { "if": { "properties": { "os": { "const": "linux" } } }, "then": { "properties": { "libc": { "const": "glibc" } } } },
+        { "if": { "properties": { "os": { "const": "macos" } } }, "then": { "properties": { "libc": { "const": "libSystem" } } } }
+      ]
+    },
+    "abi": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "wireVersion", "pointerBits", "callingConvention", "headerSha3_256"],
+      "properties": {
+        "id": { "const": "rill.sqlite.c/1" },
+        "wireVersion": { "const": 1 },
+        "pointerBits": { "const": 64 },
+        "callingConvention": { "const": "C" },
+        "headerSha3_256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "profile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "inspectionPolicy", "defines", "forbiddenDefines", "settings"],
+      "properties": {
+        "id": { "const": "rill.sqlite.initial/1" },
+        "inspectionPolicy": { "const": "rill.sqlite.inspection/1" },
+        "defines": { "const": { "SQLITE_THREADSAFE": 1, "SQLITE_OMIT_LOAD_EXTENSION": 1, "SQLITE_OMIT_SHARED_CACHE": 1, "SQLITE_TRUSTED_SCHEMA": 0, "SQLITE_MAX_MMAP_SIZE": 0 } },
+        "forbiddenDefines": { "const": ["SQLITE_ENABLE_BATCH_ATOMIC_WRITE", "SQLITE_ENABLE_FTS3", "SQLITE_ENABLE_FTS4", "SQLITE_ENABLE_FTS5", "SQLITE_ENABLE_RTREE", "SQLITE_ENABLE_GEOPOLY", "SQLITE_ENABLE_DBPAGE_VTAB", "SQLITE_ENABLE_DBSTAT_VTAB"] },
+        "settings": { "const": { "startupMode": "serialized", "openMode": "fullmutex-privatecache", "defensive": true, "trustedSchema": false, "foreignKeysDefault": true, "busyTimeoutMs": 0, "fileSynchronous": "full", "uri": false } }
+      }
+    },
+    "symbols": {
+      "type": "object", "additionalProperties": false,
+      "required": ["privatePrefix", "exportedFunctions"],
+      "properties": {
+        "privatePrefix": { "type": "string", "pattern": "^rill_sqlite_private_[a-z0-9_]+_$" },
+        "exportedFunctions": { "const": ["rill_sqlite_v1_service_start", "rill_sqlite_v1_submit", "rill_sqlite_v1_request_stop", "rill_sqlite_v1_observe", "rill_sqlite_v1_copy_result", "rill_sqlite_v1_adopt", "rill_sqlite_v1_release_job", "rill_sqlite_v1_service_stop"] }
+      }
+    },
+    "hooks": { "const": { "temporaryLease": 1, "wakeToken": 1, "atomicAdoption": 1, "blockingBootstrap": 1 } },
+    "budgets": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ordinaryWorkers", "interruptWorkers", "ordinaryQueueEntries", "ordinaryQueueBytes", "cleanupQueueEntries", "requestBytes", "sqlBytes", "cacheEntries", "cacheSqlBytes", "diagnosticRecords", "parameterBytes", "fieldBytes", "rowBytes", "metadataBytes", "columns", "parameters"],
+      "properties": {
+        "ordinaryWorkers": { "$ref": "#/$defs/positive" }, "interruptWorkers": { "$ref": "#/$defs/positive" },
+        "ordinaryQueueEntries": { "$ref": "#/$defs/positive" }, "ordinaryQueueBytes": { "$ref": "#/$defs/positive" },
+        "cleanupQueueEntries": { "$ref": "#/$defs/positive" }, "requestBytes": { "$ref": "#/$defs/positive" },
+        "sqlBytes": { "$ref": "#/$defs/positive" }, "cacheEntries": { "$ref": "#/$defs/unsigned" },
+        "cacheSqlBytes": { "$ref": "#/$defs/unsigned" }, "diagnosticRecords": { "$ref": "#/$defs/positive" },
+        "parameterBytes": { "$ref": "#/$defs/positive" }, "fieldBytes": { "$ref": "#/$defs/positive" },
+        "rowBytes": { "$ref": "#/$defs/positive" }, "metadataBytes": { "$ref": "#/$defs/positive" },
+        "columns": { "$ref": "#/$defs/positive" }, "parameters": { "$ref": "#/$defs/positive" }
+      }
+    }
+  },
+  "$defs": {
+    "identity": { "type": "string", "minLength": 1 },
+    "arguments": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "unsigned": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+    "positive": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+  }
+}

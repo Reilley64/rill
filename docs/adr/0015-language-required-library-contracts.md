@@ -4,6 +4,22 @@
 
 ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separate sessions. This decision follows both, including when a separately prepared artifact is not yet present in a checkout.
 
+## Later implementation and conversion refinement (#41)
+
+[ADR 0017](0017-user-implementable-conversions.md) supersedes the closed-only numeric conversion boundary below and the old snake_case try spellings. Canonical into/from and tryInto/tryFrom allow user endpoint-owned implementations, destination/source specificity and implementation-defined typed errors. Numeric pairs retain protected standard behavior and ConversionError. Parsing stays separate. `implement` becomes language-wide family-body syntax; declarations and standalone functions retain `function`. The updated catalogue and prototypes distinguish these exceptions from unchanged ordinary overload, ownership and error/cause rules.
+
+## Later streaming extension (#32)
+
+[ADR 0018](0018-streaming-and-buffered-io.md) extends the baseline with separate ordinary read/write/flush/close families, exact typed progress errors, bounded append reads and owning buffered adapters. It adds Bytes clear/truncate/reserve, not a competing buffer or writable view API. Q36 explicitly requires scoped noBorrow evidence for readToEnd/local-buffer adapter errors and the flush error preserved across buffered consuming close, not a blanket prohibition on primary borrowed errors. Existing stdio/whole-file signatures and their partial-effect warnings stay unchanged; no reliable progress count is retrofitted into them. Explicit consuming close observes finalization failures, while disposal discards pending output and still completes required native cleanup. #33/#34/#35/#38/#39/#40 own deadlines/concrete consumers; #30 remains the backend gate. See the updated catalogue and prototype 19 for hand-checked examples, not implemented streaming.
+
+## Later filesystem extension (#35)
+
+[ADR 0019](0019-paths-files-and-filesystem-operations.md) adds byte-preserving Path, access-mode-specific file handles, checked seek/explicit sync, focused metadata/directories/symlinks and nonrecursive temporary guards. Existing text whole-file APIs keep their guarantees and gain &Path implementations; IoErrorKind gains explicit filesystem outcomes. Native/WASI capability limits, path races, partial effects and cleanup are recorded rather than treated as a sandbox/durability proof. See catalogue/prototype 20; #28/#30 retain formal/provider validation.
+
+## SQL extension (#40)
+
+[ADR 0021](0021-partial-standard-sql-contract.md) and the [integrated SQL contract](../sql-contracts.md) now record the explicitly confirmed shared interface, including fixed control arities and #33 temporal/token integration. External drivers/pools/ORMs remain separate; native-provider work moves to #43 without being declared fulfilled. Named conversion helpers/user JSON examples preserve #41/#31; intrinsic cancellation stays outside Result while explicit SQL tokens have typed outcomes. The narrow std::time::validateInstantDomain amendment avoids private field access. Design closure is not runtime/provider support; #28/#30 retain formal/backend gates.
+
 ## Decisions and consequences
 
 - `List`/hash `Map` are owned, explicitly mutable and independently copied; u64 counts/indices, Option queries, read-only keys and explicit eq/hash contracts. Map insertion retains an existing equal key and returns its displaced value. List transformations are eager, sequential and support both consumed and borrowed input.

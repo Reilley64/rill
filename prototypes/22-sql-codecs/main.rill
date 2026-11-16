@@ -1,0 +1,341 @@
+// #40 design contract: hand-checked value/codec/error examples, NOT SQL execution.
+// These two cell fixtures are not PostgreSQL/SQLite protocol or native adapters.
+// Fixed bind helpers use a memory encoder; no connect/query is performed.
+import domain::{Email, EmailInput, EmailError, EmailDecodeError, emailText};
+import std::convert::{into, tryInto};
+import std::sql::{Parameter, ParameterType, bindInto, tryBind, BindError,
+  decimal, decimalWithLimit, decimalText,
+  DbError, UniqueViolation, KeyIdentity, KeyDetails, KeyDescription, KeyPart,
+  KeyCondition, DetailOrigin, NameDetail};
+import std::encoding::json::Value;
+import std::bytes::{Bytes, length as byteLength, get as byteGet};
+import std::string::{bytes, decodeUtf8, Utf8Error};
+import std::collection::{List, push, length as listLength, get as listGet};
+import std::sql::driver::bind;
+import std::option::Option;
+import std::result::{Result, Ok, Err};
+import std::error::{display, value, formatError};
+import std::compare::eq;
+import std::panic;
+
+enum CellError { Null, WrongKind, Encoding(Err<Utf8Error>) }
+implement display(error: &CellError): string {
+  return "fixture cell conversion failed";
+}
+// Network-like text arrives as owned bytes requiring checked UTF-8 decoding.
+type NetworkCell = { data: Bytes; isNull: bool };
+implement tryInto<string>(cell: &NetworkCell): Result<string,CellError> {
+  if (cell.isNull) { return Err(CellError.Null); }
+  guard let text = decodeUtf8(&cell.data) else (error) {
+    return Err(CellError.Encoding(error));
+  }
+  return Ok(text);
+}
+// Embedded-like cells expose a native-kind distinction, without a real C handle.
+enum EmbeddedCell { Null, Text(string), Integer(i64) }
+implement tryInto<string>(cell: &EmbeddedCell): Result<string,CellError> {
+  return match (cell) {
+    EmbeddedCell.Text(text) => Ok(copy(text)),
+    EmbeddedCell.Null => Err(CellError.Null),
+    EmbeddedCell.Integer(number) => Err(CellError.WrongKind),
+  };
+}
+// Explicit nullable conversion, not an automatic Into-to-TryInto adapter.
+implement<T,E> tryInto<Option<T>>(cell: &EmbeddedCell): Result<Option<T>,E>
+  where tryInto(T, &EmbeddedCell, E) {
+  return match (cell) {
+    EmbeddedCell.Null => Ok(Option.None),
+    _ => Ok(Option.Some(tryInto<T>(cell)?)),
+  };
+}
+
+function email(text: string): Email {
+  guard let checked = tryInto<Email>(text) else { panic(&"nonempty fixture expected"); }
+  return checked;
+}
+function sqlRepresentation(): bool {
+  let parameter = into<Parameter>(email("one@example.test"));
+  return match (parameter) {
+    Parameter.Text(text) => eq(&text, &"one@example.test"),
+    _ => false,
+  };
+}
+function userValidationError(): bool {
+  guard tryInto<Parameter>(EmailInput { text: "" }) else (error) {
+    return match (value(&error)) {
+      EmailError.Empty => true,
+      _ => false,
+    };
+  }
+  return false;
+}
+function jsonRepresentation(): bool {
+  let encoded = into<Value>(email("two@example.test"));
+  return match (encoded) {
+    Value.String(text) => eq(&text, &"two@example.test"),
+    _ => false,
+  };
+}
+function jsonOwnedDecode(): bool {
+  guard let decoded = tryInto<Email>(Value.String("three@example.test")) else {
+    return false;
+  }
+  return eq(emailText(&decoded), &"three@example.test");
+}
+function jsonBorrowedDecode(): bool {
+  let encoded = Value.String("four@example.test");
+  guard let decoded = tryInto<Email>(&encoded) else { return false; }
+  // The decoded Email owns copied text; encoded is still independently usable.
+  return eq(emailText(&decoded), &"four@example.test") && match (&encoded) {
+    Value.String(text) => eq(text, &"four@example.test"),
+    _ => false,
+  };
+}
+function networkDecode(): bool {
+  let cell = NetworkCell { data: copy(bytes(&"five@example.test")), isNull: false };
+  guard let decoded = tryInto<Email>(&cell) else { return false; }
+  return eq(emailText(&decoded), &"five@example.test");
+}
+function embeddedDecode(): bool {
+  let cell = EmbeddedCell.Text("six@example.test");
+  guard let decoded = tryInto<Email>(&cell) else { return false; }
+  return eq(emailText(&decoded), &"six@example.test");
+}
+function nullIsNotEmptyText(): bool {
+  let cell = EmbeddedCell.Null;
+  guard tryInto<Email>(&cell) else (error) {
+    return match (value(&error)) {
+      EmailDecodeError.Cell(inner) => match (value(inner)) {
+        CellError.Null => true,
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+function nullableDecode(): bool {
+  let cell = EmbeddedCell.Null;
+  guard let decoded = tryInto<Option<Email>>(&cell) else { return false; }
+  return match (decoded) { Option.None => true, Option.Some(found) => false };
+}
+function wrongKindIsNotFormattedText(): bool {
+  let cell = EmbeddedCell.Integer(42i64);
+  guard tryInto<Email>(&cell) else (error) {
+    return match (value(&error)) {
+      EmailDecodeError.Cell(inner) => match (value(inner)) {
+        CellError.WrongKind => true,
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+function nullParameterIsTyped(): bool {
+  let parameter = Parameter.Null(ParameterType.Text);
+  return match (parameter) {
+    Parameter.Null(ParameterType.Text) => true,
+    _ => false,
+  };
+}
+function decimalSpelling(): bool {
+  guard let number = decimal(&"-12.3400e+2") else { return false; }
+  return eq(decimalText(&number), &"-12.3400e+2");
+}
+function decimalRejectsLeadingZero(): bool {
+  guard decimal(&"01") else { return true; }
+  return false;
+}
+function decimalBudget(): bool {
+  guard decimalWithLimit(&"1e999999999", 4u64) else { return true; }
+  return false;
+}
+
+enum MockNativeError { Duplicate { detail: string; sql: string } }
+implement display(error: &MockNativeError): string {
+  // INTENTIONALLY UNSAFE raw-native fixture: the standard wrapper must not call
+  // this formatter automatically. Deliberate native inspection still can.
+  return match (error) {
+    MockNativeError.Duplicate { detail, sql } => `${detail}; ${sql}`,
+  };
+}
+function nativeFailure(): Result<void,MockNativeError> {
+  return Err(MockNativeError.Duplicate {
+    detail: "sensitive@example.test", sql: "INSERT secret_literal",
+  });
+}
+function identity(): KeyIdentity {
+  return KeyIdentity {
+    database: Option.None, schema: Option.None,
+    table: Option.Some(NameDetail { name: "users", origin: DetailOrigin.DeclaredSchema }),
+    key: Option.Some(NameDetail { name: "uq_tenant_email", origin: DetailOrigin.DeclaredSchema }),
+  };
+}
+function uniqueFailure(details: KeyDetails): Result<void,DbError<MockNativeError>> {
+  guard nativeFailure() else (error) {
+    return Err(DbError.UniqueViolation {
+      info: UniqueViolation { identity: identity(), details: details }, source: error,
+    });
+  }
+  panic(&"native fixture must fail");
+}
+function compositeDescription(): KeyDetails {
+  return KeyDetails.Described(KeyDescription {
+    parts: [KeyPart.Column("tenant_id"), KeyPart.Column("email")],
+    condition: KeyCondition.Unconditional, origin: DetailOrigin.DeclaredSchema,
+  });
+}
+function uniqueDetailsUnavailable(): bool {
+  guard uniqueFailure(KeyDetails.Unavailable) else (error) {
+    return match (value(&error)) {
+      DbError.UniqueViolation { info, source } => match (&info.details) {
+        KeyDetails.Unavailable => true,
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+function containsText(text: &string, needle: &string): bool {
+  let hay = bytes(text);
+  let wanted = bytes(needle);
+  let count = byteLength(wanted);
+  if (count > byteLength(hay)) { return false; }
+  let mut start = 0u64;
+  while (start <= byteLength(hay) - count) {
+    let mut offset = 0u64;
+    let mut matched = true;
+    while (offset < count) {
+      let same = match (byteGet(hay, start + offset)) {
+        Option.Some(actual) => match (byteGet(wanted, offset)) {
+          Option.Some(expected) => actual == expected,
+          Option.None => false,
+        },
+        Option.None => false,
+      };
+      if (!same) { matched = false; break; }
+      offset += 1u64;
+    }
+    if (matched) { return true; }
+    start += 1u64;
+  }
+  return false;
+}
+function safeDefaultAndTypedSource(): bool {
+  guard uniqueFailure(compositeDescription()) else (error) {
+    let rendered = formatError(&error);
+    if (containsText(&rendered, &"sensitive@example.test")
+      || containsText(&rendered, &"secret_literal")) { return false; }
+    return match (value(&error)) {
+      DbError.UniqueViolation { info, source } => match (value(source)) {
+        MockNativeError.Duplicate { detail, sql } => eq(detail, &"sensitive@example.test"),
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+function compositeColumnsStayOrdered(): bool {
+  guard uniqueFailure(compositeDescription()) else (error) {
+    return match (value(&error)) {
+      DbError.UniqueViolation { info, source } => match (&info.details) {
+        KeyDetails.Described(description) => {
+          if (listLength(&description.parts) != 2u64) { return false; }
+          guard let first = listGet(&description.parts, 0u64) else { return false; }
+          guard let second = listGet(&description.parts, 1u64) else { return false; }
+          return match (first) {
+            KeyPart.Column(name) => eq(name, &"tenant_id") && match (second) {
+              KeyPart.Column(other) => eq(other, &"email"),
+              _ => false,
+            },
+            _ => false,
+          };
+        },
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+
+// A memory-only argument encoder tests helper wiring, not a database driver.
+type FixtureArgs = { values: List<Parameter> };
+implement bind(arguments: &mut FixtureArgs, parameter: Parameter)
+  : Result<void,DbError<MockNativeError>> {
+  return Ok(push(&mut arguments.values, parameter));
+}
+function explicitBindingHelpers(): bool {
+  let mut arguments = FixtureArgs { values: [] };
+  guard bindInto(&mut arguments, email("bound@example.test")) else { return false; }
+  guard tryBind(&mut arguments, EmailInput { text: "" }) else (error) {
+    return listLength(&arguments.values) == 1u64 && match (value(&error)) {
+      BindError.Conversion(inner) => match (value(inner)) {
+        EmailError.Empty => true,
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+function integerWidthsPreserved(): bool {
+  let signed = into<Parameter>(7i64);
+  let unsigned = into<Parameter>(7u64);
+  return match (signed) {
+    Parameter.I64(number) => number == 7i64 && match (unsigned) {
+      Parameter.U64(other) => other == 7u64,
+      _ => false,
+    },
+    _ => false,
+  };
+}
+function expressionDetailsStayExplicitAndRedacted(): bool {
+  let details = KeyDetails.Described(KeyDescription {
+    parts: [KeyPart.Expression(Option.Some("lower(email)"))],
+    condition: KeyCondition.Partial(Option.Some("token = 'secret_predicate'")),
+    origin: DetailOrigin.DeclaredSchema,
+  });
+  guard uniqueFailure(details) else (error) {
+    let rendered = formatError(&error);
+    if (containsText(&rendered, &"lower(")
+      || containsText(&rendered, &"secret_predicate")) { return false; }
+    return match (value(&error)) {
+      DbError.UniqueViolation { info, source } => match (&info.details) {
+        KeyDetails.Described(description) => {
+          guard let first = listGet(&description.parts, 0u64) else { return false; }
+          return match (first) {
+            KeyPart.Expression(sql) => true,
+            _ => false,
+          };
+        },
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+
+expect sqlRepresentation();
+expect explicitBindingHelpers();
+expect integerWidthsPreserved();
+expect userValidationError();
+expect jsonRepresentation();
+expect jsonOwnedDecode();
+expect jsonBorrowedDecode();
+expect networkDecode();
+expect embeddedDecode();
+expect nullIsNotEmptyText();
+expect nullableDecode();
+expect wrongKindIsNotFormattedText();
+expect nullParameterIsTyped();
+expect decimalSpelling();
+expect decimalRejectsLeadingZero();
+expect decimalBudget();
+expect uniqueDetailsUnavailable();
+expect safeDefaultAndTypedSource();
+expect compositeColumnsStayOrdered();
+expect expressionDetailsStayExplicitAndRedacted();

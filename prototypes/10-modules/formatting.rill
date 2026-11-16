@@ -1,7 +1,7 @@
 // The exported declaration owns this family's identity and visibility.
 export function show<T>(value: &T): string;
 
-function show(value: &i32): string {
+implement show(value: &i32): string {
   return `${value}`;
 }
 

@@ -27,7 +27,7 @@ export function readHidden(value: &Hidden): i32 {
 }
 
 // A private type can participate in a visible family without exposing its fields.
-function show(value: &Hidden): string {
+implement show(value: &Hidden): string {
   return `hidden ${value.value}`;
 }
 

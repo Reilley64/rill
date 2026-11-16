@@ -1,0 +1,87 @@
+{
+  "scope": "Compiler machinery ONLY; no source tail replacement or complete ledger proof",
+  "versions": {
+    "opt": "Homebrew LLVM version 23.1.5\n  Optimized build.\n  Default target: arm64-apple-darwin27.0.0\n  Host CPU: apple-m3\n",
+    "llc": "Homebrew LLVM version 23.1.5\n  Optimized build.\n  Default target: arm64-apple-darwin27.0.0\n  Host CPU: apple-m3\n\n  Registered Targets:\n    aarch64     - AArch64 (little endian)\n    aarch64_32  - AArch64 (little endian ILP32)\n    aarch64_be  - AArch64 (big endian)\n    amdgcn      - legacy name for amdgpu\n    amdgpu      - AMDGPU gfx6+\n    arm         - ARM\n    arm64       - ARM64 (little endian)\n    arm64_32    - ARM64 (little endian ILP32)\n    armeb       - ARM (big endian)\n    avr         - Atmel AVR Microcontroller\n    bpf         - BPF (host endian)\n    bpfeb       - BPF (big endian)\n    bpfel       - BPF (little endian)\n    hexagon     - Hexagon\n    lanai       - Lanai\n    loongarch32 - 32-bit LoongArch\n    loongarch64 - 64-bit LoongArch\n    mips        - MIPS (32-bit big endian)\n    mips64      - MIPS (64-bit big endian)\n    mips64el    - MIPS (64-bit little endian)\n    mipsel      - MIPS (32-bit little endian)\n    msp430      - MSP430 [experimental]\n    nvptx       - NVIDIA PTX 32-bit\n    nvptx64     - NVIDIA PTX 64-bit\n    ppc32       - PowerPC 32\n    ppc32le     - PowerPC 32 LE\n    ppc64       - PowerPC 64\n    ppc64le     - PowerPC 64 LE\n    r600        - AMD GPUs HD2XXX-HD6XXX\n    riscv32     - 32-bit RISC-V\n    riscv32be   - 32-bit big endian RISC-V\n    riscv64     - 64-bit RISC-V\n    riscv64be   - 64-bit big endian RISC-V\n    sparc       - Sparc\n    sparcel     - Sparc LE\n    sparcv9     - Sparc V9\n    spirv       - SPIR-V Logical\n    spirv32     - SPIR-V 32-bit\n    spirv64     - SPIR-V 64-bit\n    systemz     - SystemZ\n    thumb       - Thumb\n    thumbeb     - Thumb (big endian)\n    ve          - VE\n    wasm32      - WebAssembly 32-bit\n    wasm64      - WebAssembly 64-bit\n    x86         - 32-bit X86: Pentium-Pro and above\n    x86-64      - 64-bit X86: EM64T and AMD64\n    xcore       - XCore\n",
+    "linker": "Homebrew LLD 23.1.5\n",
+    "node": "v26.13.0\n"
+  },
+  "source_and_tool_sha256": {
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon.py": "bb39ff974ffe0e6d346c5eba0485f43b7675d66b3b2575a2e763e517e489a038",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon-check.mjs": "bcd202640f08c5caa3c9e2454005da059a80170251059caedbacd0eb161602f4",
+    "/opt/homebrew/opt/llvm/bin/opt": "9aaee860e97ae076831f91352c06755fce78d2322947d5e17e8612a5a63d6c9e",
+    "/opt/homebrew/opt/llvm/bin/llc": "c728162fefd94fb097aa2e01b53a3e3402879256a09bd241ce52c4fcac75c481",
+    "/opt/homebrew/bin/wasm-ld": "57aa226bcac0488f519a5c7114c5ec4b7a982a4aca929f973cd100890a6d4367",
+    "/tmp/rill-backend-30-tools/binaryen-version_133/bin/wasm-dis": "5be72355404cb0332d74bc9a84384a52371696c599c54909baaa8d377f27665c"
+  },
+  "observations": [
+    {
+      "case": "inline",
+      "mode": 0,
+      "test": "spill_resume_destroy",
+      "observations": 1000001,
+      "allocations": 0,
+      "frees": 0,
+      "fallback_bytes": 0
+    },
+    {
+      "case": "inline",
+      "mode": 0,
+      "test": "undersized_fallback_region",
+      "fatal_expected": false,
+      "fatal_observed": false,
+      "canary_intact": true
+    },
+    {
+      "case": "inline",
+      "mode": 2,
+      "test": "spill_resume_destroy",
+      "observations": 1000001,
+      "allocations": 0,
+      "frees": 0,
+      "fallback_bytes": 0
+    },
+    {
+      "case": "inline",
+      "mode": 2,
+      "test": "undersized_fallback_region",
+      "fatal_expected": false,
+      "fatal_observed": false,
+      "canary_intact": true
+    },
+    {
+      "case": "fallback",
+      "mode": 0,
+      "test": "spill_resume_destroy",
+      "observations": 1000001,
+      "allocations": 1,
+      "frees": 1,
+      "fallback_bytes": 8
+    },
+    {
+      "case": "fallback",
+      "mode": 0,
+      "test": "undersized_fallback_region",
+      "fatal_expected": true,
+      "fatal_observed": true,
+      "canary_intact": true
+    },
+    {
+      "case": "fallback",
+      "mode": 2,
+      "test": "spill_resume_destroy",
+      "observations": 1000001,
+      "allocations": 1,
+      "frees": 1,
+      "fallback_bytes": 8
+    },
+    {
+      "case": "fallback",
+      "mode": 2,
+      "test": "undersized_fallback_region",
+      "fatal_expected": true,
+      "fatal_observed": true,
+      "canary_intact": true
+    }
+  ]
+}

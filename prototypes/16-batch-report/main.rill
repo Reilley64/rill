@@ -26,7 +26,7 @@ enum WatchEvent {
   Idle,
 }
 
-function display(error: &AppError): string {
+implement display(error: &AppError): string {
   return match (error) {
     AppError.Read { path } => `cannot read ${path}`,
     AppError.Decode { path } => `invalid UTF-8 in ${path}`,
@@ -35,7 +35,7 @@ function display(error: &AppError): string {
   };
 }
 
-function display(error: &AppError.Rows): string {
+implement display(error: &AppError.Rows): string {
   return `invalid records in ${error.path}`;
 }
 

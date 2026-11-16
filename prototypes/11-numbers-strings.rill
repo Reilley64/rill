@@ -1,13 +1,15 @@
 // #18 design artifacts, not executed compiler tests.
 // All new std paths/helper spellings and Result error types are illustrative for #23.
-// In particular, Result<T> here uses the default Error as a placeholder interface;
-// #23 must finalize error types without implicit error conversion or return-only overloads.
+// #41 / docs/adr/0017-user-implementable-conversions.md supersedes closed-only conversions.
+// Conversion names and generic evidence below follow #41; unrelated #18 helper sketches
+// remain historical where #23 supersedes them. No implicit error conversion is added.
 // decodeUtf8/decodeUtf8Lossy below are COPYING operations on List<u8>, not borrowed
 // decoders and not a claim that List has contiguous storage. No byte-view ABI is assumed.
 
-import std::convert::{from, into, try_from, try_into};
+import std::convert::{from, into, tryFrom, tryInto};
 import std::format::show;
 import std::result::Result;
+import std::error::display;
 import std::string::{slice, byteAt, byteLength, parse, decodeUtf8, decodeUtf8Lossy};
 import std::char::{codePoint, fromCodePoint};
 import std::collection::List;
@@ -16,7 +18,7 @@ type Point = { x: i32; y: i32 };
 
 // Extend canonical template show because this module owns Point.
 // The primitive formatter called by the inner template is NOT this implementation.
-function show(point: &Point): string {
+implement show(point: &Point): string {
   return `point ${point.x},${point.y}`;
 }
 
@@ -25,8 +27,9 @@ function widen<To, From>(value: From): To where into(To, From) {
   return from<To>(value);
 }
 
-function checked<To, From>(value: From): Result<To> where try_into(To, From) {
-  return try_from<To>(value);
+function checked<To, From, E>(value: From): Result<To, E>
+  where tryInto(To, From, E), display(E) {
+  return tryFrom<To>(value);
 }
 
 function fits(): bool {
@@ -37,28 +40,28 @@ function fits(): bool {
 }
 
 function failsRange(): bool {
-  guard try_into<u8>(300u16) else {
+  guard tryInto<u8>(300u16) else {
     return true;
   }
   return false;
 }
 
 function trySafePair(): bool {
-  guard let value = try_from<i64>(7i32) else {
+  guard let value = tryFrom<i64>(7i32) else {
     return false;
   }
   return value == 7;
 }
 
 function truncatedUnsigned(): u8 {
-  guard let value = try_into<u8>(-0.5f64) else {
+  guard let value = tryInto<u8>(-0.5f64) else {
     return 255;
   }
   return value;
 }
 
 function rejectsInfinity(): bool {
-  guard try_from<i32>(1.0f64 / 0.0f64) else {
+  guard tryFrom<i32>(1.0f64 / 0.0f64) else {
     return true;
   }
   return false;

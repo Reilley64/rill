@@ -41,7 +41,7 @@ type Shape = Circle | Rect;
 
 ```rill
 function onlyFrench(language: &Language): string;
-function onlyFrench(language: &Language.French): string { return "Bonjour"; }
+implement onlyFrench(language: &Language.French): string { return "Bonjour"; }
 
 function bad(language: &Language): string {
   return onlyFrench(language);

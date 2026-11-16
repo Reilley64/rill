@@ -1,0 +1,160 @@
+// #41 / ADR 0017: hand-checked intended-valid examples, not executable tests.
+// Prototype 17 is reserved by #24's separately prepared diagnostics artifacts.
+import std::convert::{into, from, tryInto, tryFrom, ConversionError};
+import std::result::{Result, Ok, Err};
+import std::error::{display, value};
+
+type UserId = { text: string };
+type Email = { text: string };
+type Box<T> = { value: T };
+type Wrapped<T> = { value: T };
+
+enum InputState { Ready, Finished }
+enum State { Active, Done }
+enum InvalidUserId { Empty }
+enum GeneralError { Rejected }
+
+implement display(error: &InvalidUserId): string {
+  return "empty user id";
+}
+implement display(error: &GeneralError): string {
+  return "conversion rejected";
+}
+
+// Same owned source, distinct destinations: distinct conversion keys.
+implement into<UserId>(value: string): UserId {
+  return UserId { text: value };
+}
+implement into<Email>(value: string): Email {
+  return Email { text: value };
+}
+implement into<string>(value: UserId): string {
+  return value.text;
+}
+
+// Borrowing explicitly copies backing text; it does not consume the source.
+implement into<string>(value: &UserId): string {
+  return copy(&value.text);
+}
+implement tryInto<UserId>(value: &string): Result<UserId, InvalidUserId> {
+  if (value == "") {
+    return Err(InvalidUserId.Empty);
+  }
+  return Ok(UserId { text: copy(value) });
+}
+
+implement into<State>(value: InputState): State {
+  return match (value) {
+    InputState.Ready => State.Active,
+    InputState.Finished => State.Done,
+  };
+}
+
+implement<T> into<Wrapped<T>>(value: Box<T>): Wrapped<T> {
+  return Wrapped<T> { value: value.value };
+}
+implement<T> tryInto<Wrapped<T>>(value: Box<T>): Result<Wrapped<T>, GeneralError> {
+  return Ok(Wrapped<T> { value: value.value });
+}
+// More-specific endpoint pattern wins; E is its output, not a dispatch input.
+implement tryInto<Wrapped<UserId>>(
+  value: Box<UserId>
+): Result<Wrapped<UserId>, InvalidUserId> {
+  if (value.value.text == "") {
+    return Err(InvalidUserId.Empty);
+  }
+  return Ok(Wrapped<UserId> { value: value.value });
+}
+
+function convert<To, From>(value: From): To where into(To, From) {
+  return into<To>(value);
+}
+function attempt<To, From, E>(value: From): Result<To, E>
+  where tryInto(To, From, E), display(E) {
+  return tryInto<To>(value);
+}
+function stringify<T>(value: T): string where into(string, T) {
+  return into<string>(value);
+}
+function stringifyBorrowed<T>(value: &T): string where into(string, &T) {
+  return into<string>(value);
+}
+
+function destinations(): bool {
+  let id = into<UserId>("u1");
+  let email = into<Email>("u1");
+  return id.text == email.text;
+}
+function inferredTarget(): string {
+  let id: UserId = into("u2");
+  return into<string>(id);
+}
+function borrowedSource(): bool {
+  let id = into<UserId>("u3");
+  let text = stringifyBorrowed(&id);
+  return text == id.text;
+}
+function customFailure(): bool {
+  let empty = "";
+  let result: Result<UserId, InvalidUserId> = tryFrom<UserId>(&empty);
+  guard result else { return true; }
+  return false;
+}
+function genericSpecialization(): bool {
+  let boxed = Box<UserId> { value: UserId { text: "u4" } };
+  // E is inferred as InvalidUserId from the winning concrete implementation.
+  let result: Result<Wrapped<UserId>, InvalidUserId> = attempt<Wrapped<UserId>>(boxed);
+  guard let wrapped = result else { return false; }
+  return wrapped.value.text == "u4";
+}
+function genericDefault(): i32 {
+  let boxed = Box<i32> { value: 7i32 };
+  let result: Result<Wrapped<i32>, GeneralError> = attempt<Wrapped<i32>>(boxed);
+  guard let wrapped = result else { return 0i32; }
+  return wrapped.value;
+}
+function conversionValue(): string {
+  let convertId: (UserId) => string = into<string>;
+  return convertId(UserId { text: "u5" });
+}
+function identity(): string {
+  return into<string>("identity");
+}
+function enumConversion(): bool {
+  return match (convert<State>(InputState.Ready)) {
+    State.Active => true,
+    State.Done => false,
+  };
+}
+function numericFailure(): bool {
+  guard let number = tryInto<u8>(300u16) else (error) {
+    return match (value(&error)) {
+      ConversionError.OutOfRange => true,
+      ConversionError.NotFinite => false,
+    };
+  }
+  return false;
+}
+function truncated(): u8 {
+  guard let number = tryInto<u8>(-0.5f64) else { return 1u8; }
+  return number;
+}
+function numericSafe(): u16 {
+  guard let number = tryInto<u16>(7u8) else { return 0u16; }
+  return number;
+}
+
+expect destinations();
+expect inferredTarget() == "u2";
+expect borrowedSource();
+expect customFailure();
+expect genericSpecialization();
+expect genericDefault() == 7i32;
+expect conversionValue() == "u5";
+expect identity() == "identity";
+expect stringify(UserId { text: "owned" }) == "owned";
+expect enumConversion();
+expect from<u16>(7u8) == 7u16;
+expect numericFailure();
+expect truncated() == 0u8;
+expect numericSafe() == 7u16;

@@ -1,0 +1,248 @@
+// #40 integrated design: hand-checked controls/temporal examples, NOT execution.
+// The immediate memory counter below is NOT a database driver or pending-I/O,
+// timer-race, native-abortion, transaction, or scheduler implementation.
+import std::sql::{SqlControl, uncontrolled, Parameter, ExecSummary, DbError,
+  ExecutionObservation, ArgumentError};
+import std::sql::driver::execute;
+import std::convert::{into, tryInto};
+import std::time::{ClockError, Order, Timestamp, manualClock, clock, now,
+  validateInstantDomain, compareInstants, timestampFromNanoseconds,
+  unixNanoseconds, unixMicrosecondsExact};
+import std::time::civil::{Date, DateFields, dateFields, Time, TimeFields, timeFields,
+  DateTime, date as datePart, time as timePart};
+import std::cancel::{CancellationSource, token, cancel, neverCanceledToken,
+  isCancellationRequested};
+import std::result::{Result, Ok, Err};
+import std::option::Option;
+import std::error::{display, value};
+
+enum FixtureError { Unused }
+implement display(error: &FixtureError): string {
+  return "fixture native failure";
+}
+type FixtureTarget = { submitted: u64 };
+type FixtureArguments = { count: u64 };
+function clockFailure(error: Err<ClockError>): DbError<FixtureError> {
+  return DbError.ClockFailure {
+    observation: ExecutionObservation.NotSubmitted, clock: error, source: Option.None,
+  };
+}
+
+// Only an immediate counter path: no claim to implement cancellation while a
+// database request waits. It exercises real public control types and fixed arity.
+implement execute(target: &mut FixtureTarget, sql: string,
+  arguments: FixtureArguments, control: SqlControl): Result<ExecSummary,DbError<FixtureError>> {
+  if (arguments.count != 0u64) {
+    return Err(DbError.InvalidArgument(ArgumentError.ParameterCount {
+      expected: 0u64, actual: arguments.count,
+    }));
+  }
+  match (&control.deadline) {
+    Option.Some([service, at]) => {
+      guard validateInstantDomain(service, *at) else (error) {
+        return Err(clockFailure(error));
+      }
+    },
+    Option.None => {},
+  }
+  if (isCancellationRequested(&control.cancellation)) {
+    return Err(DbError.Cancelled {
+      observation: ExecutionObservation.NotSubmitted, source: Option.None,
+    });
+  }
+  match (&control.deadline) {
+    Option.Some([service, at]) => {
+      guard let reading = now(service) else (error) { return Err(clockFailure(error)); }
+      guard let order = compareInstants(reading, *at) else (error) {
+        return Err(clockFailure(error));
+      }
+      match (order) {
+        Order.Less => {},
+        _ => {
+          return Err(DbError.DeadlineExceeded {
+            observation: ExecutionObservation.NotSubmitted, source: Option.None,
+          });
+        },
+      }
+    },
+    Option.None => {},
+  }
+  target.submitted += 1u64;
+  return Ok(ExecSummary { rowsAffected: Option.Some(1u64) });
+}
+
+function uncontrolledRuns(): bool {
+  let mut target = FixtureTarget { submitted: 0u64 };
+  guard execute(&mut target, "SELECT 1", FixtureArguments { count: 0u64 }, uncontrolled()) else {
+    return false;
+  }
+  return target.submitted == 1u64;
+}
+function cancelledBeforeSubmission(): bool {
+  let source = CancellationSource();
+  cancel(&source);
+  let control = SqlControl { deadline: Option.None, cancellation: token(&source) };
+  let mut target = FixtureTarget { submitted: 0u64 };
+  guard execute(&mut target, "SELECT 1", FixtureArguments { count: 0u64 }, control) else (error) {
+    return target.submitted == 0u64 && match (value(&error)) {
+      DbError.Cancelled { observation, source } => match (observation) {
+        ExecutionObservation.NotSubmitted => true,
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+function domainCheckBeforeRequestedToken(): bool {
+  let first = manualClock();
+  let second = manualClock();
+  let firstClock = clock(&first);
+  let secondClock = clock(&second);
+  guard let at = now(&firstClock) else { return false; }
+  let source = CancellationSource();
+  cancel(&source);
+  let control = SqlControl {
+    deadline: Option.Some([secondClock, at]), cancellation: token(&source),
+  };
+  let mut target = FixtureTarget { submitted: 0u64 };
+  guard execute(&mut target, "SELECT 1", FixtureArguments { count: 0u64 }, control) else (error) {
+    return target.submitted == 0u64 && match (value(&error)) {
+      DbError.ClockFailure { observation, clock, source } => match (observation) {
+        ExecutionObservation.NotSubmitted => match (value(clock)) {
+          ClockError.DomainMismatch => true,
+          _ => false,
+        },
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+function expiredBeforeSubmission(): bool {
+  let manual = manualClock();
+  let service = clock(&manual);
+  guard let at = now(&service) else { return false; }
+  let control = SqlControl {
+    deadline: Option.Some([service, at]), cancellation: neverCanceledToken(),
+  };
+  let mut target = FixtureTarget { submitted: 0u64 };
+  guard execute(&mut target, "SELECT 1", FixtureArguments { count: 0u64 }, control) else (error) {
+    return target.submitted == 0u64 && match (value(&error)) {
+      DbError.DeadlineExceeded { observation, source } => match (observation) {
+        ExecutionObservation.NotSubmitted => true,
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+  return false;
+}
+function copiedControlRetainsTokenState(): bool {
+  let source = CancellationSource();
+  let original = SqlControl { deadline: Option.None, cancellation: token(&source) };
+  let duplicate = copy(&original);
+  cancel(&source);
+  return isCancellationRequested(&original.cancellation)
+    && isCancellationRequested(&duplicate.cancellation);
+}
+function clockCopyHasSameDomain(): bool {
+  let manual = manualClock();
+  let service = clock(&manual);
+  guard let at = now(&service) else { return false; }
+  let duplicate = copy(&service);
+  guard validateInstantDomain(&duplicate, at) else { return false; }
+  return true;
+}
+function dateParameter(): bool {
+  guard let date = Date(DateFields { year: 2024i32, month: 2u8, day: 29u8 }) else {
+    return false;
+  }
+  let parameter = into<Parameter>(date);
+  return match (parameter) {
+    Parameter.Date(stored) => {
+      let fields = dateFields(&stored);
+      return fields.year == 2024i32 && fields.month == 2u8 && fields.day == 29u8;
+    },
+    _ => false,
+  };
+}
+function timeParameter(): bool {
+  guard let time = Time(TimeFields {
+    hour: 23u8, minute: 59u8, second: 59u8, nanosecond: 123456789u32,
+  }) else { return false; }
+  return match (into<Parameter>(time)) {
+    Parameter.Time(stored) => timeFields(&stored).nanosecond == 123456789u32,
+    _ => false,
+  };
+}
+function civilDateTimeParameter(): bool {
+  guard let day = Date(DateFields { year: 2024i32, month: 2u8, day: 29u8 }) else {
+    return false;
+  }
+  guard let time = Time(TimeFields {
+    hour: 12u8, minute: 0u8, second: 0u8, nanosecond: 1u32,
+  }) else { return false; }
+  return match (into<Parameter>(DateTime(day, time))) {
+    Parameter.DateTime(stored) => dateFields(&datePart(&stored)).day == 29u8
+      && timeFields(&timePart(&stored)).nanosecond == 1u32,
+    _ => false,
+  };
+}
+function timestampParameter(): bool {
+  guard let instant = timestampFromNanoseconds(-1i128) else { return false; }
+  let parameter = into<Parameter>(instant);
+  return match (parameter) {
+    Parameter.Timestamp(stored) => unixNanoseconds(&stored) == -1i128,
+    _ => false,
+  };
+}
+
+type TemporalCell = { nanoseconds: i128 };
+implement tryInto<Timestamp>(cell: &TemporalCell): Result<Timestamp,DbError<FixtureError>> {
+  guard let timestamp = timestampFromNanoseconds(cell.nanoseconds) else (error) {
+    return Err(DbError.Temporal { error: error });
+  }
+  return Ok(timestamp);
+}
+function temporalErrorEnvelope(): bool {
+  // One nanosecond beyond #33's upper Timestamp bound, still representable i128.
+  let cell = TemporalCell { nanoseconds: 253402207201000000000i128 };
+  guard tryInto<Timestamp>(&cell) else (error) {
+    return match (value(&error)) {
+      DbError.Temporal { error } => true,
+      _ => false,
+    };
+  }
+  return false;
+}
+function exactMicroseconds(timestamp: Timestamp): Result<i128,DbError<FixtureError>> {
+  guard let count = unixMicrosecondsExact(&timestamp) else (error) {
+    return Err(DbError.Temporal { error: error });
+  }
+  return Ok(count);
+}
+function subMicrosecondRejected(): bool {
+  guard let timestamp = timestampFromNanoseconds(1i128) else { return false; }
+  guard exactMicroseconds(timestamp) else (error) {
+    return match (value(&error)) {
+      DbError.Temporal { error } => true,
+      _ => false,
+    };
+  }
+  return false;
+}
+
+expect uncontrolledRuns();
+expect cancelledBeforeSubmission();
+expect domainCheckBeforeRequestedToken();
+expect expiredBeforeSubmission();
+expect copiedControlRetainsTokenState();
+expect clockCopyHasSameDomain();
+expect dateParameter();
+expect timeParameter();
+expect civilDateTimeParameter();
+expect timestampParameter();
+expect temporalErrorEnvelope();
+expect subMicrosecondRejected();

@@ -7,7 +7,7 @@ import std::error::{display, cause, value, intoValue};
 import std::bytes::Bytes;
 import std::string::{viewUtf8, decodeLossy, chars};
 import std::char::{codePoint, fromCodePoint};
-import std::convert::{try_into, ConversionError};
+import std::convert::{tryInto, ConversionError};
 import std::number::{parseNumber, wrappingAdd, saturatingAdd};
 import std::shared::{shared, view};
 import std::mutex::{Mutex, LockGuard, mutex, lock};
@@ -24,24 +24,24 @@ enum OtherError {
   Different,
 }
 
-function display(error: &SmallError): string {
+implement display(error: &SmallError): string {
   return match (error) {
     SmallError.Bad => "bad",
     SmallError.Outer => "outer",
   };
 }
 
-function display(error: &OtherError): string {
+implement display(error: &OtherError): string {
   return "different";
 }
 
 type Counter = { current: u64; end: u64 };
 
-function iterate(counter: Counter): Counter {
+implement iterate(counter: Counter): Counter {
   return counter;
 }
 
-function next(counter: &mut Counter): Option<u64> {
+implement next(counter: &mut Counter): Option<u64> {
   if (counter.current == counter.end) {
     return Option.None;
   }
@@ -60,7 +60,7 @@ function customIteration(): u64 {
 
 type WrappedGuard = { held: LockGuard<i32>; flag: &mut bool };
 
-function dispose(wrapper: WrappedGuard): void {
+implement dispose(wrapper: WrappedGuard): void {
   *wrapper.flag = true;
   // Compiler cleanup still releases wrapper.held; no explicit dispose required.
 }
@@ -234,7 +234,7 @@ function invalidScalar(): bool {
 }
 
 function narrowingFails(): bool {
-  guard let number = try_into<u8>(300u16) else (error) {
+  guard let number = tryInto<u8>(300u16) else (error) {
     return match (value(&error)) {
       ConversionError.OutOfRange => true,
       ConversionError.NotFinite => false,
@@ -244,7 +244,7 @@ function narrowingFails(): bool {
 }
 
 function fractionalConversion(): bool {
-  guard let number = try_into<u8>(-0.5f64) else (error) {
+  guard let number = tryInto<u8>(-0.5f64) else (error) {
     return false;
   }
   return number == 0u8;
