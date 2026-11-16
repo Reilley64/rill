@@ -1,0 +1,15 @@
+{
+  "repository": "boostorg/context",
+  "tag": "boost-1.92.0",
+  "revision": "cc1b9e02cd530d6607becc984e1e5bfa4f7b3600",
+  "files": {
+    "make_arm64_aapcs_macho_gas.S": "70f07951a0bd02415f8c36b0fec2007f6cd33f1e121e569396d313a637d399dd",
+    "jump_arm64_aapcs_macho_gas.S": "948981fc56f53c319e709f17212d1b9c7a202c59ed3767a5b361cb5fa2b81f12",
+    "make_arm64_aapcs_elf_gas.S": "4391a1bf8033a984128baddd1aa3cdbe269d038349fa93d038a7fd409816de84",
+    "jump_arm64_aapcs_elf_gas.S": "8757cfbfdcc7cbc43ac10ddee7c7f461ea3109704c2710a50a1dae7ae9bb8a04",
+    "make_x86_64_sysv_macho_gas.S": "b47ab015d1159173effdbc59dfc6ddac81304b2f80678523419ea87eebddecb2",
+    "jump_x86_64_sysv_macho_gas.S": "9b7f0901d3516fbd123fc6637992ee80515ecdfaa21b400e274431917e48f7d4",
+    "make_x86_64_sysv_elf_gas.S": "822eb4db4451d54af7c1bf4f66c193c166d01264e12c3d67f8a89beaf7839738",
+    "jump_x86_64_sysv_elf_gas.S": "560c7fa5b5c4476999e50e54a6b14efaddb7c7f42a8de8165cd1336c71c93ef0"
+  }
+}

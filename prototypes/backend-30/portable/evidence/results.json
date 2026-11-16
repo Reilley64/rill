@@ -16,10 +16,10 @@
   "source_and_tool_sha256": {
     "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/run.py": "82bc07a261be60f53f8d2652324a443d23c2cacc1123583bdf8e360bc02353b2",
     "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon-check.mjs": "bcd202640f08c5caa3c9e2454005da059a80170251059caedbacd0eb161602f4",
-    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/README.md": "61368e027794523eafbaa6a05294db0d20d9ee3ad66a0b0f44bb8195b32f175f",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/README.md": "5d99d74b9ee9d6dbb817121e8d8ca24f0362d6d75e3b143eb9995b4e6193dcd1",
     "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/check.mjs": "b3912057b770d88ff58563954b80b5bdcad0d31bc42133f3e17c7b1d7bd73b7b",
     "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/machine.c": "73e5a83de5c1ac6f0eafb0fc0d34681f25f321cbd8c404268db1bc4540695958",
-    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/host.c": "682c4505635929141aeda5d70ead305d842c9859c5e66472046e922c3cd79289",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/host.c": "81994fa86566d384db2d682e430a933b519baaa6049467c6368d0206f322c99b",
     "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/portable/retcon.py": "bb39ff974ffe0e6d346c5eba0485f43b7675d66b3b2575a2e763e517e489a038",
     "/opt/homebrew/Cellar/llvm/23.1.5/bin/clang": "edcec56599c95557f16c1e40cb813491cb7f872748cadaef5998493f96a3fe3c",
     "/opt/homebrew/Cellar/llvm/23.1.5/bin/opt": "9aaee860e97ae076831f91352c06755fce78d2322947d5e17e8612a5a63d6c9e",
@@ -755,6 +755,15 @@
       "result": 1000000
     },
     {
+      "compiler_mode": 0,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "fatal_pending_guest_store_teardown",
+      "worker_access_after_store_drop": true,
+      "copy_freed_after_join": true,
+      "guest_reentered_after_fatal": false,
+      "copyback_after_fatal": false
+    },
+    {
       "compiler_mode": 2,
       "engine": "Node/V8",
       "case": "tail_replacement",
@@ -1090,6 +1099,15 @@
       "early_wake_rejected": true,
       "remaining_waits": 976,
       "result": 1000000
+    },
+    {
+      "compiler_mode": 2,
+      "engine": "Wasmtime/Cranelift/macOS/AArch64",
+      "case": "fatal_pending_guest_store_teardown",
+      "worker_access_after_store_drop": true,
+      "copy_freed_after_join": true,
+      "guest_reentered_after_fatal": false,
+      "copyback_after_fatal": false
     }
   ],
   "limits": [

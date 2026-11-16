@@ -105,6 +105,42 @@ static void foreign_growth(Env *e) {
   unsigned waits=finish(e,0); assert(GET(e,0,9)==1000000 && GET(e,0,18)==1);
   printf("{\"case\":\"native_copy_completion_after_legal_relocation\",\"relocated\":true,\"early_wake_rejected\":true,\"remaining_waits\":%u,\"result\":1000000}\n",waits);
 }
+static void fatal_pending_foreign(Env *e) {
+  setup(e,0,3,1000000);
+  while (CALL(e,"poll",0,4096)!=1) {}
+  uint64_t input=GET(e,0,14);
+  assert(GET(e,0,16)==1 && GET(e,0,29)==1 && GET(e,0,30)==0);
+  Job *j=calloc(1,sizeof(*j)); assert(j);
+  assert(pthread_mutex_init(&j->mutex,NULL)==0 && pthread_cond_init(&j->cond,NULL)==0);
+  size_t size=wasmtime_memory_data_size(e->ctx,&e->memory);
+  assert(input<=size && sizeof(j->input)<=size-input);
+  memcpy(j->input,wasmtime_memory_data(e->ctx,&e->memory)+input,sizeof(j->input));
+  pthread_t thread; assert(pthread_create(&thread,NULL,worker,j)==0);
+  CALL(e,"drop_handle",0); CALL(e,"request_cancel",0);
+  // Inject terminal guest failure while the logical operation is still pending.
+  // Only the external embedding observes the trap; never resume this invocation.
+  wasmtime_extern_t f;
+  assert(wasmtime_instance_export_get(e->ctx,&e->instance,"test_reserve",12,&f));
+  assert(f.kind==WASMTIME_EXTERN_FUNC);
+  wasmtime_val_t args[6]={
+    {.kind=WASMTIME_I32,.of.i32=0},{.kind=WASMTIME_I32,.of.i32=0},
+    {.kind=WASMTIME_I64,.of.i64=0},{.kind=WASMTIME_I64,.of.i64=1},
+    {.kind=WASMTIME_I64,.of.i64=0},{.kind=WASMTIME_I64,.of.i64=M}},result;
+  wasm_trap_t *trap=NULL;
+  wasmtime_error_t *error=wasmtime_func_call(e->ctx,&f.of.func,args,6,&result,1,&trap);
+  // A host-created trap can be surfaced as a C-API error, unlike a core trap.
+  assert((trap || error) && e->fatal_reason==4);
+  if(trap)wasm_trap_delete(trap);
+  if(error)wasmtime_error_delete(error);
+  wasmtime_store_delete(e->store); e->store=NULL; e->ctx=NULL;
+  // The worker owns no guest address and has not yet accessed its copy.
+  assert(pthread_mutex_lock(&j->mutex)==0); assert(!j->done); j->go=1;
+  assert(pthread_cond_signal(&j->cond)==0 && pthread_mutex_unlock(&j->mutex)==0);
+  assert(pthread_join(thread,NULL)==0 && j->done);
+  assert(j->output[0]==(MAGIC^0x55) && j->output[1]==~MAGIC);
+  assert(pthread_cond_destroy(&j->cond)==0 && pthread_mutex_destroy(&j->mutex)==0); free(j);
+  puts("{\"case\":\"fatal_pending_guest_store_teardown\",\"worker_access_after_store_drop\":true,\"copy_freed_after_join\":true,\"guest_reentered_after_fatal\":false,\"copyback_after_fatal\":false}");
+}
 int main(int argc,char **argv) {
   assert(argc==3); Env e={0};
   wasm_config_t *cfg=wasm_config_new();
@@ -139,5 +175,6 @@ int main(int argc,char **argv) {
   finish(&e,0); finish(&e,1); assert(GET(&e,0,9)==8001 && GET(&e,1,9)==8001);
   printf("{\"case\":\"wasmtime_two_live_ordinary_chains\",\"each_depth\":8000,\"combined_saved\":%" PRIu64 "}\n",sum);
   foreign_growth(&e); assert(!e.fatal_reason);
-  wasmtime_store_delete(e.store); wasmtime_module_delete(module); wasm_engine_delete(e.engine);
+  fatal_pending_foreign(&e); assert(!e.store && e.fatal_reason==4);
+  wasmtime_module_delete(module); wasm_engine_delete(e.engine);
 }

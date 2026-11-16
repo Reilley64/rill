@@ -1,0 +1,3843 @@
+[
+  {
+    "name": "version-clang",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-llc",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-lld",
+    "argv": [
+      "/opt/homebrew/bin/ld.lld",
+      "--version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-host",
+    "argv": [
+      "uname",
+      "-a"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-os",
+    "argv": [
+      "sw_vers"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-sdk",
+    "argv": [
+      "xcrun",
+      "--show-sdk-path"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-sdk-version",
+    "argv": [
+      "xcrun",
+      "--show-sdk-version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-sdk-build",
+    "argv": [
+      "xcrun",
+      "--show-sdk-build-version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-ld-path",
+    "argv": [
+      "xcrun",
+      "--find",
+      "ld"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-apple-ld",
+    "argv": [
+      "xcrun",
+      "ld",
+      "-version_details"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-docker",
+    "argv": [
+      "docker",
+      "version"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "version-rosetta",
+    "argv": [
+      "pkgutil",
+      "--pkg-info",
+      "com.apple.pkg.RosettaUpdateAuto"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-incoming-byval",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "verify-packet",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-byval-negative",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=0",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-byval.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected": "nonzero",
+    "matched_expectation": true,
+    "expected_rejection": "failed to perform tail call elimination"
+  },
+  {
+    "name": "arm-macos-O0-capacity-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-capacity-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-capacity.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-capacity-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-capacity.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-abi-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-abi.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-abi-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-abi.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-abi-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-abi.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-packet-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O0>",
+      "-S",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-packet-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-packet-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=0",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-packet.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-packet-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-capacity-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-packet-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-switch",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/switch.S",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-switch.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-link",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/host.c",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-capacity.o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-abi.o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-packet.o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0-switch.o",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-query",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "query",
+      "1048576",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-0",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "default",
+      "1048576",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-1",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "tiny",
+      "4096",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-2",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "near",
+      "623696",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-3",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "exact",
+      "623680",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-4",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "one-over",
+      "623680",
+      "623633",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-5",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "one-unit-short",
+      "623664",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-6",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "oversized",
+      "1048576",
+      "2138624",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-7",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "unchecked",
+      "131072",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-8",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "zero",
+      "0",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-9",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "below-min",
+      "1",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-10",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "align-up",
+      "1048561",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-11",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "too-large",
+      "1048577",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-12",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "u64-overflow",
+      "18446744073709551615",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-13",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "align-overflow",
+      "18446744073709551608",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-14",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "abi",
+      "1048576",
+      "623632",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-15",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "abi",
+      "1048576",
+      "623632",
+      "1"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O0-case-16",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O0",
+      "abi",
+      "1048576",
+      "623632",
+      "2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-byval-negative",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=2",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-byval.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected": "nonzero",
+    "matched_expectation": true,
+    "expected_rejection": "failed to perform tail call elimination"
+  },
+  {
+    "name": "arm-macos-O2-capacity-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-capacity-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-capacity.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-capacity-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-capacity.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-abi-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-abi.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-abi-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-abi.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-abi-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-abi.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-packet-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O2>",
+      "-S",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-packet-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-packet-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=2",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-packet.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-packet-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=arm64-apple-darwin27.0.0",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-capacity-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-packet-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-switch",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/switch.S",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-switch.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-link",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "arm64-apple-darwin27.0.0",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/host.c",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-capacity.o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-abi.o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-packet.o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2-switch.o",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-query",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "query",
+      "1048576",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-0",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "default",
+      "1048576",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-1",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "tiny",
+      "4096",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-2",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "near",
+      "615312",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-3",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "exact",
+      "615296",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-4",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "one-over",
+      "615296",
+      "615297",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-5",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "one-unit-short",
+      "615280",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-6",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "oversized",
+      "1048576",
+      "2130384",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-7",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "unchecked",
+      "131072",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-8",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "zero",
+      "0",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-9",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "below-min",
+      "1",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-10",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "align-up",
+      "1048561",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-11",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "too-large",
+      "1048577",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-12",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "u64-overflow",
+      "18446744073709551615",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-13",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "align-overflow",
+      "18446744073709551608",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-14",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "abi",
+      "1048576",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-15",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "abi",
+      "1048576",
+      "615296",
+      "1"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-macos-O2-case-16",
+    "argv": [
+      "/private/tmp/rill-30-native-capacity-disposition/arm-macos-O2",
+      "abi",
+      "1048576",
+      "615296",
+      "2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-byval-negative",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-apple-darwin27.0.0",
+      "-O=0",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-byval.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-capacity-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-capacity-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-capacity.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-capacity-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-capacity.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-abi-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-abi.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-abi-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-abi.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-abi-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-abi.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-packet-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O0>",
+      "-S",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-packet-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-packet-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-apple-darwin27.0.0",
+      "-O=0",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-packet.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-packet-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-apple-darwin27.0.0",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-capacity-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-packet-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-switch",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/switch.S",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-switch.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-link",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/host.c",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-capacity.o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-abi.o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-packet.o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0-switch.o",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-query",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "query",
+      "1048576",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-0",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "default",
+      "1048576",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-1",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "tiny",
+      "4096",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-2",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "near",
+      "615376",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-3",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "exact",
+      "615360",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-4",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "one-over",
+      "615360",
+      "615313",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-5",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "one-unit-short",
+      "615344",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-6",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "oversized",
+      "1048576",
+      "2134496",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-7",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "unchecked",
+      "131072",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-8",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "zero",
+      "0",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-9",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "below-min",
+      "1",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-10",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "align-up",
+      "1048561",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-11",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "too-large",
+      "1048577",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-12",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "u64-overflow",
+      "18446744073709551615",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-13",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "align-overflow",
+      "18446744073709551608",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-14",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "abi",
+      "1048576",
+      "615312",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-15",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "abi",
+      "1048576",
+      "615312",
+      "1"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O0-case-16",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O0",
+      "abi",
+      "1048576",
+      "615312",
+      "2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-byval-negative",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-apple-darwin27.0.0",
+      "-O=2",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-byval.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-capacity-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-capacity-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-capacity.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-capacity-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-capacity.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-abi-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-abi.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-abi-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-abi.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-abi-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-abi.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-packet-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O2>",
+      "-S",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-packet-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-packet-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-apple-darwin27.0.0",
+      "-O=2",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-packet.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-packet-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-apple-darwin27.0.0",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-capacity-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-packet-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-switch",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/switch.S",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-switch.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-link",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-apple-darwin27.0.0",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/host.c",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-capacity.o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-abi.o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-packet.o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2-switch.o",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-query",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "query",
+      "1048576",
+      "615296",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-0",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "default",
+      "1048576",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-1",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "tiny",
+      "4096",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-2",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "near",
+      "615328",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-3",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "exact",
+      "615312",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-4",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "one-over",
+      "615312",
+      "615305",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-5",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "one-unit-short",
+      "615296",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-6",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "oversized",
+      "1048576",
+      "2130384",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-7",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "unchecked",
+      "131072",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-8",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "zero",
+      "0",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-9",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "below-min",
+      "1",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-10",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "align-up",
+      "1048561",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-11",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "too-large",
+      "1048577",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-12",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "u64-overflow",
+      "18446744073709551615",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-13",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "align-overflow",
+      "18446744073709551608",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 86,
+    "expected": 86,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-14",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "abi",
+      "1048576",
+      "615304",
+      "0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-15",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "abi",
+      "1048576",
+      "615304",
+      "1"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-macos-O2-case-16",
+    "argv": [
+      "arch",
+      "-x86_64",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-macos-O2",
+      "abi",
+      "1048576",
+      "615304",
+      "2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-versions",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "set -ex; uname -a; cc --version; ld --version; rustc --version --verbose; getconf GNU_LIBC_VERSION; sha256sum /usr/bin/gcc /usr/bin/ld /lib/*/libc.so.6; dpkg-query -W"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-byval-negative",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=0",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-byval.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected": "nonzero",
+    "matched_expectation": true,
+    "expected_rejection": "failed to perform tail call elimination"
+  },
+  {
+    "name": "arm-linux-O0-capacity-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-capacity-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-capacity.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-capacity-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-capacity.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-abi-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-abi.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-abi-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-abi.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-abi-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-abi.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-packet-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O0>",
+      "-S",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-packet-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-packet-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=0",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-packet.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-packet-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-capacity-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-packet-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-switch",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/switch.S",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O0-switch.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-link",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "set -ex; cc -O2 -Wall -Wextra -Werror /src/host.c /out/arm-linux-O0-capacity.o /out/arm-linux-O0-abi.o /out/arm-linux-O0-packet.o /out/arm-linux-O0-switch.o -o /out/arm-linux-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-query",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "/out/arm-linux-O0 query 1048576 623632 0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O0-suite",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "set -x\n/out/arm-linux-O0 default 1048576 623632 0 > /out/arm-linux-O0-case-0.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O0 tiny 4096 623632 0 > /out/arm-linux-O0-case-1.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 near 623696 623632 0 > /out/arm-linux-O0-case-2.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O0 exact 623680 623632 0 > /out/arm-linux-O0-case-3.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O0 one-over 623680 623633 0 > /out/arm-linux-O0-case-4.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 one-unit-short 623664 623632 0 > /out/arm-linux-O0-case-5.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 oversized 1048576 2138624 0 > /out/arm-linux-O0-case-6.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 unchecked 131072 623632 0 > /out/arm-linux-O0-case-7.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O0 zero 0 623632 0 > /out/arm-linux-O0-case-8.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 below-min 1 623632 0 > /out/arm-linux-O0-case-9.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 align-up 1048561 623632 0 > /out/arm-linux-O0-case-10.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O0 too-large 1048577 623632 0 > /out/arm-linux-O0-case-11.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 u64-overflow 18446744073709551615 623632 0 > /out/arm-linux-O0-case-12.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 align-overflow 18446744073709551608 623632 0 > /out/arm-linux-O0-case-13.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O0 abi 1048576 623632 0 > /out/arm-linux-O0-case-14.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O0 abi 1048576 623632 1 > /out/arm-linux-O0-case-15.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O0 abi 1048576 623632 2 > /out/arm-linux-O0-case-16.json; s=$?; test \"$s\" -eq 0 || exit 1\nexit 0\n"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-byval-negative",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=2",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-byval.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": -6,
+    "expected": "nonzero",
+    "matched_expectation": true,
+    "expected_rejection": "failed to perform tail call elimination"
+  },
+  {
+    "name": "arm-linux-O2-capacity-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-capacity-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-capacity.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-capacity-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-capacity.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-abi-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-abi.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-abi-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-abi.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-abi-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-abi.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-packet-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O2>",
+      "-S",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-packet-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-packet-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=2",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-packet.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-packet-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=aarch64-unknown-linux-gnu",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-capacity-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-packet-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-switch",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "aarch64-unknown-linux-gnu",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/switch.S",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/arm-linux-O2-switch.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-link",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "set -ex; cc -O2 -Wall -Wextra -Werror /src/host.c /out/arm-linux-O2-capacity.o /out/arm-linux-O2-abi.o /out/arm-linux-O2-packet.o /out/arm-linux-O2-switch.o -o /out/arm-linux-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-query",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "/out/arm-linux-O2 query 1048576 615296 0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "arm-linux-O2-suite",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/arm64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "-c",
+      "set -x\n/out/arm-linux-O2 default 1048576 615296 0 > /out/arm-linux-O2-case-0.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O2 tiny 4096 615296 0 > /out/arm-linux-O2-case-1.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 near 615312 615296 0 > /out/arm-linux-O2-case-2.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O2 exact 615296 615296 0 > /out/arm-linux-O2-case-3.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O2 one-over 615296 615297 0 > /out/arm-linux-O2-case-4.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 one-unit-short 615280 615296 0 > /out/arm-linux-O2-case-5.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 oversized 1048576 2130384 0 > /out/arm-linux-O2-case-6.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 unchecked 131072 615296 0 > /out/arm-linux-O2-case-7.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O2 zero 0 615296 0 > /out/arm-linux-O2-case-8.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 below-min 1 615296 0 > /out/arm-linux-O2-case-9.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 align-up 1048561 615296 0 > /out/arm-linux-O2-case-10.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O2 too-large 1048577 615296 0 > /out/arm-linux-O2-case-11.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 u64-overflow 18446744073709551615 615296 0 > /out/arm-linux-O2-case-12.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 align-overflow 18446744073709551608 615296 0 > /out/arm-linux-O2-case-13.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/arm-linux-O2 abi 1048576 615296 0 > /out/arm-linux-O2-case-14.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O2 abi 1048576 615296 1 > /out/arm-linux-O2-case-15.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/arm-linux-O2 abi 1048576 615296 2 > /out/arm-linux-O2-case-16.json; s=$?; test \"$s\" -eq 0 || exit 1\nexit 0\n"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-versions",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "set -ex; uname -a; cc --version; ld --version; rustc --version --verbose; getconf GNU_LIBC_VERSION; sha256sum /usr/bin/gcc /usr/bin/ld /lib/*/libc.so.6; dpkg-query -W"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-byval-negative",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=0",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-byval.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-capacity-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-capacity-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-capacity.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-capacity-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-capacity.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-abi-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-abi.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-abi-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-abi.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-abi-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O0",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-abi.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-packet-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O0>",
+      "-S",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-packet-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-packet-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=0",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-packet.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-packet-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=0",
+      "-filetype=obj",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-capacity-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-packet-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-switch",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/switch.S",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O0-switch.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-link",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "set -ex; cc -O2 -Wall -Wextra -Werror /src/host.c /out/x86-linux-O0-capacity.o /out/x86-linux-O0-abi.o /out/x86-linux-O0-packet.o /out/x86-linux-O0-switch.o -o /out/x86-linux-O0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-query",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "/out/x86-linux-O0 query 1048576 615312 0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O0-suite",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "set -x\n/out/x86-linux-O0 default 1048576 615312 0 > /out/x86-linux-O0-case-0.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O0 tiny 4096 615312 0 > /out/x86-linux-O0-case-1.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 near 615376 615312 0 > /out/x86-linux-O0-case-2.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O0 exact 615360 615312 0 > /out/x86-linux-O0-case-3.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O0 one-over 615360 615313 0 > /out/x86-linux-O0-case-4.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 one-unit-short 615344 615312 0 > /out/x86-linux-O0-case-5.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 oversized 1048576 2134496 0 > /out/x86-linux-O0-case-6.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 unchecked 131072 615312 0 > /out/x86-linux-O0-case-7.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O0 zero 0 615312 0 > /out/x86-linux-O0-case-8.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 below-min 1 615312 0 > /out/x86-linux-O0-case-9.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 align-up 1048561 615312 0 > /out/x86-linux-O0-case-10.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O0 too-large 1048577 615312 0 > /out/x86-linux-O0-case-11.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 u64-overflow 18446744073709551615 615312 0 > /out/x86-linux-O0-case-12.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 align-overflow 18446744073709551608 615312 0 > /out/x86-linux-O0-case-13.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O0 abi 1048576 615312 0 > /out/x86-linux-O0-case-14.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O0 abi 1048576 615312 1 > /out/x86-linux-O0-case-15.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O0 abi 1048576 615312 2 > /out/x86-linux-O0-case-16.json; s=$?; test \"$s\" -eq 0 || exit 1\nexit 0\n"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-byval-negative",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=2",
+      "/private/tmp/rill-30-native-capacity-disposition/incoming-byval.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-byval.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-capacity-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-capacity-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-capacity.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-capacity-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/capacity.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-capacity.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-abi-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fstack-usage",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-abi.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-abi-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-abi.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-abi-ir",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-inline",
+      "-fno-optimize-sibling-calls",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-S",
+      "-emit-llvm",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/abi.c",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-abi.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-packet-opt",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=default<O2>",
+      "-S",
+      "/private/tmp/rill-30-native-capacity-disposition/packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-packet-verify",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/opt",
+      "-passes=verify",
+      "-disable-output",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-packet.ll"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-packet-asm",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=2",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-packet.s"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-packet-obj",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llc",
+      "-mtriple=x86_64-unknown-linux-gnu",
+      "-O=2",
+      "-filetype=obj",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-packet.ll",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-capacity-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-capacity.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-packet-disassembly",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "-d",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-packet.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-switch",
+    "argv": [
+      "/opt/homebrew/opt/llvm/bin/clang",
+      "-target",
+      "x86_64-unknown-linux-gnu",
+      "-c",
+      "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity/switch.S",
+      "-o",
+      "/private/tmp/rill-30-native-capacity-disposition/x86-linux-O2-switch.o"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-link",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "set -ex; cc -O2 -Wall -Wextra -Werror /src/host.c /out/x86-linux-O2-capacity.o /out/x86-linux-O2-abi.o /out/x86-linux-O2-packet.o /out/x86-linux-O2-switch.o -o /out/x86-linux-O2"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-query",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "/out/x86-linux-O2 query 1048576 615264 0"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  },
+  {
+    "name": "x86-linux-O2-suite",
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "--network=none",
+      "--ulimit",
+      "core=0:0",
+      "--platform",
+      "linux/amd64",
+      "--mount",
+      "type=bind,src=/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-capacity,dst=/src,readonly",
+      "--mount",
+      "type=bind,src=/private/tmp/rill-30-native-capacity-disposition,dst=/out",
+      "--entrypoint=sh",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "-c",
+      "set -x\n/out/x86-linux-O2 default 1048576 615272 0 > /out/x86-linux-O2-case-0.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O2 tiny 4096 615272 0 > /out/x86-linux-O2-case-1.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 near 615296 615272 0 > /out/x86-linux-O2-case-2.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O2 exact 615280 615272 0 > /out/x86-linux-O2-case-3.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O2 one-over 615280 615273 0 > /out/x86-linux-O2-case-4.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 one-unit-short 615264 615272 0 > /out/x86-linux-O2-case-5.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 oversized 1048576 2130352 0 > /out/x86-linux-O2-case-6.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 unchecked 131072 615272 0 > /out/x86-linux-O2-case-7.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O2 zero 0 615272 0 > /out/x86-linux-O2-case-8.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 below-min 1 615272 0 > /out/x86-linux-O2-case-9.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 align-up 1048561 615272 0 > /out/x86-linux-O2-case-10.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O2 too-large 1048577 615272 0 > /out/x86-linux-O2-case-11.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 u64-overflow 18446744073709551615 615272 0 > /out/x86-linux-O2-case-12.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 align-overflow 18446744073709551608 615272 0 > /out/x86-linux-O2-case-13.json; s=$?; test \"$s\" -eq 86 || exit 1\n/out/x86-linux-O2 abi 1048576 615272 0 > /out/x86-linux-O2-case-14.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O2 abi 1048576 615272 1 > /out/x86-linux-O2-case-15.json; s=$?; test \"$s\" -eq 0 || exit 1\n/out/x86-linux-O2 abi 1048576 615272 2 > /out/x86-linux-O2-case-16.json; s=$?; test \"$s\" -eq 0 || exit 1\nexit 0\n"
+    ],
+    "cwd": "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7",
+    "exit": 0,
+    "expected": 0,
+    "matched_expectation": true
+  }
+]

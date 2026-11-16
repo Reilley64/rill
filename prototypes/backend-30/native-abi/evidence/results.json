@@ -1,0 +1,2859 @@
+{
+  "gate": "OPEN",
+  "scope": "Executed fixed-layout private native ABI mechanism candidate only",
+  "targets": [
+    [
+      "arm-macos",
+      "arm64-apple-darwin27.0.0",
+      null,
+      null,
+      null
+    ],
+    [
+      "x86-macos",
+      "x86_64-apple-darwin27.0.0",
+      null,
+      null,
+      null
+    ],
+    [
+      "arm-linux",
+      "aarch64-unknown-linux-gnu",
+      "linux/arm64",
+      "rust@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137",
+      "aarch64-linux-gnu"
+    ],
+    [
+      "x86-linux",
+      "x86_64-unknown-linux-gnu",
+      "linux/amd64",
+      "rust@sha256:d841af61827b29b3efa46f5363e8f2e972b379cc0463c319e8f320d9f0c8eb0c",
+      "x86_64-linux-gnu"
+    ]
+  ],
+  "llvm_source_commit": "392dfff97d29b59d77e5cac6d4b6ef2585fe7117",
+  "versions": {
+    "version-apple-ld": "{\n\t\"version\": \"27037.1\",\n\t\"architectures\": [\n\t\t\"armv6\",\n\t\t\"armv7\",\n\t\t\"armv7s\",\n\t\t\"arm64\",\n\t\t\"arm64e\",\n\t\t\"arm64_32\",\n\t\t\"i386\",\n\t\t\"x86_64\",\n\t\t\"x86_64h\",\n\t\t\"armv6m\",\n\t\t\"armv7k\",\n\t\t\"armv7m\",\n\t\t\"armv7em\",\n\t\t\"armv8m.main\",\n\t\t\"armv8.1m.main\"\n\t],\n\t\"lto\": {\n\t\t\"runtime_api_version\": 30,\n\t\t\"static_api_version\": 30,\n\t\t\"version_string\": \"LLVM version 21.0.0\"\n\t},\n\t\"tapi\": {\n\t\t\"version\": \"21.0.0\",\n\t\t\"version_string\": \"Apple TAPI version 21.0.0 (tapi-2100.3.8.1)\"\n\t}\n}\n",
+    "version-arm-linux": "Linux 299aefdf3f42 7.2.12-orbstack-00394-gbecdd6130068 #1 SMP PREEMPT Thu Oct 22 22:17:17 UTC 2026 aarch64 GNU/Linux\nc++ (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nGNU ld (GNU Binutils for Debian) 2.44\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) a later version.\nThis program has absolutely no warranty.\nrustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\nglibc 2.41\nac4f48ec03aa3988b0c087fd8a0ae681c2922354b321065ff49911b8ab20db73  /usr/bin/g++\n5a284e435cdf41bc05d93f0683da12b8a42608b93c79e187e7d03fab6a22ddf4  /usr/bin/ld\n70fa4c4cf57eabeb96097cce47582d02379c4cd1de3db3e98ade4dd7089a1b13  /lib/aarch64-linux-gnu/libc.so.6\nfff1f0050a33ddf29c44634c7639ac16e2573a61e3daab4fcc4c007b432ccf19  /usr/lib/aarch64-linux-gnu/libstdc++.so.6\nlibc6:arm64\t2.41-12+deb13u4\nlibstdc++6:arm64\t14.2.0-19\n",
+    "version-clang": "Homebrew clang version 23.1.5\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/23.1.5/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/23.1.5/etc/clang/arm64-apple-darwin27.cfg\n",
+    "version-docker": "{\"Platform\":{\"Name\":\"Docker Engine - Community\"},\"Version\":\"29.8.2\",\"ApiVersion\":\"1.56\",\"MinAPIVersion\":\"1.40\",\"Os\":\"linux\",\"Arch\":\"arm64\",\"Components\":[{\"Name\":\"Engine\",\"Version\":\"29.8.2\",\"Details\":{\"ApiVersion\":\"1.56\",\"Arch\":\"arm64\",\"BuildTime\":\"Wed Sep 30 19:32:49 2026\",\"Experimental\":\"true\",\"GitCommit\":\"8af9fe3\",\"GoVersion\":\"go1.26.8\",\"KernelVersion\":\"7.2.12-orbstack-00394-gbecdd6130068\",\"MinAPIVersion\":\"1.40\",\"Module\":\"github.com/moby/moby/v2\",\"ModuleVersion\":\"v2.0.0+unknown\",\"Os\":\"linux\"}},{\"Name\":\"containerd\",\"Version\":\"v2.3.6\",\"Details\":{\"GitCommit\":\"ee2735368117d2eb259779949d5e75cdafec9761\"}},{\"Name\":\"runc\",\"Version\":\"1.5.2\",\"Details\":{\"GitCommit\":\"29dd3dc2b13b4123162e5fe132504bb4b15569f1\"}},{\"Name\":\"docker-init\",\"Version\":\"0.19.0\",\"Details\":{\"GitCommit\":\"de40ad0\"}}],\"GitCommit\":\"8af9fe3\",\"GoVersion\":\"go1.26.8\",\"KernelVersion\":\"7.2.12-orbstack-00394-gbecdd6130068\",\"Experimental\":true,\"BuildTime\":\"2026-09-30T19:32:49.000000000+00:00\"}\n",
+    "version-host": "Darwin Mac.localdomain 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:05:41 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T8122 arm64\n",
+    "version-ld-path": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld\n",
+    "version-llc": "Homebrew LLVM version 23.1.5\n  Optimized build.\n  Default target: arm64-apple-darwin27.0.0\n  Host CPU: apple-m3\n\n  Registered Targets:\n    aarch64     - AArch64 (little endian)\n    aarch64_32  - AArch64 (little endian ILP32)\n    aarch64_be  - AArch64 (big endian)\n    amdgcn      - legacy name for amdgpu\n    amdgpu      - AMDGPU gfx6+\n    arm         - ARM\n    arm64       - ARM64 (little endian)\n    arm64_32    - ARM64 (little endian ILP32)\n    armeb       - ARM (big endian)\n    avr         - Atmel AVR Microcontroller\n    bpf         - BPF (host endian)\n    bpfeb       - BPF (big endian)\n    bpfel       - BPF (little endian)\n    hexagon     - Hexagon\n    lanai       - Lanai\n    loongarch32 - 32-bit LoongArch\n    loongarch64 - 64-bit LoongArch\n    mips        - MIPS (32-bit big endian)\n    mips64      - MIPS (64-bit big endian)\n    mips64el    - MIPS (64-bit little endian)\n    mipsel      - MIPS (32-bit little endian)\n    msp430      - MSP430 [experimental]\n    nvptx       - NVIDIA PTX 32-bit\n    nvptx64     - NVIDIA PTX 64-bit\n    ppc32       - PowerPC 32\n    ppc32le     - PowerPC 32 LE\n    ppc64       - PowerPC 64\n    ppc64le     - PowerPC 64 LE\n    r600        - AMD GPUs HD2XXX-HD6XXX\n    riscv32     - 32-bit RISC-V\n    riscv32be   - 32-bit big endian RISC-V\n    riscv64     - 64-bit RISC-V\n    riscv64be   - 64-bit big endian RISC-V\n    sparc       - Sparc\n    sparcel     - Sparc LE\n    sparcv9     - Sparc V9\n    spirv       - SPIR-V Logical\n    spirv32     - SPIR-V 32-bit\n    spirv64     - SPIR-V 64-bit\n    systemz     - SystemZ\n    thumb       - Thumb\n    thumbeb     - Thumb (big endian)\n    ve          - VE\n    wasm32      - WebAssembly 32-bit\n    wasm64      - WebAssembly 64-bit\n    x86         - 32-bit X86: Pentium-Pro and above\n    x86-64      - 64-bit X86: EM64T and AMD64\n    xcore       - XCore\n",
+    "version-objdump": "Homebrew LLVM version 23.1.5\n  Optimized build.\n\n\n  Registered Targets:\n    aarch64     - AArch64 (little endian)\n    aarch64_32  - AArch64 (little endian ILP32)\n    aarch64_be  - AArch64 (big endian)\n    amdgcn      - legacy name for amdgpu\n    amdgpu      - AMDGPU gfx6+\n    arm         - ARM\n    arm64       - ARM64 (little endian)\n    arm64_32    - ARM64 (little endian ILP32)\n    armeb       - ARM (big endian)\n    avr         - Atmel AVR Microcontroller\n    bpf         - BPF (host endian)\n    bpfeb       - BPF (big endian)\n    bpfel       - BPF (little endian)\n    hexagon     - Hexagon\n    lanai       - Lanai\n    loongarch32 - 32-bit LoongArch\n    loongarch64 - 64-bit LoongArch\n    mips        - MIPS (32-bit big endian)\n    mips64      - MIPS (64-bit big endian)\n    mips64el    - MIPS (64-bit little endian)\n    mipsel      - MIPS (32-bit little endian)\n    msp430      - MSP430 [experimental]\n    nvptx       - NVIDIA PTX 32-bit\n    nvptx64     - NVIDIA PTX 64-bit\n    ppc32       - PowerPC 32\n    ppc32le     - PowerPC 32 LE\n    ppc64       - PowerPC 64\n    ppc64le     - PowerPC 64 LE\n    r600        - AMD GPUs HD2XXX-HD6XXX\n    riscv32     - 32-bit RISC-V\n    riscv32be   - 32-bit big endian RISC-V\n    riscv64     - 64-bit RISC-V\n    riscv64be   - 64-bit big endian RISC-V\n    sparc       - Sparc\n    sparcel     - Sparc LE\n    sparcv9     - Sparc V9\n    spirv       - SPIR-V Logical\n    spirv32     - SPIR-V 32-bit\n    spirv64     - SPIR-V 64-bit\n    systemz     - SystemZ\n    thumb       - Thumb\n    thumbeb     - Thumb (big endian)\n    ve          - VE\n    wasm32      - WebAssembly 32-bit\n    wasm64      - WebAssembly 64-bit\n    x86         - 32-bit X86: Pentium-Pro and above\n    x86-64      - 64-bit X86: EM64T and AMD64\n    xcore       - XCore\n",
+    "version-opt": "Homebrew LLVM version 23.1.5\n  Optimized build.\n  Default target: arm64-apple-darwin27.0.0\n  Host CPU: apple-m3\n",
+    "version-os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434\n",
+    "version-rosetta": "package-id: com.apple.pkg.RosettaUpdateAuto\nversion: 1.0.0.0.1790234402\nvolume: /\nlocation: /\ninstall-time: 1793667663\n",
+    "version-sdk-build": "26A425\n",
+    "version-sdk-version": "27.0\n",
+    "version-sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\n",
+    "version-x86-linux": "Linux 6f7f1e66de5b 7.2.12-orbstack-00394-gbecdd6130068 #1 SMP PREEMPT Thu Oct 22 22:17:17 UTC 2026 x86_64 GNU/Linux\nc++ (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nGNU ld (GNU Binutils for Debian) 2.44\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) a later version.\nThis program has absolutely no warranty.\nrustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\nglibc 2.41\n6b3696e4dcb85e1c949c732a02befa50e3983ecf94ce7e8e58d9d503b954b79d  /usr/bin/g++\nd2766988b6a1b1d1518cdc09242e726d1f24e151e16410ada3092b11ffd9081b  /usr/bin/ld\n9792e3cbb541c8f44c7acf5f14f4022ea62998ecc787d326bed4d8b6547dfd92  /lib/x86_64-linux-gnu/libc.so.6\n972bb2a18b71140dab0240f8a1f68ab3fb1d56bcd4c4f824a91b70888faf5a00  /usr/lib/x86_64-linux-gnu/libstdc++.so.6\nlibc6:amd64\t2.41-12+deb13u4\nlibstdc++6:amd64\t14.2.0-19\n"
+  },
+  "file_sha256": {
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-abi/mechanism.cpp": "057fbbd4e00dc04953864758851e798f1f0327b75b165192786efb165a770a38",
+    "/Users/reilley/.t3/worktrees/rill/t3-85868963-5b0056cf791b01d7/prototypes/backend-30/native-abi/run.py": "bf2614d49454d24382e6dc7b4539146a8f00948047403e7a22a859366f8c52af",
+    "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld": "58d1a357fb0ce0940a2b8afb1d1531e8e858ee1bfa6b93122c1c87758cfa2103",
+    "/opt/homebrew/opt/llvm/bin/clang++": "edcec56599c95557f16c1e40cb813491cb7f872748cadaef5998493f96a3fe3c",
+    "/opt/homebrew/opt/llvm/bin/opt": "9aaee860e97ae076831f91352c06755fce78d2322947d5e17e8612a5a63d6c9e",
+    "/opt/homebrew/opt/llvm/bin/llc": "c728162fefd94fb097aa2e01b53a3e3402879256a09bd241ce52c4fcac75c481",
+    "/opt/homebrew/opt/llvm/bin/llvm-objdump": "02cb9d43af6901c73a4c18f23ff9b474395c81aaaaca06e52723c5312316bbce"
+  },
+  "header_manifest_sha256": "92e991a5d86096e485a71bd9f67e82bddea982dd1fcf16392e9ca294849707a6",
+  "artifact_sha256": {
+    "arm-linux-O0-exe": "1abf741df8b115ff88b5c26a8a1621bd46209cafdbff0d8775c4c0e9c185b31a",
+    "arm-linux-O0-tail-source.ll": "65077af3e015794315523e859b04dd61c30f4922c4cfc096f89ef530487553bc",
+    "arm-linux-O0-tail.ll": "b1aad41abb5f99e2576bc09f10f5c776198cdc08cbf60e24d6e1e8f481e3aba2",
+    "arm-linux-O0-tail.o": "c2788894be5c88f9d02c4c9e9e72d1ae9a0cd2dc4c8f7277e95389ebe361a6a7",
+    "arm-linux-O0-tail.s": "245ac5aa2eda5882d1daf4521f4ebe833f0f8d0b87bcbe7b8ddc685dd0ca8678",
+    "arm-linux-O0.d": "e3664d3f61ed46f2d1b35b63a71471dd2508b15353e897fbf924ce42ce1092f6",
+    "arm-linux-O0.ll": "a9a59366f1155a60475624d7abfbbabef8b7ff9ec8e2441a859bfa7142845236",
+    "arm-linux-O0.o": "b4d8d01c090b74be3872ff2fedfd08b5ffab8be492beed3b2e89dbb68066d469",
+    "arm-linux-O0.s": "6c9274aa8951e98d0bdfb2b41ed07974cae84971bc6585a5afc238ac355fe28f",
+    "arm-linux-O0.su": "9ec76424d34f8f3c595730a10ba8930a52ad1d4941cdb9088833328eb087ff45",
+    "arm-linux-O2-exe": "3ac67e721523f0fa6693146eae356c14d5eb678bf51fb68f68428f9078d5a9e5",
+    "arm-linux-O2-tail-source.ll": "65077af3e015794315523e859b04dd61c30f4922c4cfc096f89ef530487553bc",
+    "arm-linux-O2-tail.ll": "c740053dae00e1d9ddc9ebf2c366a8a6cd9cbbe3d351fbcfbec27632e8868467",
+    "arm-linux-O2-tail.o": "24b581b9e559d2b0fcd3f763a27e82f373d5e73f3af058088795bb2181234cc4",
+    "arm-linux-O2-tail.s": "273f9a7f17d1b808642e2f13708c0d93002890048e56ed8977601e0a20bd4301",
+    "arm-linux-O2.d": "7592b65106133e855a7c1e269aeec4dfc673939d7732f0471dee540e2e9b379b",
+    "arm-linux-O2.ll": "291d5f232831363cdbd3ff10c20b3a5a97fedeb39092a5ca73ff15b1bcab4d2b",
+    "arm-linux-O2.o": "c637910ce3c914a6052513046b5d63fd2fa10d1988ff882ca96b19644cf7d921",
+    "arm-linux-O2.s": "2dc280e9874e339338a45533efa770796b22faa75c8b669301a7341cb10da2c6",
+    "arm-linux-O2.su": "6ba0791155f3de7e453e5e786793fd54f2e8447aa3c574b8e46858970ede4167",
+    "arm-macos-O0-exe": "b01fb52f4b5dd8803dcb9d985c707c8a436f53b4f81e321da4b44228129ba77e",
+    "arm-macos-O0-tail-source.ll": "a6c013bd43bf3d494628a57c1741be09cb923742daf941c9fb7b64788c1d1f8c",
+    "arm-macos-O0-tail.ll": "f0fbdaae91df3cf8557a3845edef13c8bce5a264cf3a505dfbb0c5853026aa06",
+    "arm-macos-O0-tail.o": "a611f481a221f7f349e10d33467e77b6aaa3b455b65b4b3f80df6769fc59870e",
+    "arm-macos-O0-tail.s": "048f15f86ae0360ec135e2154a49f0378731602c22c386d318964a11676809a4",
+    "arm-macos-O0.d": "b65c059733d32a0147682a4bb5cb729cadbcc1e8175d8cd3dbb448f296f3444d",
+    "arm-macos-O0.ll": "9689b994621b69bb525140928c51dac38bf23909c936d3323b48aa2f1f8fe955",
+    "arm-macos-O0.o": "a53546a6192c8ca2bdc0a227df6f655ea6ca24aac7627d489a7576cf455068bf",
+    "arm-macos-O0.s": "25388036803f4e0a673744969be2158ec5872177c5f6be5e8aaf05132ba621dd",
+    "arm-macos-O0.su": "a458b237c9e0b06ae6affb0b0255faff705d24433c808428c3763954729ce5a9",
+    "arm-macos-O2-exe": "7a90116d044e1834aa5a8f08c6b74ac8e533a42d410fa2a454c5cbd4311b4aed",
+    "arm-macos-O2-tail-source.ll": "a6c013bd43bf3d494628a57c1741be09cb923742daf941c9fb7b64788c1d1f8c",
+    "arm-macos-O2-tail.ll": "48c31d7eb0c1f919be898fb9736c3d9a04f265f78937e1ea92543c5149a5dca7",
+    "arm-macos-O2-tail.o": "040377a517e6efb9927571275436809dd8e01f661702eddd096eab2ceefafb5d",
+    "arm-macos-O2-tail.s": "088799594dcf1959fdf47cb9fdbd64b576aca67dd3f392f0c46bca2e921a6f1a",
+    "arm-macos-O2.d": "acfd12c4885253f168396c67512ac6e2f1fd264cde7cbb582f214e41ae8de602",
+    "arm-macos-O2.ll": "49b0afc112491b5e070299062b75344504ecc62e9aefb08cfa5c585d10b2fb18",
+    "arm-macos-O2.o": "c52a84a2af87b319a2a23a0123e1d81c7a55f5aaddf7ad6e4e2e4864e0a83aba",
+    "arm-macos-O2.s": "ba304f23e293ba9c44513dbf79e7638a2e18ebe53c296c8081223daee707b659",
+    "arm-macos-O2.su": "5f4c525c6c70d427b8952c71bbc31f4ddafb98e436bb50d8210e4e5b0b359962",
+    "x86-linux-O0-exe": "7e02e9316acff3e78026def0369a3e07ad9e525d457ecf16c728c1dd69b84275",
+    "x86-linux-O0-tail-source.ll": "9f6b6e52915674ce3e21407936084859cb2351ae504e6de90a198664284abef9",
+    "x86-linux-O0-tail.ll": "470599cf75a64f422fb5df5d3a8bc6a10dd9853161ddaaf3c31d40d0146e7c63",
+    "x86-linux-O0-tail.o": "50a8ef00dcd643e4f0efae29b89ff408b30c5b6af8e9c0a4ce8803f1c77941a2",
+    "x86-linux-O0-tail.s": "f602cf96d777edd6031f66ffa50585197e3016d016dc62104b8b5dc244d31846",
+    "x86-linux-O0.d": "7eaf720a28497e40092bfdd299043cf4427b5b4ff4ebfd53af295ed1a4d0f406",
+    "x86-linux-O0.ll": "81c6ac45a57e379d6d0ed60b059d4e49670a97eb99794035be766d6cd59674c9",
+    "x86-linux-O0.o": "ba1f2250b2836bfa7ea0d11652b595fda6e835c28dcee20beeae74d772042405",
+    "x86-linux-O0.s": "1affe1752495f0f389f01a728233d70f5889e48c55b7b1697ba74a86cec49acb",
+    "x86-linux-O0.su": "e93282803dc30b95e8a1c3ecdb1bce6fed0e0b02e547cce89747d47de341e264",
+    "x86-linux-O2-exe": "897d6ca0fd2cd49e4e776fd7aeb00fbb7549b284ef2aaea1255e7df1925a81b9",
+    "x86-linux-O2-tail-source.ll": "9f6b6e52915674ce3e21407936084859cb2351ae504e6de90a198664284abef9",
+    "x86-linux-O2-tail.ll": "4e07234fb7fe5d5efef89949139239494eda41b4c6d6e626a16e8a5364ab2e53",
+    "x86-linux-O2-tail.o": "a4735ee8a24074cce96160ad8a869ee4dca89a53ebce05bbb4c7a99d8216922d",
+    "x86-linux-O2-tail.s": "c61d55af99af3fae26af7238d16bea651476a11957e5cff4eae8cdf4d6bbb4ce",
+    "x86-linux-O2.d": "a658b9f5cb45251767e0c3145a800c66352789f7ef6b76c98d74fba6628c5bb6",
+    "x86-linux-O2.ll": "e457c38cfed5efdb79633ae01baddb3c7059e7094fdbb323e6e907ce53ec2d1b",
+    "x86-linux-O2.o": "6240f600bb96acb4b879b90b1819032f3301f5af240d0944ebe6cb7a1f9d27c1",
+    "x86-linux-O2.s": "64d4c47dd6ab472af5536f1b9dff49ed9337ee729a45713a00959ea13ac12a69",
+    "x86-linux-O2.su": "4692a7e0ea48575ac131a8db2dbdd4dffb0dea443107694884231b038f0516fc",
+    "x86-macos-O0-exe": "1d7ff6e322907c83e57299123156f5c9a2b546911e20a9f3cb4dbaab8165240b",
+    "x86-macos-O0-tail-source.ll": "107c40c8a9baec2c19b0cc1783cfc7b655b4a61fd61eacbe8cad8112b4a906a8",
+    "x86-macos-O0-tail.ll": "60d8b98f3de6bfe4a5d231306973ceec121541b6010e0c316bba70d78f267e06",
+    "x86-macos-O0-tail.o": "d7510c870144bb1999e141ed79d0242c6bdf3278dbc236db8b77e83f3b80222b",
+    "x86-macos-O0-tail.s": "0d5d6431ecf0350a3d06f471451b215fe14e0c2fe37423e26a6771faceb9b637",
+    "x86-macos-O0.d": "6bb862f73f530a7929c4fdbf6c42547c04606e818869fc371cfeb31b8e33b5c9",
+    "x86-macos-O0.ll": "e57b6949e63ec643394ec9d2730b6f179b2410404a46415e3b8908d25c4871d9",
+    "x86-macos-O0.o": "523fc88f5d4b59808859bbc54f29386096947f8bc7668c2ee4db17da85506766",
+    "x86-macos-O0.s": "f33374ce542d1137c5ee15780415362df97bfec07b325a3ae27a033e99a9d07c",
+    "x86-macos-O0.su": "371f8b9b044430ffb224478ccc758a426039436ef210f32a38e1ddbc83c96c26",
+    "x86-macos-O2-exe": "d39ed6ec074507cdbbb7029f1606a9c9c9c3ec528471a1e265d0025b80a14b39",
+    "x86-macos-O2-tail-source.ll": "107c40c8a9baec2c19b0cc1783cfc7b655b4a61fd61eacbe8cad8112b4a906a8",
+    "x86-macos-O2-tail.ll": "85c39a6981327f4ea5db363180dc03a212f266d872e58f54752347a5fb3bfb30",
+    "x86-macos-O2-tail.o": "c3bb1d4c682d4f411f286f707955c78c0db20a61b74ba2bd813d2b4f58c653d9",
+    "x86-macos-O2-tail.s": "42aa63628a9dbf6718b91e513298a09b07733fed6b7eedeaa314f3f80c75bcc5",
+    "x86-macos-O2.d": "435a10fb4315133a475abc265fbabb299393c5cea2b57ac81ec1602edc6b6b2c",
+    "x86-macos-O2.ll": "00f8fc70d5579bdbae576a090f572765ae40167b87a7336d0e81deda11080c64",
+    "x86-macos-O2.o": "69fe6ce2094d18a1ae790094fea436723ad995d43c140437d8b886d58340e5dd",
+    "x86-macos-O2.s": "6267d55f4eb705e71c1f564955a74653de57f8a05a6eaec2c453aab1a5ed5e14",
+    "x86-macos-O2.su": "245bc3025b6b26e5bef80dab3a5f9bb9516d42c6238966d86b78a2b10e4ce05b"
+  },
+  "audits": {
+    "arm-macos-O0": {
+      "per_transfer_acyclic_graph": {
+        "_Z10float_bitsy": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "llvm.memcpy.p0.p0.i64",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z11check_valuePK5ValueP7Contextyb": [
+          "_Z9wide_bitsy",
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy",
+          "_Z9wide_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "_Z11double_bitsy": [],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z13scalar_fieldsP5Valuey": [
+          "_Z9wide_bitsy",
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy",
+          "_Z9wide_bitsy",
+          "_Z11double_bitsy",
+          "llvm.memset.p0.i64"
+        ],
+        "_Z5valueP6Packet": [],
+        "_Z6retireP6Packet": [],
+        "_Z9constructP6Packetj": [
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm"
+        ],
+        "_Z9wide_bitsy": [],
+        "_ZL2spv": [],
+        "__bzero": [
+          "memset"
+        ],
+        "abi_observe": [
+          "_ZL2spv",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuey"
+        ],
+        "bzero": [
+          "memset"
+        ],
+        "memcpy": [],
+        "memset": []
+      },
+      "machine_calls": {
+        "bzero": [
+          "memset"
+        ],
+        "_Z11double_bitsy": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "memcpy",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z9constructP6Packetj": [
+          "memset",
+          "_Z10shape_bytejm",
+          "memset",
+          "_Z10shape_bytejm",
+          "bzero",
+          "_Z10shape_bytejm"
+        ],
+        "memset": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "memcpy": [],
+        "_Z5valueP6Packet": [],
+        "_Z11check_valuePK5ValueP7Contextyb": [
+          "_Z9wide_bitsy",
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy",
+          "_Z9wide_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuey"
+        ],
+        "abi_observe": [
+          "_ZL2spv",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb"
+        ],
+        "_Z10float_bitsy": [],
+        "__bzero": [
+          "memset"
+        ],
+        "_Z13scalar_fieldsP5Valuey": [
+          "_Z9wide_bitsy",
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy",
+          "_Z9wide_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z10shape_bytejm": [],
+        "_Z9wide_bitsy": [],
+        "_Z6retireP6Packet": [],
+        "_ZL2spv": []
+      },
+      "no_per_transfer_allocation": true,
+      "all_external_transfer_helpers_rejected": true,
+      "tail_branches": {
+        "self": [
+          "bl\t_abi_observe",
+          "b\tLBB0_2",
+          "bl\t_abi_finish",
+          "bl\t_abi_step",
+          "b\t_self"
+        ],
+        "mutual_0": [
+          "bl\t_abi_observe",
+          "b\tLBB1_2",
+          "bl\t_abi_finish",
+          "bl\t_abi_step",
+          "b\t_mutual_1"
+        ],
+        "mutual_1": [
+          "bl\t_abi_observe",
+          "b\tLBB2_2",
+          "bl\t_abi_finish",
+          "bl\t_abi_step",
+          "b\t_mutual_2"
+        ],
+        "mutual_2": [
+          "bl\t_abi_observe",
+          "b\tLBB3_2",
+          "bl\t_abi_finish",
+          "bl\t_abi_step",
+          "b\t_mutual_0"
+        ],
+        "indirect_0": [
+          "bl\t_abi_observe",
+          "b\tLBB4_2",
+          "bl\t_abi_finish",
+          "bl\t_abi_step",
+          "br\tx5"
+        ],
+        "indirect_1": [
+          "bl\t_abi_observe",
+          "b\tLBB5_2",
+          "bl\t_abi_finish",
+          "bl\t_abi_step",
+          "br\tx5"
+        ],
+        "indirect_2": [
+          "bl\t_abi_observe",
+          "b\tLBB6_2",
+          "bl\t_abi_finish",
+          "bl\t_abi_step",
+          "br\tx5"
+        ]
+      },
+      "body_stack_usage": [
+        "prototypes/backend-30/native-abi/mechanism.cpp:17:memcpy\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:23:memset\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:30:bzero\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:31:__bzero\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:35:_Z14capture_invokePK7Capturey\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:80:_Z5valueP6Packet\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:87:_Z10shape_bytejm\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:88:_Z9constructP6Packetj\t80\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:107:_Z6retireP6Packet\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:115:_Z9wide_bitsy\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:116:_Z10float_bitsy\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:117:_Z11double_bitsy\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:118:_Z13scalar_fieldsP5Valuey\t80\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:138:_Z11check_valuePK5ValueP7Contextyb\t176\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:162:_Z11check_shapeP6PacketP7Context\t80\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:176:_Z12check_poisonPK5ValueP7Context\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:180:_Z10move_valueP5ValueS0_P7Context\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:203:abi_observe\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:192:_ZL2spv\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:213:abi_step\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:229:abi_finish\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:246:_Z4rootj\t1664\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:70:_ZN7ContextC1Ev\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:311:main\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:70:_ZN7ContextC2Ev\t32\tstatic"
+      ]
+    },
+    "arm-macos-O2": {
+      "per_transfer_acyclic_graph": {
+        "_Z10float_bitsy": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "llvm.memcpy.p0.p0.i64",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z11check_valuePK5ValueP7Contextyb": [
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "_Z11double_bitsy": [],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z13scalar_fieldsP5Valuey": [
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "_Z5valueP6Packet": [],
+        "_Z6retireP6Packet": [],
+        "_Z9constructP6Packetj": [
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm"
+        ],
+        "_Z9wide_bitsy": [],
+        "__bzero": [
+          "memset"
+        ],
+        "abi_observe": [
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuey"
+        ],
+        "bzero": [
+          "memset"
+        ],
+        "memcpy": [
+          "llvm.assume"
+        ],
+        "memset": []
+      },
+      "machine_calls": {
+        "bzero": [
+          "memset"
+        ],
+        "_Z9wide_bitsy": [],
+        "__bzero": [
+          "memset"
+        ],
+        "_Z6retireP6Packet": [],
+        "_Z13scalar_fieldsP5Valuey": [
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "memcpy": [],
+        "_Z5valueP6Packet": [],
+        "_Z11check_valuePK5ValueP7Contextyb": [
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuey"
+        ],
+        "_Z11double_bitsy": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "abi_observe": [
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z10float_bitsy": [],
+        "_Z9constructP6Packetj": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "memset": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ]
+      },
+      "no_per_transfer_allocation": true,
+      "all_external_transfer_helpers_rejected": true,
+      "tail_branches": {
+        "self": [
+          "bl\t_abi_observe",
+          "bl\t_abi_step",
+          "bl\t_abi_observe",
+          "b\tLBB0_3",
+          "b\t_abi_finish"
+        ],
+        "mutual_0": [
+          "bl\t_abi_observe",
+          "bl\t_abi_step",
+          "b\t_mutual_1",
+          "b\t_abi_finish"
+        ],
+        "mutual_1": [
+          "bl\t_abi_observe",
+          "bl\t_abi_step",
+          "b\t_mutual_2",
+          "b\t_abi_finish"
+        ],
+        "mutual_2": [
+          "bl\t_abi_observe",
+          "bl\t_abi_step",
+          "b\t_mutual_0",
+          "b\t_abi_finish"
+        ],
+        "indirect_0": [
+          "bl\t_abi_observe",
+          "bl\t_abi_step",
+          "br\tx5",
+          "b\t_abi_finish"
+        ],
+        "indirect_1": [
+          "bl\t_abi_observe",
+          "bl\t_abi_step",
+          "br\tx5",
+          "b\t_abi_finish"
+        ],
+        "indirect_2": [
+          "bl\t_abi_observe",
+          "bl\t_abi_step",
+          "br\tx5",
+          "b\t_abi_finish"
+        ]
+      },
+      "body_stack_usage": [
+        "prototypes/backend-30/native-abi/mechanism.cpp:17:memcpy\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:23:memset\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:30:bzero\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:31:__bzero\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:35:_Z14capture_invokePK7Capturey\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:80:_Z5valueP6Packet\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:87:_Z10shape_bytejm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:88:_Z9constructP6Packetj\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:107:_Z6retireP6Packet\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:115:_Z9wide_bitsy\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:116:_Z10float_bitsy\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:117:_Z11double_bitsy\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:118:_Z13scalar_fieldsP5Valuey\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:138:_Z11check_valuePK5ValueP7Contextyb\t80\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:162:_Z11check_shapeP6PacketP7Context\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:176:_Z12check_poisonPK5ValueP7Context\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:180:_Z10move_valueP5ValueS0_P7Context\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:203:abi_observe\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:213:abi_step\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:229:abi_finish\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:246:_Z4rootj\t1472\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:311:main\t32\tstatic"
+      ]
+    },
+    "x86-macos-O0": {
+      "per_transfer_acyclic_graph": {
+        "_Z10float_bitsy": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "llvm.memcpy.p0.p0.i64",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z11check_valuePK5ValueP7Contextyb": [
+          "_Z9wide_bitsy",
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy",
+          "_Z9wide_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "_Z11double_bitsy": [],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z13scalar_fieldsP5Valuey": [
+          "_Z9wide_bitsy",
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy",
+          "_Z9wide_bitsy",
+          "_Z11double_bitsy",
+          "llvm.memset.p0.i64"
+        ],
+        "_Z5valueP6Packet": [],
+        "_Z6retireP6Packet": [],
+        "_Z9constructP6Packetj": [
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm"
+        ],
+        "_Z9wide_bitsy": [],
+        "_ZL2spv": [],
+        "__bzero": [
+          "memset"
+        ],
+        "abi_observe": [
+          "_ZL2spv",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuey"
+        ],
+        "bzero": [
+          "memset"
+        ],
+        "memcpy": [],
+        "memset": []
+      },
+      "machine_calls": {
+        "bzero": [
+          "memset"
+        ],
+        "_Z11double_bitsy": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "memcpy",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z9constructP6Packetj": [
+          "memset",
+          "_Z10shape_bytejm",
+          "memset",
+          "_Z10shape_bytejm",
+          "memset",
+          "_Z10shape_bytejm"
+        ],
+        "memset": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "memcpy": [],
+        "_Z5valueP6Packet": [],
+        "_Z11check_valuePK5ValueP7Contextyb": [
+          "_Z9wide_bitsy",
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy",
+          "_Z9wide_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuey"
+        ],
+        "abi_observe": [
+          "_ZL2spv",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb"
+        ],
+        "_Z10float_bitsy": [],
+        "__bzero": [
+          "memset"
+        ],
+        "_Z13scalar_fieldsP5Valuey": [
+          "_Z9wide_bitsy",
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy",
+          "_Z9wide_bitsy",
+          "_Z11double_bitsy",
+          "memset"
+        ],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z10shape_bytejm": [],
+        "_Z9wide_bitsy": [],
+        "_Z6retireP6Packet": [],
+        "_ZL2spv": []
+      },
+      "no_per_transfer_allocation": true,
+      "all_external_transfer_helpers_rejected": true,
+      "tail_branches": {
+        "self": [
+          "callq\t_abi_observe",
+          "callq\t_abi_finish",
+          "callq\t_abi_step",
+          "jmp\t_self                           ## TAILCALL"
+        ],
+        "mutual_0": [
+          "callq\t_abi_observe",
+          "callq\t_abi_finish",
+          "callq\t_abi_step",
+          "jmp\t_mutual_1                       ## TAILCALL"
+        ],
+        "mutual_1": [
+          "callq\t_abi_observe",
+          "callq\t_abi_finish",
+          "callq\t_abi_step",
+          "jmp\t_mutual_2                       ## TAILCALL"
+        ],
+        "mutual_2": [
+          "callq\t_abi_observe",
+          "callq\t_abi_finish",
+          "callq\t_abi_step",
+          "jmp\t_mutual_0                       ## TAILCALL"
+        ],
+        "indirect_0": [
+          "callq\t_abi_observe",
+          "callq\t_abi_finish",
+          "callq\t_abi_step",
+          "jmpq\t*%rax                           ## TAILCALL"
+        ],
+        "indirect_1": [
+          "callq\t_abi_observe",
+          "callq\t_abi_finish",
+          "callq\t_abi_step",
+          "jmpq\t*%rax                           ## TAILCALL"
+        ],
+        "indirect_2": [
+          "callq\t_abi_observe",
+          "callq\t_abi_finish",
+          "callq\t_abi_step",
+          "jmpq\t*%rax                           ## TAILCALL"
+        ]
+      },
+      "body_stack_usage": [
+        "prototypes/backend-30/native-abi/mechanism.cpp:17:memcpy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:23:memset\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:30:bzero\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:31:__bzero\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:35:_Z14capture_invokePK7Capturey\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:80:_Z5valueP6Packet\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:87:_Z10shape_bytejm\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:88:_Z9constructP6Packetj\t72\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:107:_Z6retireP6Packet\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:115:_Z9wide_bitsy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:116:_Z10float_bitsy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:117:_Z11double_bitsy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:118:_Z13scalar_fieldsP5Valuey\t88\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:138:_Z11check_valuePK5ValueP7Contextyb\t184\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:162:_Z11check_shapeP6PacketP7Context\t72\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:176:_Z12check_poisonPK5ValueP7Context\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:180:_Z10move_valueP5ValueS0_P7Context\t40\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:203:abi_observe\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:192:_ZL2spv\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:213:abi_step\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:229:abi_finish\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:246:_Z4rootj\t1528\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:70:_ZN7ContextC1Ev\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:311:main\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:70:_ZN7ContextC2Ev\t56\tstatic"
+      ]
+    },
+    "x86-macos-O2": {
+      "per_transfer_acyclic_graph": {
+        "_Z10float_bitsy": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "llvm.memcpy.p0.p0.i64",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z11check_valuePK5ValueP7Contextyb": [
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "_Z11double_bitsy": [],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z13scalar_fieldsP5Valuey": [
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "_Z5valueP6Packet": [],
+        "_Z6retireP6Packet": [],
+        "_Z9constructP6Packetj": [
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm"
+        ],
+        "_Z9wide_bitsy": [],
+        "__bzero": [
+          "memset"
+        ],
+        "abi_observe": [
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuey"
+        ],
+        "bzero": [
+          "memset"
+        ],
+        "memcpy": [
+          "llvm.assume"
+        ],
+        "memset": [
+          "llvm.assume"
+        ]
+      },
+      "machine_calls": {
+        "bzero": [
+          "memset"
+        ],
+        "_Z9wide_bitsy": [],
+        "__bzero": [
+          "memset"
+        ],
+        "_Z6retireP6Packet": [],
+        "_Z13scalar_fieldsP5Valuey": [
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "memcpy": [],
+        "_Z5valueP6Packet": [],
+        "_Z11check_valuePK5ValueP7Contextyb": [
+          "_Z9wide_bitsy",
+          "_Z10float_bitsy",
+          "_Z11double_bitsy"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuey"
+        ],
+        "_Z11double_bitsy": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "memcpy",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "abi_observe": [
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextyb"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z10float_bitsy": [],
+        "_Z9constructP6Packetj": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "__bzero",
+          "_Z10shape_bytejm"
+        ],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "memset": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ]
+      },
+      "no_per_transfer_allocation": true,
+      "all_external_transfer_helpers_rejected": true,
+      "tail_branches": {
+        "self": [
+          "callq\t_abi_observe",
+          "callq\t_abi_step",
+          "callq\t_abi_observe",
+          "jmp\tLBB0_2",
+          "callq\t_abi_finish"
+        ],
+        "mutual_0": [
+          "callq\t_abi_observe",
+          "callq\t_abi_step",
+          "jmp\t_mutual_1                       ## TAILCALL",
+          "callq\t_abi_finish"
+        ],
+        "mutual_1": [
+          "callq\t_abi_observe",
+          "callq\t_abi_step",
+          "jmp\t_mutual_2                       ## TAILCALL",
+          "callq\t_abi_finish"
+        ],
+        "mutual_2": [
+          "callq\t_abi_observe",
+          "callq\t_abi_step",
+          "jmp\t_mutual_0                       ## TAILCALL",
+          "callq\t_abi_finish"
+        ],
+        "indirect_0": [
+          "callq\t_abi_observe",
+          "callq\t_abi_step",
+          "jmpq\t*%rax                           ## TAILCALL",
+          "callq\t_abi_finish"
+        ],
+        "indirect_1": [
+          "callq\t_abi_observe",
+          "callq\t_abi_step",
+          "jmpq\t*%rax                           ## TAILCALL",
+          "callq\t_abi_finish"
+        ],
+        "indirect_2": [
+          "callq\t_abi_observe",
+          "callq\t_abi_step",
+          "jmpq\t*%rax                           ## TAILCALL",
+          "callq\t_abi_finish"
+        ]
+      },
+      "body_stack_usage": [
+        "prototypes/backend-30/native-abi/mechanism.cpp:17:memcpy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:23:memset\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:30:bzero\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:31:__bzero\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:35:_Z14capture_invokePK7Capturey\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:80:_Z5valueP6Packet\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:87:_Z10shape_bytejm\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:88:_Z9constructP6Packetj\t40\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:107:_Z6retireP6Packet\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:115:_Z9wide_bitsy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:116:_Z10float_bitsy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:117:_Z11double_bitsy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:118:_Z13scalar_fieldsP5Valuey\t40\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:138:_Z11check_valuePK5ValueP7Contextyb\t72\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:162:_Z11check_shapeP6PacketP7Context\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:176:_Z12check_poisonPK5ValueP7Context\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:180:_Z10move_valueP5ValueS0_P7Context\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:203:abi_observe\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:213:abi_step\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:229:abi_finish\t40\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:246:_Z4rootj\t1272\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:311:main\t24\tstatic"
+      ]
+    },
+    "arm-linux-O0": {
+      "per_transfer_acyclic_graph": {
+        "_Z10float_bitsm": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "llvm.memcpy.p0.p0.i64",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z11check_valuePK5ValueP7Contextmb": [
+          "_Z9wide_bitsm",
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm",
+          "_Z9wide_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z11double_bitsm": [],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z13scalar_fieldsP5Valuem": [
+          "_Z9wide_bitsm",
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm",
+          "_Z9wide_bitsm",
+          "_Z11double_bitsm",
+          "llvm.memset.p0.i64"
+        ],
+        "_Z5valueP6Packet": [],
+        "_Z6retireP6Packet": [],
+        "_Z9constructP6Packetj": [
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm"
+        ],
+        "_Z9wide_bitsm": [],
+        "_ZL2spv": [],
+        "__bzero": [
+          "memset"
+        ],
+        "abi_observe": [
+          "_ZL2spv",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuem"
+        ],
+        "bzero": [
+          "memset"
+        ],
+        "memcpy": [],
+        "memset": []
+      },
+      "machine_calls": {
+        "_Z11double_bitsm": [],
+        "bzero": [
+          "memset"
+        ],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "memcpy",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z9constructP6Packetj": [
+          "memset",
+          "_Z10shape_bytejm",
+          "memset",
+          "_Z10shape_bytejm",
+          "memset",
+          "_Z10shape_bytejm"
+        ],
+        "memset": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "memcpy": [],
+        "_Z5valueP6Packet": [],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuem"
+        ],
+        "abi_observe": [
+          "_ZL2spv",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb"
+        ],
+        "_Z11check_valuePK5ValueP7Contextmb": [
+          "_Z9wide_bitsm",
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm",
+          "_Z9wide_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "__bzero": [
+          "memset"
+        ],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z10shape_bytejm": [],
+        "_Z13scalar_fieldsP5Valuem": [
+          "_Z9wide_bitsm",
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm",
+          "_Z9wide_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z10float_bitsm": [],
+        "_Z9wide_bitsm": [],
+        "_Z6retireP6Packet": [],
+        "_ZL2spv": []
+      },
+      "no_per_transfer_allocation": true,
+      "all_external_transfer_helpers_rejected": true,
+      "tail_branches": {
+        "self": [
+          "bl\tabi_observe",
+          "b\t.LBB0_2",
+          "bl\tabi_finish",
+          "bl\tabi_step",
+          "b\tself"
+        ],
+        "mutual_0": [
+          "bl\tabi_observe",
+          "b\t.LBB1_2",
+          "bl\tabi_finish",
+          "bl\tabi_step",
+          "b\tmutual_1"
+        ],
+        "mutual_1": [
+          "bl\tabi_observe",
+          "b\t.LBB2_2",
+          "bl\tabi_finish",
+          "bl\tabi_step",
+          "b\tmutual_2"
+        ],
+        "mutual_2": [
+          "bl\tabi_observe",
+          "b\t.LBB3_2",
+          "bl\tabi_finish",
+          "bl\tabi_step",
+          "b\tmutual_0"
+        ],
+        "indirect_0": [
+          "bl\tabi_observe",
+          "b\t.LBB4_2",
+          "bl\tabi_finish",
+          "bl\tabi_step",
+          "br\tx5"
+        ],
+        "indirect_1": [
+          "bl\tabi_observe",
+          "b\t.LBB5_2",
+          "bl\tabi_finish",
+          "bl\tabi_step",
+          "br\tx5"
+        ],
+        "indirect_2": [
+          "bl\tabi_observe",
+          "b\t.LBB6_2",
+          "bl\tabi_finish",
+          "bl\tabi_step",
+          "br\tx5"
+        ]
+      },
+      "body_stack_usage": [
+        "prototypes/backend-30/native-abi/mechanism.cpp:17:memcpy\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:23:memset\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:30:bzero\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:31:__bzero\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:35:_Z14capture_invokePK7Capturem\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:80:_Z5valueP6Packet\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:87:_Z10shape_bytejm\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:88:_Z9constructP6Packetj\t80\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:107:_Z6retireP6Packet\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:115:_Z9wide_bitsm\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:116:_Z10float_bitsm\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:117:_Z11double_bitsm\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:118:_Z13scalar_fieldsP5Valuem\t80\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:138:_Z11check_valuePK5ValueP7Contextmb\t176\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:162:_Z11check_shapeP6PacketP7Context\t80\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:176:_Z12check_poisonPK5ValueP7Context\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:180:_Z10move_valueP5ValueS0_P7Context\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:203:abi_observe\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:192:_ZL2spv\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:213:abi_step\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:229:abi_finish\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:246:_Z4rootj\t1600\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:70:_ZN7ContextC2Ev\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:311:main\t32\tstatic"
+      ]
+    },
+    "arm-linux-O2": {
+      "per_transfer_acyclic_graph": {
+        "_Z10float_bitsm": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "llvm.memcpy.p0.p0.i64",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z11check_valuePK5ValueP7Contextmb": [
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z11double_bitsm": [],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z13scalar_fieldsP5Valuem": [
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z5valueP6Packet": [],
+        "_Z6retireP6Packet": [],
+        "_Z9constructP6Packetj": [
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm"
+        ],
+        "_Z9wide_bitsm": [],
+        "__bzero": [
+          "memset"
+        ],
+        "abi_observe": [
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuem"
+        ],
+        "bzero": [
+          "memset"
+        ],
+        "memcpy": [],
+        "memset": []
+      },
+      "machine_calls": {
+        "_Z11double_bitsm": [],
+        "bzero": [
+          "memset"
+        ],
+        "__bzero": [
+          "memset"
+        ],
+        "_Z6retireP6Packet": [],
+        "memcpy": [],
+        "_Z5valueP6Packet": [],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuem"
+        ],
+        "_Z13scalar_fieldsP5Valuem": [
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "abi_observe": [
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z9wide_bitsm": [],
+        "_Z10float_bitsm": [],
+        "_Z9constructP6Packetj": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z11check_valuePK5ValueP7Contextmb": [
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "memset": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ]
+      },
+      "no_per_transfer_allocation": true,
+      "all_external_transfer_helpers_rejected": true,
+      "tail_branches": {
+        "self": [
+          "bl\tabi_observe",
+          "bl\tabi_step",
+          "bl\tabi_observe",
+          "b\t.LBB0_3",
+          "b\tabi_finish"
+        ],
+        "mutual_0": [
+          "bl\tabi_observe",
+          "bl\tabi_step",
+          "b\tmutual_1",
+          "b\tabi_finish"
+        ],
+        "mutual_1": [
+          "bl\tabi_observe",
+          "bl\tabi_step",
+          "b\tmutual_2",
+          "b\tabi_finish"
+        ],
+        "mutual_2": [
+          "bl\tabi_observe",
+          "bl\tabi_step",
+          "b\tmutual_0",
+          "b\tabi_finish"
+        ],
+        "indirect_0": [
+          "bl\tabi_observe",
+          "bl\tabi_step",
+          "br\tx5",
+          "b\tabi_finish"
+        ],
+        "indirect_1": [
+          "bl\tabi_observe",
+          "bl\tabi_step",
+          "br\tx5",
+          "b\tabi_finish"
+        ],
+        "indirect_2": [
+          "bl\tabi_observe",
+          "bl\tabi_step",
+          "br\tx5",
+          "b\tabi_finish"
+        ]
+      },
+      "body_stack_usage": [
+        "prototypes/backend-30/native-abi/mechanism.cpp:17:memcpy\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:23:memset\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:30:bzero\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:31:__bzero\t16\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:35:_Z14capture_invokePK7Capturem\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:80:_Z5valueP6Packet\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:87:_Z10shape_bytejm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:88:_Z9constructP6Packetj\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:107:_Z6retireP6Packet\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:115:_Z9wide_bitsm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:116:_Z10float_bitsm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:117:_Z11double_bitsm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:118:_Z13scalar_fieldsP5Valuem\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:138:_Z11check_valuePK5ValueP7Contextmb\t80\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:162:_Z11check_shapeP6PacketP7Context\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:176:_Z12check_poisonPK5ValueP7Context\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:180:_Z10move_valueP5ValueS0_P7Context\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:203:abi_observe\t32\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:213:abi_step\t64\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:229:abi_finish\t48\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:246:_Z4rootj\t1408\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:311:main\t32\tstatic"
+      ]
+    },
+    "x86-linux-O0": {
+      "per_transfer_acyclic_graph": {
+        "_Z10float_bitsm": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "llvm.memcpy.p0.p0.i64",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z11check_valuePK5ValueP7Contextmb": [
+          "_Z9wide_bitsm",
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm",
+          "_Z9wide_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z11double_bitsm": [],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z13scalar_fieldsP5Valuem": [
+          "_Z9wide_bitsm",
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm",
+          "_Z9wide_bitsm",
+          "_Z11double_bitsm",
+          "llvm.memset.p0.i64"
+        ],
+        "_Z5valueP6Packet": [],
+        "_Z6retireP6Packet": [],
+        "_Z9constructP6Packetj": [
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm"
+        ],
+        "_Z9wide_bitsm": [],
+        "_ZL2spv": [],
+        "__bzero": [
+          "memset"
+        ],
+        "abi_observe": [
+          "_ZL2spv",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuem"
+        ],
+        "bzero": [
+          "memset"
+        ],
+        "memcpy": [],
+        "memset": []
+      },
+      "machine_calls": {
+        "_Z11double_bitsm": [],
+        "bzero": [
+          "memset"
+        ],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "memcpy",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z9constructP6Packetj": [
+          "memset",
+          "_Z10shape_bytejm",
+          "memset",
+          "_Z10shape_bytejm",
+          "memset",
+          "_Z10shape_bytejm"
+        ],
+        "memset": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "memcpy": [],
+        "_Z5valueP6Packet": [],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuem"
+        ],
+        "abi_observe": [
+          "_ZL2spv",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb"
+        ],
+        "_Z11check_valuePK5ValueP7Contextmb": [
+          "_Z9wide_bitsm",
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm",
+          "_Z9wide_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "__bzero": [
+          "memset"
+        ],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z10shape_bytejm": [],
+        "_Z13scalar_fieldsP5Valuem": [
+          "_Z9wide_bitsm",
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm",
+          "_Z9wide_bitsm",
+          "_Z11double_bitsm",
+          "memset"
+        ],
+        "_Z10float_bitsm": [],
+        "_Z9wide_bitsm": [],
+        "_Z6retireP6Packet": [],
+        "_ZL2spv": []
+      },
+      "no_per_transfer_allocation": true,
+      "all_external_transfer_helpers_rejected": true,
+      "tail_branches": {
+        "self": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_finish@PLT",
+          "callq\tabi_step@PLT",
+          "jmp\tself@PLT                        # TAILCALL"
+        ],
+        "mutual_0": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_finish@PLT",
+          "callq\tabi_step@PLT",
+          "jmp\tmutual_1@PLT                    # TAILCALL"
+        ],
+        "mutual_1": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_finish@PLT",
+          "callq\tabi_step@PLT",
+          "jmp\tmutual_2@PLT                    # TAILCALL"
+        ],
+        "mutual_2": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_finish@PLT",
+          "callq\tabi_step@PLT",
+          "jmp\tmutual_0@PLT                    # TAILCALL"
+        ],
+        "indirect_0": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_finish@PLT",
+          "callq\tabi_step@PLT",
+          "jmpq\t*%rax                           # TAILCALL"
+        ],
+        "indirect_1": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_finish@PLT",
+          "callq\tabi_step@PLT",
+          "jmpq\t*%rax                           # TAILCALL"
+        ],
+        "indirect_2": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_finish@PLT",
+          "callq\tabi_step@PLT",
+          "jmpq\t*%rax                           # TAILCALL"
+        ]
+      },
+      "body_stack_usage": [
+        "prototypes/backend-30/native-abi/mechanism.cpp:17:memcpy\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:23:memset\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:30:bzero\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:31:__bzero\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:35:_Z14capture_invokePK7Capturem\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:80:_Z5valueP6Packet\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:87:_Z10shape_bytejm\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:88:_Z9constructP6Packetj\t72\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:107:_Z6retireP6Packet\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:115:_Z9wide_bitsm\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:116:_Z10float_bitsm\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:117:_Z11double_bitsm\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:118:_Z13scalar_fieldsP5Valuem\t88\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:138:_Z11check_valuePK5ValueP7Contextmb\t184\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:162:_Z11check_shapeP6PacketP7Context\t72\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:176:_Z12check_poisonPK5ValueP7Context\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:180:_Z10move_valueP5ValueS0_P7Context\t40\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:203:abi_observe\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:192:_ZL2spv\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:213:abi_step\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:229:abi_finish\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:246:_Z4rootj\t1528\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:70:_ZN7ContextC2Ev\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:311:main\t24\tstatic"
+      ]
+    },
+    "x86-linux-O2": {
+      "per_transfer_acyclic_graph": {
+        "_Z10float_bitsm": [],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "llvm.memcpy.p0.p0.i64",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ],
+        "_Z11check_valuePK5ValueP7Contextmb": [
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z11double_bitsm": [],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z13scalar_fieldsP5Valuem": [
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z5valueP6Packet": [],
+        "_Z6retireP6Packet": [],
+        "_Z9constructP6Packetj": [
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm",
+          "llvm.memset.p0.i64",
+          "_Z10shape_bytejm"
+        ],
+        "_Z9wide_bitsm": [],
+        "__bzero": [
+          "memset"
+        ],
+        "abi_observe": [
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb"
+        ],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuem"
+        ],
+        "bzero": [
+          "memset"
+        ],
+        "memcpy": [
+          "llvm.assume"
+        ],
+        "memset": [
+          "llvm.assume"
+        ]
+      },
+      "machine_calls": {
+        "_Z11double_bitsm": [],
+        "bzero": [
+          "memset"
+        ],
+        "__bzero": [
+          "memset"
+        ],
+        "_Z6retireP6Packet": [],
+        "memcpy": [],
+        "_Z5valueP6Packet": [],
+        "abi_step": [
+          "_Z9constructP6Packetj",
+          "_Z5valueP6Packet",
+          "_Z5valueP6Packet",
+          "_Z10move_valueP5ValueS0_P7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb",
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z6retireP6Packet",
+          "_Z5valueP6Packet",
+          "_Z13scalar_fieldsP5Valuem"
+        ],
+        "_Z13scalar_fieldsP5Valuem": [
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "_Z10move_valueP5ValueS0_P7Context": [
+          "memcpy",
+          "_Z12check_poisonPK5ValueP7Context"
+        ],
+        "abi_observe": [
+          "_Z11check_shapeP6PacketP7Context",
+          "_Z5valueP6Packet",
+          "_Z11check_valuePK5ValueP7Contextmb"
+        ],
+        "_Z10shape_bytejm": [],
+        "_Z9wide_bitsm": [],
+        "_Z10float_bitsm": [],
+        "_Z9constructP6Packetj": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "memset",
+          "_Z10shape_bytejm"
+        ],
+        "_Z12check_poisonPK5ValueP7Context": [],
+        "_Z11check_valuePK5ValueP7Contextmb": [
+          "_Z9wide_bitsm",
+          "_Z10float_bitsm",
+          "_Z11double_bitsm"
+        ],
+        "memset": [],
+        "_Z11check_shapeP6PacketP7Context": [
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm",
+          "_Z10shape_bytejm"
+        ]
+      },
+      "no_per_transfer_allocation": true,
+      "all_external_transfer_helpers_rejected": true,
+      "tail_branches": {
+        "self": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_step@PLT",
+          "callq\tabi_observe@PLT",
+          "jmp\t.LBB0_2",
+          "callq\tabi_finish@PLT"
+        ],
+        "mutual_0": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_step@PLT",
+          "jmp\tmutual_1@PLT                    # TAILCALL",
+          "callq\tabi_finish@PLT"
+        ],
+        "mutual_1": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_step@PLT",
+          "jmp\tmutual_2@PLT                    # TAILCALL",
+          "callq\tabi_finish@PLT"
+        ],
+        "mutual_2": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_step@PLT",
+          "jmp\tmutual_0@PLT                    # TAILCALL",
+          "callq\tabi_finish@PLT"
+        ],
+        "indirect_0": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_step@PLT",
+          "jmpq\t*%rax                           # TAILCALL",
+          "callq\tabi_finish@PLT"
+        ],
+        "indirect_1": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_step@PLT",
+          "jmpq\t*%rax                           # TAILCALL",
+          "callq\tabi_finish@PLT"
+        ],
+        "indirect_2": [
+          "callq\tabi_observe@PLT",
+          "callq\tabi_step@PLT",
+          "jmpq\t*%rax                           # TAILCALL",
+          "callq\tabi_finish@PLT"
+        ]
+      },
+      "body_stack_usage": [
+        "prototypes/backend-30/native-abi/mechanism.cpp:17:memcpy\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:23:memset\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:30:bzero\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:31:__bzero\t8\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:35:_Z14capture_invokePK7Capturem\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:80:_Z5valueP6Packet\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:87:_Z10shape_bytejm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:88:_Z9constructP6Packetj\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:107:_Z6retireP6Packet\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:115:_Z9wide_bitsm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:116:_Z10float_bitsm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:117:_Z11double_bitsm\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:118:_Z13scalar_fieldsP5Valuem\t40\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:138:_Z11check_valuePK5ValueP7Contextmb\t72\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:162:_Z11check_shapeP6PacketP7Context\t40\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:176:_Z12check_poisonPK5ValueP7Context\t0\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:180:_Z10move_valueP5ValueS0_P7Context\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:203:abi_observe\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:213:abi_step\t56\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:229:abi_finish\t24\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:246:_Z4rootj\t1272\tstatic",
+        "prototypes/backend-30/native-abi/mechanism.cpp:311:main\t24\tstatic"
+      ]
+    }
+  },
+  "observations": [
+    {
+      "target": "arm-macos",
+      "optimization": 0,
+      "execution": "Apple ARM64",
+      "mode": 0,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 192,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-macos",
+      "optimization": 0,
+      "execution": "Apple ARM64",
+      "mode": 1,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 192,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-macos",
+      "optimization": 0,
+      "execution": "Apple ARM64",
+      "mode": 2,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 192,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-macos",
+      "optimization": 2,
+      "execution": "Apple ARM64",
+      "mode": 0,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 112,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-macos",
+      "optimization": 2,
+      "execution": "Apple ARM64",
+      "mode": 1,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 112,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-macos",
+      "optimization": 2,
+      "execution": "Apple ARM64",
+      "mode": 2,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 112,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-macos",
+      "optimization": 0,
+      "execution": "Rosetta",
+      "mode": 0,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 176,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-macos",
+      "optimization": 0,
+      "execution": "Rosetta",
+      "mode": 1,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 176,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-macos",
+      "optimization": 0,
+      "execution": "Rosetta",
+      "mode": 2,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 176,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-macos",
+      "optimization": 2,
+      "execution": "Rosetta",
+      "mode": 0,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 112,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-macos",
+      "optimization": 2,
+      "execution": "Rosetta",
+      "mode": 1,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 96,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-macos",
+      "optimization": 2,
+      "execution": "Rosetta",
+      "mode": 2,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 96,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-linux",
+      "optimization": 0,
+      "execution": "ARM Linux VM",
+      "mode": 0,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 192,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-linux",
+      "optimization": 0,
+      "execution": "ARM Linux VM",
+      "mode": 1,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 192,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-linux",
+      "optimization": 0,
+      "execution": "ARM Linux VM",
+      "mode": 2,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 192,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-linux",
+      "optimization": 2,
+      "execution": "ARM Linux VM",
+      "mode": 0,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 112,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-linux",
+      "optimization": 2,
+      "execution": "ARM Linux VM",
+      "mode": 1,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 96,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "arm-linux",
+      "optimization": 2,
+      "execution": "ARM Linux VM",
+      "mode": 2,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 96,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-linux",
+      "optimization": 0,
+      "execution": "translated Linux VM",
+      "mode": 0,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 176,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-linux",
+      "optimization": 0,
+      "execution": "translated Linux VM",
+      "mode": 1,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 176,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-linux",
+      "optimization": 0,
+      "execution": "translated Linux VM",
+      "mode": 2,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 176,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-linux",
+      "optimization": 2,
+      "execution": "translated Linux VM",
+      "mode": 0,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 112,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-linux",
+      "optimization": 2,
+      "execution": "translated Linux VM",
+      "mode": 1,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 96,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    },
+    {
+      "target": "x86-linux",
+      "optimization": 2,
+      "execution": "translated Linux VM",
+      "mode": 2,
+      "ok": true,
+      "transfers": 1000000,
+      "samples": 1000001,
+      "moves": 1000001,
+      "sp_span": 0,
+      "sampled_depth": 96,
+      "capture_frees": 1,
+      "buffer_frees": 1,
+      "copy_frees": 1,
+      "consumed_sum": 6439,
+      "edges": [
+        333334,
+        333333,
+        333333
+      ],
+      "record_sizes": [
+        176,
+        224,
+        320
+      ],
+      "record_alignments": [
+        16,
+        32,
+        64
+      ],
+      "value_offsets": [
+        0,
+        48,
+        48
+      ],
+      "slot_bytes": 320,
+      "two_packet_bytes": 768,
+      "result_bytes": 176,
+      "fixed_root_objects": 1159
+    }
+  ],
+  "limits": [
+    "No physical x86 execution",
+    "No capacity validation or managed NativeStack in this fixture",
+    "malloc/free/printf and final capture invocation are outside the per-transfer acyclic graph; no all-runtime-call bound",
+    "No production ABI, source eligibility/ownership/drop checker, compiler, target support closure or adoption",
+    "No arbitrary/dynamic/overlapping layouts, escaping packets, generic indirect ABI, public interop, suspension or lifecycle validation"
+  ]
+}
