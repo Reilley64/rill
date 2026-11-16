@@ -716,6 +716,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 mod tests {
     use super::*;
     use crate::{Reactor, WakeAttempt, WakeReceiver, wake_channel};
+    use socket2::SockRef;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream as StdTcpStream};
     use std::thread;
@@ -740,6 +741,20 @@ mod tests {
                 return attempt;
             }
             thread::yield_now();
+        }
+    }
+
+    fn complete_read(progress: &mut TcpProgress) -> ReadOutcome {
+        loop {
+            let step = progress.advance();
+            if let Some(outcome) = step.read {
+                return outcome;
+            }
+            assert_eq!(step.schedule, ProgressSchedule::Waiting);
+            let (notifier, wake_receiver) = wake_channel();
+            let wait = progress.register_wait(notifier).unwrap();
+            assert_eq!(wait_for_wake(&wake_receiver), WakeAttempt::Item);
+            wait.withdraw().unwrap();
         }
     }
 
@@ -938,6 +953,102 @@ mod tests {
             }
             WriteAdmission::Admitted => panic!("oversized write admitted"),
         }
+    }
+
+    #[test]
+    fn buffered_prefix_precedes_peer_reset_failure() {
+        let reactor = Reactor::new().unwrap();
+        let (client, mut server) = pair();
+        server.write_all(b"prefix").unwrap();
+        SockRef::from(&server)
+            .set_linger(Some(Duration::ZERO))
+            .unwrap();
+        drop(server);
+        let mut progress = tcp_progress(client, reactor.handle());
+
+        assert_eq!(progress.admit_read(16), Admission::Admitted);
+        match complete_read(&mut progress) {
+            ReadOutcome::Data(data) => assert_eq!(data, b"prefix"),
+            other => panic!("buffered prefix was not preserved: {other:?}"),
+        }
+        assert_eq!(progress.admit_read(16), Admission::Admitted);
+        match complete_read(&mut progress) {
+            ReadOutcome::Failed(failure) => assert!(matches!(
+                failure.error.kind(),
+                io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::BrokenPipe
+            )),
+            ReadOutcome::End => panic!("peer reset was normalized to EOF"),
+            other => panic!("unexpected reset outcome: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sustained_backpressure_waits_then_rearms_to_completion() {
+        let reactor = Reactor::new().unwrap();
+        let (client, mut server) = pair();
+        SockRef::from(&client).set_send_buffer_size(4096).unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut progress = tcp_progress(client, reactor.handle());
+        let payload = vec![0x5a; MAX_PROGRESS_BYTES];
+        let mut completed_bytes = 0usize;
+        let mut reached_backpressure = false;
+
+        'fill: for _ in 0..4096 {
+            assert!(matches!(
+                progress.admit_write(payload.clone()),
+                WriteAdmission::Admitted
+            ));
+            loop {
+                let step = progress.advance();
+                if matches!(step.write, Some(WriteOutcome::Completed)) {
+                    completed_bytes += payload.len();
+                    continue 'fill;
+                }
+                match step.schedule {
+                    ProgressSchedule::Runnable => continue,
+                    ProgressSchedule::Waiting => {
+                        reached_backpressure = true;
+                        break 'fill;
+                    }
+                    ProgressSchedule::Idle => panic!("pending write became idle"),
+                }
+            }
+        }
+        assert!(
+            reached_backpressure,
+            "loopback send buffer never applied pressure"
+        );
+
+        let expected_bytes = completed_bytes + payload.len();
+        let reader = thread::spawn(move || {
+            let mut received = vec![0; expected_bytes];
+            server.read_exact(&mut received).unwrap();
+            received
+        });
+        let (root, wake_receiver) = wake_channel();
+        'complete: loop {
+            let wait = progress.register_wait(root.clone()).unwrap();
+            assert_eq!(wait_for_wake(&wake_receiver), WakeAttempt::Item);
+            wait.withdraw().unwrap();
+            loop {
+                let step = progress.advance();
+                if matches!(step.write, Some(WriteOutcome::Completed)) {
+                    break 'complete;
+                }
+                match step.schedule {
+                    ProgressSchedule::Runnable => continue,
+                    ProgressSchedule::Waiting => break,
+                    ProgressSchedule::Idle => panic!("pending write became idle"),
+                }
+            }
+        }
+        let received = reader.join().unwrap();
+        assert_eq!(received.len(), expected_bytes);
+        assert!(received.iter().all(|byte| *byte == 0x5a));
     }
 
     #[test]

@@ -4,7 +4,7 @@ Status: implementation research and current-host component evidence, **not** a R
 
 ## Selected private mechanism
 
-The implementation-private `runtime` package uses locked **mio1.2.5** with default features disabled and only `os-poll,net`. Cargo metadata reports mio MIT and its transitive libc0.2.191 MIT OR Apache-2.0. Cargo.lock owns exact registry checksums. This is not a public Rill dependency or readiness API.
+The implementation-private `runtime` package uses locked **mio1.2.5** with default features disabled and only `os-poll,net`. Tests pin socket2 0.6.5 for portable send-buffer/linger fault setup. Cargo metadata reports mio MIT, socket2/libc MIT OR Apache-2.0; Cargo.lock owns exact registry checksums. These are not public Rill dependencies or readiness APIs.
 
 One explicitly owned `Reactor` owns one poll thread, mio Poll/Registry and Waker. Dropping Reactor sets terminal state, wakes Poll and joins the thread. `ReactorHandle` registers one-shot token generations; events remove the generation before coalescing a Rill-runtime WakeNotifier hint. Withdrawal deactivates callbacks, deregisters the source and waits for in-flight notification quiescence. Tokens start above the reserved reactor-waker token and are never reused before checked usize exhaustion, so stale/late events cannot target another registration.
 
@@ -25,9 +25,10 @@ Mio can report readiness that no longer permits progress, and another operation 
 On the current macOS27.0.1 AArch64 host:
 
 - 15 channel/wake/watch tests cover buffered/rendezvous try operations, pending sender input recovery, closure/drain, coalescing, one-shot/rearm, endpoint/target loss, registration cleanup and synchronized arm-transition races.
-- TCP loopback tests cover deferred nonblocking setup, read wait/wake/withdraw, registration after already-readable state, full write plus ordered flush, simultaneous logical read/write demand, clean FIN and cached End, stale withdrawn registration, duplicate registration rejection, stop interruption, limit rejection and terminal close.
-- The complete runtime suite passed20 repeated invocations during development; the normal repository check executes it once with clippy warnings denied.
+- 2 reactor tests cover checked token-space exhaustion before registration and explicit-owner drop retiring an active callback generation.
+- 12 TCP loopback tests cover deferred nonblocking setup, read wait/wake/withdraw, registration after already-readable state, full write plus ordered flush, simultaneous logical read/write demand, clean FIN/cached End, buffered data before reset failure, stale withdrawn token, duplicate registration, stop, close/limits and sustained send-buffer backpressure with wait/rearm to completion.
+- The complete29-test runtime suite passed20 repeated invocations during development; the normal repository check executes it once with clippy warnings denied.
 
-This is Rust component execution using loopback TCP on one host. It does not run Rill, generated code or the future Rill scheduler. No Linux, macOS x86-64, resource-fault, reset/prefix-error, sustained backpressure/partial-write, token-wrap, reactor-poll-failure or multi-connection stress cell has run. The use of std::net::shutdown during release is a current implementation boundary, not peer acknowledgement or graceful application protocol completion.
+This is Rust component execution using loopback TCP on one host. It does not run Rill, generated code or the future Rill scheduler. No Linux or macOS x86-64 CI result has yet been recorded in this note. Resource-allocation/reactor-poll failure, guaranteed native partial-write (distinct from WouldBlock), true token wrap and multi-connection stress remain untested. The use of std::net::shutdown during release is a current implementation boundary, not peer acknowledgement or graceful application protocol completion.
 
 `mise run test:runtime` deliberately remains unavailable/exit2. #47 stays open for compiler intrinsics/metadata, generated ABI, scheduler/cancellation integration, complete progress outcomes, real native target matrix and cross-component Rill acceptance. #44/#48 remain separate TLS/HTTP gates.

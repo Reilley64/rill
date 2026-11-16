@@ -266,3 +266,51 @@ fn wait<'a, T>(condvar: &Condvar, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T>
         .wait(guard)
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wake_channel;
+    use std::net::{TcpListener, TcpStream};
+
+    fn stream() -> (mio::net::TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = TcpStream::connect(address).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        client.set_nonblocking(true).unwrap();
+        (mio::net::TcpStream::from_std(client), server)
+    }
+
+    #[test]
+    fn token_exhaustion_rejects_before_registration() {
+        let reactor = Reactor::new().unwrap();
+        let handle = reactor.handle();
+        handle
+            .shared
+            .next_token
+            .store(usize::MAX, Ordering::Relaxed);
+        let (mut stream, _server) = stream();
+        let (notifier, _receiver) = wake_channel();
+        let error = match handle.register(&mut stream, Interest::READABLE, notifier) {
+            Ok(_) => panic!("exhausted token space registered a source"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(lock(&handle.shared.registrations).is_empty());
+    }
+
+    #[test]
+    fn reactor_drop_retires_active_callback_generation() {
+        let reactor = Reactor::new().unwrap();
+        let handle = reactor.handle();
+        let (mut stream, _server) = stream();
+        let (notifier, _receiver) = wake_channel();
+        let registration = handle
+            .register(&mut stream, Interest::READABLE, notifier)
+            .unwrap();
+        assert!(lock(&registration.state.active).active);
+        drop(reactor);
+        assert!(!lock(&registration.state.active).active);
+    }
+}
