@@ -1,10 +1,10 @@
 # #40 SQL/JSON codec, control and error evidence
 
-Read the source examples in [`prototypes/22-sql-codecs`](../../prototypes/22-sql-codecs).
+Read the source examples in [`prototypes/16-sql-codecs`](../../prototypes/16-sql-codecs).
 
 This is the human-confirmed shared-interface design, not an implementation. [The contract](../sql-contracts.md) and [ADR 0021](../adr/0021-partial-standard-sql-contract.md) integrate #33 and Q58-Q77 and replace the partial checkpoint. [Research](../research/0040-standard-sql-and-unique-errors.md) remains source input. [#43](https://github.com/Reilley64/rill/issues/43) separately gates actual embedded-provider support, not #40 design closure/RFC drafting. The [JSON](../json-contracts.md) and [time](../time-contracts.md) contracts define the value behavior used here.
 
-[main.rill](../../prototypes/22-sql-codecs/main.rill) has 20 intended-valid expectations and loads [domain.rill](../../prototypes/22-sql-codecs/domain.rill). [control.rill](../../prototypes/22-sql-codecs/control.rill) is a separate entry with 12 control/temporal expectations, for 32 total. Reviewers checked all of them by hand. They did not execute Rill, clocks, tokens, databases, native/WASI code or protocol/security tests. The memory argument encoder, immediate counter and cell fixtures are not SQL drivers. They do not prove PostgreSQL/SQLite integration or race/abortion behavior.
+[main.rill](../../prototypes/16-sql-codecs/main.rill) has 20 intended-valid expectations and loads [domain.rill](../../prototypes/16-sql-codecs/domain.rill). [control.rill](../../prototypes/16-sql-codecs/control.rill) is a separate entry with 12 control/temporal expectations, for 32 total. Reviewers checked all of them by hand. They did not execute Rill, clocks, tokens, databases, native/WASI code or protocol/security tests. The memory argument encoder, immediate counter and cell fixtures are not SQL drivers. They do not prove PostgreSQL/SQLite integration or race/abortion behavior.
 
 ## What the source actually demonstrates
 

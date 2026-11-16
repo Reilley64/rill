@@ -1,8 +1,8 @@
 # Standard-library contract design checks (#23)
 
-Read the source examples in [`prototypes/15-library-contracts.rill`](../../prototypes/15-library-contracts.rill).
+Read the source examples in [`prototypes/09-library-contracts.rill`](../../prototypes/09-library-contracts.rill).
 
-Sources: [ADR 0015](../adr/0015-language-required-library-contracts.md) and the [public interface catalogue](../standard-library-contracts.md). `15-library-contracts.rill` contains 35 intended-valid expectations. Reviewers checked these design cases by hand, without compiling or executing them. They are not scheduler measurements, a checker proof or accepted RFCs. The native and concurrent cases do not establish that the backend gate #30 has passed.
+Sources: [ADR 0015](../adr/0015-language-required-library-contracts.md) and the [public interface catalogue](../standard-library-contracts.md). `09-library-contracts.rill` contains 35 intended-valid expectations. Reviewers checked these design cases by hand, without compiling or executing them. They are not scheduler measurements, a checker proof or accepted RFCs. The native and concurrent cases do not establish that the backend gate #30 has passed.
 
 ## Intended-valid inventory
 

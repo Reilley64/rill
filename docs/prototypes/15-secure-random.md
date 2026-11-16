@@ -1,6 +1,6 @@
 # Secure random byte case inventory
 
-Read the source examples in [`prototypes/21-secure-random.rill`](../../prototypes/21-secure-random.rill).
+Read the source examples in [`prototypes/15-secure-random.rill`](../../prototypes/15-secure-random.rill).
 
 Design evidence for [#37](https://github.com/Reilley64/rill/issues/37), [ADR 0020](../adr/0020-secure-random-byte-generation.md) and the [public contract](../standard-library-contracts.md#13-secure-random-bytes). The companion has eight intended-valid expectations. Reviewers checked them by hand, without compiling or executing them. They use empty standard calls and explicitly chosen application fakes. They do not replace std::random with a deterministic provider. No native syscall/framework/WASI provider, scheduler integration, cryptographic generator, private production-provider override or compiler is implemented here.
 

@@ -1,6 +1,6 @@
 # Prototype 27: TLS values and owned composition
 
-Read the source examples in [`prototypes/27-tls`](../../prototypes/27-tls).
+Read the source examples in [`prototypes/23-tls`](../../prototypes/23-tls).
 
 This fixture records the consolidated, human-approved Rill [#38](https://github.com/Reilley64/rill/issues/38) Q1-Q80 contract. The [TLS contract](../tls-contracts.md), [private native boundary](../tls-native-boundary.md) and [ADR 0025](../adr/0025-explicit-tls-trust-and-private-provider-boundary.md) are authoritative. These examples do not add APIs. The earlier round files and consistency review were interview checkpoints, not independent implementation approvals.
 
@@ -149,6 +149,6 @@ On `wasm32-wasip1`, provider-free DNS/IP/ALPN values and pure options remain por
 
 ## Review-only Python checker
 
-Run `python3 prototypes/27-tls/check.py` from any directory. It uses the Python standard library only, counts anchored declared expectation lines, and runs independent author-written reference assertions for ASCII DNS admission/canonicalization/numeric guard, opaque ALPN sizes/bytes, negative time flooring, half-open validity and CRL age, numerical quotas and a tiny unique-error/tail transfer model. Counts are printed separately by group. These checks cover author data and a toy bookkeeping model. They are not a Rill parser, evaluator, library implementation, TLS/provider/crypto implementation, IDNA or DER validator, native test or security/soundness proof. It does not read certificates, contact peers, invoke a compiler/provider or check the parent documentation links.
+Run `python3 prototypes/23-tls/check.py` from any directory. It uses the Python standard library only, counts anchored declared expectation lines, and runs independent author-written reference assertions for ASCII DNS admission/canonicalization/numeric guard, opaque ALPN sizes/bytes, negative time flooring, half-open validity and CRL age, numerical quotas and a tiny unique-error/tail transfer model. Counts are printed separately by group. These checks cover author data and a toy bookkeeping model. They are not a Rill parser, evaluator, library implementation, TLS/provider/crypto implementation, IDNA or DER validator, native test or security/soundness proof. It does not read certificates, contact peers, invoke a compiler/provider or check the parent documentation links.
 
 These sources and the Python checker do not implement TLS. #28 owns the remaining formal rules and adversarial cases. Production TLS still needs the bridge, distribution, conformance, parsing-limit, native-lifecycle, target and security checks tracked in #44. #30's completed mechanism experiments and #43's SQLite provider design do not establish TLS support. Passing the review checker does not clear those requirements.

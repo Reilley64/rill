@@ -1,6 +1,6 @@
 # Concurrency and cancellation safety cases
 
-Read [the source examples](../../prototypes/09-concurrency-safety.rill). They combine the earlier channel/worker demonstration with the guard and cancellation cases from [#16](https://github.com/Reilley64/rill/issues/16) and [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md).
+Read [the source examples](../../prototypes/04-concurrency-safety.rill). They combine the earlier channel/worker demonstration with the guard and cancellation cases from [#16](https://github.com/Reilley64/rill/issues/16) and [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md).
 
 The source contains 11 intended-valid expectations. They have been inspected, not executed by a Rill compiler or runtime. Library names and call shapes follow the [published catalogue](../standard-library-contracts.md). These cases do not prove scheduling, synchronization or cancellation safety.
 

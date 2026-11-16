@@ -59,6 +59,6 @@ Add `where noBorrow(T)` as a compiler-recognized intrinsic, not a user-implement
 - **Runtime borrow checks, implicit mutable sharing, or automatic shared downgrades:** avoid some static restrictions but introduce different runtime/access rules. Not adopted.
 - **Caller inspection of callee bodies.** This could make checking more precise, but would make contracts implementation-dependent. Not adopted.
 
-`prototypes/07-mutation.rill` illustrates the approved syntax and `docs/prototypes/07-mutation-safety.md` records hand-checked expectations and remaining validation obligations. These are design artifacts, not executed compiler tests or a proof.
+`prototypes/06-mutation.rill` illustrates the approved syntax and `docs/prototypes/06-mutation-safety.md` records hand-checked expectations and remaining validation obligations. These are design artifacts, not executed compiler tests or a proof.
 
 ADR 0009 records #16's approved synchronization, cross-goroutine, guard, and cancellation/join policies. ADR 0010 records #17's module/scoping and privacy rules, including non-capturing named functions, canonical ownership-hook identity, and protection of required built-in ownership mechanics. #23 owns standard-library signatures and callable contracts preserving the evidence required by `spawn` and waiting helpers. #28 owns explicit checking/cleanup rules, safety rationale, and adversarial cases in the feature RFCs. The approved direction does not automatically accept those RFCs.

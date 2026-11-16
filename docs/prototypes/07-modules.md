@@ -1,8 +1,8 @@
 # Module, export and privacy prototype
 
-Read [the source examples](../../prototypes/10-modules), which follow [ADR 0010](../adr/0010-file-modules-explicit-exports-and-privacy.md) and [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md). The earlier union representations now use enums. These are inspected design artifacts, not compiler-executed tests.
+Read [the source examples](../../prototypes/07-modules), which follow [ADR 0010](../adr/0010-file-modules-explicit-exports-and-privacy.md) and [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md). The earlier union representations now use enums. These are inspected design artifacts, not compiler-executed tests.
 
-A future tool would accept `rill run prototypes/10-modules/main.rill` or `rill test prototypes/10-modules/main.rill`. The entry file's directory is the application source root. The toolchain supplies std; the fixture does not contain its own standard library.
+A future tool would accept `rill run prototypes/07-modules/main.rill` or `rill test prototypes/07-modules/main.rill`. The entry file's directory is the application source root. The toolchain supplies std; the fixture does not contain its own standard library.
 
 ## Reachable files
 

@@ -1,8 +1,8 @@
 # #32 streaming I/O: adapters and adversarial evidence
 
-Read the source examples in [`prototypes/19-streaming-io.rill`](../../prototypes/19-streaming-io.rill).
+Read the source examples in [`prototypes/12-streaming-io.rill`](../../prototypes/12-streaming-io.rill).
 
-[ADR 0018](../adr/0018-streaming-and-buffered-io.md) records the human-confirmed decision. The [companion source](../../prototypes/19-streaming-io.rill) contains 15 intended-valid expectations. Reviewers checked all examples and traces by hand. These are not compiler/runtime tests, protocol/security validation or a soundness proof. #28 formalizes checking; #30 still gates backends.
+[ADR 0018](../adr/0018-streaming-and-buffered-io.md) records the human-confirmed decision. The [companion source](../../prototypes/12-streaming-io.rill) contains 15 intended-valid expectations. Reviewers checked all examples and traces by hand. These are not compiler/runtime tests, protocol/security validation or a soundness proof. #28 formalizes checking; #30 still gates backends.
 
 ## Positive source coverage
 

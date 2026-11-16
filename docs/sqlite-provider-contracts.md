@@ -2,7 +2,7 @@
 
 The user explicitly confirmed Q1-Q58 and the consolidated recording plan. The design is recorded; implementation/integration validation is outstanding. [#43](https://github.com/Reilley64/rill/issues/43) stays OPEN. This is not a working provider, an accepted RFC, or a safety/security/target-support claim. The checkout has no implementation of the required compiler/build/runtime bridge. [#40](https://github.com/Reilley64/rill/issues/40)'s [shared SQL interface](sql-contracts.md) remains design-complete; [#30](https://github.com/Reilley64/rill/issues/30) retains actual backend/lease/scheduling/reclamation gates. Its newer Wasm dispatcher direction is not superseded by this native-only profile.
 
-[ADR 0024](adr/0024-external-sqlite-native-provider.md) records placement/trust tradeoffs. [Primary-source evidence](research/0043-sqlite-native-provider.md), [binding/wire specification](sqlite-provider-binding-v1.md), [metadata schema](sqlite-provider-binding-v1.schema.json), and [prototype 26 inventory](../experiments/sqlite-provider/README.md) are coordinated design inputs. Native reference results and Python protocol/state models are explicitly separate from product integration.
+[ADR 0024](adr/0024-external-sqlite-native-provider.md) records placement/trust tradeoffs. [Primary-source evidence](research/0043-sqlite-native-provider.md), [binding/wire specification](sqlite-provider-binding-v1.md), [metadata schema](sqlite-provider-binding-v1.schema.json), and [SQLite provider experiment inventory](../experiments/sqlite-provider/README.md) are coordinated design inputs. Native reference results and Python protocol/state models are explicitly separate from product integration.
 
 ## 1. Placement and authority
 

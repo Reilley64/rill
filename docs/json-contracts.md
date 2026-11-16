@@ -214,7 +214,7 @@ Other syntax identifies an unexpected byte or EOF; a completed invalid scalar es
 
 ## 8. Evidence, scope and follow-through
 
-`prototypes/19-json.rill` contains intended-valid calls and independent expectations; `docs/prototypes/19-json.md` contains rejection, numeric-conversion and adversarial/resource cases. They are hand-checked design artifacts, not executed tests or a parser implementation. They do not establish that #28/#30 implementation/checker/backend gates are cleared.
+`prototypes/17-json.rill` contains intended-valid calls and independent expectations; `docs/prototypes/17-json.md` contains rejection, numeric-conversion and adversarial/resource cases. They are hand-checked design artifacts, not executed tests or a parser implementation. They do not establish that #28/#30 implementation/checker/backend gates are cleared.
 
 Use #41's confirmed conversion registration/error-evidence/naming reconciliation; #24 owns compiler diagnostics; #28 integrates exact JSON algorithms/invariants, byte positions and scalar spans, float/integer boundary behavior, quota accounting, callee exits/transitive views, deep copy/partial cleanup/cancellation/native lifetime rules and eventual executable suites. #30 still validates backend/proper-tail/Wasm mechanisms. If an accepted operation cannot be specified/checked consistently, return that blocker through the map; do not assert that privacy or iterative intent proves memory safety. #32/#39 and other application foundations must compose these owned values/errors rather than assume a streaming/reflected serializer.
 

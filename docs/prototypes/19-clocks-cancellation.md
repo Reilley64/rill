@@ -1,8 +1,8 @@
 # Clock and cancellation design evidence. #33
 
-Read the source examples in [`prototypes/24-clocks-cancellation.rill`](../../prototypes/24-clocks-cancellation.rill).
+Read the source examples in [`prototypes/19-clocks-cancellation.rill`](../../prototypes/19-clocks-cancellation.rill).
 
-These examples follow the [clock/cancellation contract](../clock-cancellation-contracts.md), [temporal values contract](../time-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `24-clocks-cancellation.rill` has 26 intended-valid, hand-checked expectations, not executed tests. It uses manual clocks and owned token state. It provides no measured sleeps, browser probes, native clock support or compiler/runtime implementation. #28/#30 remain checking/backend gates.
+These examples follow the [clock/cancellation contract](../clock-cancellation-contracts.md), [temporal values contract](../time-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `19-clocks-cancellation.rill` has 26 intended-valid, hand-checked expectations, not executed tests. It uses manual clocks and owned token state. It provides no measured sleeps, browser probes, native clock support or compiler/runtime implementation. #28/#30 remain checking/backend gates.
 
 ## Active inventory
 

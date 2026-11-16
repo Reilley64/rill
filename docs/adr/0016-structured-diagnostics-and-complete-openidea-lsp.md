@@ -16,4 +16,4 @@ The selected client drops some detailed diagnostic fields, retains some stale di
 
 [Delivery/acceptance #42](https://github.com/Reilley64/rill/issues/42) carries the entire prioritized scope as a **v0 tooling-readiness gate**. No matrix row has passed. Closing #24 approves design only; completed server delivery is not a prerequisite for drafting #28 RFCs. #28 retains exact checking/cleanup/observation/lowering rules; #30 retains backend evidence. An inconsistent required contract returns to the map, not silent feature reduction or an assumed new architecture.
 
-[Prototype 17](../prototypes/17-diagnostics.md) provides hand-authored source/report/schema examples and adversarial cases. No Rill compiler, runtime or server was executed, no soundness/backend proof is claimed, and future RFC acceptance remains separate.
+[Prototype 21](../prototypes/21-diagnostics.md) provides hand-authored source/report/schema examples and adversarial cases. No Rill compiler, runtime or server was executed, no soundness/backend proof is claimed, and future RFC acceptance remains separate.

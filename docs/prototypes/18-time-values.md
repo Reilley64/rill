@@ -1,8 +1,8 @@
 # Temporal values. #33 design evidence
 
-Read the source examples in [`prototypes/23-time-values.rill`](../../prototypes/23-time-values.rill).
+Read the source examples in [`prototypes/18-time-values.rill`](../../prototypes/18-time-values.rill).
 
-These examples follow the [time contract](../time-contracts.md), [clock/token contract](../clock-cancellation-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `23-time-values.rill` has 39 hand-checked intended-valid expectations, including invalid-data checks. No Rill parser, compiler or library ran. The imports name proposed library operations, not existing implementations. #28 supplies exact algorithms and checker evidence; #30 supplies actual host/backend support.
+These examples follow the [time contract](../time-contracts.md), [clock/token contract](../clock-cancellation-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `18-time-values.rill` has 39 hand-checked intended-valid expectations, including invalid-data checks. No Rill parser, compiler or library ran. The imports name proposed library operations, not existing implementations. #28 supplies exact algorithms and checker evidence; #30 supplies actual host/backend support.
 
 ## Active inventory
 

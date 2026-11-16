@@ -10,7 +10,7 @@ Use the [documentation index](../README.md) to find a document's owner before ch
 - Put primary-source investigations and experiment summaries in `docs/research/`.
 - Keep contracts in `docs/`, decision rationale in `docs/adr/` and proposals in `docs/rfcs/`.
 
-Use full filenames in references. Several historical numeric prefixes repeat; a number alone is not artifact identity. Keep published identities unless a separate change explicitly renames them.
+Use full filenames in references. Historical ADR numbers repeat; a number alone is not artifact identity. When adding or consolidating prototypes, follow the [index's chronological numbering rule](../prototypes/README.md#numbering). Keep published identities unless a separate change explicitly renames them.
 
 ## Moving artifacts
 

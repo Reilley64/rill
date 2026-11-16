@@ -1,6 +1,6 @@
 # Caused-by error cases
 
-Read the source examples in [`prototypes/13-caused-by-errors.rill`](../../prototypes/13-caused-by-errors.rill).
+Read the source examples in [`prototypes/02-caused-by-errors.rill`](../../prototypes/02-caused-by-errors.rill).
 
 These examples follow [ADR 0013](../adr/0013-caused-by-errors-with-explicit-wrapping.md) and the [published Result/error contracts](../standard-library-contracts.md#4-option-result-origins-and-causes). The source combines the earlier port pipeline and caused-by examples. It declares ten intended-valid expectations, inspected but not executed by a Rill compiler or runtime.
 

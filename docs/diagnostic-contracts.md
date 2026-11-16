@@ -1,6 +1,6 @@
 # Rill diagnostic and expectation-report contracts
 
-[#24](https://github.com/Reilley64/rill/issues/24) confirms this design; [ADR 0016](adr/0016-structured-diagnostics-and-complete-openidea-lsp.md) records it. These are approved design inputs, not implemented diagnostics, accepted feature RFCs or a checker proof. [LSP contracts](lsp-contracts.md) and [delivery gate #42](https://github.com/Reilley64/rill/issues/42) cover editor delivery; #28/#30 retain checking/backend validation. [Prototype 17](prototypes/17-diagnostics.md) is hand-authored, not emitted by a compiler.
+[#24](https://github.com/Reilley64/rill/issues/24) confirms this design; [ADR 0016](adr/0016-structured-diagnostics-and-complete-openidea-lsp.md) records it. These are approved design inputs, not implemented diagnostics, accepted feature RFCs or a checker proof. [LSP contracts](lsp-contracts.md) and [delivery gate #42](https://github.com/Reilley64/rill/issues/42) cover editor delivery; #28/#30 retain checking/backend validation. [Prototype 21](prototypes/21-diagnostics.md) is hand-authored, not emitted by a compiler.
 
 ## 1. Current source semantics
 

@@ -1,8 +1,8 @@
 # #35 path and filesystem evidence
 
-Read the source examples in [`prototypes/20-filesystem.rill`](../../prototypes/20-filesystem.rill).
+Read the source examples in [`prototypes/13-filesystem.rill`](../../prototypes/13-filesystem.rill).
 
-[ADR 0019](../adr/0019-paths-files-and-filesystem-operations.md) records the human-confirmed Q1-Q44 decision. The [source companion](../../prototypes/20-filesystem.rill) has 16 intended-valid lexical expectations, plus effectful application workflow functions. Reviewers checked all of them by hand. Validation of this fixture did not run a Rill compiler, exercise an OS filesystem or WASI host, or execute a security suite or backend. #28/#30 retain the formal and runtime gates.
+[ADR 0019](../adr/0019-paths-files-and-filesystem-operations.md) records the human-confirmed Q1-Q44 decision. The [source companion](../../prototypes/13-filesystem.rill) has 16 intended-valid lexical expectations, plus effectful application workflow functions. Reviewers checked all of them by hand. Validation of this fixture did not run a Rill compiler, exercise an OS filesystem or WASI host, or execute a security suite or backend. #28/#30 retain the formal and runtime gates.
 
 ## Public API and ownership coverage
 

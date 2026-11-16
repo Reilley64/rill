@@ -1,8 +1,8 @@
 # Diagnostic, report and LSP contract examples
 
-Read the source examples in [`prototypes/17-diagnostics`](../../prototypes/17-diagnostics).
+Read the source examples in [`prototypes/21-diagnostics`](../../prototypes/21-diagnostics).
 
-These examples follow confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md), the [report contracts/schema](../diagnostic-contracts.md) and the [LSP matrix](../lsp-contracts.md). The [batch-report program](16-batch-report.md) is a separate application example.
+These examples follow confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md), the [report contracts/schema](../diagnostic-contracts.md) and the [LSP matrix](../lsp-contracts.md). The [batch-report program](10-batch-report.md) is a separate application example.
 
 No Rill compiler emitted these reports, and no example ran as Rill. The report files are hand-authored protocol examples. Mechanical checks cover only coordinates, hashes and ordinary data calculations. There is no Rill compiler, runtime or server yet. [#42](https://github.com/Reilley64/rill/issues/42) owns full-scope LSP delivery and acceptance; #28/#30 retain the requirements for checker and backend evidence. Static checks do not prove inference, borrow safety, snapshot noninterference or client behavior.
 
@@ -24,7 +24,7 @@ No Rill compiler emitted these reports, and no example ran as Rill. The report f
 
 Report counts describe the authored fixture context, not an assertion about an eventual toolchain's additional loaded standard-module expectations. Source declaration counts are local to the named files.
 
-All report URIs use the fictitious normalized fixture prefix `file:///workspace/rill/`. The checker maps it to this repo for byte/hash checks. Real integration must use real properly encoded host/client URIs, not copy these paths into an editor configuration.
+Reports retain their original fictitious prefix, `file:///workspace/rill/prototypes/17-diagnostics/`. The checker resolves each suffix relative to its current 21-diagnostics directory. Renumbering changes filesystem paths, not the authored reports, source hashes or coordinates. Real integration must use properly encoded host/client URIs rather than copying fixture paths into an editor configuration.
 
 ### Rejection contract inventory
 
@@ -51,7 +51,7 @@ Additional compiler messages/cascades are not asserted absent. Exact source/rule
 Use an isolated Python validator environment without changing project dependencies or the lockfile:
 
 ```sh
-uv run --no-project --with jsonschema==4.25.1 python prototypes/17-diagnostics/check-fixtures.py
+uv run --no-project --with jsonschema==4.25.1 python prototypes/21-diagnostics/check-fixtures.py
 ```
 
 The validator checks the Draft 2020-12 schema, typed records and negative data mutations. It also checks lossless decimal fields, sequence numbers and counters, snapshot hashes, original UTF-8 locations and token substrings. It independently recomputes Unicode-scalar and UTF-16 mappings. For Rill source, it checks only declaration counts, rejection headers and delimiters. It does not parse or type-check Rill or implement an emitter. The JSONL records were authored from the contract. No final summary in a real stream means completion was not observed; an external tool cannot infer success from the last diagnostic alone.

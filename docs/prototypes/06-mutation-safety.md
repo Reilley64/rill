@@ -1,10 +1,10 @@
 # Mutation safety examples
 
-Read the source examples in [`prototypes/07-mutation.rill`](../../prototypes/07-mutation.rill).
+Read the source examples in [`prototypes/06-mutation.rill`](../../prototypes/06-mutation.rill).
 
 These are design cases for [#15](https://github.com/Reilley64/rill/issues/15) and [ADR 0007](../adr/0007-explicit-mutation-with-conservative-borrow-dependencies.md). Reviewers checked the expected outcomes against the approved design by inspection, not with a compiler. The cases inform #28's explicit checking rules and eventual compile-pass/compile-fail tests. They are not evidence of a soundness proof.
 
-`07-mutation.rill` supplies complete intended-valid examples with independent top-level expectations. Snippets here are separate cases, not one program. Library signatures without bodies are schematic contracts. #23 still owns their complete standard-library definitions. An executable fixture suite must make those dependencies explicit.
+`06-mutation.rill` supplies complete intended-valid examples with independent top-level expectations. Snippets here are separate cases, not one program. Library signatures without bodies are schematic contracts. #23 still owns their complete standard-library definitions. An executable fixture suite must make those dependencies explicit.
 
 ## Basic access and reborrowing
 
@@ -119,4 +119,4 @@ The RFC's future accepted/rejected fixtures must also cover:
 | A binding containing a `Shared<T>` handle is mutable. | Do not grant ordinary `&mut T` access to the shared payload. |
 | Cancellation arrives while old-value disposal suspends during replacement. | ADR 0009 defers delivery through installation while keeping the replacement owned and tracking initialized/disposed state. Deliver pending cancellation afterward against a valid slot and clean it up once. Deferred waits continue normally; requests do not abandon them. |
 
-#28 must formalize the combined contracts, reborrowing and nested-reference obligations, generic/callable evidence, control-flow merges, and disposal-sensitive last use. [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) records #16's cancellation and synchronized-sharing policies; `09-concurrency-safety.md` adds guard/wait/native-operation cases. Hand-checking these lists does not make the remaining checking rules or runtime behaviors implemented or proven.
+#28 must formalize the combined contracts, reborrowing and nested-reference obligations, generic/callable evidence, control-flow merges, and disposal-sensitive last use. [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) records #16's cancellation and synchronized-sharing policies; `04-concurrency-safety.md` adds guard/wait/native-operation cases. Hand-checking these lists does not make the remaining checking rules or runtime behaviors implemented or proven.

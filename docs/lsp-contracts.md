@@ -124,4 +124,4 @@ Every row is NOT RUN. Owners indicate responsibility, not delivery. FE means the
 | Notebook/kernel/cross-cell execution, Run/Test/DAP, non-LSP syntax/grammar | Explicitly outside current language/file-model commitment, not new Rill semantics |
 | Windows-native server/all remote combinations | These are not implicit host acceptance targets. They require an explicit scope extension. |
 
-No row is passed by this document or [hand-authored prototype 17](prototypes/17-diagnostics.md). #42 must carry every outstanding obligation until complete or explicitly transferred to an open successor with human scope approval. Missing mechanisms return to the map; RFC drafting and future RFC acceptance remain distinct from delivered tooling.
+No row is passed by this document or [hand-authored prototype 21](prototypes/21-diagnostics.md). #42 must carry every outstanding obligation until complete or explicitly transferred to an open successor with human scope approval. Missing mechanisms return to the map; RFC drafting and future RFC acceptance remain distinct from delivered tooling.

@@ -1,6 +1,6 @@
 # Secure random byte generation
 
-[Issue #37](https://github.com/Reilley64/rill/issues/37) confirms secure-by-default `std::random` with owned generation and filling an existing exclusive `Bytes` owner. The Q1-Q15 interview and consolidated design were explicitly confirmed. [The public catalogue](../standard-library-contracts.md#13-secure-random-bytes) records the exact API; [prototype 21](../../prototypes/21-secure-random.rill) and its [case inventory](../prototypes/21-secure-random.md) are hand-checked design evidence, not an implemented library, executed provider tests, security/checker proof or accepted feature RFC.
+[Issue #37](https://github.com/Reilley64/rill/issues/37) confirms secure-by-default `std::random` with owned generation and filling an existing exclusive `Bytes` owner. The Q1-Q15 interview and consolidated design were explicitly confirmed. [The public catalogue](../standard-library-contracts.md#13-secure-random-bytes) records the exact API; [prototype 15](../../prototypes/15-secure-random.rill) and its [case inventory](../prototypes/15-secure-random.md) are hand-checked design evidence, not an implemented library, executed provider tests, security/checker proof or accepted feature RFC.
 
 ## Complete success, not transactional mutation
 

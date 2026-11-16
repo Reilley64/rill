@@ -1,6 +1,6 @@
 # Environment and argument case inventory
 
-Read the source examples in [`prototypes/20-environment-inputs.rill`](../../prototypes/20-environment-inputs.rill).
+Read the source examples in [`prototypes/14-environment-inputs.rill`](../../prototypes/14-environment-inputs.rill).
 
 Design evidence for [#36](https://github.com/Reilley64/rill/issues/36), [ADR 0019](../adr/0019-owned-startup-environment-and-arguments.md) and the [public contract](../standard-library-contracts.md#12-environment-and-argument-inputs). Reviewers checked the companion's 29 intended-valid expectations and this independent inventory by hand, without compiling or executing them. This fixture delivers no native/WASI environment reader, startup runtime, decoder, library implementation or checker. #41's language-wide implement form applies to any future family bodies. The companion only defines standalone helpers and consumes canonical library functions.
 

@@ -1,15 +1,15 @@
 # Realistic Rill batch-report prototype (#25)
 
-Read the source examples in [`prototypes/16-batch-report`](../../prototypes/16-batch-report).
+Read the source examples in [`prototypes/10-batch-report`](../../prototypes/10-batch-report).
 
 This prototype asks whether the current design remains coherent in a normal application workflow and what ownership and copying costs it imposes.
 
 The user explicitly accepted it as #25 prototype evidence for the RFCs. The two Rill files are 298 physical lines combined, including 14 independent top-level expectations. Reviewers inspected this intended-valid source by hand. They did not execute an application or test suite, prove concurrency safety or validate a backend. The prototype invents no JSON/HTTP/CLI API. It uses the confirmed #23 catalogue and ADR 0015 as design inputs, not a library implementation. Publishing these design artifacts does not establish compiler or backend support.
 
-- [main.rill](../../prototypes/16-batch-report/main.rill): native file/UTF-8 work, scoped concurrency, notifications, mutex metrics, error context and entry startup.
-- [records.rill](../../prototypes/16-batch-report/records.rill): application grammar, owned records, aggregation, generic rendering and pure expectations.
-- Inputs: [north.tsv](../../prototypes/16-batch-report/north.tsv) (LF, final record unterminated), [south.tsv](../../prototypes/16-batch-report/south.tsv) (CRLF, final newline).
-- [expected-report.txt](../../prototypes/16-batch-report/expected-report.txt): hand-computed successful output, not captured Rill output.
+- [main.rill](../../prototypes/10-batch-report/main.rill): native file/UTF-8 work, scoped concurrency, notifications, mutex metrics, error context and entry startup.
+- [records.rill](../../prototypes/10-batch-report/records.rill): application grammar, owned records, aggregation, generic rendering and pure expectations.
+- Inputs: [north.tsv](../../prototypes/10-batch-report/north.tsv) (LF, final record unterminated), [south.tsv](../../prototypes/10-batch-report/south.tsv) (CRLF, final newline).
+- [expected-report.txt](../../prototypes/10-batch-report/expected-report.txt): hand-computed successful output, not captured Rill output.
 - Published primary evidence: [complete source snapshot/findings](https://github.com/Reilley64/rill/issues/25#issuecomment-6873277247) and [explicitly accepted verdict](https://github.com/Reilley64/rill/issues/25#issuecomment-6873344066).
 - Authority: [library contracts](../standard-library-contracts.md), [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md), [ADR 0015](../adr/0015-language-required-library-contracts.md), and the confirmed [#29 errors](https://github.com/Reilley64/rill/issues/29) / [#22 stack policy](https://github.com/Reilley64/rill/issues/22). #28 formalizes/checks the design; #30 gates backend mechanisms; #31 separately designs JSON.
 

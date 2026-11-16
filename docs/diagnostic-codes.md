@@ -121,4 +121,4 @@ The compiler/server cannot trust its own analysis operation/state. This is not a
 
 ## Compatibility and examples
 
-All compiler/driver severities use R codes; there is no E/W prefix dependency or v0 Werror promotion. False expectations use `expectationResult`, not one code per expression; ordinary application Err/panic formats remain #23/#22 contracts. Codes, schema and representative [prototype 17](prototypes/17-diagnostics.md) examples are static design artifacts, not an implemented emitter. Exact #28 rules can add documented kinds without recycling these meanings.
+All compiler/driver severities use R codes; there is no E/W prefix dependency or v0 Werror promotion. False expectations use `expectationResult`, not one code per expression; ordinary application Err/panic formats remain #23/#22 contracts. Codes, schema and representative [prototype 21](prototypes/21-diagnostics.md) examples are static design artifacts, not an implemented emitter. Exact #28 rules can add documented kinds without recycling these meanings.

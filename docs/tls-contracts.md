@@ -1,6 +1,6 @@
 # Standard TLS transports
 
-The human-confirmed #38 Q1-Q80 decisions and explicit consolidated confirmation govern this contract. [ADR 0025](adr/0025-explicit-tls-trust-and-private-provider-boundary.md) records the trade-off; [native boundary](tls-native-boundary.md) records the closed implementation interface; [prototype 27](prototypes/27-tls.md) supplies hand-checked examples and the NOT RUN inventory. [#44](https://github.com/Reilley64/rill/issues/44) gates actual TLS delivery/support. This records the design, not implemented TLS, compiler/checker execution, protocol conformance or security certification.
+The human-confirmed #38 Q1-Q80 decisions and explicit consolidated confirmation govern this contract. [ADR 0025](adr/0025-explicit-tls-trust-and-private-provider-boundary.md) records the trade-off; [native boundary](tls-native-boundary.md) records the closed implementation interface; [prototype 23](prototypes/23-tls.md) supplies hand-checked examples and the NOT RUN inventory. [#44](https://github.com/Reilley64/rill/issues/44) gates actual TLS delivery/support. This records the design, not implemented TLS, compiler/checker execution, protocol conformance or security certification.
 
 ## 1. Scope, precedence and targets
 

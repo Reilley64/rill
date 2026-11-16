@@ -1,6 +1,6 @@
 # Numbers, string views, and adversarial cases
 
-Read the source examples in [`prototypes/11-numbers-strings.rill`](../../prototypes/11-numbers-strings.rill).
+Read the source examples in [`prototypes/08-numbers-strings.rill`](../../prototypes/08-numbers-strings.rill).
 
 These examples follow [#18](https://github.com/Reilley64/rill/issues/18), [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) and the [published library contracts](../standard-library-contracts.md). The companion still contains 41 intended-valid expectations. They have been inspected, not executed by a compiler/runtime or a compile-fail runner. Library imports now use the published Bytes, parsing and string APIs. Different error types still require explicit adaptation, and ordinary return-only overloads remain invalid.
 
@@ -14,7 +14,7 @@ The text cases cover exact substring copies, byte/scalar boundaries, descriptor 
 
 Decoding now reads an explicitly constructed Bytes value. decodeUtf8 produces owned text; decodeLossy replaces invalid sequences. String byte lookup first obtains the canonical bytes view. Nothing assumes List contiguity or invents a borrowed List header. Generic copy borrows logical T through `copy(&T)`, including a substring view.
 
-A primitive canonical formatter cannot implement itself by interpolating the same primitive through that formatter. The [overload](../../prototypes/03-overloads.rill) and [module](../../prototypes/10-modules/formatting.rill) examples instead declare separate show families. Templates inside those bodies still use canonical standard formatting.
+A primitive canonical formatter cannot implement itself by interpolating the same primitive through that formatter. The [overload](../../prototypes/03-overloads.rill) and [module](../../prototypes/07-modules/formatting.rill) examples instead declare separate show families. Templates inside those bodies still use canonical standard formatting.
 
 ## Independent compile-rejection cases
 

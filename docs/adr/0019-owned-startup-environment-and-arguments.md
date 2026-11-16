@@ -1,6 +1,6 @@
 # Owned startup environment and argument inputs
 
-[Issue #36](https://github.com/Reilley64/rill/issues/36) confirms `std::env`: explicit independently owned `Inputs` values copied from a fixed safe-startup capture, read-only byte access, strict owned-text conveniences and validated synthetic construction. The complete Q1-Q21 interview and consolidated summary were explicitly confirmed. [The public catalogue](../standard-library-contracts.md#12-environment-and-argument-inputs) is the API/behavior contract; [prototype 20](../../prototypes/20-environment-inputs.rill) and its [case inventory](../prototypes/20-environment-inputs.md) are hand-checked design evidence, not an implemented library, executed tests or accepted feature RFC.
+[Issue #36](https://github.com/Reilley64/rill/issues/36) confirms `std::env`: explicit independently owned `Inputs` values copied from a fixed safe-startup capture, read-only byte access, strict owned-text conveniences and validated synthetic construction. The complete Q1-Q21 interview and consolidated summary were explicitly confirmed. [The public catalogue](../standard-library-contracts.md#12-environment-and-argument-inputs) is the API/behavior contract; [prototype 14](../../prototypes/14-environment-inputs.rill) and its [case inventory](../prototypes/14-environment-inputs.md) are hand-checked design evidence, not an implemented library, executed tests or accepted feature RFC.
 
 ## Why capture rather than live lookup
 

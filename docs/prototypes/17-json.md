@@ -1,8 +1,8 @@
 # JSON design evidence (#31)
 
-Read the source examples in [`prototypes/19-json.rill`](../../prototypes/19-json.rill).
+Read the source examples in [`prototypes/17-json.rill`](../../prototypes/17-json.rill).
 
-Source: [ADR 0018](../adr/0018-owned-precision-preserving-json.md) and the [JSON contract](../json-contracts.md). `19-json.rill` contains 53 intended-valid expectation declarations, including invalid-input checks. Reviewers checked all outcomes by hand. There is no JSON parser or compiler implementation here, and no Rill body or expectation was executed. #28 retains the checking, inference and cleanup work; #30 retains pinned backend support; #41 retains conversion machinery.
+Source: [ADR 0018](../adr/0018-owned-precision-preserving-json.md) and the [JSON contract](../json-contracts.md). `17-json.rill` contains 53 intended-valid expectation declarations, including invalid-input checks. Reviewers checked all outcomes by hand. There is no JSON parser or compiler implementation here, and no Rill body or expectation was executed. #28 retains the checking, inference and cleanup work; #30 retains pinned backend support; #41 retains conversion machinery.
 
 ## Active source inventory
 

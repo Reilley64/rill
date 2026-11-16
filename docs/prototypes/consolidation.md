@@ -14,8 +14,8 @@ The former filenames identify programs in the linked revision, not current paths
 | 03-overloads.rill | [03-overloads.rill](../../prototypes/03-overloads.rill) and [01-basics.rill](../../prototypes/01-basics.rill) | Integer, boolean and record formatting; generic List formatting and concrete List<Point> specialization. Recursive Fibonacci and its three expectations move to basics. |
 | 12-enums.rill | [03-overloads.rill](../../prototypes/03-overloads.rill) | All 16 original enum expectations retain their order. They cover static variant selection, fallback, match narrowing, inferred/annotated types, joins, owned payloads, generic inference and mutation. |
 | 05-records-unions-match.rill and 08-named-records.rill | [05-records-match.rill](../../prototypes/05-records-match.rill) | Nested/guarded matching, area and growth, owned collection mapping, named construction, inference, spread rebuilding, generic records and nominal/anonymous-record rejections. |
-| 02-result-pipe-guard.rill and 13-caused-by-errors.rill | [13-caused-by-errors.rill](../../prototypes/13-caused-by-errors.rill) | Port parsing and bounds, reserved-port guard, Result pipes/combinators, error rendering, nested and explicit wrapping, exact-type propagation and skipped failure expressions. |
-| 04-goroutines-channels.rill and 09-concurrency-safety.rill | [09-concurrency-safety.rill](../../prototypes/09-concurrency-safety.rill) | A producer and two workers share a receiver, transfer messages and close queues through disposal. A heartbeat competes with a timer and is explicitly stopped. Plain heterogeneous jobs compute an average. Fallible jobs distinguish all, race, any and allSettled. The original seven guard/cancellation expectations remain. |
+| 02-result-pipe-guard.rill and 13-caused-by-errors.rill | [02-caused-by-errors.rill](../../prototypes/02-caused-by-errors.rill) | Port parsing and bounds, reserved-port guard, Result pipes/combinators, error rendering, nested and explicit wrapping, exact-type propagation and skipped failure expressions. |
+| 04-goroutines-channels.rill and 09-concurrency-safety.rill | [04-concurrency-safety.rill](../../prototypes/04-concurrency-safety.rill) | A producer and two workers share a receiver, transfer messages and close queues through disposal. A heartbeat competes with a timer and is explicitly stopped. Plain heterogeneous jobs compute an average. Fallible jobs distinguish all, race, any and allSettled. The original seven guard/cancellation expectations remain. |
 
 ## Corrections during consolidation
 
@@ -36,23 +36,23 @@ The remaining programs keep their separate purposes:
 
 | Program or group | Purpose and disposition |
 | --- | --- |
-| [07-mutation.rill](../../prototypes/07-mutation.rill) | Reborrowing, disjoint fields, callable modes, generic dependencies and retained mutable storage. All 13 expectations remain. |
-| [10-modules/](../../prototypes/10-modules/) | Seven-file identity/export/privacy/startup graph. All 15 expectations remain; union layouts and borrowed-copy calls are corrected. |
-| [11-numbers-strings.rill](../../prototypes/11-numbers-strings.rill) | All 41 numeric, UTF-8, view/dependency and ordered-formatting expectations remain with current library calls. |
-| [14-stacks-recursion.rill](../../prototypes/14-stacks-recursion.rill) | All 14 tail, non-tail, indirect-call, local-retention and sized-spawn expectations remain. Scalar iteration and borrowed text copy are corrected. |
-| [15-library-contracts.rill](../../prototypes/15-library-contracts.rill) | The core library integration cases remain byte-identical. |
-| [16-batch-report/](../../prototypes/16-batch-report/) | The application workflow and its two Rill files/data remain byte-identical. |
-| [17-diagnostics/](../../prototypes/17-diagnostics/) | All 14 Rill fixtures retain their exact bytes, including CRLF, coordinates, intentional failures and independent rejections. The report/schema checks remain separate from compiler execution. |
-| [18-conversions.rill](../../prototypes/18-conversions.rill) | All 14 endpoint-selection and error-evidence expectations remain. Only an obsolete reservation comment was removed. |
-| [19-json.rill](../../prototypes/19-json.rill) | JSON grammar, ownership, precision, limits and error cases remain byte-identical. |
-| [19-streaming-io.rill](../../prototypes/19-streaming-io.rill) | Streaming ownership, partial effects and typed progress remain byte-identical. |
-| [20-environment-inputs.rill](../../prototypes/20-environment-inputs.rill) | Owned startup data, ordering, byte/text boundaries and errors remain byte-identical. |
-| [20-filesystem.rill](../../prototypes/20-filesystem.rill) | Lexical paths and uncalled filesystem workflows remain byte-identical. |
-| [21-secure-random.rill](../../prototypes/21-secure-random.rill) | Empty production calls and explicit application fakes remain byte-identical. |
-| [22-sql-codecs/](../../prototypes/22-sql-codecs/) | All three codec/control sources remain byte-identical. They are not database drivers. |
-| [23-time-values.rill](../../prototypes/23-time-values.rill) | Temporal value and arithmetic cases remain byte-identical. |
-| [24-clocks-cancellation.rill](../../prototypes/24-clocks-cancellation.rill) | Manual-clock, token and deadline cases remain byte-identical. |
-| [25-networking.rill](../../prototypes/25-networking.rill) | Address/control values and uncalled network workflows remain byte-identical. |
-| [27-tls/values.rill](../../prototypes/27-tls/values.rill) | TLS values and uncalled composition helpers remain byte-identical. No handshake or security validation is implied. |
+| [06-mutation.rill](../../prototypes/06-mutation.rill) | Reborrowing, disjoint fields, callable modes, generic dependencies and retained mutable storage. All 13 expectations remain. |
+| [07-modules/](../../prototypes/07-modules/) | Seven-file identity/export/privacy/startup graph. All 15 expectations remain; union layouts and borrowed-copy calls are corrected. |
+| [08-numbers-strings.rill](../../prototypes/08-numbers-strings.rill) | All 41 numeric, UTF-8, view/dependency and ordered-formatting expectations remain with current library calls. |
+| [09-library-contracts.rill](../../prototypes/09-library-contracts.rill) | The core library integration cases remain byte-identical. |
+| [10-batch-report/](../../prototypes/10-batch-report/) | The application workflow and its two Rill files/data remain byte-identical. |
+| [11-conversions.rill](../../prototypes/11-conversions.rill) | All 14 endpoint-selection and error-evidence expectations remain. Only an obsolete reservation comment was removed. |
+| [12-streaming-io.rill](../../prototypes/12-streaming-io.rill) | Streaming ownership, partial effects and typed progress remain byte-identical. |
+| [13-filesystem.rill](../../prototypes/13-filesystem.rill) | Lexical paths and uncalled filesystem workflows remain byte-identical. |
+| [14-environment-inputs.rill](../../prototypes/14-environment-inputs.rill) | Owned startup data, ordering, byte/text boundaries and errors remain byte-identical. |
+| [15-secure-random.rill](../../prototypes/15-secure-random.rill) | Empty production calls and explicit application fakes remain byte-identical. |
+| [16-sql-codecs/](../../prototypes/16-sql-codecs/) | All three codec/control sources remain byte-identical. They are not database drivers. |
+| [17-json.rill](../../prototypes/17-json.rill) | JSON grammar, ownership, precision, limits and error cases remain byte-identical. |
+| [18-time-values.rill](../../prototypes/18-time-values.rill) | Temporal value and arithmetic cases remain byte-identical. |
+| [19-clocks-cancellation.rill](../../prototypes/19-clocks-cancellation.rill) | Manual-clock, token and deadline cases remain byte-identical. |
+| [20-stacks-recursion.rill](../../prototypes/20-stacks-recursion.rill) | All 14 tail, non-tail, indirect-call, local-retention and sized-spawn expectations remain. Scalar iteration and borrowed text copy are corrected. |
+| [21-diagnostics/](../../prototypes/21-diagnostics/) | All 14 Rill fixtures retain their exact bytes, including CRLF, coordinates, intentional failures and independent rejections. The report/schema checks remain separate from compiler execution. |
+| [22-networking.rill](../../prototypes/22-networking.rill) | Address/control values and uncalled network workflows remain byte-identical. |
+| [23-tls/values.rill](../../prototypes/23-tls/values.rill) | TLS values and uncalled composition helpers remain byte-identical. No handshake or security validation is implied. |
 
 The [case-note index](README.md) links the independent rejection inventories as well as the programs. Backend/provider programs remain under [experiments/](../../experiments/README.md), not mixed into these source studies. Their original recorded artifacts are unchanged.

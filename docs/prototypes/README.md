@@ -2,53 +2,57 @@
 
 [Rill sources and fixtures](../../prototypes/) are design examples, not an implemented compiler or standard library. Their case notes distinguish expected behavior from checks actually performed. Use the [RFC evidence labels](../rfcs/README.md#examples-and-evidence) when recording results.
 
-The [consolidation record](consolidation.md) maps every combined example's purpose to its current source. It also lists the unchanged domain programs and explains corrections to historical syntax and library calls. Independent rejection snippets intentionally contain invalid code; they are not additions to an intended-valid program.
+The [consolidation record](consolidation.md) maps combined examples to their original purposes. Independent rejection snippets intentionally contain invalid code; they are not additions to an intended-valid program.
+
+## Numbering
+
+Number groups consecutively by the authored date of their first source-addition commit in main's history. A consolidated example takes the earliest date of its constituent programs, not its merge or rename date. For equal dates, retain the original numeric order, then sort by filename. Renaming a group does not restart its chronology.
+
+Keep a group's source and case-note numbers aligned. Update the index, references and checker commands together when renumbering. Prototype numbers order examples; they are not issue, ADR or RFC IDs.
 
 <a id="early-syntax-studies"></a>
-
-## Combined language examples
-
-| Topic | Source | Case notes |
-| --- | --- | --- |
-| Hello world, functions, recursion and top-level expectations | [01-basics.rill](../../prototypes/01-basics.rill) | The source includes independent expectation-failure and rejection examples in comments. |
-| Static overloads, specialization and enum payloads | [03-overloads.rill](../../prototypes/03-overloads.rill) | [Overload and enum cases](03-overloads.md) |
-| Named records, shape matching and owned rebuilding | [05-records-match.rill](../../prototypes/05-records-match.rill) | [Record and shape cases](05-records-match.md) |
-| Mutation, borrowing and callable capabilities | [07-mutation.rill](../../prototypes/07-mutation.rill) | [Mutation cases](07-mutation-safety.md) |
-| Worker queues, scoped helpers, guards and cancellation | [09-concurrency-safety.rill](../../prototypes/09-concurrency-safety.rill) | [Concurrency cases](09-concurrency-safety.md) |
-| Modules, exports and privacy | [10-modules/](../../prototypes/10-modules/) | [Module cases](10-modules.md) |
-| Numeric widths, text views and formatting | [11-numbers-strings.rill](../../prototypes/11-numbers-strings.rill) | [Numeric/text cases](11-numbers-strings.md) |
-| Error wrapping, guards and Result pipelines | [13-caused-by-errors.rill](../../prototypes/13-caused-by-errors.rill) | [Error cases](13-caused-by-errors.md) |
-| Stack and tail-call rules | [14-stacks-recursion.rill](../../prototypes/14-stacks-recursion.rill) | [Stack cases](14-stacks-recursion.md) |
-
 <a id="feature-and-library-examples"></a>
+<a id="combined-language-examples"></a>
+<a id="library-and-application-examples"></a>
 
-## Library and application examples
+## Chronological index
 
-| Topic | Source | Case notes |
+| Source | Purpose and case notes | First source commit |
 | --- | --- | --- |
-| Core library interfaces | [15-library-contracts.rill](../../prototypes/15-library-contracts.rill) | [Library cases](15-library-contracts.md) |
-| Batch-report application | [16-batch-report/](../../prototypes/16-batch-report/) | [Workload and findings](16-batch-report.md) |
-| Diagnostic/report fixtures | [17-diagnostics/](../../prototypes/17-diagnostics/) | [Fixtures and checker](17-diagnostics.md) |
-| User conversions | [18-conversions.rill](../../prototypes/18-conversions.rill) | [Conversion cases](18-conversions.md) |
-| JSON | [19-json.rill](../../prototypes/19-json.rill) | [JSON cases](19-json.md) |
-| Streaming I/O | [19-streaming-io.rill](../../prototypes/19-streaming-io.rill) | [I/O cases](19-streaming-io.md) |
-| Environment and arguments | [20-environment-inputs.rill](../../prototypes/20-environment-inputs.rill) | [Input cases](20-environment-inputs.md) |
-| Filesystem | [20-filesystem.rill](../../prototypes/20-filesystem.rill) | [Filesystem cases](20-filesystem.md) |
-| Secure random bytes | [21-secure-random.rill](../../prototypes/21-secure-random.rill) | [Random cases](21-secure-random.md) |
-| SQL codecs and control | [22-sql-codecs/](../../prototypes/22-sql-codecs/) | [SQL cases](22-sql-codecs.md) |
-| Temporal values | [23-time-values.rill](../../prototypes/23-time-values.rill) | [Time cases](23-time-values.md) |
-| Clocks and cancellation | [24-clocks-cancellation.rill](../../prototypes/24-clocks-cancellation.rill) | [Clock/control cases](24-clocks-cancellation.md) |
-| Networking | [25-networking.rill](../../prototypes/25-networking.rill) | [Network cases](25-networking.md) |
-| TLS values | [27-tls/](../../prototypes/27-tls/) | [TLS cases and checker](27-tls.md) |
+| [01-basics.rill](../../prototypes/01-basics.rill) | Hello world, functions, recursion and independent expectations. The source comments include expectation failures and rejections. | [e8977c3](https://github.com/Reilley64/rill/commit/e8977c3) |
+| [02-caused-by-errors.rill](../../prototypes/02-caused-by-errors.rill) | [Error wrapping, guards and Result pipelines](02-caused-by-errors.md). | [e8977c3](https://github.com/Reilley64/rill/commit/e8977c3) |
+| [03-overloads.rill](../../prototypes/03-overloads.rill) | [Static overloads, specialization and enum payloads](03-overloads.md). | [e8977c3](https://github.com/Reilley64/rill/commit/e8977c3) |
+| [04-concurrency-safety.rill](../../prototypes/04-concurrency-safety.rill) | [Worker queues, scoped helpers, guards and cancellation](04-concurrency-safety.md). | [e8977c3](https://github.com/Reilley64/rill/commit/e8977c3) |
+| [05-records-match.rill](../../prototypes/05-records-match.rill) | [Named records, shape matching and owned rebuilding](05-records-match.md). | [e8977c3](https://github.com/Reilley64/rill/commit/e8977c3) |
+| [06-mutation.rill](../../prototypes/06-mutation.rill) | [Mutation, borrowing and callable capabilities](06-mutation-safety.md). | [aafdf60](https://github.com/Reilley64/rill/commit/aafdf60) |
+| [07-modules/](../../prototypes/07-modules/) | [Modules, exports and privacy](07-modules.md). | [34f5fa2](https://github.com/Reilley64/rill/commit/34f5fa2) |
+| [08-numbers-strings.rill](../../prototypes/08-numbers-strings.rill) | [Numeric widths, text views and formatting](08-numbers-strings.md). | [4ec9b0e](https://github.com/Reilley64/rill/commit/4ec9b0e) |
+| [09-library-contracts.rill](../../prototypes/09-library-contracts.rill) | [Core library interfaces](09-library-contracts.md). | [27418d5](https://github.com/Reilley64/rill/commit/27418d5) |
+| [10-batch-report/](../../prototypes/10-batch-report/) | [Batch-report application and findings](10-batch-report.md). | [5da7522](https://github.com/Reilley64/rill/commit/5da7522) |
+| [11-conversions.rill](../../prototypes/11-conversions.rill) | [User conversions and error evidence](11-conversions.md). | [ac23d5c](https://github.com/Reilley64/rill/commit/ac23d5c) |
+| [12-streaming-io.rill](../../prototypes/12-streaming-io.rill) | [Streaming ownership and partial effects](12-streaming-io.md). | [ac23d5c](https://github.com/Reilley64/rill/commit/ac23d5c) |
+| [13-filesystem.rill](../../prototypes/13-filesystem.rill) | [Paths and uncalled filesystem workflows](13-filesystem.md). | [9750d93](https://github.com/Reilley64/rill/commit/9750d93) |
+| [14-environment-inputs.rill](../../prototypes/14-environment-inputs.rill) | [Owned environment and argument inputs](14-environment-inputs.md). | [a03fa33](https://github.com/Reilley64/rill/commit/a03fa33) |
+| [15-secure-random.rill](../../prototypes/15-secure-random.rill) | [Secure random bytes and application fakes](15-secure-random.md). | [a03fa33](https://github.com/Reilley64/rill/commit/a03fa33) |
+| [16-sql-codecs/](../../prototypes/16-sql-codecs/) | [SQL codecs and control examples](16-sql-codecs.md). | [0e9f70c](https://github.com/Reilley64/rill/commit/0e9f70c) |
+| [17-json.rill](../../prototypes/17-json.rill) | [JSON grammar, ownership and limits](17-json.md). | [b77fe15](https://github.com/Reilley64/rill/commit/b77fe15) |
+| [18-time-values.rill](../../prototypes/18-time-values.rill) | [Temporal values and arithmetic](18-time-values.md). | [b77fe15](https://github.com/Reilley64/rill/commit/b77fe15) |
+| [19-clocks-cancellation.rill](../../prototypes/19-clocks-cancellation.rill) | [Manual clocks, tokens and deadlines](19-clocks-cancellation.md). | [b77fe15](https://github.com/Reilley64/rill/commit/b77fe15) |
+| [20-stacks-recursion.rill](../../prototypes/20-stacks-recursion.rill) | [Stack and tail-call rules](20-stacks-recursion.md). | [d30cabe](https://github.com/Reilley64/rill/commit/d30cabe) |
+| [21-diagnostics/](../../prototypes/21-diagnostics/) | [Diagnostic/report fixtures and checker](21-diagnostics.md). | [d30cabe](https://github.com/Reilley64/rill/commit/d30cabe) |
+| [22-networking.rill](../../prototypes/22-networking.rill) | [Addresses and controlled networking](22-networking.md). | [d30cabe](https://github.com/Reilley64/rill/commit/d30cabe) |
+| [23-tls/](../../prototypes/23-tls/) | [TLS values, composition and checker](23-tls.md). | [2121a68](https://github.com/Reilley64/rill/commit/2121a68) |
 
-Historical numeric prefixes repeat. Use complete filenames, such as 19-json.rill and 19-streaming-io.rill, rather than a number alone. Current contracts and decisions are listed in the [documentation index](../README.md).
+The stack and diagnostic programs arrived later than their old reserved numbers suggested. Error and concurrency examples retain the earlier chronology of the port and channel programs they absorbed.
 
 ## Paths after consolidation
 
-Case notes formerly stored as `prototypes/<name>.md` now live in `docs/prototypes/`. A grouped example's README now uses `docs/prototypes/<group>.md`. The consolidation record lists source merges and renames; all diagnostic fixture and application data paths are unchanged.
+Case notes formerly stored as `prototypes/<name>.md` now live in `docs/prototypes/`. A grouped example's README uses `docs/prototypes/<group>.md`. The consolidation record links current replacements while retaining original filenames in its historical column.
+
+Renumbering moves complete source/fixture groups without changing Rill or data contents. Diagnostic reports retain their original fictitious URIs; the [checker](21-diagnostics.md#reproduce-the-static-checks) resolves them relative to its current directory. Recorded paths identify the original authored evidence, not the current filesystem location.
 
 Standalone programs moved from `prototypes/backend-30/` to `experiments/backend-30/`, and from `prototypes/26-sqlite-provider/` to `experiments/sqlite-provider/`. Recorded command logs, hashes and ticket snapshots retain their historical paths. Current runbooks use the new layout.
 
 ## Executable experiments
 
-[Backend](../../experiments/backend-30/README.md) and [SQLite provider](../../experiments/sqlite-provider/README.md) programs live in [experiments/](../../experiments/README.md). Their native/model execution evidence is distinct from the expected behavior of these Rill sources. Moving or editing a source example does not rerun an experiment or make it compiler-checked.
+[Backend](../../experiments/backend-30/README.md) and [SQLite provider](../../experiments/sqlite-provider/README.md) programs live in [experiments/](../../experiments/README.md). Their native/model execution evidence is distinct from the expected behavior of these Rill sources. Moving a source example does not rerun an experiment or make it compiler-checked.

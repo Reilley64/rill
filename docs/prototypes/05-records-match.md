@@ -6,7 +6,7 @@
 
 Shape is a closed enum that explicitly wraps the named Circle and Rect records. Matching selects a variant; record patterns inspect its payload. The source retains the nested origin pattern, guarded large-circle and square cases, a wildcard fallback, area calculation and owned map/grow/sum workflow.
 
-Growing a shape rebuilds its named payload with a spread. The total-area expectation uses a narrow numeric interval instead of promising a particular decimal rendering of a binary float. Primitive formatting remains covered by the [numeric/text examples](11-numbers-strings.md).
+Growing a shape rebuilds its named payload with a spread. The total-area expectation uses a narrow numeric interval instead of promising a particular decimal rendering of a binary float. Primitive formatting remains covered by the [numeric/text examples](08-numbers-strings.md).
 
 The named-record cases cover construction, an inferred value from a typed function, an explicitly annotated binding, named spread rebuilding and a generic Box. Point now uses f64 so the same record supports geometry. ScreenPoint has identical fields but remains a different nominal type.
 

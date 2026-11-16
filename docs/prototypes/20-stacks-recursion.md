@@ -1,6 +1,6 @@
 # Stack capacity and recursion cases
 
-Read the source examples in [`prototypes/14-stacks-recursion.rill`](../../prototypes/14-stacks-recursion.rill).
+Read the source examples in [`prototypes/20-stacks-recursion.rill`](../../prototypes/20-stacks-recursion.rill).
 
 These are approved design inputs for [#22](https://github.com/Reilley64/rill/issues/22) and [ADR 0014](../adr/0014-bounded-stacks-proper-tail-calls-and-backend-gates.md). The companion has 14 intended-valid expectations, checked by inspection only. Validation of this companion did not run a Rill compiler/runtime, measure stacks, run native probes or execute a Wasm pipeline. Small successful calculations cannot establish constant-space behavior or safe overflow containment.
 
@@ -24,7 +24,7 @@ Illustrative future invocations:
 ```sh
 # Decimal byte counts: 1 MiB default, 8 MiB entry.
 rill build --stack-size 1048576 --entry-stack-size 8388608 main.rill
-rill test --stack-size 1048576 prototypes/14-stacks-recursion.rill
+rill test --stack-size 1048576 prototypes/20-stacks-recursion.rill
 # For a validated Wasm backend, not a claim that this pipeline works today:
 rill build --target wasm32-wasip1 --stack-size 1048576 --saved-stack-size 1048576 main.rill
 ```
