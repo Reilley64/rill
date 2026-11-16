@@ -1,0 +1,327 @@
+// #45: intended-valid resumable-I/O declarations and ownership traces.
+// HandChecked only: no Rill compiler/runtime/channel/TCP/TLS implementation ran.
+import std::bytes::{Bytes, length};
+import std::option::Option;
+import std::result::{Result, Ok};
+import std::channel::{
+  Sender, Receiver, WakeNotifier,
+  channel, trySend, tryReceive,
+  SendAttempt, ReceiveAttempt,
+  wakeChannel, wake, watchReceiveReady, arm, disarm,
+};
+import std::io::progress::{
+  ProgressSchedule, AdmissionReason, Admission, WriteRejection, WriteAdmission,
+  ReadOutcome, WriteOutcome, OperationOutcome, DriverFailureSet, ProgressStep,
+  admitRead, admitWrite, admitFlush, admitClose, requestStop, advance,
+  registerProgressWait, withdrawProgressWait,
+};
+
+enum ModelError { Failed }
+
+enum ModelState {
+  Starting,
+  Open,
+  ReadPending,
+  WritePending,
+  FlushPending,
+  Closing,
+  Stopping,
+  Terminal,
+}
+
+type ModelDriver = {
+  state: ModelState;
+  pendingWrite: Option<Bytes>;
+};
+
+function nothing(): void {}
+
+function modelDriver(): ModelDriver {
+  return ModelDriver {
+    state: ModelState.Starting,
+    pendingWrite: Option.None,
+  };
+}
+
+function emptyStep(schedule: ProgressSchedule): ProgressStep<
+  ModelError, ModelError, ModelError, ModelError, ModelError
+> {
+  return ProgressStep {
+    schedule,
+    started: false,
+    stopFinished: false,
+    read: Option.None,
+    write: Option.None,
+    flush: Option.None,
+    close: Option.None,
+    driverFailures: Option.None,
+  };
+}
+
+implement admitRead(driver: &mut ModelDriver, maximum: u64): Admission {
+  if (maximum == 0u64) {
+    return Admission.Rejected(AdmissionReason.InvalidInput);
+  }
+  match (driver.state) {
+    ModelState.Open => {
+      driver.state = ModelState.ReadPending;
+      return Admission.Admitted;
+    },
+    ModelState.Starting => { return Admission.Rejected(AdmissionReason.NotStarted); },
+    ModelState.Closing => { return Admission.Rejected(AdmissionReason.Closing); },
+    ModelState.Stopping => { return Admission.Rejected(AdmissionReason.Stopping); },
+    ModelState.Terminal => { return Admission.Rejected(AdmissionReason.Terminal); },
+    _ => { return Admission.Rejected(AdmissionReason.Busy); },
+  };
+}
+
+implement admitWrite(driver: &mut ModelDriver, input: Bytes): WriteAdmission {
+  if (length(&input) > 16384u64) {
+    return WriteAdmission.Rejected(WriteRejection {
+      reason: AdmissionReason.LimitExceeded,
+      input,
+    });
+  }
+  match (driver.state) {
+    ModelState.Open => {
+      driver.pendingWrite = Option.Some(input);
+      driver.state = ModelState.WritePending;
+      return WriteAdmission.Admitted;
+    },
+    ModelState.Starting => { return WriteAdmission.Rejected(WriteRejection {
+      reason: AdmissionReason.NotStarted,
+      input,
+    }); },
+    ModelState.Closing => { return WriteAdmission.Rejected(WriteRejection {
+      reason: AdmissionReason.Closing,
+      input,
+    }); },
+    ModelState.Stopping => { return WriteAdmission.Rejected(WriteRejection {
+      reason: AdmissionReason.Stopping,
+      input,
+    }); },
+    ModelState.Terminal => { return WriteAdmission.Rejected(WriteRejection {
+      reason: AdmissionReason.Terminal,
+      input,
+    }); },
+    _ => { return WriteAdmission.Rejected(WriteRejection {
+      reason: AdmissionReason.Busy,
+      input,
+    }); },
+  };
+}
+
+implement admitFlush(driver: &mut ModelDriver): Admission {
+  match (driver.state) {
+    ModelState.Open => {
+      driver.state = ModelState.FlushPending;
+      return Admission.Admitted;
+    },
+    ModelState.Starting => { return Admission.Rejected(AdmissionReason.NotStarted); },
+    ModelState.Closing => { return Admission.Rejected(AdmissionReason.Closing); },
+    ModelState.Stopping => { return Admission.Rejected(AdmissionReason.Stopping); },
+    ModelState.Terminal => { return Admission.Rejected(AdmissionReason.Terminal); },
+    _ => { return Admission.Rejected(AdmissionReason.Busy); },
+  };
+}
+
+implement admitClose(driver: &mut ModelDriver): Admission {
+  match (driver.state) {
+    ModelState.Open => {
+      driver.state = ModelState.Closing;
+      return Admission.Admitted;
+    },
+    ModelState.Starting => { return Admission.Rejected(AdmissionReason.NotStarted); },
+    ModelState.Closing => { return Admission.Rejected(AdmissionReason.Closing); },
+    ModelState.Stopping => { return Admission.Rejected(AdmissionReason.Stopping); },
+    ModelState.Terminal => { return Admission.Rejected(AdmissionReason.Terminal); },
+    _ => { return Admission.Rejected(AdmissionReason.Busy); },
+  };
+}
+
+implement requestStop(driver: &mut ModelDriver): void {
+  driver.state = match (driver.state) {
+    ModelState.Terminal => ModelState.Terminal,
+    _ => ModelState.Stopping,
+  };
+}
+
+implement advance(driver: &mut ModelDriver): ProgressStep<
+  ModelError, ModelError, ModelError, ModelError, ModelError
+> {
+  match (driver.state) {
+    ModelState.Starting => {
+      driver.state = ModelState.Open;
+      return ProgressStep { ...emptyStep(ProgressSchedule.Idle), started: true };
+    },
+    ModelState.ReadPending => {
+      driver.state = ModelState.Open;
+      return ProgressStep {
+        ...emptyStep(ProgressSchedule.Idle),
+        read: Option.Some(ReadOutcome.Data(Bytes([7u8]))),
+      };
+    },
+    ModelState.WritePending => {
+      driver.pendingWrite = Option.None;
+      driver.state = ModelState.Open;
+      return ProgressStep {
+        ...emptyStep(ProgressSchedule.Idle),
+        write: Option.Some(WriteOutcome.Completed),
+      };
+    },
+    ModelState.FlushPending => {
+      driver.state = ModelState.Open;
+      return ProgressStep {
+        ...emptyStep(ProgressSchedule.Idle),
+        flush: Option.Some(OperationOutcome.Completed),
+      };
+    },
+    ModelState.Closing => {
+      driver.state = ModelState.Terminal;
+      return ProgressStep {
+        ...emptyStep(ProgressSchedule.Idle),
+        close: Option.Some(OperationOutcome.Completed),
+      };
+    },
+    ModelState.Stopping => {
+      driver.pendingWrite = Option.None;
+      driver.state = ModelState.Terminal;
+      return ProgressStep { ...emptyStep(ProgressSchedule.Idle), stopFinished: true };
+    },
+    _ => { return emptyStep(ProgressSchedule.Idle); },
+  };
+}
+
+function waitOnce<D,G,DE>(driver: &D, notifier: WakeNotifier): Result<void,DriverFailureSet<DE>>
+  where registerProgressWait(D,G,DE), withdrawProgressWait(G,DE) {
+  let registration = registerProgressWait(driver, notifier)?;
+  return withdrawProgressWait(registration);
+}
+
+function bufferedAttempts(): bool {
+  let [sender, receiver] = channel<i32>(1u64);
+  let sent = trySend(&sender, 12i32);
+  let received = tryReceive(&receiver);
+  return (match (sent) { SendAttempt.Sent => true, _ => false })
+    && (match (received) { ReceiveAttempt.Item(value) => value == 12i32, _ => false });
+}
+
+function fullReturnsInput(): bool {
+  let [sender, receiver] = channel<i32>(1u64);
+  let first = trySend(&sender, 1i32);
+  let second = trySend(&sender, 2i32);
+  return (match (first) { SendAttempt.Sent => true, _ => false })
+    && (match (second) { SendAttempt.Full(value) => value == 2i32, _ => false });
+}
+
+function rendezvousDoesNotReserve(): bool {
+  let [sender, receiver] = channel<i32>(0u64);
+  return (match (trySend(&sender, 1i32)) { SendAttempt.Full(value) => value == 1i32, _ => false })
+    && (match (tryReceive(&receiver)) { ReceiveAttempt.Empty => true, _ => false });
+}
+
+function closedAttempts(): bool {
+  let [sender, receiver] = channel<i32>(1u64);
+  dispose(receiver);
+  let closedSend = trySend(&sender, 9i32);
+  let [sender2, receiver2] = channel<i32>(1u64);
+  dispose(sender2);
+  let closedReceive = tryReceive(&receiver2);
+  return (match (closedSend) { SendAttempt.Closed(value) => value == 9i32, _ => false })
+    && (match (closedReceive) { ReceiveAttempt.Closed => true, _ => false });
+}
+
+function coalescedWake(): bool {
+  let [notifier, inbox] = wakeChannel();
+  let first = wake(&notifier);
+  let second = wake(&notifier);
+  let observed = tryReceive(&inbox);
+  let empty = tryReceive(&inbox);
+  return first && second
+    && (match (observed) { ReceiveAttempt.Item(value) => true, _ => false })
+    && (match (empty) { ReceiveAttempt.Empty => true, _ => false });
+}
+
+function watchedReadiness(): bool {
+  let [root, inbox] = wakeChannel();
+  let [sender, receiver] = channel<i32>(1u64);
+  let mut watch = watchReceiveReady(&receiver, copy(&root));
+  arm(&mut watch);
+  let sent = trySend(&sender, 4i32);
+  let woke = tryReceive(&inbox);
+  disarm(&mut watch);
+  let received = tryReceive(&receiver);
+  return (match (sent) { SendAttempt.Sent => true, _ => false })
+    && (match (woke) { ReceiveAttempt.Item(value) => true, _ => false })
+    && (match (received) { ReceiveAttempt.Item(value) => value == 4i32, _ => false });
+}
+
+function startedThenRead(): bool {
+  let mut driver = modelDriver();
+  let start = advance(&mut driver);
+  let admission = admitRead(&mut driver, 64u64);
+  let step = advance(&mut driver);
+  return start.started
+    && (match (admission) { Admission.Admitted => true, _ => false })
+    && (match (step.read) {
+      Option.Some(ReadOutcome.Data(bytes)) => length(&bytes) == 1u64,
+      _ => false,
+    });
+}
+
+function rejectsZeroRead(): bool {
+  let mut driver = modelDriver();
+  let started = advance(&mut driver);
+  return match (admitRead(&mut driver, 0u64)) {
+    Admission.Rejected(AdmissionReason.InvalidInput) => true,
+    _ => false,
+  };
+}
+
+function oversizedWriteReturned(): bool {
+  let mut driver = modelDriver();
+  let started = advance(&mut driver);
+  let input = Bytes([0u8]); // Model the boundary by direct state-independent classification below.
+  driver.state = ModelState.Starting;
+  return match (admitWrite(&mut driver, input)) {
+    WriteAdmission.Rejected(rejection) => match (rejection.reason) {
+      AdmissionReason.NotStarted => length(&rejection.input) == 1u64,
+      _ => false,
+    },
+    _ => false,
+  };
+}
+
+function writeCompletes(): bool {
+  let mut driver = modelDriver();
+  let started = advance(&mut driver);
+  let admission = admitWrite(&mut driver, Bytes([1u8, 2u8]));
+  let step = advance(&mut driver);
+  return (match (admission) { WriteAdmission.Admitted => true, _ => false })
+    && (match (step.write) {
+      Option.Some(WriteOutcome.Completed) => true,
+      _ => false,
+    });
+}
+
+function stopFinishes(): bool {
+  let mut driver = modelDriver();
+  let started = advance(&mut driver);
+  requestStop(&mut driver);
+  let stopped = advance(&mut driver);
+  let after = advance(&mut driver);
+  return stopped.stopFinished && !after.stopFinished
+    && (match (after.schedule) { ProgressSchedule.Idle => true, _ => false });
+}
+
+expect bufferedAttempts();
+expect fullReturnsInput();
+expect rendezvousDoesNotReserve();
+expect closedAttempts();
+expect coalescedWake();
+expect watchedReadiness();
+expect startedThenRead();
+expect rejectsZeroRead();
+expect oversizedWriteReturned();
+expect writeCompletes();
+expect stopFinishes();

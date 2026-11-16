@@ -32,6 +32,8 @@ Names identify semantic operations, not callable Rill externs, numeric opcodes o
 | LoadCrls | Takes owned bounded input and an exact positive whole-second age, then returns an unpublished CRL snapshot. | Parse number/scope/form/conflict data without claiming authenticated peer status. Reject partial/unsupported input without fetching. |
 | BuildClientConfig / BuildServerConfig | Takes retained credential/anchor/CRL snapshot references and closed policy data, then returns an unpublished config. | Freeze logical inputs, validate role/purpose/ALPN/profile and native effective inventory. No ambient overrides. |
 | CreateClient / CreateServer | Takes retained config and client reference/SNI data, then returns an unpublished engine. | Create one engine with private input/output buffers and fresh local key state. No transport object/callback enters C. |
+| ConfigureProgress | Takes a new unpublished engine and the fixed progress profile before any I/O. | Enable partial write; disable moving-buffer/AUTO_RETRY; set one pipeline, 16KiB fragment/attempt, no output padding and bounded16KiB BIO-pair halves. Reject effective-setting mismatch. No mid-retry mode change. |
+| ObserveRenegotiation | Takes only fixed passive TLS message metadata from the engine's private observer and records a bounded policy fact. | Detect TLS1.2 post-handshake HelloRequest/renegotiating ClientHello; no Rill/user callback, OpenSSL re-entry or public message exposure. Consume only after immediate current-call classification, then terminally stop. |
 | FeedCiphertext | Takes a stable owned input span and returns the exact consumed ciphertext count. | Process the prefix before managed transport reads, with bounded ingress and strict record/work accounting. This is not plaintext progress. |
 | AcceptPlaintext | Takes stable owned pending plaintext and returns exact private-stage acceptance/processing facts. | Public acceptance was TLS-owned queue admission, not native return value; preserve retry identity and cursors. |
 | Advance | Takes an engine, action and checked time/control admission context, then returns completion/WANT/failure facts. | Perform a handshake, record read/write, pending control, flush or send-notify as a serialized foreign step. Do not suspend/re-enter managed code. |
@@ -46,6 +48,8 @@ Managed read/write/flush/close are not native opcodes. Their independently selec
 
 WANT is continuation of the same engine operation, not success, transport health, EOF, cancellation completion or a new handshake/reconnect. Preserve the original plaintext buffer identity/length/content and internal native cursor until that retry obligation actually ends. Do not infer cancellation-abortability from memory BIO support.
 
+For progress engines, connected BIO-pair ring capacity is charged inside the existing ciphertext-in/out ceilings. The external managed owner drains/feeds only while no SSL call is active and preserves lower unaccepted tails/jobs/copy overlap. Full/empty retry is pressure, not EOF/resource failure. Write-WANT_WRITE permits only external drain plus the same native write retry. Other interleavings require reviewed state-specific evidence; last WANT alone is not a public scheduler oracle. Positive partial success is the only fresh-suffix boundary.
+
 ## 4. Data and memory contract
 
 - Inputs distinguish policy scalars, immutable snapshot references, engine identity, stable native buffer spans, checked wall time and operation/wake generations. Counts use checked u64 semantics; selected ABI sizes/signed-int/time_t/calendar range checks precede narrowing. Outputs distinguish actual consumed/produced native bytes from managed public plaintext transfer.
@@ -54,6 +58,7 @@ WANT is continuation of the same engine operation, not success, transport health
 - Managed input is copied into bounded private storage before foreign use. Provider output and metadata are copied/adopted into owned validated representations before pointer invalidation/release. No borrowed native char*, error queue string, peer stack or X509 object escapes as a safe Rill view.
 - Logical snapshots can be shared only with real cache/reference synchronization and protected lifetime. Mutable engines are serialized; at most one native step owns an engine at a time. Cached public observations do not enter it concurrently. Native locks are private obligations, not user thread-affine guards.
 - Accepted-material/staging limits are not a transient heap/stack proof. Audit reassembly, native caches, key generation, signature/path/policy work, CRL expansion, callbacks and outstanding leases. Native reported shortage may become NativeResourceLimit; Rill/runtime allocation/bookkeeping/error-construction failure remains fatal, with no reporting/unwind guarantee.
+- Progress ring reservations are 16384 bytes per ciphertext direction within, not in addition to, the existing65536-byte direction limits. Account copied drains, lower-job payload/tails and simultaneous copy overlap until actual release. Managed command bytes, stable native retry copies and output result storage similarly share plaintext ceilings. The standalone reference does not prove this asynchronous ledger.
 
 ## 5. Execution, error capture and callbacks
 
@@ -61,7 +66,7 @@ Potentially blocking initialization/entropy/parser/crypto/free work runs on admi
 
 For each foreign step, establish error-queue preconditions and execute the relevant SSL operation. Save relevant native system-error state. Perform required SSL_get_error/classification on the same native thread without intervening unrelated OpenSSL calls. Drain/capture safe numeric facts before migration/re-entry. Keep native error, outer TLS operation/phase and original managed transport cause distinct. Native strings/file paths/data dumps are not public messages.
 
-Private SNI/ALPN/verification callbacks inspect only retained native state and bounded admitted data. No arbitrary Rill closure re-entry, suspending callback, app retrieval/signing/password/keylog callback or success override of failed verification. Where an extra restriction cannot be enforced safely in the chosen maintained provider, use reviewed upstream support/patches or return to the decision. Do not assume a callback flag proves enforcement.
+Private SNI/ALPN/verification callbacks inspect only retained native state and bounded admitted data. No arbitrary Rill closure re-entry, suspending callback, app retrieval/signing/password/keylog callback or success override of failed verification. The progress-only renegotiation observer is likewise fixed/passive: record message direction/type after handshake and perform no OpenSSL call. After the enclosing SSL call is classified immediately, a recorded event selects ProtocolFailure/Control and terminal release with no further application SSL I/O or SSL_shutdown. Where an extra restriction cannot be enforced safely in the chosen maintained provider, use reviewed upstream support/patches or return to the decision. Do not assume a callback flag alone proves complete enforcement.
 
 Certificate time comes from checked wall acquisition, not unchecked native time() or OCSP_check_validity convenience paths. Native parameter inheritance/application, floor-to-seconds, native range and [notBefore,notAfter) behavior need fixtures. Local admission checks and peer verification phases use fresh samples; immutable config never contains frozen now.
 
@@ -82,7 +87,9 @@ Before admission an effect-free borrowed-operation rejection preserves a healthy
 
 Intrinsic stopping stays outside Result and masked through required installation/replacement/disposal/joins. Mandatory release ignores external cancellation and can wait indefinitely. Do not reclassify selected success/error after cleanup. Cleanup provides no rollback. Do not replay, reuse a poisoned session as healthy or clone error envelopes. Failed/poisoned disposal does not perform graceful TLS I/O.
 
-## 7. Conformance and acceptance inventory. All NOT RUN
+## 7. Conformance and acceptance inventory
+
+[`research/0045-progress-reference/`](research/0045-progress-reference/) is bounded **ReferenceExecuted** evidence on one macOS-arm64 host against the selected OpenSSL3.5.9 archive. Its13/13 in-memory cases cover selected BIO/retry/KeyUpdate/closure paths and demonstrate unsafe TLS1.2 renegotiation continuation versus explicit stop. It is not this private ABI, TCP, Rill integration, complete async accounting or target acceptance. Every required #44 item below remains NOT RUN unless separately published:
 
 Required #44 evidence includes:
 - Actual LLVM23/Rill metadata consumer, trusted lowering/marshalling and C shim; immutable configuration copy and generic RE/WE/FE/CE evidence; no orphan interception of protected native obligations.

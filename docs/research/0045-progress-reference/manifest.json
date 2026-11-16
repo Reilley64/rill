@@ -1,0 +1,148 @@
+{
+  "generated_utc": "2026-11-16T05:20:30.886821+00:00",
+  "claimed_selected_source_commit": "45e844fa2a14ec92d146bd8f5778ac130b6625fb",
+  "source_version": "3.5.9",
+  "source_archive": "/tmp/0045-source/source.tar.gz",
+  "source_archive_sha256": "f54250b21795bb01240f3f9b42c384868d04460e339e39275aaaf93487f2d903",
+  "identity_limit": "Archive hash and extracted directory name identify the supplied artifact; the tar extraction has no .git metadata, so commit identity was not independently recomputed.",
+  "private_source_copy": "/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb",
+  "build_parallelism": 4,
+  "configure_argv": [
+    "./Configure",
+    "darwin64-arm64-cc",
+    "no-shared",
+    "no-tests",
+    "no-asm",
+    "no-dso",
+    "no-engine",
+    "no-async",
+    "-O2"
+  ],
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.9.6",
+  "compiler": [
+    "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+    "Target: arm64-apple-darwin27.0.0"
+  ],
+  "openssl_version_a": [
+    "OpenSSL 3.5.9 29 Sep 2026 (Library: OpenSSL 3.5.9 29 Sep 2026)",
+    "built on: Mon Nov 16 05:20:12 2026 UTC",
+    "platform: darwin64-arm64-cc",
+    "options:  bn(64,64)",
+    "compiler: cc -fPIC -arch arm64 -O3 -Wall -O2 -DL_ENDIAN -DOPENSSL_PIC -D_REENTRANT -DOPENSSL_BUILDING_OPENSSL -DNDEBUG",
+    "OPENSSLDIR: \"/usr/local/ssl\"",
+    "ENGINESDIR: \"/usr/local/lib/engines-3\"",
+    "MODULESDIR: \"/usr/local/lib/ossl-modules\"",
+    "Seeding source: os-specific",
+    "CPUINFO: N/A"
+  ],
+  "commands": [
+    {
+      "cwd": "/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb",
+      "argv": [
+        "./Configure",
+        "darwin64-arm64-cc",
+        "no-shared",
+        "no-tests",
+        "no-asm",
+        "no-dso",
+        "no-engine",
+        "no-async",
+        "-O2"
+      ]
+    },
+    {
+      "cwd": "/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb",
+      "argv": [
+        "make",
+        "-j4",
+        "build_sw"
+      ]
+    },
+    {
+      "cwd": "/Users/reilley/.t3/worktrees/rill/t3-310756ec-4fdcfd06e5f26ff9",
+      "argv": [
+        "/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb/apps/openssl",
+        "version",
+        "-a"
+      ]
+    },
+    {
+      "cwd": "/Users/reilley/.t3/worktrees/rill/t3-310756ec-4fdcfd06e5f26ff9",
+      "argv": [
+        "/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb/apps/openssl",
+        "req",
+        "-config",
+        "/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb/apps/openssl.cnf",
+        "-x509",
+        "-newkey",
+        "ec",
+        "-pkeyopt",
+        "ec_paramgen_curve:P-256",
+        "-nodes",
+        "-days",
+        "1",
+        "-subj",
+        "/CN=localhost",
+        "-addext",
+        "subjectAltName=DNS:localhost",
+        "-keyout",
+        "/tmp/0045-progress-reference-private/localhost-key.pem",
+        "-out",
+        "/tmp/0045-progress-reference-private/localhost-cert.pem"
+      ]
+    },
+    {
+      "cwd": "/Users/reilley/.t3/worktrees/rill/t3-310756ec-4fdcfd06e5f26ff9",
+      "argv": [
+        "cc",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Wpedantic",
+        "-I/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb/include",
+        "/Users/reilley/.t3/worktrees/rill/t3-310756ec-4fdcfd06e5f26ff9/docs/research/0045-progress-reference/reference.c",
+        "/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb/libssl.a",
+        "/tmp/0045-progress-reference-private/openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb/libcrypto.a",
+        "-o",
+        "/tmp/0045-progress-reference-private/reference"
+      ]
+    },
+    {
+      "cwd": "/Users/reilley/.t3/worktrees/rill/t3-310756ec-4fdcfd06e5f26ff9",
+      "argv": [
+        "/tmp/0045-progress-reference-private/reference",
+        "<ephemeral-cert>",
+        "<ephemeral-key>"
+      ]
+    },
+    {
+      "cwd": "/Users/reilley/.t3/worktrees/rill/t3-310756ec-4fdcfd06e5f26ff9",
+      "argv": [
+        "cc",
+        "--version"
+      ]
+    }
+  ],
+  "artifacts": {
+    "reference.c": {
+      "sha256": "67825f666c1e417d8fe5ed312b8acfafc653d44f821ef876729c439f19b95e6a",
+      "bytes": 21040
+    },
+    "run_reference.py": {
+      "sha256": "d3f65401eabdc055825b2ce33454da7441171aa8fd19fec0586d0fc0c398fbd3",
+      "bytes": 5746
+    },
+    "README.md": {
+      "sha256": "2a4a4e19f0253f3affea61fdb73c34aeda4589c2a663f9c2e65af8e47f63b2cb",
+      "bytes": 8996
+    },
+    "results.md": {
+      "sha256": "aeda6dfbd140a1a2ad7ae4a3bc1e1eb69ed261bd0ac8e873c7c19e13c8771c71",
+      "bytes": 2886
+    }
+  },
+  "exit_code": 0
+}

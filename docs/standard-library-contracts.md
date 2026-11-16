@@ -48,16 +48,20 @@ The arity schemas below describe exactly the 2-, 3-, and 4-item implementations,
 | `std::char` | codePoint, fromCodePoint |
 | `std::shared` | Shared, shared, view |
 | `std::mutex` | Mutex, LockGuard, mutex, lock |
-| `std::channel` | Sender, Receiver, SendError, channel, send, receive, after, select, unsent, intoUnsent |
+| `std::channel` | Sender, Receiver, SendError, channel, send, receive, after, select, unsent, intoUnsent; #45 SendAttempt, ReceiveAttempt, WakeNotifier, ChannelWatch, trySend, tryReceive, wakeChannel, wake, watchSendReady, watchReceiveReady, arm, disarm |
 | `std::routine` | Routine, AllFailed, failures, join, all, allSettled, race, any |
 | `std::time` | sleep; [#33 temporal/clock/wait contract](time-contracts.md) and [cancellation integration](clock-cancellation-contracts.md); #40's validateInstantDomain amendment below |
 | `std::cancel` | [#33 sources, tokens, links, guard and poll/wait/select observation](clock-cancellation-contracts.md) |
 | `std::io` | IoError, IoErrorKind, kind, nativeCode, readStdin, writeStdout, writeStderr, flushStdout, flushStderr; read, write, flush, close, readExact, writeAll, readToEnd, IoFailure, ReadExactError, ReadToEndError, BufferedReader, BufferedWriter, bufferedReader, bufferedWriter, intoParts, BufferedFlushError, BufferedCloseError |
+| `std::io::progress` | #45 ProgressSchedule, admissions/rejections, read/write/operation/interruption outcomes, DriverFailurePhase/DriverFailure/DriverFailureSet, ProgressStep; admitRead, admitWrite, admitFlush, admitClose, requestStop, advance, registerProgressWait, withdrawProgressWait |
 | `std::path` | Path type/factory, PathError, PathComponent, Components, pathBytes, pathText, isAbsolute, join, parent, fileName, components |
 | `std::sql`, `std::sql::driver` | #40 design: Parameter/ParameterType/Decimal/ColumnRef/ExecSummary, SqlControl/uncontrolled, TransactionOptions/IsolationLevel/TransactionOutcome/TransactionFailure, ReuseDisposition/QueryFailure, DbError and structured uniqueness/codec errors, canonical connect/arguments/bind/prepare/execute/query/begin/commit/rollback/cellAt/resolveUnique/reuseDisposition/reset, explicit bindInto/tryBind/get/queryOne/queryOptional; see the SQL contract for full shapes |
 | `std::fs` | readFile, writeFile; ReadFile, WriteFile, ReadWriteFile, WriteOptions, CreateMode, WriteBehavior, SeekFrom, openRead, openWrite, openReadWrite, seek, sync, syncDirectory; Metadata, FileKind, metadata, symlinkMetadata, readLink, createSymlink, currentDir; DirEntry, ReadDir, readDir, createDir, createDirs, removeFile, removeDir, rename; TempFile, TempDir, TempFileCloseError, tempFile, tempDir, tempPath, keep; uses canonical std::io::IoError |
-| `std::net` | [Address values, TCP owners/halves, resolution/dialing, NetError, NetControl and controlled canonical I/O](networking-contracts.md) |
-| `std::tls` | [Explicit trust/CRL/credential snapshots, owned client/server handshakes and canonical I/O](tls-contracts.md); [private provider boundary](tls-native-boundary.md) |
+| `std::net` | [Address values, TCP owners/halves, resolution/dialing, NetError, NetControl, controlled canonical I/O and #45 TcpProgress](networking-contracts.md) |
+| `std::tls` | [Explicit trust/CRL/credential snapshots, owned client/server handshakes, canonical I/O and #45 TlsProgress](tls-contracts.md); [private provider boundary](tls-native-boundary.md) |
+| `std::http` | [#39 owning methods/statuses/URI/headers/heads/plans/limits/controls/body/completion/error values](http-contracts.md) |
+| `std::http::h1` | [#39 strict transport-independent HTTP/1 request/response decoders and encoders](http-contracts.md) |
+| `std::http::client`, `std::http::server` | [#39 explicit connection driver/endpoint pairs and consuming runners](http-contracts.md) |
 | `std::env` | Inputs, EnvError, EnvErrorKind, EnvPosition; inputs, fromParts, argsBytes, varsBytes, getBytes, args, vars, get, kind, position |
 | `std::random` | randomBytes, fillRandom, RandomError, RandomErrorKind, kind, nativeCode |
 | `std::encoding::json` | Owned Value/Number/Object, explicit parse/format/limits/errors; see the [JSON contract](json-contracts.md) |
@@ -271,6 +275,8 @@ send<T>(to: &Sender<T>, value: T): Result<void, SendError<T>>
 Zero capacity is unbuffered rendezvous; positive capacity is bounded. Capacity is explicit. There is no no-argument/default-argument constructor and no unbounded mode. Unsupported allocation/capacity does not produce a recoverable out-of-memory result; runtime target limits/checks still apply. Last Sender closes the channel; buffered messages drain before None. Last receiver ownership release makes pending/future sends fail and disposes undelivered buffered ownership exactly once. Sender copy preserves the same channel/count; receivers are shared through Shared, not duplicated by a standard receiver copy.
 
 One `receive<S,T>(from:S):Option<T>` family implements &Receiver<T> and &Shared<Receiver<T>>, with noBorrow(T), sendable(T). This is explicit forwarding. It moves a received message or yields None once closed/drained. A pending send owns its message; success commits one transfer, failure returns the undelivered T in opaque SendError<T>. `unsent<T>(&SendError<T>):&T` inspects; `intoUnsent<T>(SendError<T>):T` recovers ownership. display(SendError<T>) needs no display(T). Cancellation never rolls back a committed transfer; abandoning an uncommitted pending operation disposes its remaining message after unregister/confirmed abort. Deferred waits remain registered through required cleanup.
+
+Confirmed [#45](progress-io-contracts.md) additionally supplies atomic nonwaiting `trySend`/`tryReceive`, owned `SendAttempt<T>`/`ReceiveAttempt<T>`, one-token `wakeChannel`/`WakeNotifier`, and one-shot send/receive `ChannelWatch<T>` guards. These preserve the same message evidence and rendezvous atomicity. A watch reserves/consumes nothing and does not retain application endpoint counts; closure is readiness and the later try-operation is authoritative. Wake tokens coalesce hints over retained state, not result payloads or event counts. Existing blocking send/receive/select contracts and fixed select arities remain unchanged. #47 retains runtime/race/target validation.
 
 ```rill
 // std::time / std::channel
@@ -596,6 +602,14 @@ The approved #33 consumer amendment adds std::time::validateInstantDomain(&Clock
 
 [SQLite provider experiment](../experiments/sqlite-provider/README.md) separates 98 standalone native fixture checks and one-host prefix/visibility/coexistence evidence from 32 Python model/schema/header checks. Native reference caps are lower: 2,000 columns / 32,766 slots. These do not change shared maxima or prove an implemented driver. Host SINGLETHREAD reconfiguration is unavailable; actual C shim/Rill artifact consumer/runtime integration and other target cells are NOT RUN. **#43 remains OPEN** with design recorded and implementation/integration validation outstanding; #30 gates remain. No RFC/support/security clearance, hidden reset/replay or new native authority follows.
 
+## Confirmed resumable I/O progress extension (#45)
+
+[ADR0027](adr/0027-single-owner-progress-and-coalescing-wakes.md), the [complete progress contract](progress-io-contracts.md), [prototype24](../prototypes/24-progress-io.rill) and its [case inventory](prototypes/24-progress-io.md) record the human-confirmed single-owner progress foundation. `std::io::progress` owns explicit admission/advance/wait/stop families and typed schedule/lane/driver outcomes. Generic code names concrete D/G and independently selected RE/WE/FE/CE/DE evidence; there is no trait, Future/Poll, associated output, public dyn or automatic capability from canonical I/O.
+
+`advance` performs bounded local work and reports Runnable/Waiting/Idle without waiting for external progress. One retained read, write, flush barrier and close/stop lifecycle keep completions bounded and non-overwritable. Driver registrations borrow their source, coalesce result-free wakes and must quiesce before mutation. Coordinator-owned token/deadline/application policy remains outside the driver; cancellation/drop/wake is never release confirmation or rollback. Standard operations use owned bytes and 16 KiB read/write units. Executor/ring/app pressure is pending; inability to retain required bounded state is typed terminal failure. There is no finite liveness/cleanup promise.
+
+`std::net::TcpProgress` consumes a whole stream and privately permits one read and one write job under one owner. `std::tls::TlsProgress<D>` consumes an eligible lower progress driver before handshake, retains TlsError at every TLS layer and uses the fixed private profile/amendments in the TLS documents. No raw recovery, TLS split or controlled overload is added. Names stay typecheck-visible across targets while live standard providers remain native Linux/macOS scope. Prototype declarations are HandChecked; the separate OpenSSL matrix is ReferenceExecuted; #47/#44 retain all Rill/runtime/TCP/provider support gates. Closing #45 is design-only and unblocks #39 design, not implementation.
+
 ## Confirmed TLS extension (#38)
 
 [ADR 0025](adr/0025-explicit-tls-trust-and-private-provider-boundary.md), the [TLS contract](tls-contracts.md), [closed native boundary](tls-native-boundary.md) and [prototype 23](prototypes/23-tls.md) record consolidated Q1-Q80. `std::tls` owns eligible canonical streams, immutable explicitly copied snapshots and consumed handshake inputs. Independently selected read/write/flush/close error types each need display/noBorrow/sendable/shareable for unique retained causes; this does not change primitive I/O or impose global noBorrow(S). Native opacity is not property evidence.
@@ -603,6 +617,16 @@ The approved #33 consumer amendment adds std::time::validateInstantDomain(&Clock
 TLS 1.3 by default and hardened explicit TLS 1.2, explicit CA roots and strict offline full-path CRLs, SAN reference verification, controlled SNI/ALPN, checked wall time and typed Unsupported Wasm provider operations are deliberate policy. No OS/bundled trust, online/soft-fail revocation, encrypted key containers, TLS split, insecure override, general FFI or implicit dial/replay. NetControl, actual plaintext prefixes and joined native release remain explicit; admitted failure poisons, TCP EOF is not close-notify, disposal is not graceful close. #39 must not assume independent duplex TLS drivers or zero-configuration HTTPS trust.
 
 Controlled private OpenSSL 3.5 LTS is a conditional provider direction. It has not passed current conformance or compiler/runtime integration. [#44](https://github.com/Reilley64/rill/issues/44) gates delivery/TLS support/v0 readiness; #30/#43 stay independently OPEN and #28 drafting is not acceptance. All prototype/source/reference checks are hand-checked or static, not Rill/native/security tests. No actual layouts/generated bindings, target support or public native-extension authority follows from the semantic operation catalogue.
+
+## Confirmed standard HTTP foundation (#39)
+
+[ADR0028](adr/0028-strict-http1-codec-and-explicit-connection-drivers.md), the [complete HTTP contract](http-contracts.md), [prototype25](../prototypes/25-http.rill) and its [case inventory](prototypes/25-http.md) record the human-confirmed direct-origin HTTP foundation. Shared owning values preserve encoded URI/authority spelling and ordered repeated byte headers; private-field heads prevent bypassing method/target validation. The public `std::http::h1` codec is transport-independent, strict CRLF/octet parsing with explicit consumed prefixes/suffix ownership and plan-bound incremental encoding.
+
+HTTP1.1 is initial with close-only1.0 compatibility. Framing rejects repeated/comma Content-Length and every TE+CL combination, supports only actual chunked coding, separates informational/final heads and late trailers, and repairs no obs-fold/bare-LF ambiguity. Valid4xx/5xx stays data. No HTTP2/3/QUIC/proxy/successful CONNECT/101, browser URL behavior, automatic retry/decompression/cookies/JSON or raw transport escape.
+
+Client/server constructors consume a #45 progress driver and return one explicit runner plus bounded application endpoint. Callers scope/spawn/join the runner; it invokes no handlers. One exchange is active; distinct noncopy endpoints allow explicit duplex app work. HttpControl is owning/absolute per exchange. Exchange completion uniquely owns lower typed errors, cleanup, layer-relative observations and conservative reuse. Drop/cancel/deadline is not completion/nonexecution/replay safety.
+
+All prototype25 expectations are HandChecked. Standards research and #45's ReferenceExecuted OpenSSL matrix are not HTTP execution. #48 retains codec/runner/adversarial/conformance/security work; #47/#44 retain lower delivery. Closing #39 is design-only and supplies #28 input, not accepted RFC/support.
 
 ## 11. Validation and follow-through
 
