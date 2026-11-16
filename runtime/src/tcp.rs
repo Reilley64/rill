@@ -1052,6 +1052,64 @@ mod tests {
     }
 
     #[test]
+    fn one_reactor_coalesces_many_connection_wakes_without_losing_results() {
+        const CONNECTIONS: usize = 32;
+        let reactor = Reactor::new().unwrap();
+        let mut progresses = Vec::with_capacity(CONNECTIONS);
+        let mut servers = Vec::with_capacity(CONNECTIONS);
+        for _ in 0..CONNECTIONS {
+            let (client, server) = pair();
+            let mut progress = tcp_progress(client, reactor.handle());
+            assert_eq!(progress.admit_read(8), Admission::Admitted);
+            assert_eq!(progress.advance().schedule, ProgressSchedule::Waiting);
+            progresses.push(progress);
+            servers.push(server);
+        }
+
+        let (root, wake_receiver) = wake_channel();
+        let mut remaining: Vec<_> = (0..CONNECTIONS).collect();
+        let mut waits: Vec<_> = remaining
+            .iter()
+            .map(|index| progresses[*index].register_wait(root.clone()).unwrap())
+            .collect();
+        for (index, server) in servers.iter_mut().enumerate() {
+            server.write_all(&[index as u8]).unwrap();
+        }
+
+        for _ in 0..CONNECTIONS {
+            assert_eq!(wait_for_wake(&wake_receiver), WakeAttempt::Item);
+            for wait in waits {
+                wait.withdraw().unwrap();
+            }
+            let mut next = Vec::new();
+            for index in remaining {
+                let step = progresses[index].advance();
+                match step.read {
+                    Some(ReadOutcome::Data(data)) => assert_eq!(data, [index as u8]),
+                    None => {
+                        assert_eq!(step.schedule, ProgressSchedule::Waiting);
+                        next.push(index);
+                    }
+                    other => panic!("connection {index} failed: {other:?}"),
+                }
+            }
+            if next.is_empty() {
+                remaining = next;
+                break;
+            }
+            waits = next
+                .iter()
+                .map(|index| progresses[*index].register_wait(root.clone()).unwrap())
+                .collect();
+            remaining = next;
+        }
+        assert!(
+            remaining.is_empty(),
+            "some connections never became readable"
+        );
+    }
+
+    #[test]
     fn graceful_close_is_terminal() {
         let reactor = Reactor::new().unwrap();
         let (client, _server) = pair();
