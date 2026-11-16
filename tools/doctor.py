@@ -46,18 +46,17 @@ def check():
         raise ValueError("Cargo does not match the selected Rust toolchain")
     if not capture("uv", "--version").startswith("uv " + uv + " "):
         raise ValueError(f"uv {uv} is required; check user-global mise overrides")
-    selected_tools = {
-        "rustc": "core:rust@" + rust,
-        "cargo": "core:rust@" + rust,
-        "uv": "aqua:astral-sh/uv@" + uv,
-    }
-    for tool, selected in selected_tools.items():
-        # The explicit selector avoids a mise 2026.11 macOS/AArch64 shim bug where
-        # `mise which rustc` reports an installed configured tool as inactive.
-        expected = Path(capture("mise", "which", tool, "--tool", selected)).resolve()
-        actual = Path(shutil.which(tool) or "/missing-tool").resolve()
-        if actual != expected:
-            raise ValueError(f"{tool} is outside the selected mise environment")
+    # Rust's mise backend intentionally exposes rustup proxies outside mise's
+    # install root. The exact rustc sysroot/toolchain and Cargo version checks
+    # above are the authority; `mise which rustc` is also broken on the
+    # macOS/AArch64 hosted runner in mise 2026.11.8. uv has a direct mise-owned
+    # executable, so retain the stronger selected-path check for it.
+    expected_uv = Path(
+        capture("mise", "which", "uv", "--tool", "aqua:astral-sh/uv@" + uv)
+    ).resolve()
+    actual_uv = Path(shutil.which("uv") or "/missing-tool").resolve()
+    if actual_uv != expected_uv:
+        raise ValueError("uv is outside the selected mise environment")
     overrides = [key for key in ("RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER") if os.environ.get(key)]
     if overrides:
         raise ValueError("Unreviewed Cargo compiler overrides: " + ", ".join(overrides))
