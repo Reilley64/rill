@@ -90,7 +90,8 @@ class WorkspaceTests(unittest.TestCase):
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
             cwd=doctor.ROOT, text=True))
         allowed = {"compiler": set(), "ide": {"compiler"}, "lsp": {"ide"},
-                   "codegen-llvm": {"compiler"}, "cli": {"compiler", "lsp", "codegen-llvm"}}
+                   "codegen-llvm": {"compiler"}, "cli": {"compiler", "lsp", "codegen-llvm"},
+                   "runtime": set()}
         packages = {package["name"]: package for package in metadata["packages"]}
         self.assertEqual(set(packages), set(allowed))
         for name, package in packages.items():

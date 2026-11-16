@@ -36,12 +36,12 @@ The root Cargo workspace is private. Its crates are implementation boundaries, n
 | `crates/codegen-llvm/` | LLVM backend integration, separate from front-end analysis. |
 | `crates/cli/` | The `rill` executable and command routing. |
 | [`stdlib/`](../stdlib/README.md) | Rill standard-library source, with a future explicit `std.rill` facade. |
-| [`runtime/`](../runtime/README.md) | Target-runtime support and future native/ABI integration. |
+| [`runtime/`](../runtime/README.md) | Implementation-private target-runtime package/support; currently tested #47 channel wake/watch, private readiness-reactor and macOS loopback TcpProgress mechanism slices, without a Rill ABI or target support matrix. |
 | [`tests/`](../tests/README.md) | Cross-component acceptance ownership and scaffold infrastructure checks. |
 
 The CLI's default `llvm` feature currently selects only the backend stub crate and links no LLVM library. Fast checks and `build:scaffold` disable that feature so future backend bindings stay outside the LLVM-free dependency graph.
 
-The first scaffold checks manifest dependency direction; the names alone do not prove semantic reuse. The compiler, IDE, LSP and backend currently provide boundaries, not implemented product behavior. Language algorithms, runtime mechanisms and production ABI work remain behind their existing gates. There are no placeholder Rill implementations in `stdlib/`.
+The scaffold checks manifest dependency direction; the names alone do not prove semantic reuse. The compiler, IDE, LSP and backend still provide boundaries, not implemented product behavior. The runtime package now contains #47 channel wake/watch and private readiness/TcpProgress mechanism slices with Rust component tests, but no generated-code ABI, Rill scheduler/cancellation integration, Linux/macOS target acceptance or Rill execution. Production runtime acceptance remains unavailable. There are no placeholder Rill implementations in `stdlib/`.
 
 ## Task profiles and current status
 
@@ -50,7 +50,7 @@ These are task groups, not alternate Rust compiler profiles. Invoke each task as
 | Task | Scope in the first scaffold |
 | --- | --- |
 | `setup` | Default developer setup, without LLVM or heavy experiment tools. |
-| `check` | LLVM-free infrastructure checks, including workspace dependency direction and CLI scaffold behavior. Not language, stdlib, runtime or client acceptance. |
+| `check` | LLVM-free infrastructure/component checks, including workspace dependency direction, CLI scaffold behavior and runtime channel/readiness/TCP unit tests. Not language, stdlib, cross-component runtime, target support, TLS or client acceptance. |
 | `build:scaffold` | Build the CLI scaffold, not a functioning Rill compiler. |
 | `build` | Product build is unavailable; exit nonzero. |
 | `test:language` | Language conformance is unavailable; exit nonzero. |

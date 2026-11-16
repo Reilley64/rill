@@ -2,7 +2,7 @@
 
 The first scaffold tests infrastructure, not the Rill language. Manifest dependency checks and CLI help/version or unavailable-command tests can pass without a compiler, standard library, runtime or server. Successful empty product suites would hide that distinction; product test tasks currently exit nonzero as unavailable.
 
-Keep component-local unit tests beside their Rust, standard-library or runtime implementation. This directory owns future cross-component acceptance inputs and runners. Current tool-infrastructure tests live beside their scripts in `tools/`; CLI process tests live in `crates/cli/tests/`. The task boundaries below reserve ownership, not implemented suites or new fixture formats.
+Keep component-local unit tests beside their Rust, standard-library or runtime implementation. This directory owns future cross-component acceptance inputs and runners. Current tool-infrastructure tests live beside their scripts in `tools/`; CLI process tests live in `crates/cli/tests/`; the #47 channel wake/watch and readiness/TCP mechanism tests live beside `runtime/src/{channel,reactor,tcp}.rs`. Those Rust component/loopback tests are not Rill, cross-component runtime or multi-target acceptance. The task boundaries below reserve ownership, not implemented suites or new fixture formats.
 
 | Future acceptance scope | Entry point and owner |
 | --- | --- |
