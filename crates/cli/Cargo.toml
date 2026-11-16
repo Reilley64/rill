@@ -1,0 +1,18 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rill"
+path = "src/main.rs"
+
+[features]
+default = ["llvm"]
+llvm = ["dep:codegen-llvm"]
+
+[dependencies]
+compiler.workspace = true
+lsp.workspace = true
+codegen-llvm = { workspace = true, optional = true }

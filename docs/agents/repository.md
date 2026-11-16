@@ -4,7 +4,8 @@ Use the [documentation index](../README.md) to find a document's owner before ch
 
 ## Artifact locations
 
-- Keep Rill sources and their input/output fixtures in `prototypes/`.
+- Keep compiler/IDE/LSP/CLI implementation in `crates/`, standard-library source in `stdlib/` and target support in `runtime/`. Follow the [development guide](../development.md) for ownership and status.
+- Keep design-example Rill sources and their input/output fixtures in `prototypes/`.
 - Put their explanations and case inventories in `docs/prototypes/`.
 - Keep runnable backend/provider experiments, local runbooks and recorded artifacts in `experiments/`.
 - Put primary-source investigations and experiment summaries in `docs/research/`.

@@ -1,0 +1,102 @@
+min_version = "2026.11.4"
+
+[settings]
+# Keep selected tools ahead of paths added after shell activation.
+activate_aggressive = true
+lockfile = true
+locked = true
+lockfile_platforms = ["linux-x64", "linux-arm64", "macos-x64", "macos-arm64"]
+
+[tools]
+"core:rust" = { version = "1.98.0", profile = "minimal", components = ["rustfmt", "clippy"] }
+"core:python" = "3.13.18"
+"aqua:astral-sh/uv" = "0.13.8"
+
+[env]
+PYTHONDONTWRITEBYTECODE = "1"
+UV_PYTHON_DOWNLOADS = "never"
+UV_PROJECT_ENVIRONMENT = "{{ config_root }}/target/python"
+
+[tasks.setup]
+description = "Verify the mise-selected base tools and install locked Python check dependencies"
+run = ["python tools/doctor.py", "uv sync --project tools/python --locked --python $(mise which python) --no-python-downloads"]
+
+[tasks.doctor]
+description = "Check the selected base tool versions and interpreter/toolchain locations"
+run = "python tools/doctor.py"
+
+[tasks.check]
+description = "Run the LLVM-free scaffold, documentation and fixture checks"
+depends = ["check:rust", "check:docs", "check:fixtures", "check:tools"]
+
+[tasks."check:rust"]
+depends = ["doctor"]
+run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli --all-targets -- -D warnings", "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli"]
+
+[tasks."check:docs"]
+depends = ["doctor"]
+run = ["python tools/check_docs.py", "git diff --check"]
+
+[tasks."check:fixtures"]
+depends = ["setup"]
+run = ["uv run --project tools/python --locked --no-sync python prototypes/21-diagnostics/check-fixtures.py", "python prototypes/23-tls/check.py", "python -m unittest discover -s experiments/sqlite-provider -p 'test_*.py'"]
+
+[tasks."check:tools"]
+depends = ["doctor"]
+run = ["python -m unittest discover -s tools -p 'test_*.py'", "python -m unittest discover -s tools/llvm -p 'test_*.py'"]
+
+[tasks."check:ci"]
+description = "Validate GitHub Actions workflow syntax"
+tools = { "aqua:rhysd/actionlint" = "1.7.12" }
+run = "actionlint"
+
+[tasks."build:scaffold"]
+description = "Build the help/version CLI without LLVM; this is not a Rill compiler"
+depends = ["doctor"]
+run = "cargo build --locked -p cli --no-default-features"
+
+[tasks.build]
+description = "Unavailable: complete Rill toolchain implementation is not present"
+run = "python tools/unavailable.py build"
+
+[tasks."test:language"]
+description = "Unavailable: executable Rill language conformance suite"
+run = "python tools/unavailable.py test:language"
+
+[tasks."test:stdlib"]
+description = "Unavailable: executed Rill standard-library behavior"
+run = "python tools/unavailable.py test:stdlib"
+
+[tasks."test:runtime"]
+description = "Unavailable: production Rill runtime/backend acceptance"
+run = "python tools/unavailable.py test:runtime"
+
+[tasks."test:lsp-client"]
+description = "Unavailable: complete OpenIDEA LSP acceptance"
+run = "python tools/unavailable.py test:lsp-client"
+
+[tasks."plan:llvm"]
+description = "Show the optional pinned LLVM installation plan without downloading it"
+run = "python tools/llvm/setup.py --plan"
+
+[tasks."setup:llvm"]
+description = "Explicitly install the pinned LLVM prefix; may download large archives or build source"
+tools = { "aqua:Kitware/CMake" = "4.4.5", "aqua:ninja-build/ninja" = "1.13.2" }
+run = "python tools/llvm/setup.py"
+
+[tasks."test:llvm"]
+description = "Verify the optional LLVM prefix and run a C-API static-link smoke test, not Rill acceptance"
+run = "python tools/llvm/check.py --smoke"
+
+[tasks."experiment:backend"]
+description = "Reproduce the original macOS/AArch64 standalone backend experiment"
+tools = { "core:node" = "26.13.0" }
+run = "llvm_bin=$(python tools/llvm/check.py --bin-path) && python experiments/backend-30/run.py --llvm \"$llvm_bin\" --linker \"$llvm_bin/wasm-ld\" --fetch-tools --tools target/experiments/backend-tools --out target/experiments/backend"
+
+[tasks."experiment:sqlite"]
+description = "Reproduce the Darwin SQLite native fixture without overwriting its archived report"
+run = "mkdir -p target/experiments && python experiments/sqlite-provider/reference/run.py --report target/experiments/sqlite-results.md"
+
+[tasks."verify:release"]
+description = "Require infrastructure and all product suites; unavailable product checks fail the release gate"
+run = ["mise run check", "mise run build", "mise run test:language", "mise run test:stdlib", "mise run test:runtime", "mise run test:lsp-client"]

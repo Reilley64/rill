@@ -4,6 +4,7 @@ Rill's design is recorded in the documents below. Source-ticket approval, RFC ac
 
 ## Start here
 
+- Use the [development guide](development.md) for the Rust workspace, mise tasks and scaffold limits.
 - Read [GLOSSARY.md](../GLOSSARY.md) for Rill's terms.
 - Use the [RFC conventions and template](rfcs/README.md) when writing a proposal.
 - Read [ADRs](adr/) for decisions and their rationale. Some historical numbers repeat. Identify an ADR by its full filename and decision link.
@@ -35,4 +36,4 @@ HTTP work is tracked in [#39](https://github.com/Reilley64/rill/issues/39). Its 
 
 ## Agent guidance
 
-[AGENTS.md](../AGENTS.md) routes coding agents to issue, domain and repository-maintenance instructions. Those instructions are separate from the language and library contracts.
+[AGENTS.md](../AGENTS.md) routes coding agents to issue, domain, toolchain and repository-maintenance instructions. Those instructions are separate from the language and library contracts.

@@ -12,6 +12,14 @@ These reports predate later Rill decisions. Their original report-only commits a
 - [Rust-to-LLVM bindings](rust-llvm-bindings.md)
 - [References and mutation without lifetime annotations](safe-references-without-lifetimes.md)
 
+## Repository and toolchain setup
+
+- [Compiler, standard-library and LSP repository layouts](compiler-stdlib-lsp-repository-layouts.md) examines source ownership, semantic reuse, tests and releases across six language ecosystems.
+- [mise toolchain management](mise-toolchain-management.md) examines tool/version/task ownership, platform prerequisites and unresolved LLVM 23 installation choices.
+- [LLVM 23 provisioning options](0046-llvm23-provisioning-options.md) checks actual upstream and Conda artifacts, native prerequisites and static-link verification requirements.
+
+These reports support the setup interview. [#46](https://github.com/Reilley64/rill/issues/46) records accepted answers and open decisions; research suggestions alone do not authorize implementation.
+
 ## Backend experiments
 
 Start with the [runtime-validation summary](0030-runtime-validation.md). The earlier [backend experiment](0030-backend-experiments.md), [mechanism research](0030-backend-mechanisms.md), [portable candidate survey](0030-portable-suspension-candidates.md) and [portable experiment report](0030-portable-suspension-experiments.md) retain earlier findings and limits. The [runnable programs and recorded artifacts](../../experiments/backend-30/README.md) are separate from these summaries.

@@ -1,0 +1,6 @@
+/target/
+/mise.local.toml
+/mise.local.lock
+/.mise/locks/mise.local/
+__pycache__/
+*.py[cod]

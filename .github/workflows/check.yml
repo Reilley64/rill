@@ -1,0 +1,31 @@
+name: Scaffold checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.11.8
+          install: false
+          cache: false
+      - run: mise install --locked
+      - run: mise run check
+      - run: mise run build:scaffold
+      - run: mise run check:ci
+      - name: Locks must remain unchanged
+        run: git diff --exit-code -- Cargo.lock mise.lock tools/python/uv.lock

@@ -1,0 +1,20 @@
+[workspace]
+members = [
+    "crates/compiler",
+    "crates/ide",
+    "crates/lsp",
+    "crates/codegen-llvm",
+    "crates/cli",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+compiler = { path = "crates/compiler" }
+ide = { path = "crates/ide" }
+lsp = { path = "crates/lsp" }
+codegen-llvm = { path = "crates/codegen-llvm" }
