@@ -121,6 +121,12 @@ NetControl uses ordinary public fields and captures a stable by-value descriptor
 
 Live networking initially targets Linux/macOS; portable values and typecheck-visible names remain on wasm32-wasip1 with typed Unsupported live requests, not new imports/preview2/inherited capabilities. Source/static/reference checks are not Rill execution or native/provider/protocol acceptance. #28/#30 and #38–#40 retain formal/native/backend/TLS/HTTP/SQL gates. Existing older prototype decisions remain subject to the precedence banner above.
 
+## TLS and the private provider boundary (#38)
+
+[ADR 0025](../docs/adr/0025-explicit-tls-trust-and-private-provider-boundary.md), the [TLS contract](../docs/tls-contracts.md) and [private operation/ownership boundary](../docs/tls-native-boundary.md) record explicitly consolidated Q1–Q80. [Prototype27](27-tls/README.md) separates portable intended-valid value expectations, uncalled secure client/server helpers, rejected boundaries and an entirely NOT RUN native acceptance inventory. Python reference assertions are not Rill parsing/typechecking/execution or crypto/security proof.
+
+The deliberately narrow profile uses explicit roots/strict offline CRLs and immutable owned snapshots, TLS1.3/default or hardened1.2, canonical plaintext progress, authenticated EOF, controlled poisoning and actual native release. No automatic browser/system trust, TLS halves, plaintext downgrade, hidden reconnect or general FFI. #39 must account for the single exclusive TLS driver. [#44](https://github.com/Reilley64/rill/issues/44) is the separate delivery/support gate; #30's newer approved record/dispatcher direction and #43's SQL design remain open implementation obligations, not TLS proof. No commit/push or RFC acceptance is implied.
+
 ## Open questions
 
 - The combined checker/runtime is a proposal, not an implemented or demonstrated-sound system. ADR 0009 records #16's policies, but #28 still owes explicit checking, cleanup, and commit rules plus adversarial examples; the mutation/concurrency safety documents are hand-checked source material, not executed fixtures. ADR 0010 records #17's module/visibility policy; #23 records the [interface catalogue](../docs/standard-library-contracts.md), #24 owns diagnostics, and #28 owns explicit resolver/checker/runtime validation; #30 separately gates backend mechanisms. The new multi-file fixture is also hand-checked, not executed. (#15, #16, #17)

@@ -48,6 +48,7 @@ The arity schemas below describe exactly the **2-, 3-, and 4-item implementation
 | `std::cancel` | [#33 sources, tokens, links, guard and poll/wait/select observation](clock-cancellation-contracts.md) |
 | `std::io` | IoError, IoErrorKind, kind, nativeCode, readStdin, writeStdout, writeStderr, flushStdout, flushStderr; [#32 canonical streaming/progress/buffering extension](https://github.com/Reilley64/rill/issues/32#issuecomment-6886715215) and its [scoped noBorrow refinement](https://github.com/Reilley64/rill/issues/32#issuecomment-6886862143) |
 | `std::net` | [Address values, TCP owners/halves, resolution/dialing, NetError, NetControl and controlled canonical I/O](networking-contracts.md) |
+| `std::tls` | [Explicit trust/CRL/credential snapshots, owned client/server handshakes and canonical I/O](tls-contracts.md); [private provider boundary](tls-native-boundary.md) |
 | `std::fs` | readFile, writeFile; uses the canonical std::io::IoError |
 | `std::env` | Inputs, EnvError, EnvErrorKind, EnvPosition; inputs, fromParts, argsBytes, varsBytes, getBytes, args, vars, get, kind, position |
 | `std::random` | randomBytes, fillRandom, RandomError, RandomErrorKind, kind, nativeCode |
@@ -377,6 +378,14 @@ NetControl and configuration use ordinary public fields under #15 binding/exclus
 Dialing resolves one batch, interleaves families, uses at most two live attempts including cleanup, defaults to 250 ms spacing/ten-second attempt caps, forwards one optional overall absolute deadline, and retains the chosen winner through loser cleanup. Defaults/options, typed errors/ordered original failure envelopes and preflight/selection rules are fully specified in the linked contract. No hidden replay, protocol probes, IDNA, provider/FFI selection or stronger return-time guarantee is implied.
 
 Live v0 networking is native Linux/macOS; portable values and typecheck-visible APIs remain on wasm32-wasip1, with typed Unsupported live operations rather than new imports/preview2/inherited-socket handoff. The 32 intended-valid expectations and all real-native matrix rows are hand-checked/NOT RUN, not Rill execution or support/security proof. #28/#30 and the TLS/HTTP/SQL consumers retain their formalization/provider/protocol gates.
+
+## Confirmed TLS extension (#38)
+
+[ADR 0025](adr/0025-explicit-tls-trust-and-private-provider-boundary.md), the [TLS contract](tls-contracts.md), [closed native boundary](tls-native-boundary.md) and [prototype27](../prototypes/27-tls/README.md) record consolidated Q1–Q80. `std::tls` owns eligible canonical streams, immutable explicitly copied snapshots and consumed handshake inputs. Independently selected read/write/flush/close error types each need display/noBorrow/sendable/shareable for unique retained causes; this does not change primitive I/O or impose global noBorrow(S). Native opacity is not property evidence.
+
+TLS1.3 default and hardened explicit1.2, explicit CA roots and strict offline full-path CRLs, SAN reference verification, controlled SNI/ALPN, checked wall time and typed Unsupported Wasm provider operations are deliberate policy. No OS/bundled trust, online/soft-fail revocation, encrypted key containers, TLS split, insecure override, general FFI or implicit dial/replay. NetControl, actual plaintext prefixes and joined native release remain explicit; admitted failure poisons, TCP EOF is not close-notify, disposal is not graceful close. #39 must not assume independent duplex TLS drivers or zero-configuration HTTPS trust.
+
+Controlled private OpenSSL3.5 LTS is a conditional provider direction, not passed current conformance or compiler/runtime integration. [#44](https://github.com/Reilley64/rill/issues/44) gates delivery/TLS support/v0 readiness; #30/#43 stay independently OPEN and #28 drafting is not acceptance. All prototype/source/reference checks are hand/static, not Rill/native/security tests. No actual layouts/generated bindings, target support or public native-extension authority follows from the semantic operation catalogue.
 
 ## 11. Validation and follow-through
 

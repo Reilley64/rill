@@ -1,0 +1,321 @@
+// #38 Q1–Q80: intended-valid design fixtures, NOT RUN by a Rill toolchain.
+// Expectations are provider-free values/options only. No fabricated TLS errors,
+// credentials/configs/native resources, certificate parsing or live I/O in expects.
+import std::panic;
+import std::result::Result;
+import std::option::Option;
+import std::error::value;
+import std::compare::eq;
+import std::hash::hash;
+import std::collection::{List, push};
+import std::bytes::{Bytes, length, get};
+import std::string::append;
+import std::net::{IpAddress, ipv4, ipv6, TcpStream, NetControl};
+import std::time::SignedDuration;
+import std::tls::{
+  ServerName, AlpnId, TlsError, TlsErrorKind, kind,
+  dnsServerName, ipServerName, dnsName, ipAddress, alpnId, alpnBytes,
+  TlsProfile, SniMode, AlpnPolicy, ClientAuth, ClientOptions, ServerOptions,
+  clientOptions, serverOptions, TrustPurpose, TlsStream,
+  credentialsFromPem, trustAnchorsFromPem, crlsFromPem,
+  clientConfigWithOptions, serverConfigWithOptions,
+  clientHandshakeWithControl, serverHandshakeWithControl,
+};
+
+function mustTls<T>(result: Result<T, TlsError>): T {
+  guard let parsed = result else (error) { panic(&"invalid TLS value fixture"); }
+  return parsed;
+}
+
+function invalid<T>(result: Result<T, TlsError>): bool {
+  guard let parsed = result else (error) {
+    return match (kind(value(&error))) { TlsErrorKind.InvalidInput => true, _ => false };
+  }
+  return false;
+} // No operation/phase enum spelling or diagnostic text is invented here.
+
+function dnsIs(name: &ServerName, expected: &string): bool {
+  return match (dnsName(name)) {
+    Option.Some(text) => eq(text, expected),
+    Option.None => false,
+  };
+}
+
+function dnsTextIs(input: &string, expected: &string): bool {
+  let name = mustTls(dnsServerName(input));
+  return dnsIs(&name, expected);
+}
+
+function detachedName(): ServerName {
+  let source: string = "MiXeD.Example.";
+  return mustTls(dnsServerName(&source));
+}
+
+function detachedCopy(): ServerName {
+  let original = detachedName();
+  return copy(&original);
+}
+
+function sameDnsIdentity(): bool {
+  let first = mustTls(dnsServerName(&"EXAMPLE.TEST."));
+  let second = mustTls(dnsServerName(&"example.test"));
+  let duplicate = copy(&first);
+  return eq(&first, &second) && hash(&first) == hash(&second)
+    && eq(&first, &duplicate) && hash(&first) == hash(&duplicate);
+}
+
+function dnsNotIp(): bool {
+  let name = detachedName();
+  return dnsIs(&name, &"mixed.example")
+    && (match (ipAddress(&name)) { Option.None => true, _ => false });
+}
+
+function v4Identity(): bool {
+  let address = IpAddress.V4(ipv4([192u8, 0u8, 2u8, 1u8]));
+  let name = ipServerName(address);
+  let duplicate = copy(&name);
+  return (match (ipAddress(&name)) {
+    Option.Some(observed) => eq(&observed, &address),
+    Option.None => false,
+  }) && (match (dnsName(&name)) { Option.None => true, _ => false })
+    && eq(&name, &duplicate) && hash(&name) == hash(&duplicate);
+}
+
+function v6Identity(): bool {
+  let address = IpAddress.V6(ipv6([8193u16, 3512u16, 0u16, 0u16, 0u16, 0u16, 0u16, 1u16]));
+  let name = ipServerName(address);
+  let duplicate = copy(&name);
+  return (match (ipAddress(&name)) {
+    Option.Some(observed) => eq(&observed, &address),
+    Option.None => false,
+  }) && (match (dnsName(&name)) { Option.None => true, _ => false })
+    && eq(&name, &duplicate) && hash(&name) == hash(&duplicate);
+}
+
+function mappedIsNotV4(): bool {
+  let v4 = ipServerName(IpAddress.V4(ipv4([192u8, 0u8, 2u8, 1u8])));
+  let mapped = ipServerName(IpAddress.V6(ipv6([0u16, 0u16, 0u16, 0u16, 0u16, 65535u16, 49152u16, 513u16])));
+  return !eq(&v4, &mapped) && (match (ipAddress(&mapped)) {
+    Option.Some(IpAddress.V6(address)) => true,
+    _ => false,
+  }); // Unequal keys need not have unequal hashes.
+}
+
+function rejectsEmpty(): bool {
+  return invalid(dnsServerName(&"")) && invalid(dnsServerName(&"."));
+}
+
+function rejectsRootDots(): bool {
+  return invalid(dnsServerName(&"example.test.."))
+    && invalid(dnsServerName(&".example.test"))
+    && invalid(dnsServerName(&"example..test"));
+}
+
+function rejectsEdges(): bool {
+  return invalid(dnsServerName(&"-example.test"))
+    && invalid(dnsServerName(&"example-.test"))
+    && invalid(dnsServerName(&"example.-test"));
+}
+
+function rejectsDecorations(): bool {
+  return invalid(dnsServerName(&" example.test"))
+    && invalid(dnsServerName(&"example.test\t"))
+    && invalid(dnsServerName(&"example.test:443"))
+    && invalid(dnsServerName(&"[::1]"));
+}
+
+function rejectsNumericLooking(): bool {
+  return invalid(dnsServerName(&"123"))
+    && invalid(dnsServerName(&"127.1"))
+    && invalid(dnsServerName(&"999.999.999.999"))
+    && invalid(dnsServerName(&"1.2.3.4.5"))
+    && invalid(dnsServerName(&"0x"))
+    && invalid(dnsServerName(&"0Xf.0x.010."));
+} // #34's all-components decimal-or-0x+hex* guard, not IP parsing.
+
+function repeatedText(part: &string, count: u64): string {
+  let mut text: string = "";
+  let mut index = 0u64;
+  while (index < count) {
+    append(&mut text, part);
+    index = index + 1u64;
+  }
+  return text;
+}
+
+function labelBounds(): bool {
+  let valid = repeatedText(&"a", 63u64);
+  let invalidLabel = repeatedText(&"a", 64u64);
+  return dnsTextIs(&valid, &valid) && invalid(dnsServerName(&invalidLabel));
+}
+
+function longName(lastLabel: u64): string {
+  let a = repeatedText(&"a", 63u64);
+  let b = repeatedText(&"b", 63u64);
+  let c = repeatedText(&"c", 63u64);
+  let d = repeatedText(&"d", lastLabel);
+  return `${a}.${b}.${c}.${d}`;
+}
+
+function totalBounds(): bool {
+  let valid = longName(61u64); // 63 + 63 + 63 + 61 + 3 = 253.
+  let rooted = `${valid}.`;
+  let tooLong = longName(62u64);
+  return dnsTextIs(&valid, &valid) && dnsTextIs(&rooted, &valid)
+    && invalid(dnsServerName(&tooLong));
+}
+
+function filledBytes(count: u64, byteValue: u8): Bytes {
+  let mut values: List<u8> = [];
+  let mut index = 0u64;
+  while (index < count) {
+    push(&mut values, byteValue);
+    index = index + 1u64;
+  }
+  return Bytes(values);
+}
+
+function byteIs(bytes: &Bytes, index: u64, expected: u8): bool {
+  return match (get(bytes, index)) {
+    Option.Some(observed) => observed == expected,
+    Option.None => false,
+  };
+}
+
+function nulAlpn(): bool {
+  let id = mustTls(alpnId(Bytes([0u8])));
+  return length(alpnBytes(&id)) == 1u64 && byteIs(alpnBytes(&id), 0u64, 0u8);
+}
+
+function binaryAlpn(): bool {
+  let id = mustTls(alpnId(Bytes([255u8, 0u8, 128u8])));
+  return length(alpnBytes(&id)) == 3u64 && byteIs(alpnBytes(&id), 0u64, 255u8)
+    && byteIs(alpnBytes(&id), 1u64, 0u8) && byteIs(alpnBytes(&id), 2u64, 128u8);
+}
+
+function maximumAlpn(): bool {
+  let id = mustTls(alpnId(filledBytes(255u64, 255u8)));
+  return length(alpnBytes(&id)) == 255u64 && byteIs(alpnBytes(&id), 254u64, 255u8)
+    && (match (get(alpnBytes(&id), 255u64)) { Option.None => true, _ => false });
+}
+
+function rejectsAlpnSizes(): bool {
+  return invalid(alpnId(Bytes([]))) && invalid(alpnId(filledBytes(256u64, 0u8)));
+}
+
+function detachedAlpnCopy(): AlpnId {
+  let original = mustTls(alpnId(Bytes([104u8, 116u8, 116u8, 112u8, 47u8, 49u8, 46u8, 49u8])));
+  return copy(&original);
+}
+
+function alpnIdentity(): bool {
+  let first = detachedAlpnCopy();
+  let second = mustTls(alpnId(Bytes([104u8, 116u8, 116u8, 112u8, 47u8, 49u8, 46u8, 49u8])));
+  let other = mustTls(alpnId(Bytes([72u8, 50u8])));
+  return eq(&first, &second) && hash(&first) == hash(&second) && !eq(&first, &other);
+}
+
+function defaultClient(): bool {
+  let options: ClientOptions = clientOptions();
+  return (match (options.profile) { TlsProfile.Modern => true, _ => false })
+    && (match (options.sni) { SniMode.Auto => true, _ => false })
+    && (match (options.alpn) { AlpnPolicy.Disabled => true, _ => false })
+    && (match (options.credentials) { Option.None => true, _ => false });
+}
+
+function defaultServer(): bool {
+  let options: ServerOptions = serverOptions();
+  return (match (options.profile) { TlsProfile.Modern => true, _ => false })
+    && (match (options.alpn) { AlpnPolicy.Disabled => true, _ => false })
+    && (match (options.clientAuth) { ClientAuth.None => true, _ => false });
+}
+
+function editClientBeforeConsumption(): bool {
+  let mut options: ClientOptions = clientOptions();
+  options.profile = TlsProfile.Compatible;
+  options.sni = SniMode.Omit;
+  options.alpn = AlpnPolicy.Optional([mustTls(alpnId(Bytes([0u8])))]);
+  return (match (options.profile) { TlsProfile.Compatible => true, _ => false })
+    && (match (options.sni) { SniMode.Omit => true, _ => false })
+    && (match (options.alpn) { AlpnPolicy.Optional(ids) => true, _ => false });
+} // Pure record edits only; no config construction and no copy(Options) claim.
+
+function editServerBeforeConsumption(): bool {
+  let mut options: ServerOptions = serverOptions();
+  options.profile = TlsProfile.Compatible;
+  options.alpn = AlpnPolicy.Required([mustTls(alpnId(Bytes([0u8])))]);
+  return (match (options.profile) { TlsProfile.Compatible => true, _ => false })
+    && (match (options.alpn) { AlpnPolicy.Required(ids) => true, _ => false })
+    && (match (options.clientAuth) { ClientAuth.None => true, _ => false });
+}
+
+// Uncalled intended-valid composition helpers, NOT expectations or real fixtures.
+// Caller supplies an ALREADY connected owner, provisioned PEM owners, an exact
+// positive whole-second maxAge and explicit control. No claim these inputs exist
+// or form valid certificates/CRLs. Both helpers require the same http/1.1 ALPN.
+// This pair uses mTLS: client credentials are sent only upon the server request.
+function secureClient(
+  connected: TcpStream, intendedName: ServerName,
+  serverRootsPem: Bytes, serverCrlsPem: Bytes,
+  clientChainPem: Bytes, clientKeyPem: Bytes,
+  maxAge: SignedDuration, control: NetControl,
+): Result<TlsStream<TcpStream>, TlsError> {
+  let anchors = trustAnchorsFromPem(serverRootsPem, TrustPurpose.ServerAuth)?;
+  let crls = crlsFromPem(serverCrlsPem, maxAge)?;
+  let credentials = credentialsFromPem(clientChainPem, clientKeyPem)?;
+  let http = alpnId(Bytes([104u8, 116u8, 116u8, 112u8, 47u8, 49u8, 46u8, 49u8]))?;
+  let mut options = clientOptions();
+  options.alpn = AlpnPolicy.Required([http]);
+  options.credentials = Option.Some(credentials);
+  let config = clientConfigWithOptions(anchors, crls, options)?;
+  return clientHandshakeWithControl(connected, intendedName, config, Bytes([]), control);
+}
+
+function secureServer(
+  connected: TcpStream, serverChainPem: Bytes, serverKeyPem: Bytes,
+  clientRootsPem: Bytes, clientCrlsPem: Bytes,
+  maxAge: SignedDuration, control: NetControl,
+): Result<TlsStream<TcpStream>, TlsError> {
+  let credentials = credentialsFromPem(serverChainPem, serverKeyPem)?;
+  let anchors = trustAnchorsFromPem(clientRootsPem, TrustPurpose.ClientAuth)?;
+  let crls = crlsFromPem(clientCrlsPem, maxAge)?;
+  let http = alpnId(Bytes([104u8, 116u8, 116u8, 112u8, 47u8, 49u8, 46u8, 49u8]))?;
+  let mut options = serverOptions();
+  options.alpn = AlpnPolicy.Required([http]);
+  options.clientAuth = ClientAuth.Required { anchors: anchors, crls: crls };
+  let config = serverConfigWithOptions(credentials, options)?;
+  return serverHandshakeWithControl(connected, config, Bytes([]), control);
+} // Postfix ? forwards the same TlsError envelope; no NetError conversion.
+
+expect dnsTextIs(&"ExAmPlE.TeSt", &"example.test");
+expect dnsTextIs(&"ExAmPlE.TeSt.", &"example.test");
+expect dnsTextIs(&"LOCALHOST", &"localhost");
+expect dnsTextIs(&"123.Example", &"123.example");
+expect dnsTextIs(&"XN--A.Example.", &"xn--a.example"); // Opaque LDH, NOT IDNA validation.
+expect sameDnsIdentity();
+expect dnsIs(&detachedName(), &"mixed.example");
+expect dnsIs(&detachedCopy(), &"mixed.example");
+expect dnsNotIp();
+expect v4Identity();
+expect v6Identity();
+expect mappedIsNotV4();
+expect rejectsEmpty();
+expect invalid(dnsServerName(&"example\u{0}.test"));
+expect invalid(dnsServerName(&"_service.example"));
+expect invalid(dnsServerName(&"*.example.test"));
+expect invalid(dnsServerName(&"caf\u{E9}.example"));
+expect rejectsRootDots();
+expect rejectsEdges();
+expect rejectsDecorations();
+expect rejectsNumericLooking();
+expect labelBounds();
+expect totalBounds();
+expect nulAlpn();
+expect binaryAlpn();
+expect maximumAlpn();
+expect rejectsAlpnSizes();
+expect alpnIdentity();
+expect defaultClient();
+expect defaultServer();
+expect editClientBeforeConsumption();
+expect editServerBeforeConsumption();

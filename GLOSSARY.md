@@ -56,6 +56,10 @@ _Avoid_: error-mapping callback, propagation report
 A borrowed TCP view carrying explicit network control for the I/O operations it permits. It retains access dependencies without owning closure of the underlying resource.
 _Avoid_: new connection, owning socket, ambient context
 
+**Controlled TLS view**:
+A borrowed TLS-stream view carrying explicit network control for its canonical I/O. It retains stream, clock and token dependencies without owning consuming close.
+_Avoid_: owning connection, ambient context, independent TLS direction
+
 **Dispose**:
 The `dispose` overload for a type: extra cleanup followed by disposal of its remaining owned fields. Calling it directly consumes the value early; moved or already disposed fields are not disposed again.
 _Avoid_: drop, destructor, deinit, finalizer
@@ -211,6 +215,14 @@ _Avoid_: String class, byte buffer, implicitly shared string
 **String view**:
 Read-only borrowed text written `&string`, which may cover a whole string or substring. Duplicating its descriptor retains the backing-source dependencies rather than producing owned text.
 _Avoid_: str type, owned substring, shared owner
+
+**TLS accepted prefix**:
+The current-input plaintext a TLS stream has accepted into its bounded owned storage. It is distinct from produced ciphertext, transport acceptance and peer application receipt.
+_Avoid_: delivered message, acknowledged bytes, ciphertext count
+
+**TLS reference name**:
+The independently chosen DNS or IP service identity a Rill client verifies, represented by ServerName. It is not the connected address, resolver canonical name or server-observed SNI.
+_Avoid_: routing hostname, authenticated client account, resolver identity
 
 **Timestamp**:
 A Unix wall-time value with nanosecond precision, distinct from a monotonic Instant and a civil date/time. A numeric representation does not imply clock accuracy.
