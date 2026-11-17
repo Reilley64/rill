@@ -56,7 +56,7 @@ class ToolSelectionTests(unittest.TestCase):
             ("rustc", "--print", "sysroot"): str(root),
             ("cargo", "--version"): f"cargo {rust} (fixture)",
             ("uv", "--version"): f"uv {uv_version or uv} (fixture)",
-            **{("mise", "which", tool): str(path) for tool, path in paths.items()},
+            ("mise", "which", "uv", "--tool", "aqua:astral-sh/uv@" + uv): str(paths["uv"]),
         }
         with patch.object(doctor, "capture", side_effect=lambda *args: answers[args]), \
                 patch.object(doctor.platform, "system", return_value="Linux"), \
@@ -90,7 +90,8 @@ class WorkspaceTests(unittest.TestCase):
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
             cwd=doctor.ROOT, text=True))
         allowed = {"compiler": set(), "ide": {"compiler"}, "lsp": {"ide"},
-                   "codegen-llvm": {"compiler"}, "cli": {"compiler", "lsp", "codegen-llvm"}}
+                   "codegen-llvm": {"compiler"}, "cli": {"compiler", "lsp", "codegen-llvm"},
+                   "runtime": set()}
         packages = {package["name"]: package for package in metadata["packages"]}
         self.assertEqual(set(packages), set(allowed))
         for name, package in packages.items():

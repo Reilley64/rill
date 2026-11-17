@@ -31,7 +31,7 @@ depends = ["check:rust", "check:docs", "check:fixtures", "check:tools"]
 
 [tasks."check:rust"]
 depends = ["doctor"]
-run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli --all-targets -- -D warnings", "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli"]
+run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p runtime --all-targets -- -D warnings", "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p runtime"]
 
 [tasks."check:docs"]
 depends = ["doctor"]
