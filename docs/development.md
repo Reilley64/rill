@@ -67,7 +67,9 @@ These are task groups, not alternate Rust compiler profiles. Invoke each task as
 
 Both workflows use explicit runner-local Cargo and Rustup homes before mise installs tools. Nested mise tasks then retain the same Rustup provider, instead of losing the runner's external provider during tool lookup. Workflow names and YAML layout follow the [GitHub automation guide](../.github/AGENTS.md).
 
-The 2026-11-17 [hosted scaffold run](https://github.com/Reilley64/rill/actions/runs/44001670793) passed Linux x86-64/AArch64 and macOS x86-64. macOS AArch64 failed during nested mise tool lookup. Native acceptance exited 2 as unavailable on every profile. Local reproduction confirms the tool-lookup failure and the explicit-home correction. Hosted validation of that correction remains unrun.
+The 2026-11-17 [initial hosted scaffold run](https://github.com/Reilley64/rill/actions/runs/44001670793) passed Linux x86-64/AArch64 and macOS x86-64. macOS AArch64 failed during nested mise tool lookup. Local reproduction confirmed the tool-lookup failure and the explicit-home correction.
+
+The [follow-up hosted run](https://github.com/Reilley64/rill/actions/runs/44006663293) at `37eed9f` passed all four profiles, including macOS AArch64. [Native acceptance](https://github.com/Reilley64/rill/actions/runs/44006663069) still exited 2 as unavailable on every profile. These results cover scaffold and M1 tests, not complete Rill execution or backend acceptance.
 
 Unavailable product tasks must not become successful empty suites. Infrastructure tests can prove routing, nonzero unavailable responses or manifest constraints; they cannot prove language semantics. Consult [test ownership](../tests/README.md) before adding acceptance tests.
 
