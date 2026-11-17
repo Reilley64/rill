@@ -61,7 +61,7 @@ Before final review, these commands passed on macOS 27.0.1 AArch64 with mise 202
 - `mise exec -- cargo tree --locked -p compiler --no-default-features`, showing no compiler dependencies.
 - `git diff --check` and the baseline preservation audit.
 
-User-global CMake/Ninja/Go lock warnings did not change repository locks or selected base tools. Workflows did not change, so check:ci was not run. Other-host profiles, product build, language/stdlib/runtime/client suites, release verification, LLVM provisioning/smoke and native experiments were not run. Existing infrastructure tests preserve unavailable product-command behavior. None of these observations establishes Rill execution.
+User-global CMake/Ninja/Go lock warnings did not change repository locks or selected base tools. Workflows did not change, so check:ci was not run. Other-host profiles were not run locally. Product build, language/stdlib/runtime/client suites, release verification, LLVM provisioning/smoke and native experiments were not run locally either. The later hosted evidence appears below. Existing infrastructure tests preserve unavailable product-command behavior. None of these observations establishes Rill execution.
 
 Publication identifies the committed revision in #57 and the scoped draft PR. The independent review results follow below.
 
@@ -82,6 +82,16 @@ No documented-standard violation was identified. One low-priority Duplicated Cod
 No findings were identified. The review checked the approved procedure against actual M3 identities, bindings, collection and retained-source behavior. It confirmed the annotation-only completion boundary and the separation of incomplete/resource outcomes from source rejection.
 
 The correction was verified locally without another delegated review. After the correction, test:compiler, test, check and build:scaffold all passed again through mise. The compiler count remained 158 and the documentation check again found zero errors across 1625 destinations. No earlier-stage fix or policy change was required. #57 and the draft PR identify the publication revision. Formal ASD-STE100 dictionary compliance remains unverified.
+
+## Hosted publication evidence
+
+The [completed PR scaffold run](https://github.com/Reilley64/rill/actions/runs/44056791144) tested implementation revision `7602ed55f8b344646218e8cc0af8089bfee18efb`. Every configured job passed: ubuntu-24.04, ubuntu-24.04-arm, macos-15 and macos-15-intel. Inspected logs show all 20 M4.1 tests passing on each profile. The jobs also passed check, build:scaffold, check:ci and committed-lock preservation.
+
+The [completed native-acceptance run](https://github.com/Reilley64/rill/actions/runs/44056790855) tested the same implementation revision. All four jobs failed. Each inspected log shows the unchanged unavailable test:runtime gate and process exit 2. These native/runtime gates remain failed, not passed or waived. Release verification did not run after that failure.
+
+The checks used the workflow-pinned mise 2026.11.8. These results establish the named scaffold/compiler tests only. They do not establish runtime, target-backend, library execution, client or release acceptance. They supersede the initial incomplete hosted-check observations in #57 and PR #58, not historical local results.
+
+This follow-up changes only the acceptance record. It does not claim that its later documentation commit has already completed hosted checks. PR #58 remains draft pending owner review and explicit merge authorization. M4.2 work has not started.
 
 ## Remaining milestone boundary
 
