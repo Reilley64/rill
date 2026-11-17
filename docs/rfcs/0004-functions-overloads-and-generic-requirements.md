@@ -161,6 +161,22 @@ A structurally admitted prelude declaration with the wrong signature rejects thi
 
 The [library catalogue](../standard-library-contracts.md#2-callable-and-ownership-evidence) supplies the existing contract provenance. These checks do not admit implementations, protected actions or native providers. A signature match proves neither copyability nor correct disposal behavior. It grants no runtime trust.
 
+### Proposed M4.3 explicit standalone calls
+
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) proposes this bounded call procedure. Owner approval is pending. Full RFC status and earlier approvals remain unchanged.
+
+Resolve a direct standalone callee through the caller's lexical/module context. Preserve its canonical function identity. Qualification uses installed exports, without filesystem probes or child autoload.
+
+A nongeneric standalone callee supplies its declared parameter and result types. A generic call in this slice must supply every type argument explicitly. Elaborate those arguments in the caller's type environment. Use one ordered substitution across the complete signature and argument vector.
+
+Check value arity and every argument against the substituted parameter type. Declared parameter context can establish literal widths. A desired result only checks the resulting signature; it cannot select another function or retry another body.
+
+Check every standalone body symbolically once against its own declaration. A call uses the declared signature rather than inspecting the callee's body. Runtime recursion is not recursive evidence search. Concrete callers do not repair an unconstrained generic body's primitive operations.
+
+A body-less family is not a standalone fallback. Ordinary family selection, function values, callable invocation, callbacks, requirements, defaults and omitted generic inference remain incomplete until their owning later procedures exist. Do not infer a callable signature from implementation counts.
+
+These call facts retain actual type arguments, the shared substitution and original callee/argument/result source sites. They establish no move, implicit copy, access loan, capture property or trusted implementation permission.
+
 ### Bodies, state and invocation
 
 Named functions receive runtime state through parameters. They cannot capture module startup lets or enclosing runtime lets. Arrows can capture state under the ownership rules. Static function and type names are not captured runtime lets.

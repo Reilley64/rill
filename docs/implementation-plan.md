@@ -490,6 +490,100 @@ These are design-checkpoint reviews, not owner approval or final implementation 
 
 The [M4.2 acceptance record](../crates/compiler/tests/m4-2-acceptance.md) maps actual reference-model and compiler tests to the approved procedure. It preserves the distinction between model execution, compiler analysis assertions and Rill execution. M4.3 through M4.8 retain their separate procedure and approval gates. M4.2 does not complete the umbrella or authorize merge.
 
+## M4.3 design checkpoint
+
+### Baseline, scope and authorities
+
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) starts from `dcc4b1390fbbf163b54618a5b4c59151d71fdb9a`, the reviewed M4.2 implementation on the existing branch. All eight slices remain in draft PR #58. No intermediate merge or new PR is required. M4 as a whole remains incomplete, and #56 remains open.
+
+The next procedures are proposed, not approved. No M4.3 compiler/model code or tests have been written. Full RFC statuses, earlier scoped approvals and historical evidence remain unchanged.
+
+[RFC 0003](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m43-scalar-and-static-control-procedure) owns supported scalar contexts, lexical bindings, static places and finite control analysis. [RFC 0006](rfcs/0006-numbers-strings-and-primitive-operations.md#proposed-m43-literal-and-primitive-checking) owns literal/context propagation and primitive operation admission. [RFC 0004](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m43-explicit-standalone-calls) owns explicit standalone calls. [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m43-never-admission) owns the proposed never precision rule.
+
+Existing exact inputs at the baseline include RFC 0001's accepted expectation/control contract, RFC 0002's canonical graph/namespaces/startup/privacy rules, and confirmed syntax/source facts. RFC 0003's initializer/scope and sequencing approvals remain fixed. RFC 0006's explicit-width, signed-minimum, rounding and trap-timing policies remain fixed. This checkpoint must not silently reopen any of them.
+
+### Proposed delivery boundary
+
+Check supported standalone bodies, startup statements of every loaded module and expectations in both modes. Support simple named/wildcard bindings, assignments, blocks, statement/expression conditionals, while, Boolean guards, return and loop transfers. Support primitive literals/operators, names/qualification, references/dereference and direct standalone calls with complete explicit type arguments.
+
+Data construction/rebuilding, field/index/bracket/pattern/match forms, guard-let, for-of, pipes, arrows/interpolation, function values, callable invocation, ordinary families and error operators remain incomplete until their later procedures exist. Nested declaration visibility/hoisting and mutable temporary acquisition remain explicitly assigned to later M4 integration. Unsupported source must not receive a completed body or scalar-stage receipt.
+
+This is the scalar/control portion of M4.3, not a claim that data, family, callback or core protocols are checked. M4.4 supplies data/pattern/variant relations; M4.5/M4.6 supply families and generic/callable evidence; M4.8 supplies remaining core, nested-source and result-use integration. None of those obligations disappears from M4 completion.
+
+### Input/output contract and public TDD seams
+
+```text
+check_scalars(completed M4.2 receipt, limits)
+    -> scoped scalar receipt or rejected/incomplete/resource/request failure
+receipt.body(module, source body owner)
+    -> supported scalar/control completion, declaration context and exit facts
+receipt.node(module, NodeId)
+    -> expression, binding, statement or control facts with original provenance
+```
+
+These are behavioral names. Body owners identify actual function/expectation declarations or the module's startup context. Queries validate the retained capture. Foreign identities, modules and invalid node indices reject as request misuse; absent facts are not invented types.
+
+Expression facts retain canonical static types, source snapshots/spans, expected contexts, binding/callee identities, explicit substitutions and original operand references. Literal facts retain original spelling/decoded provenance and exact range or rounded-bit evidence. Control facts retain actual callable/loop targets and finite exit summaries. Statement facts have no expression value, not an Error type.
+
+Keep private inference slots and blocked-binding causes outside TypeTerm. A known failed initializer preserves its binder identity and error cause. Dependent uses cannot manufacture a valid type or a false missing-name proof. Later statements cannot repair a missing initializer context.
+
+A completed receipt covers only supported scalar typing, lexical/static-place requirements and the approved control proof. Full body/source validity, data/pattern coverage, family selection, generic/callable evidence, result-use, ownership, cleanup, runtime and editor behavior remain unperformed. Static writable/read-only facts are not access loans, physical owner addresses or storage-initialization proofs.
+
+| Public seam | Catches | Does not establish |
+| --- | --- | --- |
+| check_scalars | Whole requested-stage completion, literal/type/name/control findings, unsupported obligations and controlled resources. | Full typed checking, ownership safety or product execution. |
+| body query | Declared result context, expectation/startup boundaries, finite returns/loop exits and explicit unsupported-body refusal. | Termination, arbitrary path-correlation proofs, cleanup or tail-call eligibility. |
+| node query | Canonical expression types, local binding identities, literal evidence, substitutions, access requirements and source control targets. | Moves/copies, loan transfer, capture evidence, runtime effects or editor behavior. |
+
+### Owner decisions requested before code
+
+| Decision | Recommendation and consequence |
+| --- | --- |
+| C1. Primitive admission | Approve the closed RFC 0006 matrix. Char ordering uses scalar code points. Text comparisons observe string, &string and &mut string, including mixed pairs, without consuming or converting views to owners. Deeper descriptor references require explicit dereference; other primitive operations do not implicitly dereference references. No pointer identity, string arithmetic or operator-family dispatch is introduced. |
+| C2. Never precision | Admit canonical never at immediate value expectations without inventing a normal value or changing its actual static type. Do not infer numeric widths or omitted source generic arguments from it alone. Keep declared intermediate result types even when an operand cannot return; dead flow does not repair mismatches. |
+| C3. Finite return/guard proof | Approve the finite Boolean-set and exit procedure. It propagates literals/logical forms and immutable Boolean initializer facts, not arbitrary arithmetic/comparison results, callee bodies or cross-statement correlations. A supported non-void body without a proved absence of fallthrough rejects as insufficient static return coverage. This may reject logically exhaustive separate tests of b and !b; an explicit else structure supplies the supported proof. |
+| C4. Procedures, scope and seams | Approve the four owning sections, contextual constraint procedure, explicit-call substitution, binding/access boundaries, three public TDD seams and direct acceptance below. Preserve all listed unsupported obligations for later M4. Use vertical public-interface TDD, final independent review and required mise checks before committing the slice into PR #58. |
+
+The C3 precision consequence is intentional and requires owner approval. This independent excerpt would fail the proposed return proof despite its runtime logical coverage:
+
+```rill
+function choose(b: bool): i32 {
+  if (b) { return 1i32; }
+  if (!b) { return 2i32; }
+}
+```
+
+The proposed diagnostic means insufficient coverage under the approved finite checking rule, not a recorded runtime fallthrough. It is NotChecked. An explicit if/else with both returns is the positive counterpart. Arithmetic traps remain runtime events; they never become a substitute return proof.
+
+### Planned direct acceptance, not observed results
+
+| Requirement | Positive, rejected and boundary cases | Owning provenance |
+| --- | --- | --- |
+| Local names and canonical identity | Parameters and earlier bindings resolve; inner initialization sees outer names. Reject missing/self-before-introduction uses and same-scope duplicates. Separate namespaces, aliases, private barriers and captures retain correct identities. | Confirmed RFC 0003 scope; RFC 0002; R0502. |
+| Binding context | Explicit annotations and initializer-local context establish types. Later uses do not fix missing widths. Failed initializers retain blocked binder causes, never valid placeholders or false absence. | RFC 0003 bindings and proposed finite constraints. |
+| Numeric literal typing | Context from parameters, returns, operands, scalar joins and annotations; no numeric default. Test all widths, integer bases, suffix conflicts, signed minima through grouping, negative unsigned zero, float ties, overflow-to-infinity rejection and permitted underflow. | RFC 0006 N4/N5, M1 literal facts. |
+| Static errors versus traps | Reject invalid literals/types in skipped and unreachable source. Accept typed arithmetic overflow, zero division and large shifts without evaluating or marking them diverging. | RFC 0006 N6/N7; confirmed trap timing. |
+| Primitive matrix and text | Check every operator category and mismatched width/type. Test char order admission, owned/view/mutable text pairs and explicit descriptor dereference. A same-spelled nominal primitive gains no operation. | Proposed C1; RFC 0006 primitive/text contracts. |
+| References and assignment | Preserve descriptor versus referent types and static access categories. Reject proved read-only writes/acquisition; return incomplete for unclassified mutable temporaries. Check statement-only assignment and compound type context without ownership claims. | RFC 0003 places; RFC 0007 exclusions. |
+| Standalone calls | Complete explicit generic arguments retain one correlated substitution across the signature. Check arity, arguments and result. Runtime function recursion uses declarations, not proof search or caller-body specialization. | RFC 0004 explicit calls; confirmed correlation/inference boundaries. |
+| Unsupported selection/evidence | Ordinary family calls, missing generic inference, defaults, callbacks and requirements remain incomplete. Expected results cannot retry or rank bodies. No requirement or resource uncertainty becomes fallback evidence. | RFCs 0004/0009 and existing M4 stage boundaries. |
+| Joins and never | Established scalar siblings can supply immediate context without width conversion. Canonical never contributes no ordinary join value. Preserve the proposed g(f(stop())) mismatch and missing-context boundaries. Permitted unimplemented variant/callable relations remain incomplete. | RFC 0005 joins and proposed C2. |
+| Control and return coverage | Explicit returns, void fallthrough, never contexts, logical/immutable Boolean facts, while exits and Boolean guards. Reject wrong targets, non-Boolean conditions and failed C3 coverage. Nested loop transfers cannot falsely discharge an outer guard. | RFC 0003 E3/E4/E5 and proposed C3. |
+| Expectations/startup | Check loaded sources in both modes. Expectations require bool without numeric default or hidden fallible return context. Reject startup capture/return escapes; unsupported inner callables are not mistaken for outer targets. | Accepted RFC 0001; RFC 0002 startup rules. |
+| Determinism, provenance and limits | Repeated/relocated contexts retain ordered canonical facts and original Unicode/CRLF/literal evidence. Foreign queries reject. Test long flat expressions/scopes, exact/one-short budgets, retained errors and unsupported-body refusal. | M1 through M4.2, RFC 0010 and explicit resource limits. |
+
+No acceptance row authorizes ownership/runtime assertions as typing evidence. Do not rewrite historical examples as executed results. Any earlier-stage fix needs a direct regression and explanation. M4.3 implementation/model assertions remain NotChecked until real tests exist and run.
+
+### Checkpoint verification
+
+Before independent review, `mise run check:docs` passed 1644 local destinations with zero errors. Added RFC prose passed a local sentence-length scan. Formal ASD-STE100 vocabulary compliance remains unverified. No M4.3 implementation/model execution is claimed.
+
+Independent Standards and Spec reviews covered the five staged documents against `dcc4b1390fbbf163b54618a5b4c59151d71fdb9a`. Standards found one minor instruction-style violation and no heuristic findings. The local correction split the three source-capture prohibitions into separate instructions without changing meaning. Spec found no actionable findings.
+
+Neither reviewer reran tests or documentation checks. Their staged reviews excluded the later local instruction split and this review record. No second delegated review of those editorial changes is claimed. Neither review grants owner approval.
+
+After the correction, `mise run check:docs` again passed 1644 destinations with zero errors. Staged and unstaged diff checks passed. No compiler, model, product, hosted or other-host execution was run for this documentation-only checkpoint.
+
 ## Completion record
 
 The following M1 statement belongs to the original planning baseline. M1/M2 later merged as recorded above; M3 evidence is separate.

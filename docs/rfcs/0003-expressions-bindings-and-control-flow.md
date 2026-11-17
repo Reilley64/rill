@@ -438,6 +438,98 @@ Other discarded values still execute their expressions and required disposal. An
 
 Check unexecuted source as well as executed paths. Invalid literals and type errors do not become valid through short-circuiting or dead-code elimination. A well-typed trapping arithmetic expression panics only when evaluated. Warnings cannot change acceptance or move that trap into an unexecuted path.
 
+### Proposed M4.3 scalar and static-control procedure
+
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) proposes this bounded next stage. Owner approval is pending. Earlier confirmed scope, sequencing and expectation rules remain unchanged. This procedure does not accept the full RFC.
+
+#### Inputs, scope and source identities
+
+Require a completed M4.2 receipt over one retained M3 graph. Reuse the original M1/M2 facts and canonical declaration/type identities. Do not parse again. Do not read live sources. Do not combine captures.
+
+Check supported standalone function bodies, every loaded module's startup statements and each expectation in both execution modes. Ordinary versus test mode changes no static checking rule. Imported startup checking does not imply imported startup execution.
+
+Supported statements are simple named/wildcard bindings, assignment, blocks, statement if, while, Boolean guard, return, break, continue and expression statements. Supported expressions are literals, names/qualification, grouping, primitive operations, references/dereference, conditional expressions and explicit standalone calls.
+
+Named construction/rebuilding, field/index operations, brackets, patterns, match, guard-let, for-of, pipes, arrows, interpolation and error operators retain their later procedures. Nested function/type declarations also remain incomplete until local declaration visibility and checking are specified. Function values and value-callable invocation remain with the callable owner.
+
+An unsupported body/subtree must not receive a completed body fact. Preserve a source obligation and explicitly incomplete secondary diagnostics. Continue independent supported bodies where resources permit. Known unsupported constructs cannot become successfully checked through unreachable-source elimination.
+
+#### Lexical environments and bindings
+
+Keep the type/module and value/function namespaces separate. Named function type binders remain canonical symbolic types. Elaborate body annotations in that binder/module environment using M4.1's type rules. Store additional original-node type uses without mutating earlier receipts.
+
+Resolve local value uses from innermost active scope outward, then through installed module bindings and the explicit prelude. Module qualification traverses installed exports only. It never probes filesystem children or grants private access.
+
+Only already introduced runtime bindings participate in startup's active lexical environment. M3's complete binder inventory is not a runtime-let hoisting rule. A new binding enters scope after checking its initializer; its initializer can read an outer same-spelled binding. Reject duplicate names in one scope, including after an earlier failed initializer. `_` introduces no usable name.
+
+Functions and expectations cannot capture ordinary startup bindings, even when those bindings hold literals. Retain R0502's meaning. Parameters and permitted local values retain their original M3 declaration identities. Static declarations remain available without capturing runtime values.
+
+Keep missing type facts outside the canonical type enum. A failed initializer can retain its binder identity and the original error/obligation that blocked its type. Dependent uses must not invent a type or falsely report an absent binder. An earlier source error does not itself become an unsupported-analysis obligation.
+
+A binding annotation supplies immediate initializer context and fixes its resulting static type. Without one, finish that initializer's inference before later statements. Do not use later assignments or uses to repair missing context. Lexical/type availability is not initialized ownership storage or move validity.
+
+#### Scalar constraints and calls
+
+Use [RFC 0006's proposed literal/primitive procedure](0006-numbers-strings-and-primitive-operations.md#proposed-m43-literal-and-primitive-checking). First collect explicit contexts, fixed operand types and the supported operation's finite relationships. Propagate them before finalizing unresolved literal widths.
+
+Private inference slots are not valid source types. Keep equality/constructor constraints and their source sites separate from published terms. Check structural equations for conflicts and cyclic private inference terms. A completed expression fact contains only fully established canonical types.
+
+When the finite implemented procedure has no permitted anchor, require an annotation. A numeric literal still has no default width. Unsupported generic inference, admissible-but-unimplemented variant/callable relationships and later family/evidence procedures remain incomplete instead of becoming guessed types or fabricated mismatches.
+
+[Explicit standalone calls](0004-functions-overloads-and-generic-requirements.md#proposed-m43-explicit-standalone-calls) use declared signatures and one whole-signature substitution. Expected results do not rank or retry ordinary bodies. Do not inspect a callee's body to strengthen its declared result or control contract.
+
+The proposed [never admission](0005-types-records-enums-and-inference.md#proposed-m43-never-admission) keeps static types separate from normal continuation. It supplies no literal width or missing generic argument. Differing non-never branch types still need their permitted join, even when a condition is known.
+
+For scalar conditional joins, an established branch result can supply shared immediate context to an unresolved sibling literal. It cannot convert an already typed sibling. Two otherwise unanchored numeric branches still need an annotation. Do not use known condition truth to bypass a written branch's type agreement.
+
+#### Places, assignment and access requirements
+
+Retain a distinction between values and places, including read-only versus mutable referent access. Name/place facts identify original binding and expression nodes. They do not establish ownership, backing addresses, access loans or valid source lifetimes.
+
+A read-only borrow wraps its established referent type. Immediate reference context can supply that type for a fresh borrow. Retain the operand's actual type and permitted admission separately. Existing references gain no covariance through this rule.
+
+Borrowing an existing reference's descriptor is not borrowing its referent. Explicit dereference preserves that distinction. Dereference requires an independently established reference constructor and retains its access mode. Never alone cannot guess read-only versus mutable reference access. Do not infer an owner from a logical string view.
+
+A mutable borrow requires a statically writable binding or mutable-reference referent in this slice. Preserve that place's exact referent type. Do not widen a mutable variant borrow to its parent. Reject a proved read-only place. Mutable acquisition from an unclassified temporary remains incomplete, not an invented permission or language prohibition. Later M4 integration must supply its remaining policy.
+
+Assignment requires a statically writable destination and compatible right-hand type. Its destination type supplies immediate context. Compound assignment uses the corresponding primitive matrix and stores that result type. These statements produce no expression value. Record destination/operand source order without executing or duplicating either expression.
+
+Static mutability does not prove loan compatibility, safe replacement, initialized storage or cleanup. Those remain unperformed. No move, implicit copy, disposal or cancellation transition belongs to this procedure.
+
+#### Proposed finite Boolean and exit analysis
+
+Track possible normal Boolean results as the finite sets empty, true, false or both. Boolean literals provide singleton sets without becoming singleton source types. Grouping preserves them and logical negation complements them.
+
+For AND, each false left result contributes false; each true left result contributes the right set. For OR, each true left result contributes true; each false left result contributes the right set. Check both operands' types even when one is skipped.
+
+Immutable Boolean bindings can retain their initializer's set. Parameters, mutable reads and other Boolean-producing operations use both unless they have no normal continuation. Do not evaluate arithmetic/comparisons, inspect callees or infer cross-statement path correlations to refine these sets.
+
+Track normal continuation, returns, loop-targeted breaks/continues and divergence separately. Each target uses its actual source identity. Calls declared with canonical primitive never have no normal continuation. Arithmetic traps do not become statically proved divergence.
+
+A return targets only its current callable. A bare return requires canonical void. Otherwise check the returned expression against the declared result using the permitted type rules. Reject normal returns from never functions. Returns/propagation cannot exit an expectation; unsupported error operators still do not create an implicit callable there.
+
+A break or continue targets the nearest enclosing loop without crossing a callable boundary. A statement if combines selected branch exits under the Boolean sets; a missing else contributes normal continuation when false is possible. Type-check every written branch regardless of its flow contribution.
+
+A while loop evaluates its condition before each iteration. False contributes normal loop exit. True contributes body returns/divergence and breaks targeting this loop. Body normal continuation and this loop's continues lead back to the condition. Consume those local transfers; do not confuse breaks from nested loops with exits from this loop.
+
+A Boolean guard's else block must have no normal continuation, independent of the guard's known truth. Only transfers that leave that else block count. A break from a loop contained wholly inside it does not establish that property.
+
+Check sequential statements even after flow loses normal continuation. Their type/name/target errors remain source errors. They cannot restore a normal path to an already noncontinuing prefix.
+
+A void body can fall through. A non-void body must have no normal fallthrough under this finite analysis. A never body must also have no normal return. Failure of this static proof rejects as insufficient return coverage; it does not claim a witnessed runtime execution.
+
+This proposed precision rule deliberately omits cross-branch correlations. Two separate tests of b and !b do not prove exhaustive return coverage merely because b is unchanged. Use explicit else structure or another supported proof. This owner decision is not an implementation resource limit or an optimizer-dependent rule.
+
+#### Checking outcomes and evidence
+
+Every completed body/node fact retains its canonical type where applicable, source snapshot/span, binding/callee identity, substitutions, expected contexts and static control targets. Statement facts have no expression value; that is not an error placeholder type.
+
+A scalar-stage receipt requires every requested supported context to complete without errors or unresolved obligations. It records data/pattern coverage, family selection, generic/callable evidence, result-use analysis, ownership, cleanup, runtime and editor behavior as unperformed. It is not a checked program or complete typed-stage success.
+
+Unsupported constructs produce Incomplete. Exhausted checked work/storage/depth limits produce ResourceLimit. Known source findings remain in explicitly partial results. Incomplete secondary diagnostics cannot be advertised as exhaustive. Never use unresolved facts or exhausted resources as missing-evidence proofs or successful fallbacks.
+
+Charge source/scope visits, digits, constraints, substitutions, queue operations, Boolean/exit facts and provenance before growth. Use bounded term traversal and iterative processing for flat expression/statement chains. Do not recursively grow the host stack along arbitrarily long binary chains. No source validity, wall-clock or OOM guarantee follows from implementation budgets.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Dependency state |

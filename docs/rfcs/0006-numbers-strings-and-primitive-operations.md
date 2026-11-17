@@ -186,6 +186,48 @@ Folding must preserve acceptance, evaluation order, effects and panic timing. Do
 
 Finite floating arithmetic may produce infinity. That differs from rejecting an overflowing individual finite literal. Strict parsing and numeric conversion also retain their own outcomes below.
 
+### Proposed M4.3 literal and primitive checking
+
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) proposes this procedure and admission matrix. Owner approval is pending. Confirmed spelling, explicit widths and trap timing remain unchanged.
+
+Use M1's retained literal/token facts and original source maps. Do not rescan source grammar or reinterpret parser commitments. A suffix names the actual compiler primitive identity despite source shadowing. A user nominal type with the same spelling is not that primitive.
+
+First collect fixed operand types, explicit annotations, immediate expectations and declared parameter/result contexts. Connect the primitive operation's operand/result relationships. Propagate established context to a fixed point before finalizing unsuffixed literals. Do not emit a missing-width error merely because the other operand has not yet supplied its established type.
+
+A suffixed literal fixes its type before expected-type agreement. An unsuffixed decimal digit literal can use established integer or floating context. Base-prefixed literals require integer context. Fraction/exponent forms require floating context. Do not choose a smallest fitting width, default width or type from value ranges.
+
+A comparison's Boolean result does not establish numeric operand widths. Same-type arithmetic can obtain width from its immediate numeric result context or an independently typed operand. Shift counts use canonical u32 independently of the left operand's integer width.
+
+After context closure, range-check the exact integer magnitude at its established width. Apply the confirmed signed-minimum exception only to a directly negated integer literal, ignoring grouping and trivia. Do not apply it to a computed positive value or subtraction operand. Reject unsigned negation, including negative zero.
+
+Round decimal floating literals directly at the selected width with nearest, ties-to-even. Reject a finite literal that rounds to infinity. Permit subnormal and zero underflow, retaining negative zero under ordinary floating negation. Do not round through another floating width first.
+
+Retain exact original spelling, selected primitive identity and range/rounded-value evidence. Reuse decoded M1 character/text facts and their original spans. Static uninterpolated templates are strings; interpolation remains incomplete until canonical formatting evidence is implemented.
+
+Use the following closed primitive matrix. These are type contracts, not user-overload searches:
+
+| Operation | Inputs and result |
+| --- | --- |
+| Arithmetic +, -, *, /, % | Two equal concrete numeric primitives N, producing N. |
+| Unary minus | Signed integer or floating N, producing N. |
+| Bitwise &, \|, ^, ~ | Equal integer inputs, or one integer for ~, producing that integer type. |
+| Shifts <<, >> | Integer N and u32, producing N. |
+| Logical !, &&, \|\| | Boolean inputs, producing bool. |
+| Equality ==, != | Equal integer/float/bool/char primitives, or the text observation forms below, producing bool. |
+| Relational <, <=, >, >= | Equal numeric primitives, char or the text observation forms below, producing bool. |
+
+The proposed char relation uses Unicode scalar code-point order. It adds no locale or grapheme ordering. This resolves the explicitly unfinished char-operator admission question only if the owner approves it.
+
+Text observation admits string, &string and &mut string operands, including mixed pairs. Each operand denotes its observed extent. Preserve its actual type and source access fact; do not convert a view into an owner. Equality and ordering do not consume operands.
+
+Deeper descriptor references require explicit dereference before comparison. Other primitive operators require their listed primitive types, not implicit reference dereferencing. This is an intrinsic text-observation rule, not an ordinary-call adapter. Complete access and retained-source safety remain unperformed.
+
+Other known operand constructors do not gain a primitive operation through spelling or field shape. The matrix introduces no string arithmetic, Boolean ordering, pointer identity or user-defined operator dispatch. Never admission follows its proposed RFC 0005 rule without supplying a missing numeric width.
+
+Unknown numeric context after the implemented finite constraint procedure requires an annotation. A valid numeric literal without width has R0003 meaning. Individual established literal range/category failure has R0002 meaning. An already typed incompatible value has R0100 meaning. Unsupported later procedures and exhausted budgets remain separate incomplete/resource outcomes.
+
+Do not evaluate arithmetic, comparisons or user functions to check types or control flow. Provable overflow, zero division and excessive shifts remain well-typed traps if operands satisfy the matrix. They are not literal-range errors or statically proved divergence. Check invalid literals and type mismatches even in skipped or unreachable source.
+
 ### Protected numeric conversions and explicit arithmetic helpers
 
 The canonical families are `into<To, From>(From): To` and `tryInto<To, From, E>(From): Result<To, E>`. `from` aliases `into`; `tryFrom` aliases `tryInto` with the same destination-first argument order. These names require explicit imports from std::convert.

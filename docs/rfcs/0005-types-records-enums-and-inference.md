@@ -436,6 +436,20 @@ Charge member comparisons, term visits, fixed-point scans, summary facts, comple
 
 Before compiler implementation, validate a separate finite reference model against independently stated expected summaries and containment graphs. Include T13 through T16, mutual cycles, forwarding, unused arguments and type growth. Include the approved stored-variant case and callable/reference boundaries. Record actual outcomes and limitations. Model execution is not compiler or Rill execution.
 
+### Proposed M4.3 never admission
+
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) proposes this precision rule. Owner approval is pending. Earlier policies and full RFC status remain unchanged.
+
+An expression whose canonical static type is primitive never can satisfy an immediate expected value type without conversion. It produces no normal value. Preserve never as its static type rather than inventing a value of the expected type.
+
+This rule does not establish a numeric width or infer a generic argument from never alone. Unrelated unknown operand types still need context. Apply the existing join rule by omitting never branches from ordinary value joins. Two never branches retain never.
+
+Keep static type and normal-continuation facts separate. A call or operator retains its declared result type even when an earlier operand cannot return. Do not retag that result as never to repair another type mismatch.
+
+For example, assume f(i32):i32 and g(bool):void. The expression g(f(stop())) still has an i32-to-bool mismatch when stop():never. Normal execution cannot reach g, but the declared intermediate type does not change. This is a proposed checking case, NotChecked.
+
+This proposal adds no general container variance or implicit width conversion. Existing variant admission retains its owning rules. An unimplemented permitted relationship must remain incomplete, not become a fabricated mismatch or successful check.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |
