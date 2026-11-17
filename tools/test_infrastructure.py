@@ -133,6 +133,26 @@ class WorkflowTests(unittest.TestCase):
                                  "${{ github.workspace }}/target/ci/rustup")
 
 
+class TestTaskTests(unittest.TestCase):
+    def test_rust_test_tasks_are_locked_and_llvm_free(self):
+        tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
+        self.assertEqual(tasks["test"]["depends"], ["doctor"])
+        self.assertEqual(tasks["test"]["run"],
+                         "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli")
+        self.assertEqual(tasks["test:compiler"]["depends"], ["doctor"])
+        self.assertEqual(tasks["test:compiler"]["run"],
+                         "cargo test --locked -p compiler --no-default-features")
+
+    def test_check_reuses_tests_and_keeps_formatting_and_clippy(self):
+        tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
+        self.assertEqual(tasks["check"]["depends"].count("test"), 1)
+        self.assertIn("check:rust", tasks["check"]["depends"])
+        self.assertEqual(tasks["check:rust"]["run"], [
+            "cargo fmt --all -- --check",
+            "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli --all-targets -- -D warnings",
+        ])
+
+
 class ScaffoldStatusTests(unittest.TestCase):
     def test_product_suites_cannot_pass_as_empty_checks(self):
         script = Path(__file__).with_name("unavailable.py")

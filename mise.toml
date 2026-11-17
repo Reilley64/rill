@@ -26,12 +26,23 @@ description = "Check the selected base tool versions and interpreter/toolchain l
 run = "python tools/doctor.py"
 
 [tasks.check]
-description = "Run the LLVM-free scaffold, documentation and fixture checks"
-depends = ["check:rust", "check:docs", "check:fixtures", "check:tools"]
+description = "Run LLVM-free Rust tests, formatting, lint, documentation and fixture checks"
+depends = ["check:rust", "check:docs", "check:fixtures", "check:tools", "test"]
 
 [tasks."check:rust"]
+description = "Check Rust formatting and LLVM-free clippy"
 depends = ["doctor"]
-run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli --all-targets -- -D warnings", "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli"]
+run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli --all-targets -- -D warnings"]
+
+[tasks.test]
+description = "Run implemented LLVM-free Rust component tests, not complete Rill product acceptance"
+depends = ["doctor"]
+run = "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli"
+
+[tasks."test:compiler"]
+description = "Run compiler unit, integration and documentation tests without LLVM"
+depends = ["doctor"]
+run = "cargo test --locked -p compiler --no-default-features"
 
 [tasks."check:docs"]
 depends = ["doctor"]

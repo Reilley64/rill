@@ -47,10 +47,13 @@ The first scaffold checks manifest dependency direction; the names alone do not 
 
 These are task groups, not alternate Rust compiler profiles. Invoke each task as `mise run <name>`. GitHub Actions uses these same task entry points rather than a separate implementation of the checks. A configured host matrix is not evidence that every host passed.
 
-| Task | Scope in the first scaffold |
+| Task | Current scope |
 | --- | --- |
 | `setup` | Default developer setup, without LLVM or heavy experiment tools. |
-| `check` | LLVM-free infrastructure checks, including workspace dependency direction and CLI scaffold behavior. Not language, stdlib, runtime or client acceptance. |
+| `test` | Implemented Rust unit, integration and documentation tests for compiler, IDE, LSP and CLI crates, without LLVM. Not complete Rill product acceptance. |
+| `test:compiler` | Focused compiler unit, integration and documentation tests, without LLVM. |
+| `check` | Rust tests, formatting, lint, documentation, fixture and tool checks. Not complete language, stdlib, runtime or client acceptance. |
+| `check:rust` | Rust formatting and LLVM-free clippy. Tests run through `test`. |
 | `build:scaffold` | Build the CLI scaffold, not a functioning Rill compiler. |
 | `build` | Product build is unavailable; exit nonzero. |
 | `test:language` | Language conformance is unavailable; exit nonzero. |
@@ -70,6 +73,8 @@ Both workflows use explicit runner-local Cargo and Rustup homes before mise inst
 The 2026-11-17 [initial hosted scaffold run](https://github.com/Reilley64/rill/actions/runs/44001670793) passed Linux x86-64/AArch64 and macOS x86-64. macOS AArch64 failed during nested mise tool lookup. Local reproduction confirmed the tool-lookup failure and the explicit-home correction.
 
 The [follow-up hosted run](https://github.com/Reilley64/rill/actions/runs/44006663293) at `37eed9f` passed all four profiles, including macOS AArch64. [Native acceptance](https://github.com/Reilley64/rill/actions/runs/44006663069) still exited 2 as unavailable on every profile. These results cover scaffold and M1 tests, not complete Rill execution or backend acceptance.
+
+Use `mise run test` for the implemented LLVM-free Rust suites and `mise run test:compiler` during compiler development. The full `check` task reuses `test`, so its Cargo test command runs once. Python tooling tests and fixture/model checks remain in `check`, outside the focused Rust test tasks.
 
 Unavailable product tasks must not become successful empty suites. Infrastructure tests can prove routing, nonzero unavailable responses or manifest constraints; they cannot prove language semantics. Consult [test ownership](../tests/README.md) before adding acceptance tests.
 
