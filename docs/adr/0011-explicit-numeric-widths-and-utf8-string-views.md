@@ -4,6 +4,12 @@
 
 [Issue #18](https://github.com/Reilley64/rill/issues/18) adopts explicit-width numbers, checked integer operations, and one primary owned `string` spelling with borrowed text views. Numbers require explicit widths. There is no public String/str split, conversion trait system, or programmer-written lifetime syntax. The consolidated interview and two consistency follow-ups are approved; the combined checker/runtime remains a proposal, not an implementation or proof.
 
+## Later core interface refinement
+
+The owner [approved canonical strict parsing and owned decoding through tryInto](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) and requested a predictable core conversion interface. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) supplies the audited matrix and its migration rules. It replaces separate public parseNumber/decodeUtf8 entry points and drafts related byte/scalar conversions.
+
+Numeric values, strict decimal grammar, UTF-8 validity and source dependencies remain unchanged. Broader matrix details and ScalarError remain draft specifications under that direction. Historical named helpers and Option-returning code-point examples below remain provenance, not current interface authority.
+
 ## Numeric types and inference
 
 The numeric primitives are `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128`, `f32`, and `f64`. Signed integers use two's complement; floats use IEEE binary32/binary64. There are no built-in `int`, `float`, `byte`, `isize`, or `usize` aliases. Internal target-sized runtime values are not a public numeric default.

@@ -1,0 +1,178 @@
+(* Rill v0 syntax annex, version 1, Draft; three policy groups confirmed 2026-11-17.
+   v0-syntax-v1.md is an integral part of this same annex.
+   Policy approval: https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690
+   It defines required commitment rules, token views and context restrictions.
+   This EBNF is not a generated or verified Rill parser.
+   Lexical terminals refer to the confirmed lexical/source policy snapshots.
+   Literals below are token spellings, not raw character matching across trivia.
+*)
+
+module = { module_item }, eof ;
+module_item = import_declaration | exported_declaration
+            | function_declaration | implementation_declaration
+            | record_declaration | enum_declaration
+            | expectation | statement ;
+exported_declaration = "export", ( import_declaration | function_declaration
+                     | record_declaration | enum_declaration ) ;
+
+import_declaration = "import", qualified_name,
+                     ( [ "as", identifier ] | "::", import_group ), ";" ;
+import_group = "{", import_item, { ",", import_item }, [ "," ], "}" ;
+import_item = identifier, [ "as", identifier ] ;
+qualified_name = identifier, { "::", identifier } ;
+
+function_declaration = function_signature, ( block | ";" ) ;
+local_function = function_signature, block ;
+function_signature = "function", identifier, [ generic_parameters ],
+                     value_parameters, ":", type_expression, [ requirements ] ;
+implementation_declaration = "implement", [ implementation_parameters ],
+                             qualified_name, [ type_arguments ],
+                             value_parameters, ":", type_expression,
+                             [ requirements ], block ;
+generic_parameters = "<", generic_parameter,
+                     { ",", generic_parameter }, [ "," ], ">" ;
+generic_parameter = identifier, [ "=", type_expression ] ;
+implementation_parameters = "<", identifier, { ",", identifier }, [ "," ], ">" ;
+value_parameters = "(", [ value_parameter_list ], ")" ;
+value_parameter_list = value_parameter, { ",", value_parameter }, [ "," ] ;
+value_parameter = parameter_name, ":", type_expression ;
+parameter_name = identifier | "_" ;
+requirements = "where", requirement, { ",", requirement }, [ "," ] ;
+requirement = qualified_name, "(", [ type_list ], ")" ;
+
+record_declaration = "type", identifier, [ generic_parameters ], "=",
+                     record_shape, [ ";" ] ;
+record_shape = "{", [ record_field_list ], "}" ;
+record_field_list = record_field, { ";", record_field }, [ ";" ] ;
+record_field = [ "private" ], identifier, ":", type_expression ;
+enum_declaration = "enum", identifier, [ generic_parameters ],
+                   "{", [ enum_variant_list ], "}", [ ";" ] ;
+enum_variant_list = enum_variant, { ",", enum_variant }, [ "," ] ;
+enum_variant = identifier, [ tuple_payload | record_payload ] ;
+tuple_payload = "(", type_list, ")" ;
+record_payload = "{", [ payload_field_list ], "}" ;
+payload_field_list = payload_field, { ";", payload_field }, [ ";" ] ;
+payload_field = identifier, ":", type_expression ;
+
+type_expression = reference_type | callable_type | type_atom ;
+reference_type = "&", [ "mut" ], type_expression ;
+callable_type = [ callable_mode ], "(", [ type_list ], ")", "=>", type_expression ;
+callable_mode = "mut" | "once" ;
+type_atom = named_type | tuple_type | "(", type_expression, ")" ;
+named_type = qualified_name, [ type_arguments ], [ ".", identifier ] ;
+tuple_type = "[", [ type_list ], "]" ;
+type_arguments = "<", type_list, ">" ;
+type_list = type_expression, { ",", type_expression }, [ "," ] ;
+
+block = "{", { block_item }, "}" ;
+block_item = local_function | record_declaration | enum_declaration | statement ;
+statement = binding_statement | return_statement | break_statement
+          | continue_statement | guard_statement | while_statement
+          | for_statement | if_statement | block | expression_statement ;
+expectation = "expect", expression, ";" ;
+binding_statement = "let", [ "mut" ], pattern,
+                    [ ":", type_expression ], "=", expression, ";" ;
+return_statement = "return", [ expression ], ";" ;
+break_statement = "break", ";" ;
+continue_statement = "continue", ";" ;
+guard_statement = "guard", ( guard_binding | expression ), "else",
+                  [ "(", identifier, ")" ], block ;
+guard_binding = "let", pattern, [ ":", type_expression ], "=", expression ;
+while_statement = "while", "(", expression, ")", block ;
+for_statement = "for", "(", "let", pattern, "of", expression, ")", block ;
+if_statement = "if", "(", expression, ")", block,
+               [ "else", ( block | if_statement ) ] ;
+expression_statement = expression, [ assignment_operator, expression ], ";" ;
+assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                    | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
+
+expression = arrow_expression | wrapping_expression ;
+arrow_expression = arrow_head, "=>", arrow_body ;
+arrow_head = "(", [ arrow_parameter_list ], ")", [ ":", type_expression ] ;
+arrow_parameter_list = arrow_parameter, { ",", arrow_parameter }, [ "," ] ;
+arrow_parameter = parameter_name, [ ":", type_expression ] ;
+arrow_body = block | expression ;
+wrapping_expression = pipe_expression, [ "?", wrapping_rhs ] ;
+wrapping_rhs = arrow_expression | pipe_expression ;
+pipe_expression = logical_or_expression, { "|>", pipe_step } ;
+pipe_step = pipe_callable, [ pipe_arguments ], [ postfix_question ] ;
+pipe_callable = value_reference, { ".", identifier }
+              | "(", arrow_expression, ")" ;
+pipe_arguments = "(", [ pipe_argument_list ], ")" ;
+pipe_argument_list = pipe_argument, { ",", pipe_argument }, [ "," ] ;
+pipe_argument = "_" | expression ;
+
+logical_or_expression = logical_and_expression, { "||", logical_and_expression } ;
+logical_and_expression = bit_or_expression, { "&&", bit_or_expression } ;
+bit_or_expression = bit_xor_expression, { "|", bit_xor_expression } ;
+bit_xor_expression = bit_and_expression, { "^", bit_and_expression } ;
+bit_and_expression = equality_expression, { "&", equality_expression } ;
+equality_expression = comparison_expression,
+                      { ( "==" | "!=" ), comparison_expression } ;
+comparison_expression = shift_expression,
+                        { ( "<" | "<=" | ">" | ">=" ), shift_expression } ;
+shift_expression = additive_expression, { ( "<<" | ">>" ), additive_expression } ;
+additive_expression = multiplicative_expression,
+                      { ( "+" | "-" ), multiplicative_expression } ;
+multiplicative_expression = prefix_expression,
+                            { ( "*" | "/" | "%" ), prefix_expression } ;
+prefix_expression = prefix_operator, prefix_expression | postfix_expression ;
+prefix_operator = "!" | "-" | "~" | "&", [ "mut" ] | "*" ;
+postfix_expression = primary_expression,
+                     { call_suffix | index_suffix | field_suffix | postfix_question } ;
+call_suffix = "(", [ expression_list ], ")" ;
+index_suffix = "[", expression, "]" ;
+field_suffix = ".", identifier ;
+postfix_question = "?", ? next significant token is not in EXPR_START ? ;
+primary_expression = literal | construction | value_reference | bracket_expression
+                   | "(", expression, ")" | if_expression | match_expression ;
+value_reference = qualified_name, [ expression_type_arguments ] ;
+expression_type_arguments = type_arguments, ? GENERIC_COMMIT succeeds ? ;
+construction = constructor_path, record_initializer ;
+constructor_path = value_reference, [ ".", identifier ] ;
+record_initializer = "{", [ record_initializer_body ], "}" ;
+record_initializer_body = record_initializers
+                        | "...", expression, [ ",", [ record_initializers ] ] ;
+record_initializers = record_initializer_field,
+                      { ",", record_initializer_field }, [ "," ] ;
+record_initializer_field = identifier, [ ":", expression ] ;
+bracket_expression = "[", [ expression_list ], "]" ;
+expression_list = expression, { ",", expression }, [ "," ] ;
+if_expression = "if", "(", expression, ")", expression, "else", expression ;
+match_expression = "match", "(", expression, ")",
+                   "{", [ match_arm_list ], "}" ;
+match_arm_list = match_arm, { ",", match_arm }, [ "," ] ;
+match_arm = pattern, [ "if", match_guard ], "=>", ( block | expression ) ;
+match_guard = expression, ? reserve the current arm top-level arrow token ? ;
+
+pattern = "_" | literal_pattern | bracket_pattern | record_pattern
+        | payload_pattern | name_pattern | "(", pattern, ")" ;
+bracket_pattern = "[", [ pattern_list ], "]" ;
+record_pattern = [ pattern_path ], "{", [ field_pattern_list ], "}" ;
+field_pattern_list = field_pattern, { ",", field_pattern }, [ "," ] ;
+field_pattern = identifier, [ ":", pattern ] ;
+payload_pattern = pattern_path, "(", [ pattern_list ], ")" ;
+name_pattern = pattern_path ;
+pattern_path = qualified_name, [ type_arguments ], [ ".", identifier ] ;
+pattern_list = pattern, { ",", pattern }, [ "," ] ;
+literal_pattern = numeric_pattern | character_literal
+                | string_literal | "true" | "false" | static_template ;
+numeric_pattern = number_literal | "-", pattern_magnitude ;
+pattern_magnitude = number_literal | "(", pattern_magnitude, ")" ;
+
+literal = number_literal | character_literal | string_literal
+        | "true" | "false" | template ;
+template = template_start, { template_text | template_hole }, template_end ;
+template_hole = template_hole_start, expression, template_hole_end ;
+static_template = template_start, { template_text }, template_end ;
+
+identifier = ? IDENT token under the pinned Unicode/keyword policy ? ;
+number_literal = ? complete valid numeric-spelling token, magnitude retained ? ;
+character_literal = ? complete cooked character-literal token ? ;
+string_literal = ? complete cooked or raw string-literal token ? ;
+template_start = ? unescaped opening backtick in the active lexical mode ? ;
+template_end = ? unescaped closing backtick in template-text mode ? ;
+template_text = ? nonempty literal-content segment in template-text mode ? ;
+template_hole_start = ? unescaped dollar/opening-brace pair in template-text mode ? ;
+template_hole_end = ? code-mode closing brace at interpolation depth zero ? ;
+eof = ? end of the selected source snapshot ? ;

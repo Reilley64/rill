@@ -6,7 +6,15 @@ ADRs 0013/0014 identify #29's error and #22's stack decisions prepared in separa
 
 ## Later implementation and conversion refinement (#41)
 
-[ADR 0017](0017-user-implementable-conversions.md) supersedes the closed-only numeric conversion boundary below and the old snake_case try spellings. Canonical into/from and tryInto/tryFrom allow user endpoint-owned implementations, destination/source specificity and implementation-defined typed errors. Numeric pairs retain protected standard behavior and ConversionError. Parsing stays separate. `implement` becomes language-wide family-body syntax; declarations and standalone functions retain `function`. The updated catalogue and prototypes distinguish these exceptions from unchanged ordinary overload, ownership and error/cause rules.
+[ADR 0017](0017-user-implementable-conversions.md) supersedes the closed-only numeric conversion boundary below and the old snake_case try spellings. Canonical into/from and tryInto/tryFrom allow user endpoint-owned implementations, destination/source specificity and implementation-defined typed errors. Numeric pairs retain protected standard behavior and ConversionError. That revision kept parsing separate; the later core interface refinement below changes that choice. `implement` becomes language-wide family-body syntax; declarations and standalone functions retain `function`. The updated catalogue and prototypes distinguish these exceptions from unchanged ordinary overload, ownership and error/cause rules.
+
+## Later core conversion interface refinement
+
+The owner [approved strict number parsing and owned UTF-8 decoding through tryInto](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) on 2026-11-16. The owner also requested predictable conversion entry points for related core helpers. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) and the catalogue record the audited matrix.
+
+This supersedes the separate public parseNumber/decodeUtf8 interface below. The broader draft matrix consolidates byte/List, borrowed-view and scalar conversion helpers while retaining each ownership contract. ScalarError is a proposed distinct checked-scalar payload. Numeric ConversionError, ParseError and Utf8Error remain distinct.
+
+DecodeLossy and canonical show remain explicit. Ordinary queries, mutation and traversal do not become conversions merely because they return a value. This is a narrow interface refinement, not full RFC acceptance, changed numeric/text semantics or implementation validation.
 
 ## Later streaming extension (#32)
 

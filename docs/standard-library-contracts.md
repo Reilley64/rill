@@ -2,7 +2,9 @@
 
 This is confirmed design input for [#23](https://github.com/Reilley64/rill/issues/23), summarized by [ADR 0015](adr/0015-language-required-library-contracts.md). This is **not** an implemented library, accepted feature RFC, or checker/backend proof. #28 writes and validates the feature RFCs; #24 owns compiler diagnostics.
 
-Separately approved application foundations extend the closed #23 core without reopening it. The std::env contract is recorded in section 12 / [ADR 0019](adr/0019-owned-startup-environment-and-arguments.md), and secure random bytes in section 13 / [ADR 0020](adr/0020-secure-random-byte-generation.md). JSON has its own [confirmed contract](json-contracts.md) from [#31](https://github.com/Reilley64/rill/issues/31), and does not gate closing #23.
+The [core conversion interface direction](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) revises the separate-parser/decoder interface. [Draft RFC 0006](rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) specifies the audited conversion matrix. Its broader pair details and ScalarError are draft applications of the owner's predictability direction, not complete RFC acceptance. Numeric, parsing and UTF-8 value rules remain unchanged.
+
+Separately approved application foundations extend the closed #23 core without reopening unrelated decisions. The std::env contract is recorded in section 12 / [ADR 0019](adr/0019-owned-startup-environment-and-arguments.md), and secure random bytes in section 13 / [ADR 0020](adr/0020-secure-random-byte-generation.md). JSON has its own [confirmed contract](json-contracts.md) from [#31](https://github.com/Reilley64/rill/issues/31), and does not gate closing #23.
 
 The newer decisions take precedence over historical examples: #18 explicit widths/UTF-8; #19 enums, not unions/singleton types; #29 origins and explicit causes, not propagation reports; #22 bounded stacks/proper tails. This contract refines #29's cause-retention boundary and #15/#17's copy/disposal interfaces explicitly below. Use the full [error ADR](adr/0013-caused-by-errors-with-explicit-wrapping.md) and [stack ADR](adr/0014-bounded-stacks-proper-tail-calls-and-backend-gates.md) for those decisions.
 
@@ -42,10 +44,10 @@ The arity schemas below describe exactly the 2-, 3-, and 4-item implementations,
 | `std::error` | Error, error, Cause, SourceLocation, display, value, intoValue, origin, cause, formatLocation, formatError, formatCause |
 | `std::format` | show |
 | `std::convert` | into/from, tryInto/tryFrom, ConversionError |
-| `std::number` | parseNumber, ParseError; wrappingAdd/Sub/Mul, saturatingAdd/Sub/Mul |
-| `std::bytes` | Bytes type/factory, length, slice, get, getMut, append, clear, truncate, reserve, intoList, copyFromList, copyToList |
-| `std::string` | length, slice, append, bytes, viewUtf8, decodeUtf8, decodeLossy, chars, charIndices, CharAt, Utf8Error |
-| `std::char` | codePoint, fromCodePoint |
+| `std::number` | ParseError; wrappingAdd/Sub/Mul, saturatingAdd/Sub/Mul |
+| `std::bytes` | Bytes type, length, slice, get, getMut, append, clear, truncate, reserve |
+| `std::string` | length, slice, append, decodeLossy, chars, charIndices, CharAt, Utf8Error |
+| `std::char` | ScalarError, proposed under the core conversion audit |
 | `std::shared` | Shared, shared, view |
 | `std::mutex` | Mutex, LockGuard, mutex, lock |
 | `std::channel` | Sender, Receiver, SendError, channel, send, receive, after, select, unsent, intoUnsent |
@@ -304,28 +306,28 @@ Bytes owns a contiguous byte sequence; &Bytes is logical read access to a whole/
 
 | Home/operation | Signature |
 | --- | --- |
-| bytes factory | Bytes(List<u8>):Bytes; consumes source; reuse optional, never assumed |
+| List to bytes | into<Bytes>(List<u8>):Bytes; consumes source; reuse optional, never assumed |
 | bytes length | length(&Bytes):u64 |
 | bytes slice | slice(&Bytes,u64,u64):Option<&Bytes> |
 | bytes get/getMut | get(&Bytes,u64):Option<u8>; getMut(&mut Bytes,u64):Option<&mut u8> |
 | bytes append | append(&mut Bytes,&Bytes):void |
 | bytes reuse (#32) | clear(&mut Bytes):void; truncate(&mut Bytes,u64):void; reserve(&mut Bytes,u64):void |
-| bytes conversions | intoList(Bytes):List<u8>; copyFromList(&List<u8>):Bytes; copyToList(&Bytes):List<u8> |
+| byte/List conversions | into<List<u8>>(Bytes):List<u8>; into<Bytes>(&List<u8>):Bytes; into<List<u8>>(&Bytes):List<u8> |
 | string length | length(&string):u64, counts UTF-8 bytes |
 | string slice | slice(&string,u64,u64):Option<&string> |
 | string append | append(&mut string,&string):void; valid UTF-8 preserved |
-| string bytes | bytes(&string):&Bytes, no mutable escape |
-| strict borrowed validation | viewUtf8(&Bytes):Result<&string,Utf8Error> |
-| strict copying decode | decodeUtf8(&Bytes):Result<string,Utf8Error> |
+| string bytes | into<&Bytes>(&string):&Bytes, no mutable escape |
+| strict borrowed validation | tryInto<&string>(&Bytes):Result<&string,Utf8Error> |
+| strict copying decode | tryInto<string>(&Bytes):Result<string,Utf8Error> |
 | lossy copying decode | decodeLossy(&Bytes):string |
 | scalar traversal | chars(&string):Chars; charIndices(&string):CharIndices |
-| scalar queries | codePoint(char):u32; fromCodePoint(u32):Option<char> |
+| scalar conversion | into<u32>(char):u32; tryInto<char>(u32):Result<char,ScalarError> |
 
 Slices use half-open byte bounds; reject reversed/out-of-bounds ranges, and for text reject non-scalar endpoints. Empty valid ranges succeed. Byte get may observe continuation bytes. Append cannot bypass conflicting loans/self-aliasing. Decoding errors own their diagnostic data; `Utf8Error` is a named record exposing `validUpTo:u64` and `errorLength:Option<u64>` (None for incomplete trailing input), with display. Strict borrowed success retains the original byte storage; copying success does not. Lossy decode replaces invalid input with U+FFFD rather than dropping it. Concrete invalid-sequence grouping follows the strict UTF-8 decoder's maximal valid-prefix/error-span contract and must be tested in #28, not confused with a view-cast.
 
 [#32 / ADR 0018](adr/0018-streaming-and-buffered-io.md) adds Bytes reuse: clear sets length to zero while retaining reusable allocation; truncate shortens or does nothing when already shorter; reserve ensures room for at least the requested additional bytes without changing length. No exact capacity/allocator footprint or public uninitialized memory is exposed. Checked length/addressability/reservation failure follows existing fatal allocation policy; no native-size wrapping or bypass of conflicting views. Streaming reads append into a whole exclusively borrowed owner, not a new writable subrange API.
 
-CharAt is a named record `{ offset:u64; value:char }`, exported from std::string. Chars/CharIndices are opaque source-retaining iterators, yielding scalars/CharAt through canonical next. fromCodePoint accepts Unicode scalars, excluding surrogates/out-of-range values, not merely printable/assigned characters. No grapheme indexing, normalization, locale collation, writable UTF-8 bytes, mutable substrings, implicit List contiguity or fabricated &List<u8> temporary headers.
+CharAt is a named record `{ offset:u64; value:char }`, exported from std::string. Chars/CharIndices are opaque source-retaining iterators, yielding scalars/CharAt through canonical next. The proposed tryInto<char>(u32) pair accepts Unicode scalars, excluding surrogates/out-of-range values, not merely printable/assigned characters. Its ScalarError has one InvalidScalar unit variant with standard display/eq. The distinct scalar payload does not broaden numeric ConversionError. No grapheme indexing, normalization, locale collation, writable UTF-8 bytes, mutable substrings, implicit List contiguity or fabricated &List<u8> temporary headers.
 
 String literals are expressions of string type, not singleton types. Uninterpolated literal expressions can be rematerialized into fresh logical owners/static backing under #18, but a named string binding moves unless explicitly copied. Optimizer knowledge does not grant implicit copying, noBorrow to a view, capture access or a safe numeric conversion. `copy(&owner)` copies owned text; `copy(view)` already passes a &string and copies the observed extent. To copy the descriptor itself use its read-only implicit-copy rules or the appropriately typed borrowed descriptor, preserving dependencies. These are not duplicate freeable owners or hidden reference counts.
 
@@ -343,13 +345,14 @@ export function tryInto<To, From, E>(value: From): Result<To, E>;
 implement into<UserId>(value: string): UserId { /* body */ }
 implement tryInto<UserId>(value: &string): Result<UserId, InvalidUserId> { /* body */ }
 
-// closed std::number operation, not automatically registered as a conversion
-parseNumber<T>(text: &string): Result<T, ParseError>
+// Standard concrete pairs, described in RFC 0006; these are calls, not new declarations.
+// tryInto<i32>(&text) selects ParseError. All twelve numeric destinations have a pair.
+// tryInto<string>(&bytes) selects Utf8Error and returns independent owned text.
 ```
 
 Only these canonical conversion families distinguish implementations by `(To, From)` rather than ordinary parameter patterns. E is the selected implementation's output evidence, never a selection key. Infer source/error family arguments from registration signatures. Calls use `into<To>(value)` / `tryInto<To>(value)` or an immediate unique concrete expected destination (including a Result success type). Do not choose a destination from the number of available implementations, later uses or a default. Source widths must be independently established. Concrete function values require resolved endpoints and the exact selected signature/error; there is no erased runtime registry.
 
-Canonical requirements are `into(To, From)`, `tryInto(To, From, E)` and `parseNumber(T)`; aliases preserve identity. Generic bodies are checked before monomorphization using symbolic selected-signature/property/dependency evidence. Both endpoints must be named in requirements; unlike a call, no value supplies the source. E can be inferred at a concrete call, but exact equality is checked against the winning implementation. A generic body cannot assume an overridable fallback's concrete error and later substitute a differently typed specialization. Additional properties such as display(E) remain explicit. For example, `stringify<T>(value:T):string where into(string,T)` accepts any owned T with the conversion; a borrowed variant requires `into(string,&T)`.
+Canonical requirements are `into(To, From)` and `tryInto(To, From, E)`; aliases preserve identity. Text parsing uses `tryInto(T, &string, ParseError)` for the standard numeric relationship, not a dedicated parseNumber(T) predicate. Generic bodies are checked before monomorphization using symbolic selected-signature/property/dependency evidence. Both endpoints must be named in requirements; unlike a call, no value supplies the source. E can be inferred at a concrete call, but exact equality is checked against the winning implementation. A generic body cannot assume an overridable fallback's concrete error and later substitute a differently typed specialization. Additional properties such as display(E) remain explicit. For example, `stringify<T>(value:T):string where into(string,T)` accepts any owned T with the conversion; a borrowed variant requires `into(string,&T)`.
 
 Collect loaded implementations once. Reject identical canonical pair patterns regardless of error/constraints; aliases and generic renaming do not create distinct patterns. Choose the unique most-specific applicable source/destination pattern, allowing concrete specializations of generic defaults. Incomparable applicable patterns are ambiguous; constraints, expected errors and import order do not rank candidates. An expected-error mismatch cannot force fallback selection. The implementation module must own the family or an endpoint's outer nominal type after peeling references. Local wrappers count; foreign wrappers containing local types, bare generic parameters, local errors, constraints and aliases do not confer ownership. Ordinary families retain their existing orphan/duplicate rules and declaration-wide implementation visibility.
 
@@ -361,9 +364,13 @@ No as, fallback width, arbitrary ordinary return-only implementations, source gu
 
 Preserve #18's semantics. Infallible integer pairs require full base-range inclusion. Integer/float and float/float destinations use IEEE rounding and may lose precision or overflow to infinity. Float-to-integer truncates first, then checks range/non-finiteness; try supports safe pairs too and keeps Result shape. ConversionError is an enum with OutOfRange and NotFinite unit variants, supplied display/eq implementations and owned origin handling through Err. No rejected infallible call becomes a panic-catching helper.
 
-ParseError has InvalidSyntax and OutOfRange unit variants with standard display/eq. Parsing consumes the whole text, no whitespace trimming/separators/suffix/base guessing; integer parsing does not truncate fractions. Float parsing accepts #18's canonical NaN/inf/-inf/-0 and decimal grammar. Finite rounded overflow produces an error; underflow may produce zero. Numeric destinations are the 12 established primitives only. Explicit radix parsing is outside the required interface.
+The owner confirmed strict text parsing and owned UTF-8 decoding through tryInto/tryFrom. The broader core matrix additionally proposes borrowed views, byte/List representation changes and scalar conversion through those same families. Each pair retains its specified move/copy/dependency contract and selected E. No extra source form, infallible-to-fallible adapter, numeric source width or conversion chain is inferred.
+
+ParseError has InvalidSyntax and OutOfRange unit variants with standard display/eq. Parsing consumes the whole text, no whitespace trimming/separators/suffix/base guessing; integer parsing does not truncate fractions. Float parsing accepts #18's canonical NaN/inf/-inf/-0 and decimal grammar. Finite rounded overflow produces an error; underflow may produce zero. The standard &string-to-numeric entries cover the 12 established primitives with E=ParseError. Application endpoints retain explicit user registration and their own selected errors. Explicit radix parsing is outside the required interface.
 
 Six ordinary same-type parameter families in std::number provide wrappingAdd/Sub/Mul and saturatingAdd/Sub/Mul for the ten integer primitives. Each declaration has `(T,T):T` shape; implementations specialize parameter types. Primitive floats have no supplied implementation. These helpers do not change checked ordinary arithmetic, bit/shift rules, constant-trap timing or introduce a general unsafe arithmetic mode. Numeric sum has the ordinary same-type arithmetic behavior, including checked integer overflow and input-order float evaluation; no reassociation promise is added.
+
+Public parseNumber/decodeUtf8 and the replaced core helpers are not retained as compatibility aliases. Private implementation helpers remain possible. decodeLossy stays named; no default into<string>(&Bytes) lossy pair is registered. Queries, mutation, traversal and context-dependent protocols are not silently converted. Historical prototype/report spellings are preserved with migration guidance in the prototype index.
 
 Canonical std::format::show has `show<T>(&T):string`; output is owned, inputs borrowed. Supply primitive bootstrap renderers (not self-recursive interpolation), standard read-only/exclusive-reference observation forwarding, and error-wrapper bridges. Generic interpolation needs canonical show(T), formats each expression once immediately left-to-right, and retains temporary/resource obligations through suspension. There is no local namesake/reflected record fallback or implicit show source binding. Keep #18's exact primitive formatting/parse rules; special formatting can use explicit functions, not a template mini-language.
 

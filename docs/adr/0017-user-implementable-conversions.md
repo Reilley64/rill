@@ -71,9 +71,19 @@ Custom E uses normal canonical display evidence for Err construction, and generi
 
 A user `into` does not automatically provide `tryInto`; explicitly register both if desired. There is no universal fallible identity or new uninhabited error solely for it. Standard numeric fallible pairs, including numeric identity/infallible pairs, retain Result with ConversionError and return Ok where infallible. Other fallible identity entries need explicit registration and a concrete error; they do not replace protected infallible identity.
 
+## Later core conversion interface refinement
+
+The owner [approved strict parsing and owned UTF-8 decoding through tryInto](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) on 2026-11-16. The owner also requested predictable conversion entry points for related core helpers. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) records the concrete audit matrix.
+
+Standard &string-to-numeric pairs select std::number::ParseError. Standard &Bytes-to-string selects std::string::Utf8Error and returns independent owned text. These replace public parseNumber and decodeUtf8, including the dedicated parseNumber(T) requirement. Numeric-to-numeric pairs keep their protected behavior and ConversionError.
+
+The broader draft matrix covers borrowed text/byte views, byte/List representation changes and scalar/code-point conversion. ScalarError.InvalidScalar is a proposed distinct scalar failure. Owned and borrowed source forms remain separate explicit registrations. Named policy, traversal, query and mutation operations remain outside this consolidation.
+
+Keep decodeLossy explicit and do not register a default lossy into<string>(&Bytes). Show remains the formatting contract, not automatic conversion evidence. The matrix and error naming are draft details under the requested direction, not complete RFC acceptance or compiler/runtime validation.
+
 ## Numeric, ownership and application boundaries
 
-Numeric full-base-range availability, checked narrowing, float rounding/possible infinity and truncation-before-range-check remain unchanged. Infallibility is not losslessness. ConversionError remains the numeric OutOfRange/NotFinite error, not a universal user-conversion error. Parsing remains explicit parseNumber with ParseError; it is not automatically registered. No as conversion/assertion syntax or default widths.
+Numeric full-base-range availability, checked narrowing, float rounding/possible infinity and truncation-before-range-check remain unchanged. Infallibility is not losslessness. ConversionError remains the numeric OutOfRange/NotFinite error, not a universal user-conversion error. Strict numeric text parsing now uses canonical tryInto with ParseError. The later core interface refinement replaces the separate public parseNumber operation. No as conversion/assertion syntax or default widths.
 
 `From = T`, `&T` and `&mut T` are distinct owned/read-only/exclusive contracts. Borrow acquisition and copying are explicit; no automatic borrowed adapters or moves out of noncopying borrowed data. Destinations and errors retain actual dependencies, including nested references carried by owned inputs. Reject references into destroyed local source storage; preserve externally backed dependencies and exclusive-access restrictions. Conversions cannot fabricate noBorrow/sendable/shareable or extend lifetimes.
 

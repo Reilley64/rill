@@ -5,8 +5,10 @@ Rill's design is recorded in the documents below. Source-ticket approval, RFC ac
 ## Start here
 
 - Use the [development guide](development.md) for the Rust workspace, mise tasks and scaffold limits.
+- Read the [implementation plan](implementation-plan.md) before starting the first compiler milestone.
 - Read [GLOSSARY.md](../GLOSSARY.md) for Rill's terms.
 - Use the [RFC conventions and template](rfcs/README.md) when writing a proposal.
+- Read the [syntax annex](grammar/v0-syntax-v1.md) with its [EBNF](grammar/v0-syntax-v1.ebnf) for the confirmed grammar policy groups.
 - Read [ADRs](adr/) for decisions and their rationale. Some historical numbers repeat. Identify an ADR by its full filename and decision link.
 - Use the [example index](prototypes/README.md) for source examples, case notes and checker commands.
 

@@ -2,6 +2,8 @@
 
 > **Template only. It is not an assigned RFC or accepted proposal.** Copy to a newly assigned `NNNN-short-feature-name.md` only when creating an actual draft, register that draft in [README](README.md#proposal-register), and replace all placeholders before ReviewReady. Follow the [conventions](README.md), [status rules](README.md#status-and-authority) and single [readiness checklist](README.md#canonical-reviewready-checklist). Authoring prompts below are not proposed feature semantics; replace them with the actual proposal.
 
+Use the [RFC writing style](README.md#writing-style) for all proposal prose.
+
 | Field | Value |
 | --- | --- |
 | ID | NNNN, unassigned in this template |

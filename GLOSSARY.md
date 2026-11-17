@@ -60,6 +60,14 @@ _Avoid_: new connection, owning socket, ambient context
 A borrowed TLS-stream view carrying explicit network control for its canonical I/O. It retains stream, clock and token dependencies without owning consuming close.
 _Avoid_: owning connection, ambient context, independent TLS direction
 
+**Conversion**:
+An explicit operation through canonical `into`/`from` or `tryInto`/`tryFrom` that produces a destination value from a source value. A fallible conversion has an implementation-selected error type.
+_Avoid_: implicit cast, automatic coercion, serializer
+
+**Diagnostic**:
+A coded compiler or driver explanation of a problem in a specific analysis context or configuration. It is distinct from an application error wrapper, expectation result or internal tool-failure record.
+_Avoid_: runtime error, exception, test result
+
 **Dispose**:
 The `dispose` overload for a type, which performs extra cleanup before disposal of its remaining owned fields. Calling it directly consumes the value early; moved or already disposed fields are not disposed again.
 _Avoid_: drop, destructor, deinit, finalizer
@@ -247,6 +255,14 @@ _Avoid_: owning row, materialized result list, reusable connection
 **SQL temporal parameter**:
 A Date/Time/DateTime from std::time::civil or Timestamp from std::time, explicitly packed into Parameter with faithful checked native mapping. The mapping does not silently repair precision, range or sentinel values, infer a zone or unit, or convert between calendar and elapsed quantities. Checked temporal failures retain their original Err<TimeError>.
 _Avoid_: monotonic Instant, implicit zone, database interval
+
+**Source snapshot**:
+The immutable original bytes associated with a canonical Rill source identity. It is distinct from an analysis-context snapshot covering dependencies and options.
+_Avoid_: live file, workspace index, normalized text
+
+**Source span**:
+A half-open byte range in one source snapshot. It is distinct from a temporal Span or a decoded literal-content range.
+_Avoid_: character offset, runtime SourceLocation, temporal span
 
 **Span**:
 A one-sign temporal value retaining calendar and time units. It is distinct from SignedDuration. Interpreting calendar units as elapsed quantities needs explicit context.

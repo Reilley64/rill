@@ -16,6 +16,10 @@ When assigning a triage role, use [docs/agents/triage-labels.md](docs/agents/tri
 
 Before changing language or library behavior, follow [docs/agents/domain.md](docs/agents/domain.md).
 
+### RFCs
+
+Before writing or reviewing RFCs, follow [docs/rfcs/README.md](docs/rfcs/README.md).
+
 ### Toolchain development
 
 Before changing production source, tooling or CI, follow [docs/agents/development.md](docs/agents/development.md).
