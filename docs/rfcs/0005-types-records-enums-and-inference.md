@@ -126,6 +126,66 @@ Unconstrained generic parameters denote distinct symbolic types. They do not pro
 
 This RFC introduces no type-alias declaration feature. Import aliases remain module bindings. Named record declarations are not structural aliases.
 
+### Proposed M4.1 canonical declaration-type procedure
+
+This section proposes a bounded first typed-analysis stage for [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56). Owner approval is pending. It does not complete inference, signature validity, layout or this Draft RFC.
+
+The input is one successful M3 Graph and explicit analysis limits. Use that graph's retained M1 snapshots and M2 nodes. Do not read live files. Do not parse again. Do not combine captures.
+
+The stage elaborates module-level record fields, enum payloads and explicit named-function or family parameter/result annotations. It also inventories their type binders. Bodies, startup statements, expectations and declarations inside bodies remain NotPerformed. Their presence does not establish their validity.
+
+#### Environments and source lookup
+
+Collect module-level nominal declarations and ordered binder identities before elaborating annotations. Use the original M3 DeclarationId for each declaration and binder. Reject duplicate binder names within one declaration. Preserve distinct binders from different declarations, even when their names match.
+
+Resolve an unqualified type name through the declaration's binders, then its module's installed type/module bindings, then M3's primitive prelude identities. This precedence is a proposal requiring owner approval. A source binding can shadow a primitive spelling. Compiler-required primitive references still use their actual prelude identities.
+
+Resolve qualified module segments through installed bindings and exported qualification. Never probe filesystem children. A module target cannot finish a type annotation. A value/function target cannot supply a type.
+
+A parent-applied variant type resolves the enum first. Collect every same-spelled variant in that enum, deduplicated only by DeclarationId. One candidate supplies the variant identity. No candidate rejects as a missing variant. Multiple candidates reject as an ambiguous annotation. Retain each candidate's identity and declaration span. Never select by traversal order.
+
+Preserve the parent application and selected variant DeclarationId. Reject variant selection on a record. Aliases preserve the canonical declaration and defining module. Unused duplicate variant declarations remain outside this slice's declaration-validity checks.
+
+Compiler access to a private signature's metadata creates no source binding. Source-written annotations still need accessible names. An exported operation can mention its own private nominal types under RFC 0002. This stage does not decide representation access or exported-payload admissibility.
+
+#### Canonical type terms
+
+Elaborate the following finite terms without expanding nominal fields:
+
+| Form | Canonical information |
+| --- | --- |
+| Primitive | Actual primitive identity from this graph's prelude. |
+| Parameter | Its original binder DeclarationId and ordered position. |
+| Nominal application | Record/enum DeclarationId and ordered argument terms. |
+| Variant | Parent enum application and original variant DeclarationId. |
+| Tuple | Ordered element terms, including zero and one elements. |
+| Reference | Read-only or mutable constructor and referent term. |
+| Callable | Written invocation mode, ordered parameter terms and result term. |
+
+Grouping changes no type identity. Equal nominal applications require equal declaration identities and equal argument terms. Tuple equality preserves order and arity. References preserve their access constructor. Callable equality preserves mode, parameter order and result. This exact equality procedure performs no widening, mode weakening, inference or overload comparison.
+
+Require full written arguments for generic applications in this stage. Excess arguments reject as malformed application. Missing arguments produce Incomplete with a needs-inference reason, not a guessed application or new language prohibition.
+
+Generic defaults and where clauses produce Incomplete in this slice. Implementation headers also produce Incomplete until their signature-substitution procedure exists. Retain their original nodes and spans as unsupported obligations. Do not classify these valid syntax forms as type errors.
+
+Void and never remain distinct primitive terms. Elaborating them does not approve their use as stored fields, parameters or inhabited values. Those position-validity judgments remain NotPerformed. Callable terms likewise prove no capture or invocation permission.
+
+For each application, retain the ordered substitution from the declaration's binders to argument terms. Keep written-use provenance separate from canonical type identity. Two written aliases can denote one term while retaining different use spans and import routes.
+
+#### Recursion, completion and provenance
+
+A nominal reference is a finite term, not a request to expand its definition. Direct, mutual and type-growing field references therefore do not start recursive type expansion. This stage neither proves nor rejects finite layout. The existing layout policy retains that responsibility.
+
+Every elaborated use retains its module, syntax-node identity, original Span and canonical target or primitive identity. Retain declaration and binder spans too. Keep M3 import-route provenance available through the originating binding. No fabricated type or internal error placeholder can appear as a valid term.
+
+Return a declaration-type receipt only when every in-scope annotation is elaborated without findings or unsupported obligations. The receipt identifies this stage and graph capture. It records signature compatibility, layout, bodies, inference, coverage, evidence, ownership and execution as NotPerformed.
+
+A receipt is not a checked program or callable implementation. Failed attempts can expose explicitly partial facts, but no completed receipt. Distinguish source type errors, unsupported/inference obligations and resource exhaustion. Preserve known findings when later work becomes incomplete.
+
+Order facts and findings by canonical module order, declaration position and written-use position. Fresh capture identities remain unequal. Determinism compares semantic records, not opaque allocation identities.
+
+Charge annotation visits, lookup steps, type terms, substitution entries and retained provenance before allocation or enqueueing. Bound traversal depth and retained terms as well as total work. Check counters for overflow. Exhaustion returns ResourceLimit, never a missing-name proof or source rejection. Limits do not guarantee wall-clock time or host allocation success.
+
 ### Record declarations and construction
 
 A record declaration fixes its field names and types. Fields are public unless marked private. Binding mutability controls permitted mutation; there are no per-field mutable declarations.

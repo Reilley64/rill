@@ -120,6 +120,22 @@ There are no ordinary optional, default-valued, named or variadic value paramete
 
 Arrow expressions may infer parameter and result types from immediate context. Callable type modes are [defined below](#callable-modes-and-requirements). The shared syntax annex records confirmed typed-arrow and generic-argument parsing policies.
 
+### Proposed M4.1 explicit header elaboration
+
+Owner approval for this first-stage procedure is pending under [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56). Full RFC status and earlier policy approvals remain unchanged.
+
+Use [RFC 0005's canonical declaration-type procedure](0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure) for named-function and body-less family annotations. Preserve parameter order, binder identities and the explicit result term. Preserve the canonical family identity independently of its source alias.
+
+This stage elaborates types; it does not check function bodies or implementation compatibility. A callable annotation records its written invocation mode. It supplies no capture evidence or invocation permission.
+
+A where clause is an unsupported obligation in this slice. Return Incomplete rather than a completed declaration-type receipt. Do not treat a requirement as proved, disproved or missing evidence. Recursive and type-growing requirements receive the same incomplete classification without starting proof search.
+
+Generic defaults and implementation headers also remain incomplete. Their later procedures must preserve inference before defaults and whole-signature substitution. Exact type equality does not replace alpha-normalized family patterns or whole-vector specificity.
+
+The canonical copy/dispose declarations remain those selected by M3's explicit prelude request. Their annotation terms can be elaborated like other family headers. This does not validate their required library signatures or authorize trusted operations.
+
+No operation gains compiler privileges through its spelling or standard-root location. This stage uses no semantic standard-library definitions or trusted-operation registry. Later operation checks need actual canonical declarations and explicit supplied contracts.
+
 ### Bodies, state and invocation
 
 Named functions receive runtime state through parameters. They cannot capture module startup lets or enclosing runtime lets. Arrows can capture state under the ownership rules. Static function and type names are not captured runtime lets.

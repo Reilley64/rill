@@ -200,6 +200,178 @@ At this checkpoint, M3 implementation and every proposed acceptance test are Not
 
 The [M3 acceptance record](../crates/compiler/tests/m3-acceptance.md) maps actual Rust tests to RFC 0002 M1 through M15, identity/order policies and the approved scope. Its later-stage column remains unpassed. It also records real filesystem limitations, the additive M2 parser-work statistic and unrun support gates. #54 and the M3-only draft PR retain command results and implementation revisions. A resolved graph is not a successfully checked program.
 
+## M4 scope and design checkpoint
+
+### Starting point and authority
+
+[M4 umbrella #56](https://github.com/Reilley64/rill/issues/56) is a separate implementation ticket from #28. It is claimed by Reilley64 and remains open. No partial slice completes M4.
+
+PR #55 merged on 2026-11-17 at 07:58:38 UTC. After fetching origin, `origin/main` was `ee12588f2cba912025900e1ac587586fb9cb6235`. The fresh branch `implementation/m4-typed-foundation` starts at that exact commit. It includes M3's reviewed source revision `862704bea6af46e1446b3b7942e690f877b116c1` and completion record `d05a0b559e6ee19f2e48d2e0f8b4719469d65f3e`.
+
+The starting commit includes both mise tasks. `test:compiler` runs compiler unit, integration and documentation tests. `test` runs the implemented LLVM-free compiler, IDE, LSP and CLI Rust suites. Neither task executes complete Rill product acceptance.
+
+M1 supplies immutable snapshots, spans, lexical facts and decoded provenance. M2 supplies strict source-preserving syntax without type-directed parsing retries. M3 supplies a captured resolved graph, installed bindings, canonical declarations, family attachments and source routes. Its [public interfaces](../crates/compiler/README.md#m3-loader-and-resolver) and [acceptance record](../crates/compiler/tests/m3-acceptance.md) retain their narrower guarantees.
+
+M3 explicitly deferred expression/type/local-use resolution, signature compatibility, public-requirement checking, captures, layout, overloads, conversions, coherence and protected operations. Those deferrals are current M4/M5 prerequisites, not failed M3 acceptance. Older absent-implementation statements in RFC evidence tables remain historical records.
+
+RFC 0001 remains Accepted at its recorded snapshot. RFCs 0002 through 0010 remain Draft with their existing scoped approvals. The new procedures below are proposals awaiting owner approval. No implementation or acceptance evidence is claimed by this checkpoint.
+
+### Proposed dependency-ordered slices
+
+Each slice needs its own approved checking procedure, public TDD seam and acceptance record before implementation. The table allocates work; it does not claim that later procedures already exist. Dependencies name the facts required, not permission to begin later work.
+
+| Slice | Dependencies | Scope and acceptance criteria | Rule owners |
+| --- | --- | --- | --- |
+| M4.1. Canonical explicit declaration types | M1 through M3 | Elaborate explicit declaration annotations into canonical terms with binder substitutions and original provenance. Reject invalid names, targets, variants and excess arguments. Return incomplete for unsupported obligations. Never emit a checked-program artifact. | RFC 0005 type identity and proposed M4.1 procedure; RFC 0004 explicit headers; RFC 0002 source lookup. |
+| M4.2. Declaration validity and finite layout | M4.1 | Check field/variant/signature well-formedness and required prelude signature compatibility. Complete and model inline-parameter summaries before implementing them. Distinguish direct/mutual/type-growing cycles from finite nesting, phantom arguments and actual trusted indirection. Check loaded declarations even without uses. | RFC 0005 declarations/layout; RFC 0004 signature forms; RFC 0002 visibility; explicit core contracts. |
+| M4.3. Local scalar inference and control targets | M4.1; M4.2 where declaration validity is required | Resolve lexical uses and named-function capture restrictions. Check bindings, explicit standalone calls, contextual scalar/text literals, primitive operations, Boolean flow, returns, loops and expectation boundaries. Check skipped source statically without evaluating it. Separate literal errors from runtime arithmetic traps. Unsupported calls remain incomplete. | RFCs 0003/0006; accepted RFC 0001; RFCs 0002/0004. |
+| M4.4. Data construction, patterns and coverage | M4.2/M4.3 | Check record/enum construction and field visibility. Supply declared field literal context. Implement permitted variant relationships, joins and tuple/List category checks. Complete nested constructor coverage and guard fallthrough before checking matches or refutable bindings. Keep ownership and runtime assertions separate. | RFC 0005; RFC 0003 control/guards; RFC 0002 privacy; supplied collection contracts. |
+| M4.5. Ordinary family collection and input selection | M4.1/M4.2; M4.4 input relations | Complete finite normalization/subsumption/intersection procedures. Check signature substitution, canonical duplicates and ordinary placement. Preserve correlations across entire parameter vectors. Test crossed ambiguity and static variant/parent selection. Return selection facts without claiming evidence-complete calls. | RFC 0004; RFCs 0002/0005; protected-action contracts where applicable. |
+| M4.6. Generic inference and symbolic evidence | M4.3/M4.4/M4.5 | Infer before trailing defaults. Stage arrows and overloaded function values from established inputs. Check generic bodies symbolically and preserve specialization-dependent selected outputs. Complete exact equality and recursive-goal handling. Missing selected ordinary evidence never triggers fallback. | RFC 0004 inference/callbacks/evidence; RFC 0005 contextual categories; RFC 0008 exact error relationships. |
+| M4.7. Conversion-specific analysis | M4.6 | Complete whole-pair matching and endpoint permission, duplicate/protected coherence, three-state requirement applicability, output determination and symbolic selected-E equality. Test unresolved winning/tied candidates, identity gates and expected-error nonselection. Do not reuse ordinary no-fallback as conversion applicability. | RFC 0009; RFCs 0004/0005/0006; supplied actual core/error contracts. |
+| M4.8. Integrated typed-stage completion | Applicable earlier M4 facts | Finish static result-use checks through named storage and aggregates. Integrate closed Err/Option/Result/iterator checks, public requirement/payload visibility and trusted-core admission. Check all loaded bodies/startup/expectations in both modes. Publish typed-stage completion only after every required typed obligation completes. Ownership and execution remain unchecked. | RFCs 0001 through 0010 within their owning sections; explicit supplied core contracts. |
+
+Source visibility applies in every slice that resolves source names or representation access. Compiler metadata never creates imports. Public generic requirements and payload visibility need their full checks before integrated completion.
+
+Trusted-core checks apply before any slice claims a protected operation or indirect representation. Use actual canonical declarations and explicit supplied contracts. A standard-root path, private fields or matching spelling never grants trust. Do not invent standard-library source to satisfy these obligations.
+
+M4.8 is a completion gate, not permission to hide unfinished work. Every remaining typed obligation must have an owning procedure and tests. M4 excludes ownership/loan transfer, disposal scheduling, MIR cleanup, runtime, codegen, LLVM and editor behavior. No slice enables successful product commands.
+
+### Recommended first slice and exact prerequisites
+
+Start with M4.1. Canonical declaration types provide a useful input for layout, inference and overload work without choosing their unresolved policies.
+
+The proposed procedure lives in [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure). [RFC 0004](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m41-explicit-header-elaboration) owns its function-header boundary. These two additions require scoped owner approval before coding. They do not require full RFC acceptance.
+
+The other exact inputs are these sections at starting commit `ee12588f2cba912025900e1ac587586fb9cb6235`:
+
+- RFC 0002, proposed M3 identities, installed bindings, exported qualification, prelude and privacy sections.
+- RFC 0005, type forms and identity, and parent-applied enum variant spelling.
+- RFC 0004, explicit function forms and callable modes. Mode relationships and evidence are not implemented by M4.1.
+- RFC 0006, primitive types and width inference. M4.1 uses the primitive identities, not literal inference or numeric operations.
+- Both version-1 syntax-annex artifacts, especially declaration/type shapes, finite tuple arities and generic-use syntax.
+- RFC 0010, analysis/source identities and original-byte spans. No reporter or new diagnostic-code assignment is required.
+
+RFCs 0001/0007/0008/0009 constrain exclusions and later integration. Their missing execution, ownership and evidence procedures do not block this annotation-only slice. The confirmed finite-layout policy remains required before any representation-validity claim, not before recording a canonical reference to a declaration.
+
+### First-slice input/output contract
+
+Proposed Rust names are descriptive, not committed interfaces:
+
+```text
+analyze_declaration_types(&Graph, AnalysisLimits)
+    -> declaration-type receipt | rejected/incomplete/resource failure
+receipt.declaration(DeclarationId)
+    -> read-only binder, field/payload and parameter/result type facts
+receipt.type_use(module, NodeId)
+    -> canonical term, ordered substitution and source provenance
+```
+
+The operation takes only a successful M3 Graph, not raw text, a partial graph or hand-built type terms. It analyzes every module-level record/enum and named function/family header in that graph. It does not cherry-pick a valid declaration while hiding an unsupported in-scope header.
+
+M4.1 supports primitive terms, nominal applications, variants, distinct symbolic binders, tuples, references and written callable modes. Generic applications need full written arguments. Generic defaults, where clauses and implementation headers return Incomplete. Missing arguments also return Incomplete rather than applying unimplemented inference. Excess arguments and unavailable source names reject.
+
+Bodies, startup statements, expectations and declarations inside bodies are outside this requested stage. The receipt lists them as NotPerformed, even when their syntax is valid. Neither an invalid body nor an unimplemented body form receives a checked-body fact. Signature compatibility, position-validity of void/never, layout, coverage, evidence and ownership are also NotPerformed.
+
+Canonical terms retain M3 capture/declaration identities. Binder terms use declaration identity, not spelling. Applications retain ordered binder substitutions. Each written use separately retains its M2 node, M1 Span, canonical target and source-binding route. Equal canonical terms can have different written-use provenance.
+
+Later evidence facts must retain canonical goal/family identities, the shared substitution, selected-body identity and selected input/output relationships. They must link justified assumptions or derivations to their source sites. Proved, disproved and unresolved states remain distinct. Exact selected-output equalities retain both compared terms and their origins. M4.1 produces none of these proofs; unsupported requirements stay explicit obligations.
+
+No semantic operation or trusted representation is admitted in this slice. M3's supplied canonical copy/dispose declarations can have their annotations elaborated. Typed library compatibility remains M4.2 work. M4.1 fabricates no Option, Result, List, conversion, error-wrapper or trusted-core definition.
+
+| Outcome | Meaning |
+| --- | --- |
+| DeclarationTypesComplete | All requested annotation elaboration completed. The receipt is not a checked program, valid implementation, layout proof or ownership proof. |
+| TypeRejected | An implemented annotation rule fails. Preserve original use/declaration spans and canonical candidates where available. No completed receipt. |
+| Incomplete | An in-scope default, requirement, implementation header or needed inference is unsupported. Preserve the obligation and partial facts, without proving or disproving evidence. |
+| ResourceLimit | A configured checked work/depth/storage budget prevents completion. No source-invalidity or missing-evidence conclusion follows. |
+| InvalidRequest | A query or supplied identity does not belong to the retained graph/receipt. Do not confuse cross-capture misuse with a source type error. |
+
+Failures retain known findings and explicitly partial typed facts. They disclose incomplete secondary diagnostics. A canonical-type enum must have no accepted Error or Unknown placeholder case. Missing terms stay missing facts, not fabricated valid types.
+
+Analysis uses retained snapshots without filesystem reads. Later source changes cannot mutate those facts. Callers needing live-input validation use M3's existing validate_inputs operation separately. A receipt never claims continuous freshness.
+
+Implementation choices include arena storage, private lookup indexes and memoization. Proposed defaults are 1,000,000 charged work units, 100,000 retained type/use/substitution entries and 64 traversal levels. Charge before growth, including failed work and provenance copies. These numbers limit implementation work, not valid Rill programs. Host allocation failure and wall-clock bounds remain outside the guarantee.
+
+### Public TDD seams and planned acceptance
+
+Approve the entry operation and both read-only queries together. Tests create real temporary source trees, call M3 load, then cross the proposed analysis interface. Do not synthesize graph identities or test private normalization helpers instead.
+
+| Seam | Catches | Does not establish |
+| --- | --- | --- |
+| analyze_declaration_types | Whole requested-stage completion, source lookup, canonical annotation rules, unsupported obligations and resource outcomes. | Bodies, evidence, representation validity or product checking. |
+| receipt.declaration | Canonical owners/binders and ordered explicit field/payload/signature types. | Implementation-family compatibility or callable permission. |
+| receipt.type_use | Alias-preserving identities, substitutions, original snapshots/spans and retained source routes. | Editor navigation, live-file freshness or ownership provenance. |
+
+Each requirement below needs direct positive, rejected and boundary assertions where applicable. Names describe planned behaviors, not existing tests or passing evidence.
+
+| Requirement | Positive / rejected / boundary cases | Provenance and scope |
+| --- | --- | --- |
+| Nominal identity | Alias/re-export applications share identities; equal-shaped declarations differ; private/missing/non-type annotations reject. Separate captures remain distinct. | RFC 0005 T1/T4 identity portions; RFC 0002 M1/M15. No construction or assignment is asserted. |
+| Generic binders and applications | Preserve ordered substitutions and repeated binder identity; reject duplicate binders and excess arguments; missing arguments are incomplete. Separate same-spelled binders do not merge. | RFC 0004 F1 header and correlated-variable preservation prerequisite. No F7 overload result is claimed. |
+| Enum and variant terms | Elaborate parent-applied generic variant annotations and payload types; reject absent variants and selection on records. Reject E.A for `enum E { A, A }` with both canonical candidates and spans, never a traversal-order winner. Preserve empty enums and record/unit payload distinctions. | RFC 0005 T3 and the proposed multiple-match lookup rule; syntax G9/G10/G17. No matching or construction is asserted. |
+| Structural terms | Preserve tuple order/arity, nested references and all written callable modes; reject wrong source targets; distinguish empty tuple from void and exact callable modes. | Syntax G13/G15 and RFC 0004 callable forms. No mode conversion or capture inference. |
+| Primitive identities | Elaborate the actual prelude primitives; preserve source shadowing and compiler-owned identities separately; reject an unknown primitive-like name. | RFCs 0002/0006. No numeric default or same-spelled trusted operation. |
+| Whole-stage refusal | Ordinary explicit generic headers complete; defaults, where clauses and implementations yield incomplete; resource limits cannot expose a completed receipt. | RFC 0004 unsupported-procedure boundary. Partial facts remain inspectable only as partial facts. |
+| Ambiguity and insufficient context | Qualified aliases resolve after M3; an ambiguous import remains M3 rejection with no analyzable graph; missing generic arguments cannot create guessed terms. | RFC 0002 M2 and RFC 0004 R0301 context boundary. Typed overload ambiguity remains M4.5. |
+| Recursive and growing obligations | Finite canonical references to recursive/growing declarations terminate without layout claims. Recursive/type-growing where goals return incomplete without proof search or fallback. | RFC 0005 T13/T15/T16 annotation portions; RFC 0004 evidence boundary. Actual layout and solver outcomes remain M4.2/M4.6/M4.7. |
+| Source provenance | Retain Unicode/CRLF use and declaration spans, alias routes and source versions. Cross-capture IDs reject as request misuse; changed live files cannot alter retained facts. | M1/M2 provenance and RFC 0010 source identity. No new simultaneous capture claim. |
+| Determinism and controlled limits | Repeat analysis and relocate source roots; compare canonical semantic facts independent of fresh opaque IDs. Exercise exact and one-short work/storage/depth budgets. | Explicit implementation limits. No OOM recovery or universal termination proof. |
+| Honest completion | Every completed receipt lists unperformed stages. Unresolved or unsupported annotation obligations never produce one. Bodies with static/runtime problems receive no checked-body fact. | Milestone boundary and RFC 0010 truthful phase scope. No arithmetic evaluation or successful CLI product command. |
+
+After approval, write one failing public-interface behavior test, observe red, implement that behavior and rerun focused tests. Repeat vertically. Do not write the entire catalog before implementation. Use mise-selected cargo check and focused compiler tests regularly. Map approved requirements to actual test names and results in a slice acceptance record.
+
+### Owner decisions requested
+
+| Decision | Recommendation and approval scope |
+| --- | --- |
+| O1. First delivery boundary | Approve M4.1 as canonical explicit declaration types, not full signature/body checking. Defaults, requirements and implementations return incomplete. Later procedure gaps do not block this independently useful slice. |
+| O2. Source type lookup | Approve binder, module binding, then primitive-prelude precedence. Qualification uses M3 installed exports without child autoload. Multiple distinct same-spelled variants reject an annotation with all candidate identities and spans. Canonical compiler primitive identities remain unaffected by source shadowing. |
+| O3. Typed facts and test seams | Approve the receipt contract and three public seams above. Complete means only annotation elaboration. Partial results and unsupported obligations never become checked artifacts. |
+| O4. Recursive declarations and layout | Approve nonexpanding nominal terms in M4.1. Defer representation validity to M4.2's complete summary/containment procedure. Do not treat a canonical annotation as a constructible or finite value type. |
+
+Later owner decisions remain local prerequisites, not M4.1 blockers. M4.2 needs trusted representation admission and complete transfer rules. M4.4 needs complete guarded/nested coverage and refutable guard-let behavior. M4.5 needs finite comparison over permitted admission relations and protected-overlap contracts. M4.6/M4.7 need recursive/nonmonotonic evidence, specialization-dependent equality and output-determination procedures. M4.8 needs exact aggregate/named-storage unused-Result checking and complete core visibility/admission contracts. RFC 0006 still lists char relational-operator admission as unfinished policy.
+
+Return these choices to the owner before implementing the affected procedure. Preserve the already confirmed no-default-width, declared-field context, inference-before-defaults, whole-vector correlation, ordinary no-fallback, conversion applicability and expected-E nonselection policies. Resource limits and unresolved goals never prove missing evidence or authorize fallback.
+
+### Delivery and verification after approval
+
+Create and claim an M4.1 slice ticket under #56 after scope approval. Link the exact approved checkpoint and the starting commit. Only the first approved slice is authorized for implementation.
+
+Follow the implement and TDD skills. Run focused tests regularly, then test:compiler, test, check and build:scaffold through mise. Run check:ci if workflows change. Record the host, tools, commands, observed results, unsupported cases and unrun gates. Any M1 through M3 fix needs its own regression and explanation.
+
+Use the code-review skill for independent Standards and Spec reviews against the exact starting commit. Address findings before the implementation commit. Record any local follow-up corrections without implying another independent review occurred.
+
+Commit and push only the approved slice. Use the PR skill to open a clearly scoped draft PR against main. Link the umbrella, slice ticket and acceptance evidence. Leave the umbrella open. Do not merge or add M5 work.
+
+No successful rill check/build/run/test command is authorized. Keep unavailable product tasks nonzero and preserve historical evidence. Typed-stage success is not ownership safety, complete source checking or execution.
+
+### Stage 1 observations and checkpoint review
+
+Only this plan and the proposed sections in RFCs 0004/0005 changed. No production source, tests, workflows, locks or historical artifacts changed. M4 implementation and every planned M4 test remain NotChecked. Owner approval is still pending.
+
+On macOS 27.0.1 AArch64, mise 2026.11.4 selected Rust/Cargo 1.98.0, Python 3.13.18 and uv 0.13.8. The following commands passed:
+
+- `mise run test:compiler`, all 138 existing compiler tests, including 47 M3 tests.
+- `mise run test`, the existing implemented LLVM-free Rust suites.
+- `mise run check`, existing Rust, documentation, tool and fixture checks.
+- `mise run build:scaffold`, the unchanged CLI scaffold.
+- `mise run check:docs`, including local links and whitespace checks.
+
+These are baseline/document checks, not M4 acceptance or Rill execution. User-global CMake/Ninja/Go lock warnings did not change repository locks. Workflows did not change, so check:ci was not run. Other-host profiles, LLVM, product build, language/stdlib/runtime/client suites and release verification were not run. Unavailable gates remain unchanged and nonzero under existing infrastructure tests.
+
+Two independent review axes examined the staged checkpoint against starting commit `ee12588f2cba912025900e1ac587586fb9cb6235`. Staged review preceded the documentation commit. This is a checkpoint review, not the required final implementation review.
+
+#### Standards
+
+One finding identified a multi-action RFC instruction. The local correction splits its three prohibitions into separate instructions. No judgement-call smell finding was reported.
+
+#### Spec
+
+One finding identified undefined lookup for multiple same-spelled enum variants. M3 collects them without establishing member uniqueness. The local correction rejects an ambiguous annotation, retains every candidate identity/span and adds a direct planned acceptance case. Full unused-declaration validity remains later work.
+
+Both corrections were made locally without another delegated review. The prose pass applied unslop while preserving code, recorded evidence, full RFC statuses and prior approvals. Formal ASD-STE100 dictionary compliance remains unverified. Commit/push of an implemented slice and its scoped draft PR remain contingent on approval and Stage 2.
+
 ## Completion record
 
 The following M1 statement belongs to the original planning baseline. M1/M2 later merged as recorded above; M3 evidence is separate.
