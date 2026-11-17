@@ -139,7 +139,13 @@ pub(super) fn collect(module: &mut Module, host: &mut Host) -> Result<Vec<Import
                 span: n.span.clone(),
             });
         }
-        if matches!(n.kind, NodeKind::Binding { .. } | NodeKind::GuardBinding) {
+        let pattern_scope = matches!(n.kind, NodeKind::For | NodeKind::MatchArm)
+            .then_some(n.span.start())
+            .or(scope);
+        if matches!(
+            n.kind,
+            NodeKind::Binding { .. } | NodeKind::GuardBinding | NodeKind::For | NodeKind::MatchArm
+        ) {
             for name in binders(syntax, n.children[0], host)? {
                 let span = syntax.nodes[name].span.clone();
                 module.declarations.push(Declaration {
@@ -151,11 +157,29 @@ pub(super) fn collect(module: &mut Module, host: &mut Host) -> Result<Vec<Import
                     },
                     name: Some(spelling(syntax, name)),
                     public: false,
-                    scope,
+                    scope: pattern_scope,
                     node: name,
                     span,
                 });
             }
+        }
+        if n.kind == NodeKind::Guard && n.children.len() == 3 {
+            let name = n.children[1];
+            let span = syntax.nodes[name].span.clone();
+            host.charge(1)?;
+            module.declarations.push(Declaration {
+                id: DeclarationId {
+                    context: module.context.clone(),
+                    module: module.key.clone(),
+                    start: span.start(),
+                    kind: DeclarationKind::Binding,
+                },
+                name: Some(spelling(syntax, name)),
+                public: false,
+                scope: Some(syntax.nodes[n.children[2]].span.start()),
+                node: name,
+                span,
+            });
         }
         let child_scope = if matches!(
             n.kind,
@@ -165,6 +189,8 @@ pub(super) fn collect(module: &mut Module, host: &mut Host) -> Result<Vec<Import
                 | NodeKind::Record
                 | NodeKind::Enum
                 | NodeKind::Arrow
+                | NodeKind::For
+                | NodeKind::MatchArm
         ) {
             Some(n.span.start())
         } else {

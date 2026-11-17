@@ -1149,6 +1149,14 @@ fn private_qualified_implementation_targets_are_not_missing() {
     let error = load(f.request()).unwrap_err();
     assert!(has_code(&error, "R0401"));
     assert!(!has_code(&error, "R0400"));
+    let witness = &error
+        .findings
+        .iter()
+        .find(|d| d.code == Some("R0401"))
+        .unwrap()
+        .witnesses[0];
+    assert_eq!(witness.module.path, "family.rill");
+    assert_eq!(witness.name, "hidden");
 }
 
 #[cfg(unix)]
@@ -1215,6 +1223,190 @@ fn canonical_order_uses_unsigned_utf8_paths_not_discovery_or_locale() {
             "\u{3b1}.rill"
         ]
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn link_target_parent_steps_follow_native_resolution_not_lexical_cleanup() {
+    let f = Fixture::new();
+    f.write("app/nested/target.rill", "export type Actual = {};");
+    f.write("app/target.rill", "export type Wrong = {};");
+    fs::create_dir(f.0.join("app/nested/deep")).unwrap();
+    std::os::unix::fs::symlink("nested/deep", f.0.join("app/d")).unwrap();
+    std::os::unix::fs::symlink("d/../target.rill", f.0.join("app/alias.rill")).unwrap();
+    f.write("app/main.rill", "import alias;");
+    let graph = load(f.request()).unwrap();
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "nested/target.rill")
+        .expect("native target must load");
+    assert_eq!(
+        module.path,
+        fs::canonicalize(f.0.join("app/alias.rill")).unwrap()
+    );
+    assert!(matches!(
+        graph.lookup_export(&module.key, Namespace::TypeModule, &["Actual"]),
+        Lookup::Found(_)
+    ));
+    assert!(!graph.modules().iter().any(|m| m.key.path == "target.rill"));
+}
+
+#[test]
+fn missing_explicit_standard_facade_is_a_missing_import_not_host_failure() {
+    let f = Fixture::new();
+    f.write("app/main.rill", "import std;");
+    let error = load(f.request()).unwrap_err();
+    assert_eq!(error.kind, FailureKind::SourceRejected);
+    assert!(has_code(&error, "R0400"));
+}
+
+#[test]
+fn for_and_match_pattern_binders_have_distinct_containing_scope_records() {
+    use compiler::loader::DeclarationKind;
+    let f = Fixture::new();
+    f.write("app/main.rill", "function inspect(input: i32): void { for (let [item, other] of items) { consume(item); } let answer = match (input) { branch => branch, Packet.Data(payload) => payload }; guard let success = operation() else (error) { return; } }");
+    let graph = load(f.request()).unwrap();
+    let main = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let binder = |name| {
+        main.declarations
+            .iter()
+            .find(|d| d.id.kind == DeclarationKind::Binding && d.name.as_deref() == Some(name))
+            .unwrap()
+    };
+    assert_eq!(binder("item").scope, binder("other").scope);
+    assert_ne!(binder("item").scope, binder("branch").scope);
+    assert_ne!(binder("branch").scope, binder("payload").scope);
+    assert!(binder("payload").scope.is_some());
+    assert_ne!(binder("success").scope, binder("error").scope);
+    assert!(binder("error").scope.is_some());
+    assert!(
+        !main
+            .declarations
+            .iter()
+            .any(|d| d.id.kind == DeclarationKind::Binding && d.name.as_deref() == Some("Packet"))
+    );
+}
+
+#[test]
+fn private_route_witness_retains_binding_owner_target_and_blocked_position() {
+    let f = Fixture::new();
+    f.write("app/real.rill", "export type Chosen = {};");
+    f.write("app/api.rill", "import real as Hidden;");
+    f.write("app/main.rill", "import api::Hidden::{Chosen};");
+    let error = load(f.request()).unwrap_err();
+    let witness = &error
+        .findings
+        .iter()
+        .find(|d| d.code == Some("R0401"))
+        .unwrap()
+        .witnesses[0];
+    assert_eq!(witness.module.path, "api.rill");
+    assert_eq!(witness.name, "Hidden");
+    assert_eq!(witness.namespace, Namespace::TypeModule);
+    assert_eq!(witness.segment, 1);
+    assert_eq!(witness.binding.bytes(), b"import real as Hidden;");
+    let Target::Module(target) = &witness.target else {
+        panic!("private module witness")
+    };
+    assert_eq!(target.path, "real.rill");
+    assert!(error.findings.iter().all(|d| d.candidates.is_empty()));
+}
+
+#[test]
+fn public_group_base_does_not_inherit_private_counterpart_failures() {
+    let f = Fixture::new();
+    f.write("app/real.rill", "export type Chosen = {};");
+    f.write(
+        "app/api.rill",
+        "export import real as R; function R(): void {}",
+    );
+    f.write("app/main.rill", "import api::R::{Missing};");
+    let error = load(f.request()).unwrap_err();
+    assert!(has_code(&error, "R0400"));
+    assert!(!has_code(&error, "R0401"));
+}
+
+#[test]
+fn privacy_witnesses_use_actual_namespace_halves_after_closure() {
+    let f = Fixture::new();
+    f.write("app/real.rill", "export type Chosen = {};");
+    f.write("app/values.rill", "export function publicValue(): void {}");
+    f.write(
+        "app/api.rill",
+        "import real as Hidden; export import values::{publicValue as Hidden};",
+    );
+    f.write("app/main.rill", "import api::Hidden::{Chosen};");
+    let error = load(f.request()).unwrap_err();
+    assert!(has_code(&error, "R0401"));
+    assert!(!has_code(&error, "R0400"));
+    f.write("app/main.rill", "import api::{Hidden};");
+    let graph = load(f.request()).unwrap();
+    let bindings: Vec<_> = graph
+        .bindings()
+        .iter()
+        .filter(|b| b.module.path == "main.rill")
+        .collect();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].namespace, Namespace::ValueFunction);
+    f.write("app/api.rill", "import values::{publicValue as Internal};");
+    f.write("app/main.rill", "import api::Internal::Child;");
+    let error = load(f.request()).unwrap_err();
+    assert!(has_code(&error, "R0400"));
+    assert!(!has_code(&error, "R0401"));
+}
+
+#[test]
+fn grouped_selection_after_long_qualification_has_bounded_resolution_copies() {
+    let f = Fixture::new();
+    for index in 0..40 {
+        let source = if index == 39 {
+            (0..160)
+                .map(|item| format!("export type T{item} = {{}}; "))
+                .collect::<String>()
+        } else {
+            format!("export import m{} as Next;", index + 1)
+        };
+        f.write(&format!("app/m{index}.rill"), &source);
+    }
+    let path = format!("m0{}", "::Next".repeat(39));
+    let members = (0..160)
+        .map(|item| format!("T{item}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    f.write("app/main.rill", &format!("import {path}::{{{members}}};"));
+    let graph = load(f.request()).unwrap();
+    assert_eq!(
+        graph
+            .bindings()
+            .iter()
+            .filter(|b| b.module.path == "main.rill")
+            .count(),
+        160
+    );
+    let mut request = f.request();
+    request.limits.max_work = 50_000;
+    assert_eq!(load(request).unwrap_err().kind, FailureKind::ResourceLimit);
+}
+
+#[cfg(unix)]
+#[test]
+fn link_target_spelling_limitations_are_not_mislabeled_as_broken_links() {
+    let f = Fixture::new();
+    f.write("app/Case.rill", "");
+    std::os::unix::fs::symlink("case.rill", f.0.join("app/alias.rill")).unwrap();
+    f.write("app/main.rill", "import alias;");
+    let error = load(f.request()).unwrap_err();
+    assert_eq!(error.kind, FailureKind::InputFailure);
+    if fs::metadata(f.0.join("app/alias.rill")).is_ok() {
+        assert!(error.message.contains("exact"));
+    } else {
+        assert!(error.message.contains("broken"));
+    }
 }
 
 #[test]

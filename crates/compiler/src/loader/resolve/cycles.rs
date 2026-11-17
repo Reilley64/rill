@@ -1,13 +1,22 @@
 //! Iterative SCC classification and cause propagation over alias obligations.
 use super::*;
 
+pub(super) const MISSING: u8 = 1;
+pub(super) const PRIVATE: u8 = 2;
+pub(super) const CYCLIC: u8 = 4;
+
 pub(super) fn alias_causes(
     imports: &[Import],
     analyses: &[Vec<(String, Span, Resolution)>],
     host: &mut Host,
 ) -> Result<Vec<u8>> {
+    let count = analyses.iter().try_fold(0usize, |count, items| {
+        count
+            .checked_add(items.len())
+            .ok_or_else(filesystem::resource)
+    })?;
+    host.charge(count)?;
     let resolutions: Vec<_> = analyses.iter().flatten().map(|(_, _, r)| r).collect();
-    host.charge(resolutions.len())?;
     let mut producers: BTreeMap<(ModuleKey, String), Vec<usize>> = BTreeMap::new();
     let mut at = 0;
     for (import, results) in imports.iter().zip(analyses) {
@@ -94,13 +103,13 @@ pub(super) fn alias_causes(
                 continue;
             }
             if resolutions[node].private {
-                causes[id] |= 2;
+                causes[id] |= PRIVATE;
             }
             if resolutions[node].missing {
-                causes[id] |= 1;
+                causes[id] |= MISSING;
             }
             if members.len() > 1 || edges[node].contains(&node) {
-                causes[id] |= 4;
+                causes[id] |= CYCLIC;
             }
             host.charge(edges[node].len())?;
             for &other in &edges[node] {
@@ -121,7 +130,7 @@ pub(super) fn alias_causes(
     while let Some(id) = ready.pop_front() {
         host.charge(1)?;
         if causes[id] == 0 && components[id].iter().any(|&node| resolutions[node].empty()) {
-            causes[id] = 1;
+            causes[id] = MISSING;
         }
         for &parent in &dependents[id] {
             host.charge(1)?;

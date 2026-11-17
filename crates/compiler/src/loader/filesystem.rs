@@ -6,6 +6,13 @@ use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Part {
+    Name(OsString),
+    Parent,
+    Boundary,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
     File,
@@ -65,17 +72,46 @@ impl Host {
         self.charge(path.as_os_str().len())?;
         let mut pending: VecDeque<_> = components(path)?
             .into_iter()
-            .map(|name| (name, false))
+            .map(|part| (part, false))
             .collect();
         let mut at = PathBuf::from("/");
         let mut links = 0;
         let mut link_states = BTreeSet::new();
-        while let Some((name, link_target)) = pending.pop_front() {
+        while let Some((part, link_target)) = pending.pop_front() {
             self.charge(1)?;
+            let name = match part {
+                Part::Boundary => {
+                    if root.is_some_and(|root| !at.starts_with(root)) {
+                        return Err(escape(&at));
+                    }
+                    continue;
+                }
+                Part::Parent => {
+                    if !fs::metadata(&at).map_err(|e| io_error(&at, e))?.is_dir() {
+                        return if link_target {
+                            Err(host_error(&at, "non-directory symbolic-link target"))
+                        } else {
+                            Ok(None)
+                        };
+                    }
+                    at.pop();
+                    if at.as_os_str().is_empty() {
+                        at.push("/");
+                    }
+                    continue;
+                }
+                Part::Name(name) => name,
+            };
             let mut exact = false;
             let directory = match fs::read_dir(&at) {
                 Ok(directory) => directory,
-                Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => return Ok(None),
+                Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => {
+                    return if link_target {
+                        Err(host_error(&at, "non-directory symbolic-link target"))
+                    } else {
+                        Ok(None)
+                    };
+                }
                 Err(error) => return Err(io_error(&at, error)),
             };
             // Do not stop at the match: budget consumption cannot depend on
@@ -89,9 +125,6 @@ impl Host {
             }
             at.push(&name);
             if !exact {
-                if link_target {
-                    return Err(host_error(&at, "broken symbolic link"));
-                }
                 return match fs::symlink_metadata(&at) {
                     Ok(_) => Err(host_error(
                         &at,
@@ -103,7 +136,11 @@ impl Host {
                             std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
                         ) =>
                     {
-                        Ok(None)
+                        if link_target {
+                            Err(host_error(&at, "broken symbolic link"))
+                        } else {
+                            Ok(None)
+                        }
                     }
                     Err(error) => Err(io_error(&at, error)),
                 };
@@ -111,7 +148,12 @@ impl Host {
             let metadata = fs::symlink_metadata(&at).map_err(|e| io_error(&at, e))?;
             if metadata.file_type().is_symlink() {
                 self.charge(pending.len().checked_add(1).ok_or_else(resource)?)?;
-                if !link_states.insert((at.clone(), pending.clone())) {
+                let state: Vec<_> = pending
+                    .iter()
+                    .filter(|(part, _)| *part != Part::Boundary)
+                    .map(|(part, _)| part.clone())
+                    .collect();
+                if !link_states.insert((at.clone(), state)) {
                     return Err(host_error(&at, "filesystem symbolic-link loop"));
                 }
                 links += 1;
@@ -124,24 +166,16 @@ impl Host {
                 } else {
                     at.parent().unwrap().join(target)
                 };
-                let target = normalize(&target)?;
-                if root.is_some_and(|root| !target.starts_with(root)) {
-                    return Err(escape(&at));
-                }
+                self.charge(target.as_os_str().len())?;
                 let mut next: VecDeque<_> = components(&target)?
                     .into_iter()
-                    .map(|name| (name, true))
+                    .map(|part| (part, true))
                     .collect();
+                next.push_back((Part::Boundary, false));
                 next.append(&mut pending);
                 pending = next;
                 at = PathBuf::from("/");
                 continue;
-            }
-            if !pending.is_empty() && !metadata.is_dir() {
-                if pending.front().is_some_and(|(_, required)| *required) {
-                    return Err(host_error(&at, "broken symbolic-link target"));
-                }
-                return Ok(None);
             }
         }
         if root.is_some_and(|root| !at.starts_with(root)) {
@@ -288,12 +322,13 @@ pub(super) fn escape(path: &Path) -> Failure {
         span: None,
         message: error.message.clone(),
         candidates: Vec::new(),
+        witnesses: Vec::new(),
     });
     error
 }
 
 fn absolute(path: &Path) -> Result<PathBuf> {
-    normalize(&if path.is_absolute() {
+    Ok(if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()
@@ -302,27 +337,13 @@ fn absolute(path: &Path) -> Result<PathBuf> {
     })
 }
 
-fn normalize(path: &Path) -> Result<PathBuf> {
-    let mut out = PathBuf::from("/");
-    for c in path.components() {
-        match c {
-            Component::RootDir | Component::CurDir => (),
-            Component::Normal(name) => out.push(name),
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::Prefix(_) => return Err(host_error(path, "unsupported host path prefix")),
-        }
-    }
-    Ok(out)
-}
-
-fn components(path: &Path) -> Result<VecDeque<OsString>> {
+fn components(path: &Path) -> Result<VecDeque<Part>> {
     path.components()
         .filter_map(|c| match c {
-            Component::Normal(name) => Some(Ok(name.to_os_string())),
-            Component::RootDir => None,
-            _ => Some(Err(host_error(path, "non-canonical path component"))),
+            Component::Normal(name) => Some(Ok(Part::Name(name.to_os_string()))),
+            Component::ParentDir => Some(Ok(Part::Parent)),
+            Component::RootDir | Component::CurDir => None,
+            Component::Prefix(_) => Some(Err(host_error(path, "unsupported host path prefix"))),
         })
         .collect()
 }

@@ -1,4 +1,4 @@
-//! Shared, LLVM-free source, lexical and syntax facts. Parsing is not source checking.
+//! Shared, LLVM-free source, lexical, syntax and module facts. Not complete source checking.
 
 pub mod lexer;
 pub mod loader;

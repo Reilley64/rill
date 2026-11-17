@@ -91,7 +91,7 @@ The owner approved O1 through O7 and the three test seams at checkpoint `a41e7cc
 
 `Graph` exposes read-only module, declaration, binding, implementation, prelude and import-outcome records. Module keys contain the origin and canonical root-relative UTF-8 path. Declaration identities also retain an opaque capture identity, source position and kind. Never merge declaration identities from separate captures. Source spans retain their actual M1 snapshot IDs and canonical native source paths. URI encoding and reporter transport are not implemented here.
 
-Discovery includes every parsed candidate-prefix facade, even without a winning export. Its declarations and expectations participate under approved O1. Directory enumeration only verifies exact spelling. It does not enroll unrelated sources. Grouped members select exports only. Ungrouped paths consider all applicable file/export routes and deduplicate targets within each namespace.
+Native parent steps apply after preceding symbolic links resolve, not through lexical path cleanup. Discovery includes every parsed candidate-prefix facade, even without a winning export. Its declarations and expectations participate under approved O1. Directory enumeration only verifies exact spelling. It does not enroll unrelated sources. Grouped members select exports only. Ungrouped paths consider all applicable file/export routes and deduplicate targets within each namespace.
 
 Re-export closure uses finite canonical candidate sets. Iterative alias-component analysis separates anchored cycles, missing exports, private barriers and unanchored cycles. An acyclic alias depending on an unanchored cycle retains R0405. Whole-graph publication prevents failed grouped imports or re-exports from supplying installed downstream bindings. A rejected attempt exposes provisional candidates, not a `Graph` or installed half-binding.
 
@@ -105,7 +105,7 @@ Prelude admission checks source structure and visibility, not typed signature co
 
 ### Failures and resource limits
 
-`FailureKind` distinguishes InvalidRequest, SourceRejected, InputFailure, SourceChanged and ResourceLimit. Findings preserve original spans and canonical candidate provenance. R0400 through R0405 retain their module meanings. R0406 layout checking is not implemented. Lexical diagnostics retain M1 codes; syntax and non-family-target messages do not introduce a new stable diagnostic registry.
+`FailureKind` distinguishes InvalidRequest, SourceRejected, InputFailure, SourceChanged and ResourceLimit. Findings preserve original spans and canonical candidate provenance. Diagnostic-only privacy witnesses retain the private binding span, module, namespace, target and blocked route position. They never enter public candidate sets or grant source access. R0400 through R0405 retain their module meanings. R0406 layout checking is not implemented. Lexical diagnostics retain M1 codes; syntax and non-family-target messages do not introduce a new stable diagnostic registry.
 
 Rejected and incomplete attempts retain explicitly partial module/import facts. Secondary diagnostics can remain incomplete. No failure type exposes successful export lookup or installed imports. An unreadable alternative is not a missing candidate. Changed captures cannot become source success through a retry.
 

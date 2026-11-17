@@ -232,12 +232,26 @@ pub enum FailureKind {
     ResourceLimit,
 }
 
+/// Diagnostic-only evidence at a private path barrier. It does not create a
+/// source binding or permit traversal of the private target.
+#[derive(Clone, Debug)]
+pub struct PrivacyWitness {
+    pub module: ModuleKey,
+    pub name: String,
+    pub namespace: Namespace,
+    /// Zero-based segment after the origin prefix; a group member follows it.
+    pub segment: usize,
+    pub binding: Span,
+    pub target: Target,
+}
+
 #[derive(Clone, Debug)]
 pub struct Finding {
     pub code: Option<&'static str>,
     pub span: Option<Span>,
     pub message: String,
     pub candidates: Vec<Candidate>,
+    pub witnesses: Vec<PrivacyWitness>,
 }
 
 #[derive(Debug, Default)]

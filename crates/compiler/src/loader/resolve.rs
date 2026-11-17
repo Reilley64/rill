@@ -7,10 +7,11 @@ use std::collections::{BTreeSet, VecDeque};
 use std::path::{Component, Path};
 
 mod cycles;
-use cycles::alias_causes;
+use cycles::{CYCLIC, MISSING, PRIVATE, alias_causes};
 
 type Slot = (ModuleKey, Namespace, String);
 type Facts = BTreeMap<Slot, BTreeSet<Target>>;
+type Privacy = BTreeMap<Slot, Vec<(Span, Target)>>;
 
 struct Engine {
     id: GraphId,
@@ -134,12 +135,19 @@ impl Engine {
             .sort_by(|a, b| (&a.module, a.span.start()).cmp(&(&b.module, b.span.start())));
         let (facts, names, public_names) = self.seeds()?;
         let mut facts = facts;
+        let no_privacy = Privacy::new();
         loop {
             let mut changed = false;
             for import in &self.imports {
                 self.host.charge(1)?;
-                let results =
-                    resolve_import(import, &facts, &names, &public_names, &mut self.host)?;
+                let results = resolve_import(
+                    import,
+                    &facts,
+                    &names,
+                    &public_names,
+                    &no_privacy,
+                    &mut self.host,
+                )?;
                 if import.public {
                     for (name, _, resolution) in results {
                         for (ns, targets) in resolution.targets {
@@ -158,6 +166,7 @@ impl Engine {
                 break;
             }
         }
+        let privacy = self.private_bindings(&facts, &names, &public_names)?;
         let mut bindings = self.declaration_bindings()?;
         let findings = &mut self.findings;
         let mut analyses = Vec::new();
@@ -167,6 +176,7 @@ impl Engine {
                 &facts,
                 &names,
                 &public_names,
+                &privacy,
                 &mut self.host,
             )?);
         }
@@ -174,7 +184,14 @@ impl Engine {
         let mut obligation = 0;
         for (import, results) in self.imports.iter().zip(analyses) {
             if import.items.is_some() {
-                let base = resolve_path(import, &facts, &names, &public_names, &mut self.host)?;
+                let base = resolve_path(
+                    import,
+                    &facts,
+                    &names,
+                    &public_names,
+                    &privacy,
+                    &mut self.host,
+                )?;
                 let types = &base.targets[&Namespace::TypeModule];
                 if !types.is_empty()
                     && (types.len() != 1 || !matches!(types.first(), Some(Target::Module(_))))
@@ -203,7 +220,7 @@ impl Engine {
                     candidates,
                 });
                 if resolution.empty() {
-                    for (bit, code) in [(1, "R0400"), (2, "R0401"), (4, "R0405")] {
+                    for (bit, code) in [(MISSING, "R0400"), (PRIVATE, "R0401"), (CYCLIC, "R0405")] {
                         if causes[obligation] & bit != 0 {
                             findings.push(finding(
                                 code,
@@ -268,6 +285,7 @@ impl Engine {
                     span: Some(binding.span.clone()),
                     message: "same-scope binding collision".into(),
                     candidates: Vec::new(),
+                    witnesses: Vec::new(),
                 });
             }
         }
@@ -347,6 +365,7 @@ impl Engine {
         let mut implementations = Vec::new();
         let findings = &mut self.findings;
         for module in self.modules.values() {
+            self.host.charge(module.declarations.len())?;
             for declaration in &module.declarations {
                 if declaration.id.kind != DeclarationKind::Implementation {
                     continue;
@@ -369,17 +388,27 @@ impl Engine {
                     } else {
                         Namespace::TypeModule
                     };
+                    self.host.charge(bindings.len())?;
                     let binding = bindings
                         .iter()
                         .find(|b| b.module == at && b.namespace == ns && &b.name == name);
                     if let Some(binding) = binding {
                         if index > 0 && !binding.public {
+                            self.host.charge(1)?;
                             inaccessible = true;
                             findings.push(Finding {
                                 code: Some("R0401"),
                                 span: Some(declaration.span.clone()),
                                 message: "private implementation target".into(),
                                 candidates: Vec::new(),
+                                witnesses: vec![PrivacyWitness {
+                                    module: binding.module.clone(),
+                                    name: name.clone(),
+                                    namespace: ns,
+                                    segment: index,
+                                    binding: binding.span.clone(),
+                                    target: binding.target.clone(),
+                                }],
                             });
                             break;
                         }
@@ -418,12 +447,14 @@ impl Engine {
                         span: Some(declaration.span.clone()),
                         message: "implementation target is not a body-less family".into(),
                         candidates: Vec::new(),
+                        witnesses: Vec::new(),
                     }),
                     None => findings.push(Finding {
                         code: Some("R0400"),
                         span: Some(declaration.span.clone()),
                         message: "implementation family target is unavailable".into(),
                         candidates: Vec::new(),
+                        witnesses: Vec::new(),
                     }),
                 }
             }
@@ -433,6 +464,42 @@ impl Engine {
         } else {
             Err(rejected(std::mem::take(findings)))
         }
+    }
+
+    fn private_bindings(
+        &mut self,
+        facts: &Facts,
+        names: &BTreeSet<Slot>,
+        public_names: &BTreeSet<Slot>,
+    ) -> Result<Privacy> {
+        let mut privacy = Privacy::new();
+        for binding in self
+            .declaration_bindings()?
+            .into_iter()
+            .filter(|b| !b.public)
+        {
+            self.host.charge(1)?;
+            privacy
+                .entry((binding.module, binding.namespace, binding.name))
+                .or_default()
+                .push((binding.span, binding.target));
+        }
+        for import in self.imports.iter().filter(|i| !i.public) {
+            for (name, span, result) in
+                resolve_import(import, facts, names, public_names, &privacy, &mut self.host)?
+            {
+                for (ns, targets) in result.targets {
+                    for target in targets {
+                        self.host.charge(1)?;
+                        privacy
+                            .entry((import.module.clone(), ns, name.clone()))
+                            .or_default()
+                            .push((span.clone(), target));
+                    }
+                }
+            }
+        }
+        Ok(privacy)
     }
 
     fn require_source(&mut self, origin: Origin, path: PathBuf) -> Result<ModuleKey> {
@@ -492,6 +559,7 @@ impl Engine {
                         span: Some(d.span.clone()),
                         message: format!("{:?}", d.kind),
                         candidates: Vec::new(),
+                        witnesses: Vec::new(),
                     })
                     .collect(),
             ));
@@ -510,6 +578,7 @@ impl Engine {
                         span: Some(e.span),
                         message: format!("{:?}", e.kind),
                         candidates: Vec::new(),
+                        witnesses: Vec::new(),
                     }])
                 }
             })?;
@@ -562,8 +631,21 @@ impl Engine {
         let segments = import.path[start..].to_vec();
         if segments.is_empty() {
             if import.path == ["std"] {
-                let key = self.require_source(origin, self.roots[&origin].join("std.rill"))?;
-                import.starts.push((key, 0));
+                let candidate = self.roots[&origin].join("std.rill");
+                if let Some(probe) = self.host.probe(&candidate, Some(&self.roots[&origin]))? {
+                    match probe.kind {
+                        Kind::File => import
+                            .starts
+                            .push((self.add_module(origin, probe.path)?, 0)),
+                        Kind::Other => {
+                            return Err(filesystem::host_error(
+                                &candidate,
+                                "standard facade is not a regular file",
+                            ));
+                        }
+                        Kind::Directory => (),
+                    }
+                }
             }
         } else {
             for (index, segment) in segments.iter().enumerate() {
@@ -673,6 +755,7 @@ impl Engine {
 struct Resolution {
     targets: BTreeMap<Namespace, BTreeSet<Target>>,
     private: bool,
+    witnesses: Vec<PrivacyWitness>,
     missing: bool,
     dependencies: BTreeSet<(ModuleKey, String)>,
     routes: BTreeSet<RouteEdge>,
@@ -720,26 +803,42 @@ impl Resolution {
 
 struct Tables<'a> {
     facts: &'a Facts,
-    names: &'a BTreeSet<Slot>,
     public_names: &'a BTreeSet<Slot>,
+    privacy: &'a Privacy,
 }
 
 fn lookup(
     module: &ModuleKey,
     name: &str,
     ns: Namespace,
+    segment: usize,
     tables: &Tables<'_>,
     result: &mut Resolution,
     host: &mut Host,
 ) -> Result<BTreeSet<Target>> {
     let Tables {
         facts,
-        names,
         public_names,
+        privacy,
     } = tables;
     host.charge(1)?;
     let slot = (module.clone(), ns, name.to_owned());
-    result.private |= names.contains(&slot) && !public_names.contains(&slot);
+    if facts.get(&slot).is_none_or(BTreeSet::is_empty)
+        && let Some(bindings) = privacy.get(&slot)
+    {
+        host.charge(bindings.len())?;
+        result.private = true;
+        for (binding, target) in bindings {
+            result.witnesses.push(PrivacyWitness {
+                module: module.clone(),
+                name: name.to_owned(),
+                namespace: ns,
+                segment,
+                binding: binding.clone(),
+                target: target.clone(),
+            });
+        }
+    }
     if public_names.contains(&slot) {
         result
             .dependencies
@@ -762,6 +861,7 @@ fn resolve_path(
     facts: &Facts,
     names: &BTreeSet<Slot>,
     public_names: &BTreeSet<Slot>,
+    privacy: &Privacy,
     host: &mut Host,
 ) -> Result<Resolution> {
     let mut result = Resolution::new();
@@ -805,10 +905,11 @@ fn resolve_path(
                         &module,
                         name,
                         ns,
+                        index,
                         &Tables {
                             facts,
-                            names,
                             public_names,
+                            privacy,
                         },
                         &mut result,
                         host,
@@ -835,17 +936,31 @@ fn resolve_import(
     facts: &Facts,
     names: &BTreeSet<Slot>,
     public_names: &BTreeSet<Slot>,
+    privacy: &Privacy,
     host: &mut Host,
 ) -> Result<Vec<(String, Span, Resolution)>> {
-    let base = resolve_path(import, facts, names, public_names, host)?;
+    let base = resolve_path(import, facts, names, public_names, privacy, host)?;
     let Some(items) = &import.items else {
         return Ok(vec![(import.alias.clone(), import.span.clone(), base)]);
     };
     let mut results = Vec::new();
     for item in items {
-        host.charge(1)?;
+        let copies = base
+            .dependencies
+            .len()
+            .checked_add(base.routes.len())
+            .and_then(|n| n.checked_add(base.witnesses.len()))
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(filesystem::resource)?;
+        host.charge(copies)?;
         let mut result = Resolution::new();
-        result.private = base.private;
+        let public_module = base.targets[&Namespace::TypeModule]
+            .iter()
+            .any(|t| matches!(t, Target::Module(_)));
+        if !public_module {
+            result.private = base.private;
+            result.witnesses = base.witnesses.clone();
+        }
         result.missing = base.missing;
         result.dependencies = base.dependencies.clone();
         result.routes = base.routes.clone();
@@ -862,10 +977,11 @@ fn resolve_import(
                         module,
                         &item.name,
                         ns,
+                        import.path.len(),
                         &Tables {
                             facts,
-                            names,
                             public_names,
+                            privacy,
                         },
                         &mut result,
                         host,
@@ -886,12 +1002,19 @@ fn finding(
     resolution: &Resolution,
     host: &mut Host,
 ) -> Result<Finding> {
-    host.charge(1)?;
+    host.charge(
+        resolution
+            .witnesses
+            .len()
+            .checked_add(1)
+            .ok_or_else(filesystem::resource)?,
+    )?;
     Ok(Finding {
         code: Some(code),
         span: Some(span.clone()),
         message: message.into(),
         candidates: resolution.candidates(host)?,
+        witnesses: resolution.witnesses.clone(),
     })
 }
 
