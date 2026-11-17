@@ -128,7 +128,7 @@ This RFC introduces no type-alias declaration feature. Import aliases remain mod
 
 ### Proposed M4.1 canonical declaration-type procedure
 
-This section proposes a bounded first typed-analysis stage for [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56). Owner approval is pending. It does not complete inference, signature validity, layout or this Draft RFC.
+The owner [approved this scoped M4.1 procedure](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. [Slice #57](https://github.com/Reilley64/rill/issues/57) implements explicit declaration types under M4 umbrella #56. Approval does not complete inference, signature validity, layout or this Draft RFC.
 
 The input is one successful M3 Graph and explicit analysis limits. Use that graph's retained M1 snapshots and M2 nodes. Do not read live files. Do not parse again. Do not combine captures.
 
@@ -138,7 +138,7 @@ The stage elaborates module-level record fields, enum payloads and explicit name
 
 Collect module-level nominal declarations and ordered binder identities before elaborating annotations. Use the original M3 DeclarationId for each declaration and binder. Reject duplicate binder names within one declaration. Preserve distinct binders from different declarations, even when their names match.
 
-Resolve an unqualified type name through the declaration's binders, then its module's installed type/module bindings, then M3's primitive prelude identities. This precedence is a proposal requiring owner approval. A source binding can shadow a primitive spelling. Compiler-required primitive references still use their actual prelude identities.
+Resolve an unqualified type name through the declaration's binders, then its module's installed type/module bindings, then M3's primitive prelude identities. The scoped checkpoint approval covers this precedence. A source binding can shadow a primitive spelling. Compiler-required primitive references still use their actual prelude identities.
 
 Resolve qualified module segments through installed bindings and exported qualification. Never probe filesystem children. A module target cannot finish a type annotation. A value/function target cannot supply a type.
 

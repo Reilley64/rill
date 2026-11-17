@@ -214,7 +214,7 @@ M1 supplies immutable snapshots, spans, lexical facts and decoded provenance. M2
 
 M3 explicitly deferred expression/type/local-use resolution, signature compatibility, public-requirement checking, captures, layout, overloads, conversions, coherence and protected operations. Those deferrals are current M4/M5 prerequisites, not failed M3 acceptance. Older absent-implementation statements in RFC evidence tables remain historical records.
 
-RFC 0001 remains Accepted at its recorded snapshot. RFCs 0002 through 0010 remain Draft with their existing scoped approvals. The new procedures below are proposals awaiting owner approval. No implementation or acceptance evidence is claimed by this checkpoint.
+RFC 0001 remains Accepted at its recorded snapshot. RFCs 0002 through 0010 remain Draft with their existing scoped approvals. The owner subsequently [approved O1 through O4](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. This authorizes only M4.1 and its three public TDD seams. The original checkpoint claimed no implementation evidence.
 
 ### Proposed dependency-ordered slices
 
@@ -241,7 +241,7 @@ M4.8 is a completion gate, not permission to hide unfinished work. Every remaini
 
 Start with M4.1. Canonical declaration types provide a useful input for layout, inference and overload work without choosing their unresolved policies.
 
-The proposed procedure lives in [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure). [RFC 0004](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m41-explicit-header-elaboration) owns its function-header boundary. These two additions require scoped owner approval before coding. They do not require full RFC acceptance.
+The proposed procedure lives in [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure). [RFC 0004](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m41-explicit-header-elaboration) owns its function-header boundary. The owner approved these two additions at the exact checkpoint recorded above. They do not establish full RFC acceptance.
 
 The other exact inputs are these sections at starting commit `ee12588f2cba912025900e1ac587586fb9cb6235`:
 
@@ -323,6 +323,8 @@ After approval, write one failing public-interface behavior test, observe red, i
 
 ### Owner decisions requested
 
+The owner approved all four recommendations below at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. Later slices remain unapproved.
+
 | Decision | Recommendation and approval scope |
 | --- | --- |
 | O1. First delivery boundary | Approve M4.1 as canonical explicit declaration types, not full signature/body checking. Defaults, requirements and implementations return incomplete. Later procedure gaps do not block this independently useful slice. |
@@ -348,7 +350,7 @@ No successful rill check/build/run/test command is authorized. Keep unavailable 
 
 ### Stage 1 observations and checkpoint review
 
-Only this plan and the proposed sections in RFCs 0004/0005 changed. No production source, tests, workflows, locks or historical artifacts changed. M4 implementation and every planned M4 test remain NotChecked. Owner approval is still pending.
+Only this plan and the proposed sections in RFCs 0004/0005 changed. No production source, tests, workflows, locks or historical artifacts changed. At checkpoint creation, M4 implementation and every planned M4 test were NotChecked. Owner approval was pending.
 
 On macOS 27.0.1 AArch64, mise 2026.11.4 selected Rust/Cargo 1.98.0, Python 3.13.18 and uv 0.13.8. The following commands passed:
 
@@ -371,6 +373,10 @@ One finding identified a multi-action RFC instruction. The local correction spli
 One finding identified undefined lookup for multiple same-spelled enum variants. M3 collects them without establishing member uniqueness. The local correction rejects an ambiguous annotation, retains every candidate identity/span and adds a direct planned acceptance case. Full unused-declaration validity remains later work.
 
 Both corrections were made locally without another delegated review. The prose pass applied unslop while preserving code, recorded evidence, full RFC statuses and prior approvals. Formal ASD-STE100 dictionary compliance remains unverified. Commit/push of an implemented slice and its scoped draft PR remain contingent on approval and Stage 2.
+
+### M4.1 Stage 2 acceptance
+
+[Slice #57](https://github.com/Reilley64/rill/issues/57) records the approved M4.1 work. The [M4.1 acceptance record](../crates/compiler/tests/m4-1-acceptance.md) maps real tests to the checkpoint requirements. It preserves unimplemented checks and later-slice boundaries. It does not complete M4 or enable any product command.
 
 ## Completion record
 

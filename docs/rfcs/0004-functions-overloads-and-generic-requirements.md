@@ -122,7 +122,7 @@ Arrow expressions may infer parameter and result types from immediate context. C
 
 ### Proposed M4.1 explicit header elaboration
 
-Owner approval for this first-stage procedure is pending under [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56). Full RFC status and earlier policy approvals remain unchanged.
+The owner [approved this first-stage procedure](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. [M4.1 slice #57](https://github.com/Reilley64/rill/issues/57) remains part of open M4 umbrella #56. Full RFC status and earlier policy approvals remain unchanged.
 
 Use [RFC 0005's canonical declaration-type procedure](0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure) for named-function and body-less family annotations. Preserve parameter order, binder identities and the explicit result term. Preserve the canonical family identity independently of its source alias.
 

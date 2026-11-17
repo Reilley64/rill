@@ -1,6 +1,6 @@
 # Compiler front end
 
-This crate implements M1 source snapshots/lexing, the M2 parser and M3 module resolution/declaration collection. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
+This crate implements M1 source snapshots/lexing, the M2 parser, M3 module resolution/declaration collection and M4.1 explicit declaration types. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
 
 The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. [M2 ticket #52](https://github.com/Reilley64/rill/issues/52) records the baseline, acceptance evidence and limitations.
 
@@ -118,3 +118,30 @@ These limits are not language restrictions or wall-clock guarantees. Host calls 
 [The acceptance record](tests/m3-acceptance.md) maps RFC cases M1 through M15 and identity/order requirements to real filesystem tests in `tests/m3.rs`. Tests cross the public loader, qualification and retained-input-validation interfaces. They do not execute Rill code.
 
 The recorded host is macOS 27.0.1 AArch64. Its filesystem is case-insensitive and normalization-insensitive for the exercised names. Exact alternate-spelling lookups reject with an explicit InputFailure instead of merging identities. Distinct case/normalization file pairs cannot be validated on this filesystem. The [hosted publication record](tests/m3-acceptance.md#hosted-publication-evidence) reports passing scaffold and M3 tests on all four configured Linux/macOS runner profiles at source revision 862704b. Distinct alternate-case/normalization file-pair validation remains unrun. These are scoped resolver results, not backend/runtime support. Windows-native loading is unsupported. Permission-denial tests disclose privileged-host bypasses rather than counting them as demonstrated denial.
+
+## M4.1 explicit declaration types
+
+The owner approved O1 through O4 at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. [Slice #57](https://github.com/Reilley64/rill/issues/57) belongs to open [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56). RFCs [0005](../../docs/rfcs/0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure) and [0004](../../docs/rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m41-explicit-header-elaboration) own the scoped procedure. Their full statuses remain Draft.
+
+`analysis::analyze_declaration_types(&Graph, AnalysisLimits)` consumes the retained M3 graph without filesystem reads or reparsing. It elaborates every module-level record/enum annotation and named-function/family parameter/result annotation. The result borrows the graph, so all canonical identities and source snapshots remain available.
+
+A successful `Receipt` means only declaration-type elaboration completed. `completion()` lists declaration validity, signature compatibility, position validity, layout, bodies, startup, expectations, inference, coverage, evidence, ownership and execution as NotPerformed. The receipt is not a checked program or callable implementation.
+
+| Query or fact | Meaning |
+| --- | --- |
+| `receipt.declaration(&DeclarationId)` | Read-only binders and ordered record fields, enum payloads or explicit function parameter/result types. A genuine out-of-scope declaration returns None. A foreign or unknown identity returns InvalidRequest. |
+| `receipt.type_use(&Module, NodeId)` | Canonical annotation term, ordered nominal substitution, original span and source-binding provenance. Use the actual module from the retained graph. Foreign modules and invalid node indices return InvalidRequest. An existing non-annotation node returns None. |
+| `declarations()` and `type_uses()` | Deterministically ordered read-only iteration over the same facts. Declaration order follows M3 identity order. Type-use order follows module, original byte start and node index. |
+| `TypeTerm` | Actual graph-scoped primitive, binder, nominal or variant identities; structural tuples, references and written callable modes. Exact equality performs no widening, inference or callable-mode conversion. |
+
+Source type lookup checks declaration binders, then installed module bindings, then primitive prelude identities. Module qualification uses installed exported bindings only. It never autoloads children. Variant qualification rejects multiple same-spelled variants instead of choosing by traversal order. Private barriers retain diagnostic-only binding/candidate evidence.
+
+Generic applications need full written arguments in this stage. Missing arguments, generic defaults, where clauses and implementation headers return Incomplete with original-node obligations. Requirements are neither proved nor disproved. Excess arguments, duplicate binders and invalid source type names/targets produce type findings. No Error or Unknown term represents a valid type.
+
+Failure exposes explicitly partial facts and incomplete secondary diagnostics, never a completed receipt. Resource exhaustion takes priority over incomplete obligations, which take priority over source rejection. Known findings remain available in every failure category. Queries do not reinterpret failures as checked artifacts.
+
+Nominal terms never expand their fields. Recording `Growing<Box<T>>` therefore does not run a recursive evidence or layout search. Unused duplicate members, void/never position legality, finite layout and implementation compatibility remain unchecked. Supplied copy/dispose annotations receive no library-compatibility or trusted-operation certification. This slice fabricates no standard-library definitions.
+
+Default limits permit 1,000,000 work units, 100,000 retained/index entries and 64 annotation traversal levels. Traversal has an absolute ceiling of 64. Entries include analysis indexes, type terms, written uses, members, substitutions, provenance references and findings. Checked counters charge before growth. Work charges scans, traversal and indexed lookups. Limits do not promise wall-clock bounds, precise heap-byte quotas or host OOM recovery.
+
+The [acceptance record](tests/m4-1-acceptance.md) maps the public-seam tests in `tests/m4_1.rs`. Run them with `mise exec -- cargo test --locked -p compiler --no-default-features --test m4_1`. No Rill code, LLVM, ownership mechanism or editor behavior executes in this suite. M4.1 leaves all product commands and unavailable gates unchanged.
