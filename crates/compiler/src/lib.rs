@@ -1,5 +1,6 @@
-//! Shared, LLVM-free source and lexical facts. Lexical completion is not source checking.
+//! Shared, LLVM-free source, lexical and syntax facts. Parsing is not source checking.
 
 pub mod lexer;
+pub mod parser;
 pub mod source;
 mod unicode;
