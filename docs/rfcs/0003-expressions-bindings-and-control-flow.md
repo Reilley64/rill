@@ -532,7 +532,7 @@ Charge source/scope visits, digits, constraints, substitutions, queue operations
 
 ### Proposed M4.4 match and guard control
 
-[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) proposes these data/control refinements. Owner approval is pending. Earlier sequencing, scope and expectation approvals remain unchanged.
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) owns these data/control refinements. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) before model/compiler code. Earlier approvals and the full RFC status remain unchanged.
 
 Match evaluates its original scrutinee position once. Pattern guards and bodies retain source order. Check every written pattern, guard and body without executing them. Coverage uses RFC 0005's static constructor procedure rather than known runtime values.
 

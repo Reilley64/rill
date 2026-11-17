@@ -594,7 +594,7 @@ Implementation `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd` is pushed in draft PR 
 
 [M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) starts at reviewed M4.3 revision `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd`. All slices remain in existing draft PR #58. No intermediate merge is required or authorized. #56 remains open.
 
-No M4.4 model/compiler code or tests exist. The following procedures and choices are pending owner approval. Earlier scoped approvals, source examples, evidence and full RFC statuses remain unchanged.
+The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler code. The bounded implementation and acceptance evidence are recorded below. The owner later [confirmed ordinary simple-binding value typing](https://github.com/Reilley64/rill/issues/61#issuecomment-6959565199), without implicit borrowing or permission for an illegal transfer. Earlier scoped approvals, source examples, evidence and full RFC statuses remain unchanged.
 
 [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m44-data-and-pattern-procedure) owns constructors, field access, variant admission/joins, categories and finite coverage. [RFC 0003](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control) owns match/guard scopes and complete expression exit composition. [RFC 0007](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification) supplies the typing prerequisite for borrowed binders, not ownership execution.
 
@@ -669,9 +669,15 @@ Before approval, all M4.4 model/compiler assertions remain NotChecked. Pre-revie
 
 Independent Standards and Spec reviews covered the four staged documents against `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd`. Standards found no documented violations or judgement-call findings. Spec found one P2 ambiguity in nested zero-constructor columns. The local correction distinguishes vacuous Root domains from symbolic Component holes and adds expected model cases for both payload orders.
 
-Neither reviewer executed a model/compiler. The original staged reviews exclude the later local correction and review record. No second delegated review is claimed. Neither review grants owner approval. K1 through K4 remain pending.
+Neither reviewer executed a model/compiler. The original staged reviews exclude the later local correction and review record. No second delegated review is claimed. Neither review granted owner approval. K1 through K4 were pending at this design checkpoint. The subsequent scoped owner approval is recorded above.
 
 After the local correction, `mise run check:docs` passed 1658 destinations with zero errors. The added-RFC sentence-length scan and staged/unstaged diff checks passed. No M4.4 model/compiler code or execution was run. Formal vocabulary compliance remains unverified.
+
+### M4.4 implementation and acceptance
+
+The [M4.4 acceptance record](../crates/compiler/tests/m4-4-acceptance.md) maps direct data entry/body/node assertions and the separate model-first evidence. Both independent final axes reviewed the staged implementation. Standards found one nonblocking duplication heuristic, corrected with a shared budget-charging substitution builder. Spec found two P2 defects in implicit-dereference views and nested match context. Public regressions failed before both local corrections. The record separates the original review scope, later corrections and actual verification; no second delegated review is claimed.
+
+The implemented scope retains explicit missing core and aggregate-classification prerequisites. Positive List/index/Option/Result admission remains an M4.8 integration gate. Neither that boundary nor the simple-binding clarification authorizes an illegal ownership transfer. M4.5 through M4.8 still require separate procedures, review and owner approval. PR #58 remains draft and unmerged; #56 remains open.
 
 ## Completion record
 

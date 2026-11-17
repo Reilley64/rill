@@ -195,3 +195,17 @@ Static places distinguish writable, read-only and value contexts. Descriptor bor
 Data/pattern protocols, ordinary families, omitted generic inference, callable creation/invocation, interpolation, errors and remaining core integration stay incomplete. Nested declarations and mutable temporary acquisition also retain later M4 obligations. `not_performed()` lists full body/signature/position/inference/layout/coverage/evidence/ownership/execution stages. A scoped receipt is not a checked program or completed M4.
 
 The [M4.3 acceptance record](tests/m4-3-acceptance.md) maps direct public-interface tests and separate verification evidence. No product routing, native/LLVM dependency, shipped standard definition or M5 behavior is added.
+
+## M4.4 scoped data and pattern typing
+
+The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) before implementation and later [clarified simple binding value types](https://github.com/Reilley64/rill/issues/61#issuecomment-6959565199). The [M4.4 acceptance record](tests/m4-4-acceptance.md) separates the finite reference model, direct compiler assertions and remaining gates.
+
+`analysis::data::check_data` takes completed M4.2 input and AnalysisLimits. It extends the existing scalar/control engine. Its DataReceipt has the same body/node query boundaries, not a second parser or a dependency on scalar-only success for data-bearing source.
+
+Node facts retain named construction and evaluation order, complete substitutions, canonical field projections, actual variants and explicit admissions. Pattern facts retain source sites, binder identities, source types and projection dependencies. Qualified arm views preserve declared parents outside their scope and retain later tag-stability requirements. Lexical assignment checks do not prove alias or loan safety.
+
+Static constructor coverage handles nested products, finite scalar domains and guarded rows. Only Root zero-constructor domains are vacuous. Nested zero-constructor Components are symbolic holes that cannot erase another column. Uncovered witnesses describe declared shapes, not inhabited Rill values. Full expression exit facts distinguish returns and actual loop targets from divergence, including skipped-source alternatives.
+
+A simple name binding keeps its initializer's value type. Reading a borrowed string field into an owning string does not gain an implicit copy or transfer permission. Borrowed destructuring uses the separate fixed classification rule. Unresolved aggregate classification remains incomplete.
+
+Tuple-context brackets need no fabricated library definition. List construction, indexing and Option/Result guards retain missing canonical core admission explicitly. General inference/defaults, families, callbacks, conversions and other remaining typed obligations stay within M4.5 through M4.8. This receipt grants no ownership, storage initialization, implicit-copy execution, cleanup, runtime, codegen or editor acceptance.

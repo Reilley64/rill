@@ -452,7 +452,7 @@ This proposal adds no general container variance or implicit width conversion. E
 
 ### Proposed M4.4 data and pattern procedure
 
-[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) proposes this next bounded procedure. Owner approval is pending. Earlier nominal, numeric, variant, bracket and privacy approvals remain unchanged. This section does not accept the full RFC.
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) owns this bounded procedure. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler code. Earlier approvals and the full RFC status remain unchanged.
 
 #### Inputs, namespaces and nominal construction
 
@@ -505,6 +505,8 @@ Start from an established scrutinee application and access category. Patterns in
 Names bind their matched position. Wildcards introduce no name. Reject repeated names within one pattern. Tuple patterns require exact tuple arity. Record patterns can omit fields but cannot inspect private or opaque representation.
 
 Check literal patterns with the scrutinee's established primitive context. Preserve M1 literal provenance and signed-minimum rules. Primitive literals remain value tests, not singleton types or overload patterns.
+
+A simple name binding keeps its initializer's value type. It does not apply the borrowed-destructuring rule to infer a reference type. The owner [confirmed this distinction](https://github.com/Reilley64/rill/issues/61#issuecomment-6959565199). Thus `let y = r.text` retains string for a string field, even when r borrows its record. This permits no implicit string copy or illegal move. Later ownership checking must reject an invalid transfer. Use `let y = &r.text` to request a borrow.
 
 Owned payload bindings retain their substituted field types. Borrowed binding types require the [pattern-copy classification seam](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification). An unresolved classification cannot silently choose copying or borrowing.
 

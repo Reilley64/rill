@@ -4,6 +4,8 @@ use crate::lexer::{LiteralMode, NumberForm, Token, TokenKind};
 use declarations::DeclarationReceipt;
 use std::collections::{BTreeSet, VecDeque};
 
+pub mod data;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BodyOwner<'g> {
     Startup,
@@ -90,6 +92,12 @@ pub struct ExpressionFacts<'g> {
     pub call: Option<CallFacts<'g>>,
     pub place: Place,
     pub boolean: Option<BooleanSet>,
+    pub data: Option<data::DataExpression<'g>>,
+    pub admission: Option<data::Admission<'g>>,
+    pub path: Option<data::PlacePath<'g>>,
+    pub refinement: Option<Arc<data::Refinement<'g>>>,
+    pub read_only_projection: bool,
+    pub access: data::Access,
 }
 #[derive(Debug)]
 pub struct CallFacts<'g> {
@@ -110,11 +118,28 @@ pub enum NodeFactKind<'g> {
     Statement,
     Annotation(TypeUse<'g>),
     Expression(ExpressionFacts<'g>),
-    Return { target: &'g DeclarationId },
+    Return {
+        target: &'g DeclarationId,
+    },
     Binding(BindingFacts<'g>),
-    Callee { declaration: &'g DeclarationId },
-    Break { target: NodeId },
-    Continue { target: NodeId },
+    Pattern(data::PatternFacts<'g>),
+    Coverage {
+        ty: Type<'g>,
+        coverage: data::Coverage<'g>,
+    },
+    PatternLiteral {
+        ty: Type<'g>,
+        evidence: LiteralEvidence<'g>,
+    },
+    Callee {
+        declaration: &'g DeclarationId,
+    },
+    Break {
+        target: NodeId,
+    },
+    Continue {
+        target: NodeId,
+    },
 }
 #[derive(Debug)]
 pub struct NodeFacts<'g> {
@@ -138,6 +163,11 @@ pub enum ScalarFindingKind {
     ReadOnly,
     GuardFallthrough,
     ExpectationBoolean,
+    MissingField,
+    DuplicateField,
+    NonExhaustive,
+    RefutableBinding,
+    TagChange,
 }
 impl ScalarFindingKind {
     pub fn code(self) -> Option<&'static str> {
@@ -172,6 +202,8 @@ pub enum ScalarUnsupported {
     MutableTemporary,
     Formatting,
     Requirements,
+    CoreAdmission,
+    ImplicitCopy,
 }
 #[derive(Debug)]
 pub struct ScalarObligation<'g> {
@@ -295,6 +327,12 @@ struct Slot<'g> {
     normal: bool,
     diverges: bool,
     boolean: Option<BooleanSet>,
+    admission: Option<data::Admission<'g>>,
+    path: Option<data::PlacePath<'g>>,
+    refinement: Option<Arc<data::Refinement<'g>>>,
+    read_only_projection: bool,
+    access: data::Access,
+    flow: Flow,
 }
 struct ExpressionResult<'g> {
     ty: Type<'g>,
@@ -302,6 +340,9 @@ struct ExpressionResult<'g> {
     normal: bool,
     diverges: bool,
     boolean: Option<BooleanSet>,
+    flow: Flow,
+    access: data::Access,
+    path: Option<data::PlacePath<'g>>,
 }
 #[derive(Clone)]
 struct Local<'g> {
@@ -310,11 +351,13 @@ struct Local<'g> {
     mutable: bool,
     boolean: Option<BooleanSet>,
 }
+#[derive(Clone)]
 struct Context<'r, 'g> {
     signature: Option<&'r DeclarationFacts<'g>>,
     scopes: Vec<BTreeMap<&'g str, Local<'g>>>,
     loops: Vec<NodeId>,
     startup: bool,
+    views: Vec<Arc<data::Refinement<'g>>>,
 }
 enum Value<'g> {
     Local(Local<'g>),
@@ -331,11 +374,19 @@ struct Inference<'g> {
     parents: BTreeMap<NodeId, NodeId>,
     queue: VecDeque<NodeId>,
     calls: BTreeMap<NodeId, PreparedCall<'g>>,
+    data: BTreeMap<NodeId, data::PreparedData<'g>>,
+    data_nodes: BTreeSet<NodeId>,
 }
 struct Checker<'r, 'g> {
     input: &'r Receipt<'g>,
     elab: Analyzer<'g>,
     facts: ScalarFacts<'g>,
+    data: bool,
+    data_depth: usize,
+    prepared_calls: BTreeMap<(&'g ModuleKey, NodeId), PreparedCall<'g>>,
+    match_inputs: BTreeMap<(&'g ModuleKey, NodeId), Option<ExpressionResult<'g>>>,
+    match_hints: BTreeMap<(&'g ModuleKey, NodeId), Option<Type<'g>>>,
+    match_blocks: BTreeMap<(&'g ModuleKey, NodeId), Flow>,
 }
 impl<'r, 'g> Checker<'r, 'g> {
     fn site(module: &'g Module, node: NodeId) -> Site<'g> {
@@ -750,10 +801,18 @@ impl<'r, 'g> Checker<'r, 'g> {
         } else {
             for (known, other) in [(&a, children[2]), (&b, children[1])] {
                 if let Some(ty) = known
-                    && primitive_name(ty).is_some_and(|n| n != "never")
+                    && primitive_name(ty) != Some("never")
+                    && (self.data || primitive_name(ty).is_some())
                     && inference.slots[&other].ty.is_none()
                 {
-                    self.establish(inference, other, ty.clone(), true)?;
+                    let context = if self.data
+                        && let TypeTerm::Variant { parent, .. } = ty.as_ref()
+                    {
+                        parent.clone()
+                    } else {
+                        ty.clone()
+                    };
+                    self.establish(inference, other, context, true)?;
                 }
             }
         }
@@ -762,6 +821,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 b
             } else if primitive_name(&b) == Some("never") || self.same(&a, &b)? {
                 a
+            } else if let Some(joined) = if self.data {
+                self.data_join(&a, &b)?
+            } else {
+                None
+            } {
+                joined
             } else {
                 if self.deferred_relation(&a, &b)?
                     || self.deferred_relation(&b, &a)?
@@ -817,7 +882,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             _ => false,
         })
     }
-    fn prefix(&mut self, inference: &mut Inference<'g>, node: NodeId, operator: &str) -> Work<()> {
+    fn prefix(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        operator: &str,
+        context: &Context<'r, 'g>,
+    ) -> Work<()> {
         let child = inference.module.syntax.nodes[node].children[0];
         if operator == "!" {
             let ty = self.primitive("bool")?;
@@ -853,7 +924,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         Place::Writable => (),
                     }
                 }
-                let referent = if !mutable {
+                let referent = if !mutable
+                    && !(self.data && matches!(actual.as_ref(), TypeTerm::Variant { .. }))
+                {
                     inference.slots[&child].expected.clone().unwrap_or(actual)
                 } else {
                     actual
@@ -872,12 +945,28 @@ impl<'r, 'g> Checker<'r, 'g> {
         if operator == "*" {
             if let Some(actual) = actual {
                 if let TypeTerm::Reference { mutable, referent } = actual.as_ref() {
-                    inference.slots.get_mut(&node).unwrap().place = if *mutable {
+                    let restricted = inference.slots[&child].read_only_projection;
+                    let path = self.project_path(
+                        inference.slots[&child].path.as_ref(),
+                        data::PathProjection::Dereference,
+                    )?;
+                    let (ty, refinement) =
+                        self.refined(path.as_ref(), referent.clone(), context)?;
+                    let slot = inference.slots.get_mut(&node).unwrap();
+                    slot.place = if *mutable && !restricted {
                         Place::Writable
                     } else {
                         Place::ReadOnly
                     };
-                    self.establish(inference, node, referent.clone(), false)?;
+                    slot.read_only_projection = restricted || !mutable;
+                    slot.access = if *mutable && !restricted {
+                        data::Access::Writable
+                    } else {
+                        data::Access::ReadOnly
+                    };
+                    slot.path = path;
+                    slot.refinement = refinement;
+                    self.establish(inference, node, ty, false)?;
                 } else if primitive_name(&actual) != Some("never") {
                     self.finding(inference.module, node, ScalarFindingKind::TypeMismatch)?;
                 }
@@ -985,18 +1074,22 @@ impl<'r, 'g> Checker<'r, 'g> {
         context: &Context<'r, 'g>,
     ) -> Work<Option<Value<'g>>> {
         let n = &module.syntax.nodes[node];
-        let path = &module.syntax.nodes[n.children[0]];
-        let first =
-            std::str::from_utf8(module.syntax.nodes[path.children[0]].span.bytes()).unwrap();
-        if path.children.len() == 1
+        let single = [node];
+        let path = if n.kind == NodeKind::Name {
+            &single[..]
+        } else {
+            &module.syntax.nodes[n.children[0]].children[..]
+        };
+        let first = std::str::from_utf8(module.syntax.nodes[path[0]].span.bytes()).unwrap();
+        if path.len() == 1
             && let Some(local) = self.local(context, first)?
         {
             return Ok(Some(Value::Local(local)));
         }
         let mut key = &module.key;
         let mut bindings = Vec::new();
-        for (index, &segment) in path.children.iter().enumerate() {
-            let last = index + 1 == path.children.len();
+        for (index, &segment) in path.iter().enumerate() {
+            let last = index + 1 == path.len();
             let name = std::str::from_utf8(module.syntax.nodes[segment].span.bytes()).unwrap();
             let namespace = if last {
                 Namespace::ValueFunction
@@ -1004,7 +1097,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Namespace::TypeModule
             };
             let Some(binding) = self.value_binding(key, name, namespace)? else {
-                if path.children.len() == 1 {
+                if path.len() == 1 {
                     let id = match first {
                         "copy" => Some(&self.input.graph.prelude().copy),
                         "dispose" => Some(&self.input.graph.prelude().dispose),
@@ -1017,7 +1110,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         )));
                     }
                 }
-                if path.children.len() == 1 {
+                if path.len() == 1 {
                     for intrinsic in &self.input.graph.prelude().intrinsics {
                         self.elab.step(1)?;
                         if intrinsic.namespace() == Namespace::ValueFunction
@@ -1140,6 +1233,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         context: &Context<'r, 'g>,
     ) -> Work<Option<PreparedCall<'g>>> {
+        if let Some(call) = self.prepared_calls.remove(&(&module.key, node)) {
+            return Ok(Some(call));
+        }
         let n = &module.syntax.nodes[node];
         let mut callee = n.children[0];
         while module.syntax.nodes[callee].kind == NodeKind::Group {
@@ -1264,9 +1360,28 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(Context {
             signature,
             scopes: vec![scope],
+            views: Vec::new(),
             loops: Vec::new(),
             startup: signature.is_none(),
         })
+    }
+    fn runtime_children(&mut self, inference: &Inference<'g>, node: NodeId) -> Work<Vec<NodeId>> {
+        let n = &inference.module.syntax.nodes[node];
+        let children = if let Some(prepared) = inference.data.get(&node) {
+            &prepared.inputs[..]
+        } else if n.kind == NodeKind::Field && self.data {
+            &n.children[..1]
+        } else if n.kind == NodeKind::Call {
+            &n.children[1..]
+        } else {
+            &n.children[..]
+        };
+        self.elab.reserve(children.len())?;
+        Ok(children
+            .iter()
+            .copied()
+            .filter(|n| inference.slots.contains_key(n))
+            .collect())
     }
     fn expression(
         &mut self,
@@ -1281,6 +1396,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             parents: BTreeMap::new(),
             queue: VecDeque::new(),
             calls: BTreeMap::new(),
+            data: BTreeMap::new(),
+            data_nodes: BTreeSet::new(),
         };
         self.elab.reserve(1)?;
         let mut stack = vec![root];
@@ -1291,6 +1408,40 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots.insert(node, Slot::default());
             self.enqueue(&mut inference, node)?;
             match syntax.kind {
+                NodeKind::Field if self.data => {
+                    if self.enum_base(module, syntax.children[0], context)? {
+                        self.elab.reserve(1)?;
+                        inference.data_nodes.insert(node);
+                    } else {
+                        let base = syntax.children[0];
+                        self.elab.reserve(2)?;
+                        inference.parents.insert(base, node);
+                        stack.push(base);
+                    }
+                }
+                NodeKind::Construction if self.data => {
+                    self.elab.reserve(1)?;
+                    inference.data_nodes.insert(node);
+                    for child in self.construction_inputs(module, node)? {
+                        self.elab.reserve(2)?;
+                        inference.parents.insert(child, node);
+                        stack.push(child);
+                    }
+                }
+                NodeKind::Bracket if self.data => {
+                    self.elab.reserve(1)?;
+                    inference.data_nodes.insert(node);
+                    for &child in &syntax.children {
+                        self.elab.reserve(2)?;
+                        inference.parents.insert(child, node);
+                        stack.push(child);
+                    }
+                }
+                NodeKind::Index if self.data => {
+                    self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                    inference.slots.get_mut(&node).unwrap().blocked = true;
+                }
+                NodeKind::Match if self.data => (),
                 NodeKind::Literal => (),
                 NodeKind::Template => {
                     self.elab.step(syntax.children.len())?;
@@ -1312,7 +1463,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         });
                     }
                 }
-                NodeKind::ValueReference => {
+                NodeKind::ValueReference | NodeKind::Name => {
                     let value = self.value(module, node, context)?;
                     if let Some(Value::Declaration(declaration, bindings)) = &value {
                         self.elab.reserve(bindings.len())?;
@@ -1329,11 +1480,23 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                     let slot = inference.slots.get_mut(&node).unwrap();
                     slot.blocked = true;
-                    if syntax.children.len() == 1
+                    if (syntax.children.len() == 1 || syntax.kind == NodeKind::Name)
                         && let Some(Value::Local(local)) = value
                     {
                         slot.blocked = local.ty.is_none();
                         slot.ty = local.ty;
+                        if self.data {
+                            slot.path = Some(data::PlacePath {
+                                root: local.declaration,
+                                projections: Vec::new(),
+                            });
+                            if let Some(ty) = slot.ty.take() {
+                                let (ty, refinement) =
+                                    self.refined(slot.path.as_ref(), ty, context)?;
+                                slot.ty = Some(ty);
+                                slot.refinement = refinement;
+                            }
+                        }
                         slot.binding = Some(local.declaration);
                         slot.place = if local.mutable {
                             Place::Writable
@@ -1344,7 +1507,19 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                 }
                 NodeKind::Call => {
-                    if let Some(call) = self.prepare_call(module, node, context)? {
+                    let callee = &module.syntax.nodes[syntax.children[0]];
+                    if self.data
+                        && callee.kind == NodeKind::Field
+                        && self.enum_base(module, callee.children[0], context)?
+                    {
+                        self.elab.reserve(1)?;
+                        inference.data_nodes.insert(node);
+                        for &argument in &syntax.children[1..] {
+                            self.elab.reserve(2)?;
+                            inference.parents.insert(argument, node);
+                            stack.push(argument);
+                        }
+                    } else if let Some(call) = self.prepare_call(module, node, context)? {
                         for &argument in &syntax.children[1..] {
                             self.elab.reserve(2)?;
                             inference.parents.insert(argument, node);
@@ -1379,48 +1554,101 @@ impl<'r, 'g> Checker<'r, 'g> {
         if let Some(expected) = expected {
             self.establish(&mut inference, root, expected, true)?;
         }
-        while let Some(node) = inference.queue.pop_front() {
-            self.elab.step(1)?;
-            let slot = inference.slots[&node].clone();
-            let syntax = &module.syntax.nodes[node];
-            match syntax.kind {
-                NodeKind::Literal if slot.ty.is_none() => {
-                    if let Some(ty) = self.literal_type(module, node, &slot)? {
-                        self.establish(&mut inference, node, ty, false)?;
-                    }
-                }
-                NodeKind::Call => {
-                    if let Some(call) = inference.calls.get(&node) {
-                        self.elab.reserve(call.parameters.len())?;
-                        let contexts: Vec<_> = call
-                            .fact
-                            .arguments
-                            .iter()
-                            .copied()
-                            .zip(call.parameters.iter().cloned())
-                            .collect();
-                        let result = call.result.clone();
-                        self.establish(&mut inference, node, result, false)?;
-                        for (argument, ty) in contexts {
-                            self.establish(&mut inference, argument, ty, true)?;
+        loop {
+            while let Some(node) = inference.queue.pop_front() {
+                self.elab.step(1)?;
+                let slot = inference.slots[&node].clone();
+                let syntax = &module.syntax.nodes[node];
+                match syntax.kind {
+                    NodeKind::Field if self.data => {
+                        if inference.data_nodes.contains(&node) {
+                            self.variant_step(&mut inference, node, context)?;
+                        } else {
+                            self.field_projection(&mut inference, node, context)?;
                         }
                     }
-                }
-                NodeKind::IfExpression => self.conditional(&mut inference, node)?,
-                NodeKind::Prefix(operator) => self.prefix(&mut inference, node, operator)?,
-                NodeKind::Binary(operator) => self.binary(&mut inference, node, operator)?,
-                NodeKind::Group => {
-                    let child = syntax.children[0];
-                    if let Some(ty) = slot.expected {
-                        self.establish(&mut inference, child, ty, true)?;
+                    NodeKind::Construction if self.data => {
+                        self.construction_step(&mut inference, node, context)?
                     }
-                    inference.slots.get_mut(&node).unwrap().place = inference.slots[&child].place;
-                    if let Some(ty) = inference.slots[&child].ty.clone() {
-                        self.establish(&mut inference, node, ty, false)?;
+                    NodeKind::Match if self.data => {
+                        if slot.expected.is_some() {
+                            self.match_step(&mut inference, node, context)?;
+                        }
                     }
+                    NodeKind::Bracket if self.data => self.tuple_step(&mut inference, node)?,
+                    NodeKind::Literal if slot.ty.is_none() => {
+                        if let Some(ty) = self.literal_type(module, node, &slot)? {
+                            self.establish(&mut inference, node, ty, false)?;
+                        }
+                    }
+                    NodeKind::Call => {
+                        if inference.data_nodes.contains(&node) {
+                            self.variant_step(&mut inference, node, context)?;
+                        } else if let Some(call) = inference.calls.get(&node) {
+                            self.elab.reserve(call.parameters.len())?;
+                            let contexts: Vec<_> = call
+                                .fact
+                                .arguments
+                                .iter()
+                                .copied()
+                                .zip(call.parameters.iter().cloned())
+                                .collect();
+                            let result = call.result.clone();
+                            self.establish(&mut inference, node, result, false)?;
+                            for (argument, ty) in contexts {
+                                self.establish(&mut inference, argument, ty, true)?;
+                            }
+                        }
+                    }
+                    NodeKind::IfExpression => self.conditional(&mut inference, node)?,
+                    NodeKind::Prefix(operator) => {
+                        self.prefix(&mut inference, node, operator, context)?
+                    }
+                    NodeKind::Binary(operator) => self.binary(&mut inference, node, operator)?,
+                    NodeKind::Group => {
+                        let child = syntax.children[0];
+                        if let Some(ty) = slot.expected {
+                            self.establish(&mut inference, child, ty, true)?;
+                        }
+                        let path = self.copy_path(inference.slots[&child].path.as_ref())?;
+                        let refinement = inference.slots[&child].refinement.clone();
+                        let place = inference.slots[&child].place;
+                        let restricted = inference.slots[&child].read_only_projection;
+                        let access = inference.slots[&child].access;
+                        let target = inference.slots.get_mut(&node).unwrap();
+                        target.place = place;
+                        target.path = path;
+                        target.refinement = refinement;
+                        target.read_only_projection = restricted;
+                        target.access = access;
+                        if let Some(ty) = inference.slots[&child].ty.clone() {
+                            self.establish(&mut inference, node, ty, false)?;
+                        }
+                    }
+                    _ => (),
                 }
-                _ => (),
             }
+            self.elab.reserve(inference.slots.len())?;
+            let pending: Vec<_> = inference
+                .slots
+                .iter()
+                .filter_map(|(&node, slot)| {
+                    (self.data
+                        && module.syntax.nodes[node].kind == NodeKind::Match
+                        && !slot.blocked
+                        && !inference.data.contains_key(&node))
+                    .then_some(node)
+                })
+                .collect();
+            if pending.is_empty() {
+                break;
+            }
+            for node in pending {
+                self.match_step(&mut inference, node, context)?;
+            }
+        }
+        if self.data {
+            self.defer_pending_constructions(&mut inference)?;
         }
         // M2 allocates children before parents. No host-stack recursion along expression chains.
         let mut negations = BTreeMap::new();
@@ -1459,12 +1687,19 @@ impl<'r, 'g> Checker<'r, 'g> {
                     && primitive_name(ty) != Some("never")
                     && !self.same(ty, expected)?
                 {
-                    if self.deferred_relation(ty, expected)? {
-                        self.defer(module, node, ScalarUnsupported::TypeRelation)?;
+                    if self.data && self.data_admission(ty, expected)? {
+                        slot.admission = Some(data::Admission {
+                            actual: ty.clone(),
+                            expected: expected.clone(),
+                        });
                     } else {
-                        self.mismatch(module, node, ty, expected)?;
+                        if self.deferred_relation(ty, expected)? {
+                            self.defer(module, node, ScalarUnsupported::TypeRelation)?;
+                        } else {
+                            self.mismatch(module, node, ty, expected)?;
+                        }
+                        slot.blocked = true;
                     }
-                    slot.blocked = true;
                 }
             } else {
                 if module.syntax.nodes[node].kind == NodeKind::Literal {
@@ -1480,19 +1715,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots.keys().copied().collect()
         };
         for &node in &ordered {
-            self.elab.step(module.syntax.nodes[node].children.len())?;
-            let blocked = module.syntax.nodes[node]
-                .children
-                .iter()
-                .any(|child| inference.slots.get(child).is_some_and(|s| s.blocked));
+            let children = self.runtime_children(&inference, node)?;
+            let blocked = children.iter().any(|child| inference.slots[child].blocked);
             let mut normal = inference.slots[&node]
                 .ty
                 .as_ref()
                 .is_some_and(|ty| primitive_name(ty) != Some("never"))
-                && module.syntax.nodes[node]
-                    .children
-                    .iter()
-                    .all(|child| inference.slots.get(child).is_none_or(|s| s.normal));
+                && children.iter().all(|child| inference.slots[child].normal);
             if module.syntax.nodes[node].kind == NodeKind::IfExpression {
                 let children = &module.syntax.nodes[node].children;
                 let condition = &inference.slots[&children[0]];
@@ -1505,7 +1734,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                     || (truth.can_be_false() && inference.slots[&children[2]].normal);
             }
             let kind = module.syntax.nodes[node].kind;
-            let children = &module.syntax.nodes[node].children;
+            if let Some(flow) = inference.data.get(&node).and_then(|p| p.flow.as_ref()) {
+                normal = flow.normal;
+            }
             let child_boolean = |child: NodeId| {
                 let slot = &inference.slots[&child];
                 if slot.normal {
@@ -1572,33 +1803,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             } else {
                 None
             };
-            let diverges = match kind {
-                NodeKind::IfExpression => {
-                    let condition = child_boolean(children[0]);
-                    inference.slots[&children[0]].diverges
-                        || (condition.can_be_true() && inference.slots[&children[1]].diverges)
-                        || (condition.can_be_false() && inference.slots[&children[2]].diverges)
-                }
-                NodeKind::Binary("&&" | "||") => {
-                    let left = &inference.slots[&children[0]];
-                    let selected = if kind == NodeKind::Binary("&&") {
-                        child_boolean(children[0]).can_be_true()
-                    } else {
-                        child_boolean(children[0]).can_be_false()
-                    };
-                    left.diverges || (selected && inference.slots[&children[1]].diverges)
-                }
-                _ => {
-                    !normal
-                        || children
-                            .iter()
-                            .any(|child| inference.slots.get(child).is_some_and(|s| s.diverges))
-                }
-            };
+            let flow = self.expression_flow(&inference, node, &children)?;
             let slot = inference.slots.get_mut(&node).unwrap();
             slot.blocked |= blocked;
             slot.normal = boolean.map_or(normal, |b| b != BooleanSet::EMPTY);
-            slot.diverges = diverges;
+            slot.diverges = flow.diverges;
+            slot.flow = flow;
             slot.boolean = boolean;
         }
         let mut result = None;
@@ -1613,14 +1823,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             }
             if let Some(ty) = &slot.ty {
-                self.elab.reserve(1)?;
+                self.elab
+                    .reserve(1 + 2 * (slot.flow.breaks.len() + slot.flow.continues.len()))?;
+                let path = self.copy_path(slot.path.as_ref())?;
                 self.facts.nodes.push(NodeFacts {
                     site: Self::site(module, node),
-                    flow: Flow {
-                        normal: slot.normal,
-                        diverges: slot.diverges,
-                        ..Flow::default()
-                    },
+                    flow: slot.flow.clone(),
                     kind: NodeFactKind::Expression(ExpressionFacts {
                         ty: ty.clone(),
                         expected: slot.expected.clone(),
@@ -1629,6 +1837,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                         call: inference.calls.remove(&node).map(|c| c.fact),
                         place: slot.place,
                         boolean: slot.boolean,
+                        data: inference.data.remove(&node).map(|p| p.fact),
+                        admission: slot.admission.clone(),
+                        path,
+                        refinement: slot.refinement.clone(),
+                        read_only_projection: slot.read_only_projection,
+                        access: slot.access,
                     }),
                 });
                 if node == root {
@@ -1638,11 +1852,85 @@ impl<'r, 'g> Checker<'r, 'g> {
                         normal: slot.normal,
                         diverges: slot.diverges,
                         boolean: slot.boolean,
+                        flow: slot.flow.clone(),
+                        access: slot.access,
+                        path: self.copy_path(slot.path.as_ref())?,
                     });
                 }
             }
         }
         Ok(result)
+    }
+    fn sequence(&mut self, mut prefix: Flow, next: &Flow) -> Work<Flow> {
+        if prefix.normal {
+            prefix.normal = false;
+            self.union(prefix, next)
+        } else {
+            Ok(prefix)
+        }
+    }
+    fn expression_flow(
+        &mut self,
+        inference: &Inference<'g>,
+        node: NodeId,
+        children: &[NodeId],
+    ) -> Work<Flow> {
+        if let Some(flow) = inference.data.get(&node).and_then(|p| p.flow.as_ref()) {
+            self.elab
+                .reserve(flow.breaks.len() + flow.continues.len())?;
+            return Ok(flow.clone());
+        }
+        let n = &inference.module.syntax.nodes[node];
+        let truth = |node| {
+            let s = &inference.slots[&node];
+            if s.normal {
+                s.boolean.unwrap_or(BooleanSet::BOTH)
+            } else {
+                BooleanSet::EMPTY
+            }
+        };
+        let mut flow = Flow::normal();
+        if n.kind == NodeKind::IfExpression {
+            let condition = &inference.slots[&children[0]].flow;
+            flow = self.union(Flow::default(), condition)?;
+            flow.normal = false;
+            if truth(children[0]).can_be_true() {
+                flow = self.union(flow, &inference.slots[&children[1]].flow)?;
+            }
+            if truth(children[0]).can_be_false() {
+                flow = self.union(flow, &inference.slots[&children[2]].flow)?;
+            }
+        } else if matches!(n.kind, NodeKind::Binary("&&" | "||")) {
+            flow = self.union(Flow::default(), &inference.slots[&children[0]].flow)?;
+            let t = truth(children[0]);
+            let conjunction = n.kind == NodeKind::Binary("&&");
+            flow.normal = if conjunction {
+                t.can_be_false()
+            } else {
+                t.can_be_true()
+            };
+            if if conjunction {
+                t.can_be_true()
+            } else {
+                t.can_be_false()
+            } {
+                flow = self.union(flow, &inference.slots[&children[1]].flow)?;
+            }
+        } else {
+            for child in children {
+                flow = self.sequence(flow, &inference.slots[child].flow)?;
+            }
+            if flow.normal
+                && inference.slots[&node]
+                    .ty
+                    .as_ref()
+                    .is_some_and(|t| primitive_name(t) == Some("never"))
+            {
+                flow.normal = false;
+                flow.diverges = true;
+            }
+        }
+        Ok(flow)
     }
     fn union(&mut self, mut a: Flow, b: &Flow) -> Work<Flow> {
         self.elab.reserve(b.breaks.len() + b.continues.len())?;
@@ -1707,7 +1995,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             NodeKind::Binding { mutable } => {
                 let pattern = n.children[0];
                 let named = simple_name(module, pattern);
-                if named.is_none() && module.syntax.nodes[pattern].kind != NodeKind::Wildcard {
+                if self.data
+                    && named.is_none()
+                    && module.syntax.nodes[pattern].kind != NodeKind::Wildcard
+                {
+                    flow = self.pattern_binding(module, node, mutable, depth + 1, context)?;
+                } else if named.is_none() && module.syntax.nodes[pattern].kind != NodeKind::Wildcard
+                {
                     self.unsupported(module, node)?;
                 } else {
                     let annotation = if n.children.len() == 3 {
@@ -1723,8 +2017,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                     let initializer = *n.children.last().unwrap();
                     let inferred =
                         self.expression(module, initializer, annotation.clone(), context)?;
-                    flow.normal = inferred.as_ref().is_none_or(|e| e.normal);
-                    flow.diverges = inferred.as_ref().is_some_and(|e| e.diverges);
+                    flow = if let Some(e) = &inferred {
+                        self.union(Flow::default(), &e.flow)?
+                    } else {
+                        Flow::normal()
+                    };
                     let boolean = inferred.as_ref().and_then(|e| e.boolean);
                     let ty = if self.marks() == before {
                         annotation.or(inferred.map(|e| e.ty))
@@ -1766,8 +2063,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             NodeKind::ExpressionStatement => {
                 if let Some(expression) = self.expression(module, n.children[0], None, context)? {
-                    flow.normal = expression.normal;
-                    flow.diverges = expression.diverges;
+                    flow = expression.flow;
                 }
             }
             NodeKind::Assignment(operator) => {
@@ -1782,6 +2078,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                     left.as_ref().map(|e| e.ty.clone())
                 };
                 let right = self.expression(module, n.children[1], expected, context)?;
+                if self.data
+                    && let Some(left) = &left
+                {
+                    self.tag_change(module, node, left, right.as_ref(), context)?;
+                }
                 if operator != "="
                     && let Some(left) = &left
                 {
@@ -1794,18 +2095,50 @@ impl<'r, 'g> Checker<'r, 'g> {
                         self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
                     }
                 }
-                flow.normal = left.as_ref().is_none_or(|e| e.normal)
-                    && right.as_ref().is_none_or(|e| e.normal);
-                flow.diverges =
-                    left.is_some_and(|e| e.diverges) || right.is_some_and(|e| e.diverges);
+                let prefix = if let Some(left) = left {
+                    left.flow
+                } else {
+                    Flow::normal()
+                };
+                flow = self.sequence(prefix, &right.map_or_else(Flow::normal, |e| e.flow))?;
             }
             NodeKind::IfStatement | NodeKind::While | NodeKind::Guard => {
-                if n.kind == NodeKind::Guard
+                if self.data
+                    && n.kind == NodeKind::Guard
+                    && module.syntax.nodes[n.children[0]].kind == NodeKind::GuardBinding
+                {
+                    let binding = &module.syntax.nodes[n.children[0]];
+                    let annotation = if binding.children.len() == 3 {
+                        self.elab.ty(
+                            module,
+                            binding.children[1],
+                            context.signature.map_or(&[], |s| &s.binders),
+                            1,
+                        )?
+                    } else {
+                        None
+                    };
+                    let input = self.expression(
+                        module,
+                        *binding.children.last().unwrap(),
+                        annotation,
+                        context,
+                    )?;
+                    flow = input.map_or_else(Flow::normal, |e| e.flow);
+                    if n.children.len() == 2 {
+                        self.statement(module, n.children[1], depth + 1, context)?;
+                    }
+                    self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                } else if n.kind == NodeKind::Guard
                     && (n.children.len() != 2
                         || module.syntax.nodes[n.children[0]].kind == NodeKind::GuardBinding)
                 {
                     self.unsupported(module, node)?;
                 } else {
+                    if n.kind == NodeKind::While {
+                        self.elab.reserve(1)?;
+                        context.loops.push(node);
+                    }
                     let boolean = self.primitive("bool")?;
                     let condition =
                         self.expression(module, n.children[0], Some(boolean), context)?;
@@ -1816,18 +2149,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                             BooleanSet::EMPTY
                         }
                     });
-                    if n.kind == NodeKind::While {
-                        self.elab.reserve(1)?;
-                        context.loops.push(node);
-                    }
                     let body = self.statement(module, n.children[1], depth + 1, context)?;
                     if n.kind == NodeKind::While {
                         context.loops.pop();
                     }
-                    flow = Flow {
-                        diverges: condition.as_ref().is_some_and(|e| e.diverges),
-                        ..Flow::default()
-                    };
+                    flow = condition.map_or_else(Flow::normal, |e| e.flow);
+                    flow.normal = false;
                     match n.kind {
                         NodeKind::IfStatement => {
                             let otherwise = if let Some(&other) = n.children.get(2) {
@@ -1854,7 +2181,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                             }
                         }
                         NodeKind::While => {
-                            flow.normal = truth.can_be_false();
+                            let condition_break = flow.breaks.remove(&node);
+                            flow.normal = truth.can_be_false() || condition_break;
+                            flow.diverges |= flow.continues.remove(&node);
                             if truth.can_be_true() {
                                 let mut body = body;
                                 flow.normal |= body.breaks.remove(&node);
@@ -1889,23 +2218,20 @@ impl<'r, 'g> Checker<'r, 'g> {
                     let DeclarationShape::Function { result, .. } = &signature.shape else {
                         unreachable!()
                     };
-                    let (normal, diverges) = if let Some(&child) = n.children.first() {
+                    flow = if let Some(&child) = n.children.first() {
                         self.expression(module, child, Some(result.clone()), context)?
-                            .map_or((true, false), |e| (e.normal, e.diverges))
+                            .map_or_else(Flow::normal, |e| e.flow)
                     } else {
                         if primitive_name(result) != Some("void") {
                             self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
                         }
-                        (true, false)
+                        Flow::normal()
                     };
                     kind = NodeFactKind::Return {
                         target: &signature.declaration.id,
                     };
-                    flow = Flow {
-                        returns: normal,
-                        diverges,
-                        ..Flow::default()
-                    };
+                    flow.returns |= flow.normal;
+                    flow.normal = false;
                 } else {
                     self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
                 }
@@ -2098,6 +2424,13 @@ pub fn check_scalars<'r, 'g>(
     input: &DeclarationReceipt<'r, 'g>,
     limits: AnalysisLimits,
 ) -> Result<ScalarReceipt<'r, 'g>, ScalarFailure<'g>> {
+    check(input, limits, false)
+}
+fn check<'r, 'g>(
+    input: &DeclarationReceipt<'r, 'g>,
+    limits: AnalysisLimits,
+    data: bool,
+) -> Result<ScalarReceipt<'r, 'g>, ScalarFailure<'g>> {
     let mut checker = Checker {
         input: input.types,
         elab: Analyzer {
@@ -2108,6 +2441,12 @@ pub fn check_scalars<'r, 'g>(
             declarations: BTreeMap::new(),
         },
         facts: ScalarFacts::default(),
+        data,
+        data_depth: 0,
+        prepared_calls: BTreeMap::new(),
+        match_inputs: BTreeMap::new(),
+        match_hints: BTreeMap::new(),
+        match_blocks: BTreeMap::new(),
     };
     let exhausted = checker
         .run()

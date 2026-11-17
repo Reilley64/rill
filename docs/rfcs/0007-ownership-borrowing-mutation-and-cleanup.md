@@ -122,7 +122,7 @@ Custom copy/dispose overlap and implicit-copy eligibility need complete formal r
 
 ### Proposed M4.4 pattern binding type classification
 
-[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) proposes this typing prerequisite. Owner approval is pending. It does not approve ownership checking or complete this RFC.
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) owns this typing prerequisite. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) before model/compiler code. This approval does not authorize ownership checking or complete this RFC.
 
 A borrowed pattern binder needs a static choice between the contained value type and a projected reference type. Use the existing implicit-copy classification, not canonical copy(T) evidence. Explicit copying does not authorize silent copying.
 
