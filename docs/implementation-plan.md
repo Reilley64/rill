@@ -106,15 +106,15 @@ Keep product build, language/stdlib/runtime/client suites and release verificati
 
 ## M3 design checkpoint
 
-This is Stage 1 of [M3 ticket #54](https://github.com/Reilley64/rill/issues/54), not implementation approval or completion evidence. The earlier M1 planning statements remain historical. M1 and M2 have since merged through [#51](https://github.com/Reilley64/rill/pull/51) and [#53](https://github.com/Reilley64/rill/pull/53).
+This records Stage 1 of [M3 ticket #54](https://github.com/Reilley64/rill/issues/54). The owner subsequently [approved checkpoint a41e7cc](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619), authorizing Stage 2 within O1 through O7 and the three public seams. The earlier M1 planning statements remain historical. M1 and M2 have since merged through [#51](https://github.com/Reilley64/rill/pull/51) and [#53](https://github.com/Reilley64/rill/pull/53).
 
 The implementation branch is `implementation/m3-loader-resolver`. Its exact starting commit is `04fd25ff9e8b4e02621802a111263947dbeb53b0`, fetched from origin/main after #53 merged. That commit contains M1 `7379a28` and M2 `6ea5fdd`. The original plan baseline is `e1559249c325c3898f506b271e91d76b884be290`. The ticket links the plan at the exact implementation start.
 
-[RFC 0002's proposed procedure](rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns candidate discovery, route reduction, namespace installation, identities, cycles and graph capture. These are unapproved additions to a Draft RFC. Its existing identity/order, lexical/source and syntax approvals remain unchanged. Approval of this checkpoint would authorize only the identified M3 contract, not accept the complete RFC set or satisfy #28's readiness obligations.
+[RFC 0002's proposed procedure](rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns candidate discovery, route reduction, namespace installation, identities, cycles and graph capture. The checkpoint approval covers these scoped additions to a Draft RFC. Its existing identity/order, lexical/source and syntax approvals remain unchanged. This approval authorizes only the identified M3 contract, not the complete RFC set or #28's readiness obligations.
 
 ### Owner choices before coding
 
-Each recommendation below needs an explicit decision. Rejecting one requires a revised procedure and checkpoint, not a silent code substitution.
+The owner approved all seven recommendations below at checkpoint a41e7cc. A departure requires a revised procedure and checkpoint, not a silent code substitution.
 
 | Choice | Recommendation | Consequence or alternative |
 | --- | --- | --- |
@@ -132,7 +132,7 @@ Implementation choices do not need new language-policy approval. These include f
 
 ### Proposed public interfaces and TDD seams
 
-The following interface is proposed, not implemented or agreed yet. Rust names can change without changing these behaviors. Keep filesystem mechanics behind a small compiler interface. Do not introduce a mock filesystem or editor-provider framework for this milestone.
+The owner approved the following behavioral interfaces. They are now implemented in `crates/compiler`, with actual tests mapped in the [M3 acceptance record](../crates/compiler/tests/m3-acceptance.md). Rust names can change without changing these behaviors. Keep filesystem mechanics behind a small compiler interface. Do not introduce a mock filesystem or editor-provider framework for this milestone.
 
 | Proposed operation | Inputs and observations | What tests catch | What it does not establish |
 | --- | --- | --- | --- |
@@ -144,7 +144,7 @@ Expose read-only canonical module/declaration/binding records, import outcomes a
 
 Tests must use these same operations as compiler callers. Real temporary filesystem fixtures establish path behavior; mocked path strings do not. Mutation between load and validation needs no timing-sensitive race or hidden test callback. Repeated load requests test deterministic semantic facts, not equality of fresh opaque capture IDs. Permission tests must detect privileged-host behavior and report it as unsupported, not silently pass.
 
-Before writing tests, obtain approval for all three seams and O1 through O7. Then use the implement and TDD skills in vertical slices. Write one failing behavior test, observe its failure, implement only that behavior, and rerun the focused suite. Do not write the entire acceptance catalog before implementation.
+Approval for all three seams and O1 through O7 preceded implementation. The implement and TDD skills govern vertical slices. Write one failing behavior test, observe its failure, implement only that behavior, and rerun the focused suite. Do not write the entire acceptance catalog before implementation.
 
 ### Proposed implementation slices
 
@@ -196,7 +196,13 @@ Workflows did not change, so check:ci was not run. M3 host filesystem cases, oth
 
 At this checkpoint, M3 implementation and every proposed acceptance test are NotChecked. Full RFC statuses, prior policy decisions and historical evidence remain unchanged. The checkpoint's Standards review found multi-action RFC instructions and misleading agreement/algorithm references. The Spec review found missing rules for failed-export publication, dependent cycle errors and diagnostic-only private routes. The revision splits those instructions, corrects the references and adds a whole-graph publication barrier, component-cause propagation and privacy witnesses. These reviews assess the proposed contract, not completed compiler behavior. Final implementation review, commit, push and an M3-only draft PR follow approval and implementation. Do not merge the PR or begin M4.
 
+### Stage 2 acceptance
+
+The [M3 acceptance record](../crates/compiler/tests/m3-acceptance.md) maps actual Rust tests to RFC 0002 M1 through M15, identity/order policies and the approved scope. Its later-stage column remains unpassed. It also records real filesystem limitations, the additive M2 parser-work statistic and unrun support gates. #54 and the M3-only draft PR retain command results and implementation revisions. A resolved graph is not a successfully checked program.
+
 ## Completion record
+
+The following M1 statement belongs to the original planning baseline. M1/M2 later merged as recorded above; M3 evidence is separate.
 
 M1 implementation: Not started. Acceptance matrix: NotChecked. No parser, lexer or source-mapper result is claimed by this planning document.
 

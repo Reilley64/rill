@@ -153,6 +153,9 @@ pub struct Syntax {
     pub nodes: Vec<Node>,
     pub root: NodeId,
     pub views: Vec<TokenView>,
+    /// Charged parser work, including discarded lookahead. Allows the loader
+    /// to account for M2 work without reconstructing parser operations.
+    pub work: usize,
 }
 
 /// Parse exactly the selected input grammar and EOF. The lexical result must
@@ -202,6 +205,7 @@ pub fn parse(
         nodes: parser.nodes,
         root,
         views: parser.views,
+        work: parser.work,
     })
 }
 

@@ -17,7 +17,7 @@ This RFC proposes one file per module, bounded application and standard-library 
 
 [RFC 0001](0001-top-level-expectations.md) owns expectation placement, execution and failure reporting. This RFC supplies its module identities and ordering. It does not duplicate those test rules.
 
-This draft does not define overload ranking, general type inference, enum operations or the ownership checker. It records their required boundaries and missing companions. No Rill resolver, checker or module runtime exists yet.
+This draft does not define overload ranking, general type inference, enum operations or the ownership checker. It records their required boundaries and missing companions. M3 now implements the approved module-resolution subset. A typed checker and module runtime remain absent.
 
 Module identities are stable within a selected analysis context. Contexts do not merge their graphs.
 
@@ -208,7 +208,7 @@ Missing imports or source bindings have meaning R0400. Inaccessible bindings hav
 
 ### Proposed M3 resolution procedure
 
-This section is an unapproved design checkpoint for [M3 ticket #54](https://github.com/Reilley64/rill/issues/54). It supplements the incomplete procedures above. It does not change earlier approvals or full RFC status. The [implementation checkpoint](../implementation-plan.md#m3-design-checkpoint) identifies owner choices, proposed interfaces and acceptance work. All new behavior below requires that checkpoint's approval before implementation.
+The owner [approved the M3 checkpoint](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619) at `a41e7cc955e67329d6dc3a8a69de667e0af204ac`. Approval covers O1 through O7, the test seams and implementation slices. This section supplies that scoped M3 contract. Earlier approvals and full RFC status remain unchanged. The [implementation checkpoint](../implementation-plan.md#m3-design-checkpoint) records the review boundary. The [acceptance record](../../crates/compiler/tests/m3-acceptance.md) distinguishes implemented resolution assertions from later checks.
 
 #### Identities and declaration records
 
@@ -246,7 +246,7 @@ A grouped path uses the same discovery procedure but requires exactly one module
 
 Cache route states by import obligation, canonical module identity, namespace and remaining segment position. Keep predecessor edges as provenance instead of enumerating complete route histories. Each route step consumes one segment. Re-export aliases use the closure procedure below rather than recursive path expansion. Repeated aliases cannot produce infinitely many route histories.
 
-Every parsed prefix module is a required resolution dependency, even if it supplies no final candidate. Its imports, declarations and expectations therefore join the graph. This proposed rule makes candidate inspection explicit and reproducible. It can enlarge the declaration set compared with retaining only the winning terminal module. The owner must approve this consequence before coding. An existence-only probe that does not parse a source contributes an observation, not declarations.
+Every parsed prefix module is a required resolution dependency, even if it supplies no final candidate. Its imports, declarations and expectations therefore join the graph. This proposed rule makes candidate inspection explicit and reproducible. It can enlarge the declaration set compared with retaining only the winning terminal module. The M3 checkpoint approval covers this consequence. An existence-only probe that does not parse a source contributes an observation, not declarations.
 
 #### Closure, canonical reduction and installation
 
@@ -262,9 +262,9 @@ Stage all bindings from one import declaration, including every grouped member a
 
 Use one publication barrier for the entire attempted graph. Validate every import's selections and collisions before publishing any imported or re-exported binding. A failed grouped member rejects the whole declaration. Any failed import prevents publication of all staged imports in that attempted graph. Publish only after family-target validation and input replay also succeed. A rejected result exposes provisional candidates and failures, not installed imports or a successful export lookup interface.
 
-This barrier prevents downstream publication through a failed exported import. Provisional targets can affect other provisional candidates and cycle anchors, but they cannot establish a resolved result when any transaction fails. No invalidation algorithm or traversal-order retry is needed. Dependent diagnostics may be incomplete after another import fails. The result must disclose that limit rather than claim every secondary error. These transaction and repeated-binding rules require owner approval.
+This barrier prevents downstream publication through a failed exported import. Provisional targets can affect other provisional candidates and cycle anchors, but they cannot establish a resolved result when any transaction fails. No invalidation algorithm or traversal-order retry is needed. Dependent diagnostics may be incomplete after another import fails. The result must disclose that limit rather than claim every secondary error. The M3 checkpoint approval covers these transaction and repeated-binding rules.
 
-The M3 implementation resolves module bindings, exported qualification and implementation-family targets. It inventories nested lexical scopes without claiming expression or type checking. Full local binding, capture, pattern and control-target resolution remains later work. Module startup binding syntax must still participate in same-scope collision inventory. Typed pattern validity remains unchecked. The checkpoint must explicitly approve this scope boundary.
+The M3 implementation resolves module bindings, exported qualification and implementation-family targets. It inventories nested lexical scopes without claiming expression or type checking. Full local binding, capture, pattern and control-target resolution remains later work. Module startup binding syntax must still participate in same-scope collision inventory. Typed pattern validity remains unchecked. The M3 checkpoint approval covers this scope boundary.
 
 #### Anchored and unanchored cycles
 
@@ -503,7 +503,7 @@ The confirmed byte ordering avoids locale and discovery differences. The project
 
 ## Implementation implications
 
-The workspace contains no Rill module resolver, namespace checker or typed graph. Private crate boundaries do not establish these mechanisms. [Development status](../development.md) records current infrastructure checks.
+The workspace now implements scoped M3 resolution and declaration collection in crates/compiler. The [acceptance record](../../crates/compiler/tests/m3-acceptance.md) identifies real loader tests and host limits. No typed graph, body checker or runtime follows from those results. [Development status](../development.md) records the separate infrastructure and product gates.
 
 A resolver needs separate origin, module, declaration, binding and source-snapshot identities. Alias lookup must preserve the declaration owner. Export lookup must not turn metadata access into source permission.
 
@@ -518,6 +518,8 @@ Source loading must enforce exact spelling and stable snapshots on each supporte
 The 2026-11-17 file-level snapshot proposal adds cases X1 through X4. All remain NotChecked by a Rill loader/lexer. Document checks do not establish atomic filesystem capture or complete graph freshness.
 
 ### Actual evidence
+
+The table below preserves pre-M3 evidence at the stated drafting revisions. The [M3 acceptance record](../../crates/compiler/tests/m3-acceptance.md) reports newer scoped resolution observations. Its metadata-only assertions do not establish later typed or runtime outcomes.
 
 | Artifact / revision | Evidence label | Rule exercised | Checker / environment | Expected / observed result | Limits |
 | --- | --- | --- | --- | --- | --- |
@@ -546,7 +548,7 @@ The 2026-11-17 file-level snapshot proposal adds cases X1 through X4. All remain
 
 The project owner [approved both policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073). Filesystem identity and canonical ordering are no longer open policy questions. The approval does not accept the complete RFC.
 
-The [proposed M3 procedure](#proposed-m3-resolution-procedure) supplies candidate, cycle, graph-capture and host-failure rules for owner review. Its graph-membership, transaction and freshness choices remain unapproved. Adversarial cases and implementation evidence remain pending. The confirmed file-level snapshot policy does not itself approve these additions. Preserve the stated namespace and origin rules.
+The [proposed M3 procedure](#proposed-m3-resolution-procedure) supplies candidate, cycle, graph-capture and host-failure rules for owner review. The owner approved its graph-membership, transaction and freshness choices for M3 at the identified checkpoint. The linked acceptance record reports actual resolution tests and their limits. Full RFC readiness and companion checking remain incomplete. The confirmed file-level snapshot policy does not itself approve these additions. Preserve the stated namespace and origin rules.
 
 [Draft RFC 0003](0003-expressions-bindings-and-control-flow.md) proposes expression, binding and control rules. Its precedence, evaluation, binding and parsing policies are confirmed. Its full text is not accepted.
 
@@ -556,7 +558,7 @@ Draft RFCs [0004](0004-functions-overloads-and-generic-requirements.md) and [000
 
 ### Implementation/validation gates
 
-The resolver, checker, source cache and runtime remain unimplemented. Host filesystem tests and complete client workflows have not run. Structural text checks cannot replace them. #28 retains formalization; #42 retains actual LSP delivery.
+M3 supplies scoped resolution and real filesystem tests on the recorded macOS AArch64 host. Other host profiles remain unrun. The typed checker, persistent source cache, runtime and complete client workflows remain unimplemented. Structural text checks cannot replace those gates. #28 retains formalization; #42 retains actual LSP delivery.
 
 ### Future/out-of-scope work
 
@@ -570,7 +572,7 @@ No canonical readiness review has occurred. Status is Draft. Source comparisons 
 
 ### Human decisions and amendments
 
-The M3 implementation request produced the unapproved procedure and linked checkpoint under #54. No new human decision or full RFC acceptance is recorded. Existing case evidence and policy approvals retain their original scopes.
+The owner approved the M3 procedure through checkpoint `a41e7cc955e67329d6dc3a8a69de667e0af204ac` under #54. The [approval record](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619) identifies O1 through O7 and the test seams. This decision authorizes scoped implementation, not full RFC acceptance or readiness. Existing case evidence and earlier policy approvals retain their original scopes.
 
 On 2026-11-17, the owner requested the complete syntax grammar. The owner then [confirmed all three syntax groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
 
