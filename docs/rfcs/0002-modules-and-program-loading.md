@@ -355,6 +355,18 @@ Required guard release, owner-count maintenance and native-borrow retention rema
 
 Private fields alone do not prevent interception. Later #23 cleanup rules also preserve remaining initialized owned fields after custom disposal. Their full checking and runtime rules need companion RFCs. This document does not claim to prove them.
 
+### Proposed M4.5 collection handoff
+
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes the next bounded collection handoff. Full RFC status remains unchanged. Only the [exact-wildcard precision](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) is approved; the complete checkpoint remains pending.
+
+Pass the actual loaded implementation inventory and installed routes to [RFC 0004's proposed ordinary procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure). Do not discover bodies from imports, filenames or calls again. Preserve canonical defining modules through aliases and repeated routes.
+
+The confirmed grammar admits implementations only at module level. M2 rejects nested implementations before an M3 graph exists. Collection cannot invent scoped candidates or retry parsing.
+
+Visibility of supported nested functions and nominal declarations remains an M4.8 integration obligation. That separate work does not admit nested implementation syntax.
+
+Ordinary input facts do not prove family-role or protected-action admission. Missing canonical classification cannot turn a conversion family into an ordinary duplicate. Missing protection metadata cannot prove a body safe. Preserve separate completion states and original source findings.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

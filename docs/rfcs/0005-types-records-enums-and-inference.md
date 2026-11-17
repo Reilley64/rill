@@ -490,7 +490,7 @@ For uncontextualized joins, retain identical types. Join different variants of o
 
 An immediate expected type checks fresh branches/elements before finalizing literals. It does not convert an existing container. Fresh tuple elements can use per-position context; an existing tuple cannot widen its elements afterward.
 
-Fix bracket category before element checking. An immediate structural tuple fixes arity and per-position types. A validated canonical List application fixes one element type. Pending ordinary-family contexts remain incomplete until M4.5 supplies their agreed input contexts.
+Fix bracket category before element checking. An immediate structural tuple fixes arity and per-position types. A validated canonical List application fixes one element type. Pending ordinary-family contexts remain incomplete. M4.5 supplies input-pattern/selection facts; M4.6 uses them to establish literal/callback/source-call contexts before checking. This proposed handoff clarification changes no recorded M4.4 result.
 
 Without category context, retain the confirmed List default. Do not reinterpret heterogeneous or empty brackets as tuples to repair inference. Empty elements and unresolved numeric widths still need established context.
 
@@ -589,6 +589,16 @@ Direct compiler tests must cross the agreed data entry/body/node seams using rea
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Borrowed patterns, moves, rebuilding, capture layouts, retained dependencies and disposal. | Proposed, not accepted. Complete pattern/ownership judgments remain incomplete. Finite layout is not an ownership proof. |
 | [Draft RFC 0008](0008-errors-propagation-and-caused-by-wrapping.md), with collection contracts still missing. | Actual Option/Result/Err constructors, causes and canonical container contracts. | Errors are proposed, not accepted. Complete constructor/variant judgments and collection contracts remain incomplete. Local Packet examples do not replace standard types. |
 | [Draft RFC 0010](0010-diagnostics-and-reporting.md), with runtime/backend still missing. | Exact failures, target layout limits, private representation and native/Wasm lowering. | Reporting is proposed, not accepted. Neither complete source/driver procedures, compiler execution nor target support is established. |
+
+### Proposed M4.5 static input boundary
+
+The owner [confirmed exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) for ordinary input patterns. A repeated wildcard cannot merge different actual static terms at their shared enum parent. Fixed parent patterns retain this RFC's permitted owned/read-only admissions.
+
+[RFC 0004's proposed finite procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) owns normalization and whole-vector comparison. Its complete M4.5 checkpoint remains pending approval. It does not add covariance through existing tuples, generic arguments or mutable references.
+
+Canonical never's no-value admission checks an immediate value expectation without retagging its type. The proposed type-vector query does not turn that rule into wildcard inference or an ordinary matching alternative. A bare canonical never result supplies no inferred input shape by itself. Other noncontinuing expressions retain their independently declared static types. Preserve unresolved positions separately from established input contracts.
+
+Source-call context formation remains M4.6 work. An input-only fact cannot invent a receiving type from implementation counts or erase actual variant evidence. Full call completion still needs the actual type/admission, selected signature and evidence obligations.
 
 ## Valid/invalid examples and diagnostics
 

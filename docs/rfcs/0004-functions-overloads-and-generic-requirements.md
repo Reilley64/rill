@@ -177,6 +177,148 @@ A body-less family is not a standalone fallback. Ordinary family selection, func
 
 These call facts retain actual type arguments, the shared substitution and original callee/argument/result source sites. They establish no move, implicit copy, access loan, capture property or trusted implementation permission.
 
+### Proposed M4.5 ordinary input procedure
+
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) follows M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. This procedure is a proposal. Model/compiler implementation approval remains pending. Full RFC status and earlier approvals remain unchanged.
+
+The owner [confirmed exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287). Repeated implementation variables bind identical established static terms. They do not choose a shared admissible parent to repair unequal occurrences.
+
+Thus `(T,T)` does not match `(E.Left,E.Right)`. Fixed `(E,E)` can admit both variants. Parent-typed `(E,E)` arguments still match `(T,T)`.
+
+Fixed `(E,E)` and repeated `(T,T)` can overlap without dominance. The former admits mixed variants; the latter admits equal types outside E. A matching call remains ambiguous without another dominating pattern. This consequence belongs to the confirmed precision, not a new per-parameter score.
+
+#### Captured inputs and header compatibility
+
+Use the actual loaded M3 graph before dead-code elimination. Preserve family, implementation, binder, nominal and module identities. Retain original syntax, spans and installed import routes. Do not reopen files or autoload names.
+
+The original M4.1 entry deliberately leaves implementation headers incomplete. Propose a separate ordinary-header entry over the shared type elaborator. Do not require that unsupported source to first obtain the original M4.1 receipt. Preserve existing entry behavior and earlier tests.
+
+Reuse the validated M3 declaration inventory and shared M4.1 canonical type machinery. Run applicable M4.2 checks on that extended header view. These include member uniqueness, canonical prelude schemas, existing type positions and source-nominal inline containment.
+
+Check record/payload fields, variants and named parameters even without calls. Extend parameter uniqueness to implementation headers. Retain each prerequisite's completion and findings. An unresolved or rejected prerequisite prevents a completed collection artifact.
+
+Elaborate module-level family and implementation parameter/result types in their own binder environments. Retain written defaults and requirement references separately. Type elaboration does not prove a requirement or apply a default.
+
+A family header introduces flexible substitution positions for compatibility checking. Implementation-owned binders remain rigid during that check. Explicit written family arguments establish the corresponding leading positions.
+
+Solve the remaining family positions from the complete written parameter/result signature. Use one substitution across that signature. Preserve every fixed constructor, reference layer, invocation mode and repeated family occurrence. Do not use value admission, body contents or requirements to repair signature disagreement.
+
+Use bounded first-order equations with an occurs check. Nominal definitions never expand. A family position can contain a finite term using implementation-owned binders. A rigid implementation binder cannot become a concrete type merely to repair an incompatible header.
+
+Reject inconsistent signature equations. Report unresolved family positions as Incomplete. Do not supply unused/result-only positions from guessed arguments or premature defaults. M4.6 owns default application and general call inference.
+
+Keep requirement targets, arguments and source positions when they can be resolved canonically. Unresolved requirement metadata cannot prove evidence or absence. Requirement truth and body checking remain unperformed here. Public-interface visibility obligations retain their existing owners.
+
+#### Canonical keys and admitted static shapes
+
+Build an ordered input vector from each implementation's written parameter types. Replace its input-occurring binders by indices assigned at first occurrence across the entire vector. Preserve repeated indices across positions and nested terms.
+
+Canonical keys retain primitive identities, nominal applications, variant identities, tuple arities, reference mutability and callable signatures/modes. Imported aliases retain their defining identities. Parameter names, results, requirements and unused binders add no ordinary key component.
+
+A pattern variable captures one exact static term at its occurrence. Later occurrences require that same term. A fixed constructor instead checks its own permitted input relation. Do not widen a variable's captured term to satisfy another occurrence.
+
+For comparison, expand only fixed outer input admissions into finite alternatives. An owned parent-enum pattern includes its exact parent type and each declared variant application. A read-only reference to that parent includes the corresponding read-only variant references.
+
+Preserve the parent arguments in every alternative. Mutable references remain invariant. Tuples and generic arguments gain no covariance. Do not expand nominal field definitions or solve inhabitation.
+
+At a fixed outer callable type, enumerate only permitted invocation-mode weakening. A read-only expected mode accepts only read-only actual mode. A mutable expected mode accepts read-only or mutable actual mode. A consuming expected mode accepts all three actual modes.
+
+Preserve callable parameter/result types exactly. A callable inside a reference, tuple or nominal argument gains no additional variance. These type comparisons prove no capture or invocation-access property.
+
+Take the finite cross-product across the whole input vector. Keep each variable index shared in every alternative. Deduplicate identical alternatives. Source order remains diagnostic provenance, never selection priority.
+
+Canonical never remains an ordinary exact type term in type-position comparison. Its no-value admission is a separate expression rule, not wildcard binding or an added type-pattern alternative. A bare canonical never result supplies no inferred input shape by itself. Independently typed intermediates retain their declared types despite lost continuation. Thus an i32-result call still supplies i32 after a never argument.
+
+An input query must distinguish established type contracts from unresolved or bare-never expression positions. A never contract must come from an independently supplied receiving contract. Merely declaring a source binding or callee result as never supplies no missing shape. Bare never cannot establish omitted generic arguments, widths or receiving shapes.
+
+#### Finite inclusion, intersection and witnesses
+
+An alternative is a finite constructor vector with correlated variables. Use separate variable namespaces for each implementation and comparison. Internal pattern variables are not Error/Unknown value types.
+
+To test inclusion of alternative A in alternative B, match B against A's symbolic vector. Treat A's variables as distinct rigid symbols. One consistent substitution for B must explain every position. Do not solve A's symbols or forget equality between repeated occurrences.
+
+For finite alternative sets, require each A alternative to be covered by a B alternative. This proposal relies on the unrestricted static type-term domain. A finite collection of proper constructor restrictions cannot exhaust an unconstrained variable.
+
+Use fresh structural tuple arities to justify that boundary when needed. Choose arities absent from the compared finite patterns. Give distinct rigid variables distinct fresh shapes. These are symbolic type witnesses, not invented nominal declarations, core definitions or runtime values.
+
+The separate model must challenge this finite-union rule before Rust implementation. Include correlated and nested cases, callable modes and all fixed enum admissions. A counterexample returns this procedure to design review. It does not authorize a weaker approximation.
+
+A is strictly more specific when inclusion holds only from A to B. Equal matching sets do not establish strict priority. Crossed vectors remain incomparable. Equivalent sets with different canonical keys do not become ordered by traversal order.
+
+For intersection, rename both variable namespaces apart. Unify the complete alternatives with one occurs-checked substitution. Constructor or equality conflicts disprove that alternative pair. One finite successful pair supplies an intersection witness. Residual variables can use valid type terms such as canonical bool for this witness. That choice is not source generic inference or a numeric default.
+
+Report disjointness only after every pair is proved not to intersect. Missing admission information, unknown metadata and exhausted limits remain unresolved. Keep the responsible source identities and any already proved witnesses.
+
+These witnesses concern static type patterns. They prove neither inhabited values nor executed calls. Do not use recursive storage emptiness to eliminate an input pattern.
+
+#### Collection, placement and protected overlap
+
+Collect each actual implementation identity once through all loaded routes. Resolve its target to one canonical family. A standalone function is not an implicit family. Preserve each route without duplicating the body.
+
+Reject distinct ordinary bodies with the same canonical input key, even without calls. Returns, requirements and binder spelling cannot rescue duplicates. Reject this condition before call evidence checking, with R0304.
+
+Check ordinary placement using canonical defining modules. The family module grants permission. Otherwise, a parameter must contain a nominal identity defined by the implementation module. Traverse nested arguments, references, tuples and callable types without expanding nominal definitions.
+
+A variant's defining enum supplies its owner. A bare binder grants no ownership. Return-only and requirement-only nominal identities grant no placement permission. Imports and re-exports do not transfer ownership.
+
+Require established family-role classification before authoritative ordinary collection or source diagnostics. Canonical conversions retain their separate pair rules. Missing role admission cannot justify treating a possible conversion family as ordinary. A same-spelled ordinary family gains no conversion exception.
+
+Conditional ordinary views may compute hypothetical keys and comparisons while role classification is pending. Attach the ordinary-role premise to every derived fact. Do not label those facts as conclusive collection, source rejection or checked calls.
+
+Use the [protected-overlap contract](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary) for actual canonical protected actions. Ordinary placement alone grants no replacement permission. Check unused implementations too.
+
+RFC 0007 owns required-provider and forbidden-input protection records. It defines their validation and the decision from intersection/dominance results. This section supplies comparison witnesses, not a second protected-overlap rule.
+
+A missing or partial protected catalogue keeps clearance Incomplete. Do not replace it with an empty caller whitelist. Known ordinary duplicate/placement findings remain available, but no completed protected collection artifact follows.
+
+#### Input selection and completion boundaries
+
+Compute selection only after the relevant headers, keys, candidate inventory and ordinary placement checks complete. Distinguish conditional ordinary views from conclusive input facts. An input winner is not an executable or evidence-complete call.
+
+A pending role permits only a hypothetical ordinary outcome with that premise attached. It cannot produce a conclusive ordinary winner, absence, ambiguity or source diagnostic. Known ordinary role permits input facts while protection/evidence clearance remains separately pending.
+
+Validate every requested identity against the same graph capture. Validate complete type applications and vector arity. Reject foreign identities and malformed requests separately from source rejection.
+
+Ground established input contracts use the finite alternatives above. Missing shapes, unresolved contextual literals/callbacks and symbolic specialization-dependent arguments return Incomplete in this slice. They cannot prove no matching implementation. M4.6 must discharge these call obligations inside M4.
+
+These are type-vector queries, not a second source-call typer. They cannot infer receiving contracts from implementation counts or retag source values. M4.6 must establish source-call contracts while preserving actual types and explicit admissions separately.
+
+Determine input-relevant family positions from the declaration's complete parameter terms. This includes callable result terms nested inside a parameter type. Apply explicit input arguments through each candidate's retained family-header substitution.
+
+Use the resulting implementation-binder equations only to filter that candidate's input match. Preserve exact variable capture while checking those equations. Do not substitute the constrained vector into the specificity table.
+
+Always rank the original normalized patterns and their original admission alternatives. At `f<E>`, constraining generic `(T)` to E cannot make it outrank fixed `(E)`. Filtering does not redefine either candidate's matching set for priority.
+
+An argument absent from the declaration's input terms is output-only. Retain it as a selected-signature agreement obligation. It cannot filter candidates or resolve ambiguity. A desired result is not a selection input.
+
+Preserve variable markers when applying explicit input constraints. A preconstrained variable still requires exact capture; it does not become a fixed parent-admission node.
+
+Match each candidate with one correlated substitution across the entire vector. Exclude only proved mismatches. An unresolved potentially relevant candidate prevents a conclusive winner or absence result.
+
+A sole matching candidate supplies a winner fact only after all other candidates are proved mismatches. Otherwise, require one candidate strictly more specific than every other settled match. Record every comparison used by that proof.
+
+Prove absence only after every candidate's match has been disproved. Prove ambiguity only after all candidate matches and all possible winner comparisons have settled. An unresolved candidate might dominate existing matches; two incomparable matches alone do not settle ambiguity.
+
+Any required unfinished header, match or comparison keeps that outcome Incomplete. Resource exhaustion yields ResourceLimit. Hypothetical outcomes retain their role premise and cannot emit source diagnostics.
+
+With an established ordinary role, proved absence has meaning R0300. Settled matches without a dominating winner have meaning R0303. Protection and evidence obligations still prevent completed collection/call artifacts.
+
+Do not check requirement truth to rank candidates. Retain declaration-wide and selected-body requirements after selection. Missing selected evidence cannot trigger fallback. Actual requirement satisfaction, output equality and source-call integration remain M4.6 obligations.
+
+Keep analysis completion separate from useful partial input facts. Missing core/protected admission forbids a completed global collection receipt. Analysis and selection reports retain this overall incomplete state. Their partial facts distinguish hypothetical outcomes from conclusive input relations with separate pending clearance. Consumers cannot treat it as a checked call or full typed artifact.
+
+#### Bounded implementation and validation
+
+Use explicit worklists for equations, alternatives, comparisons and candidate visits. Charge temporary substitutions, paths, products, witnesses and caches before growth. Key caches by graph, comparison mode, binder namespaces and complete input terms. Admission-dependent entries also retain the exact catalogue identity.
+
+Bound work, retained entries and depth independently. Check arithmetic before increasing counters. Keep the existing absolute depth ceiling. ResourceLimit precedes Incomplete, then SourceRejected; retained secondary findings are not exhaustive.
+
+The proposed public seams are ordinary analysis, canonical family-fact queries and input-vector selection. The implementation plan defines their scope and expected failure distinctions. They expose original source routes and proof witnesses without creating source bindings.
+
+Before Rust, validate normalization, inclusion, intersection and selection with a separate finite model. Compare bounded ground enumerations against symbolic comparisons. Include fresh-arity separation and adversarial correlations. Model execution is not a universal proof or Rill execution.
+
+No M4.5 model/compiler code or successful acceptance exists at this checkpoint. The exact-wildcard decision does not approve the remaining procedures or seams. Obtain scoped checkpoint approval before implementation.
+
 ### Bodies, state and invocation
 
 Named functions receive runtime state through parameters. They cannot capture module startup lets or enclosing runtime lets. Arrows can capture state under the ownership rules. Static function and type names are not captured runtime lets.

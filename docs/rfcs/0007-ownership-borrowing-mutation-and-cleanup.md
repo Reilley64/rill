@@ -304,6 +304,32 @@ Standard/default cleanup needs bounded call-stack use, using iterative state whe
 
 Panic, stack overflow and fatal exhaustion retain no-unwind behavior. Normal top-level completion still has no implicit global background join. Proper tail transfer cannot free caller storage or skip pending cleanup to create eligibility.
 
+### Proposed M4.5 protected-overlap boundary
+
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes this collection prerequisite. Checkpoint approval remains pending. This section approves no provider, ownership operation or runtime mechanism.
+
+A catalogue belongs to one graph capture and one admitted metadata identity. Each family record retains actual role-admission evidence and its provenance. It states whether required-winner and prohibited-input inventories are complete. Missing evidence is not a validated empty inventory.
+
+Use two protection record forms. A required-winner record names its canonical family, input pattern, action and actual admitted provider. A prohibited-input record names its canonical family, forbidden pattern and negative-capability reason. The prohibited form has no provider.
+
+Resolve a required provider to its actual implementation declaration in that graph. Check its target family and normalized input key against the record. Validate its required signature schema through actual core admission. A caller assertion cannot create provider authority.
+
+Admission belongs to the particular family/action record. Admission for another action is not a global whitelist. A prohibited record cannot gain a provider through unrelated admission.
+
+Validate the catalogue before checking source bodies. Reject conflicting required winners as invalid admission. Reject required/prohibited domain conflicts too. Do not choose an action by catalogue order.
+
+Use [RFC 0004's comparison procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) for each applicable family record. Compare original whole-vector patterns, not caller-filtered variants.
+
+For a required-winner record, check every body not admitted for that record. Disjointness is safe. An intersecting body is safe only when the required provider's pattern strictly dominates it. Equal, narrower or incomparable overlapping bodies reject as R0500.
+
+For a prohibited-input record, reject any implementation intersecting the forbidden domain. There is no provider to supply a more-specific escape. A generic adapter's overlap still counts. Requirements and aliases cannot remove the prohibition or manufacture its negative capability.
+
+If unavailable capability information prevents a complete prohibition, retain a pending prohibition obligation. Do not omit it from catalogue completeness. This includes protection whose capture or transitive metadata remains unavailable.
+
+Names, standard-root paths and private fields confer no authority. An actually empty inventory still requires validated per-family admission evidence. User requirements do not affect overlap checking. Retain the action/prohibition, body and comparison witnesses.
+
+Actual canonical admission remains an M4.8 prerequisite when missing. Structural input facts can remain useful, but no completed protected collection or checked call follows. No test may fabricate a standard capability definition or weaken the catalogue to obtain success.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

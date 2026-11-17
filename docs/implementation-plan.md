@@ -679,6 +679,108 @@ The [M4.4 acceptance record](../crates/compiler/tests/m4-4-acceptance.md) maps d
 
 The implemented scope retains explicit missing core and aggregate-classification prerequisites. Positive List/index/Option/Result admission remains an M4.8 integration gate. Neither that boundary nor the simple-binding clarification authorizes an illegal ownership transfer. M4.5 through M4.8 still require separate procedures, review and owner approval. PR #58 remains draft and unmerged; #56 remains open.
 
+## M4.5 design checkpoint
+
+### Baseline and scope
+
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) starts from M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. Its predecessor has 36 public-interface tests and 239 passing compiler tests. The [M4.4 acceptance record](../crates/compiler/tests/m4-4-acceptance.md) preserves its model, review, correction and verification scopes.
+
+The owner [approved exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287), including the stated parent-pattern incomparability. That approval does not approve this complete checkpoint, its seams, models or compiler implementation. No M4.5 model/compiler code exists.
+
+All slices stay in existing draft PR #58. #56 remains open. No intermediate merge, new PR, M5 or complete-M4 claim is authorized.
+
+### Owning procedures
+
+- [RFC 0004 ordinary input procedure](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) owns header compatibility, canonical keys, finite comparison, collection and input-only selection.
+- [RFC 0002 collection handoff](rfcs/0002-modules-and-program-loading.md#proposed-m45-collection-handoff) preserves the actual loaded graph, identities, routes and unresolved scoped declarations.
+- [RFC 0005 static input boundary](rfcs/0005-types-records-enums-and-inference.md#proposed-m45-static-input-boundary) distinguishes fixed admissions, exact wildcard terms and never's no-value rule.
+- [RFC 0007 protected-overlap boundary](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary) owns canonical protection prerequisites without granting runtime or ownership authority.
+
+The proposed implementation extends shared header/type facilities rather than create another resolver. The existing M4.1 entry must retain its deliberately bounded behavior. Requiring its success on implementation-bearing source would block collection before the new procedure can inspect it.
+
+The extended header view must reuse applicable M4.2 validation, not bypass it. Retain member uniqueness, required prelude schemas, type-position and containment checks, including uncalled declarations. Implementation header parameters receive the same uniqueness rule. Failed or unresolved prerequisites prevent completed collection.
+
+Header compatibility solves family positions against the full written implementation signature. Implementation binders remain rigid. Normalized input variables instead range symbolically across type terms during comparison. Keep these distinct roles and namespaces.
+
+Defaults and requirements retain source metadata, not guessed truth. Their unresolved use prevents affected completion. Input-only selection does not check generic bodies, derive callable captures, satisfy selected evidence or finish source-call contexts. Those remain M4.6 duties inside M4.
+
+Missing canonical family-role/protected admission prevents completed global collection. [RFC 0004's completion boundary](rfcs/0004-functions-overloads-and-generic-requirements.md#input-selection-and-completion-boundaries) separates hypothetical ordinary facts from conclusive input relations. A pending role permits only a conditional outcome with that premise attached. It cannot establish source rejection, an ordinary winner or a checked call.
+
+With an established ordinary role, input facts can still retain separate pending protected/evidence clearance. Overall analysis remains incomplete until required clearance finishes. Ground candidate matches and necessary comparisons must settle before winner, absence or ambiguity becomes conclusive.
+
+### Proposed public seams
+
+Names below define behavior, not final Rust spelling. The owner must approve the boundaries before tests or implementation.
+
+```text
+analyze_ordinary(captured M3 graph, actual admitted-catalogue state, limits)
+    -> header/collection analysis with completion state, facts and obligations
+analysis.family(canonical family identity)
+    -> canonical header, implementation, key, placement and comparison provenance
+select_inputs(analysis, canonical family, established input contracts,
+              explicit family arguments, limits)
+    -> selection report with hypothetical/conclusive input facts and completion state
+```
+
+| Seam | Catches | Does not establish |
+| --- | --- | --- |
+| Ordinary analysis | Header substitution, input keys, actual collection routes, duplicates, placement, known protected conflicts and pending admission. | Complete source validity, generic body/evidence checks, provider trust or execution. |
+| Family query | Original family/body/binder/nominal identities, correlated keys, source witnesses and per-check completion. | Source bindings for metadata-only names or permission to inspect private representation. |
+| Input selection | Established static vector matching and whole-vector winner/absence/ambiguity with retained comparisons. | Literal/callback inference, output agreement, selected requirements, access/ownership or an executable call. |
+
+All interfaces reject foreign captures and malformed canonical types/indices. Public requests cannot supply an unchecked trusted-provider whitelist. Missing catalogue state differs from an actually validated empty inventory.
+
+A hypothetical structural outcome must retain its ordinary-role premise. It is not a conclusive ordinary winner or source finding. A conclusive input relation can retain separate pending protected/evidence obligations without becoming a completed collection or call. Source diagnostics require the applicable role/admission premises, not a hypothetical interpretation of an unclassified conversion family.
+
+Established type contracts differ from unresolved or bare-canonical-never positions. Bare never does not infer a width, wildcard binding or receiving shape. Other noncontinuing expressions retain their independently declared static types. Symbolic specialization-dependent vectors remain incomplete here. M4.6 must complete those source-call obligations without body-count guesses or result-directed ranking.
+
+### Decisions requested before model/compiler code
+
+| Choice | Proposal and consequence |
+| --- | --- |
+| P1. Finite static comparison | Approve canonical whole-vector alternatives, exact correlated wildcard matching, rigid-symbol inclusion, occurs-checked intersection and fresh-tuple separation. Fixed parent/read-only and outer callable-mode admissions expand finitely. Consuming expected mode accepts all three actual modes; the reverse does not follow. Rank original patterns after explicit input constraints filter matches. No container or mutable-reference covariance follows. Checker limits never shrink the universal type domain. Validate the finite-union rule before Rust; a counterexample returns to design. |
+| P2. Header and input-context boundary | Approve shared ordinary-header elaboration without weakening the original M4.1 entry. One family substitution preserves the full written parameter/result signature, with implementation binders rigid. Keep never's no-value expectation distinct from type-vector matching. Literal/callback/default/source-call completion remains M4.6, not an arbitrary input shape chosen here. |
+| P3. Canonical collection and protected clearance | Approve canonical body deduplication, input-key duplicates, nested nominal placement and RFC 0007's protected-record decisions. Validate per-family evidence and actual required providers. Retain no-provider prohibitions or explicit pending prohibition obligations. Missing family-role or protection admission keeps global completion incomplete. Conditional structural facts retain that premise; they never license checked calls or fabricated standard roles. Actual core admission remains within M4.8. |
+| P4. Scope, seams and validation | Approve the three public seams and model-first plan. Validate normalization/comparison/collection/selection independently before vertical public-interface TDD. Keep defaults, evidence, callable formation, conversions, core and final integration inside their later M4 slices. Run required verification and separate final reviews in PR #58. |
+
+P1 does not reopen the owner's exact-wildcard decision. It proposes the executable finite method and its remaining admission boundaries. Full RFC statuses and prior approvals remain unchanged.
+
+### Planned model and compiler acceptance
+
+All cases below are NotChecked for M4.5. They are expected results, not compiler observations or executed proof.
+
+| Requirement | Planned contrasts |
+| --- | --- |
+| Alias and binder normalization | Different import routes to one family/body count once. Renamed binders and unused result/requirement-only binders do not distinguish input keys. Preserve all actual routes and source positions. |
+| Signature substitution | One family argument must agree across complete parameters and result. Fixed references/modes cannot disappear. A rigid implementation binder cannot be solved to repair a mismatch. Missing family positions/default completion stay incomplete. |
+| Correlations and ambiguity | `(T,T)` is narrower than `(A,B)`; crossed `(Point,T)`/`(U,Point)` are incomparable. Repeated wildcards reject mixed variant terms. Fixed `(E,E)` can overlap `(T,T)` without dominance, even at an equal-variant vector. |
+| Static admissions | Owned/read-only variants fit fixed parent patterns. Parent values do not fit variant-only patterns. Mutable widening and nested container covariance reject. Pin expected/actual callable-mode direction without capture evidence. Bare never cannot infer an input shape; a noncontinuing i32-result intermediate still supplies i32. |
+| Inclusion and intersection | Compare whole alternative vectors with distinct binder namespaces. Reject cyclic substitutions. Challenge finite-union inclusion with nested correlations and fresh tuple arities. Do not use runtime inhabitation or current caller counts. |
+| Duplicates and placement | Reject uncalled distinct bodies with equal keys despite different returns/requirements. Permit nested local nominal ownership in parameters. Reject return-only, imported-owner and bare-binder permissions. |
+| Role and protection | Never misclassify a possible canonical conversion as an ordinary duplicate. A missing/partial catalogue stays incomplete. Validate per-family evidence and exact required-provider links. Cover required-winner and no-provider prohibited domains, including generic adapters and pending negative metadata. Positive real admission is unrun until actual contracts exist. |
+| Selection and evidence boundary | Ground static vectors produce settled input facts only with their premises proved. Pending role yields hypothetical facts, not source diagnostics. Explicit input arguments filter through retained header substitutions; original patterns still determine priority. Output-only arguments cannot filter. Unknown candidates/comparisons can block ambiguity as well as winner/absence. Requirements cannot tie-break or trigger fallback. |
+| Provenance and resources | Foreign identities reject. Repeated/relocated normalized facts agree. Exact limits pass; one-short limits retain known facts as ResourceLimit. Wide products, long vectors and growing equations cannot exhaust host recursion or turn pending work into disjointness. |
+
+The reference model's proposed public operations are normalization, inclusion/intersection comparison and input selection over abstract canonical identities. A separate bounded ground enumerator provides an independent finite oracle. Those bounds are test limits, not the language's type universe or a universal soundness proof.
+
+Compiler assertions must use real M3 snapshots and canonical declaration inventories. No fabricated List, conversion or protected-capability definition can supply positive admission. Preserve incomplete outcomes when actual contracts are absent.
+
+Required local verification remains `mise run test:compiler`, `mise run test`, `mise run check` and `mise run build:scaffold`. Run check:ci only if workflows change. Record model execution, compiler assertions, product execution and unrun gates separately.
+
+### Checkpoint verification and review
+
+No M4.5 model, compiler assertion or Rill execution has run. Pre-review documentation validation passed 1675 destinations with zero errors. Added RFC prose passed a local sentence-length scan. Formal ASD-STE100 vocabulary compliance remains unverified.
+
+Independent Standards and Spec axes reviewed five staged documents against `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. Their staged diff SHA-256 was `db7bdda5a51bdb491112e3eb7c538bc469894551cdb05951c59c18b74e35a701`.
+
+Standards recorded three documented-rule findings and one editorial judgment. They concerned conditional collection prerequisites, duplicate ownership of protected decisions, the literal-context handoff and unclear disjointness prose. Spec recorded six clarification findings. They concerned filtering versus ranking, M4.2 prerequisites, conditional outcomes, executable protection records, module-only implementation syntax and mode/never precision.
+
+The local correction ranks original patterns after candidate filtering through retained header substitutions. It reuses applicable M4.2 checks and distinguishes hypothetical ordinary outcomes from conclusive input relations. Unknown candidates/comparisons cannot settle ambiguity. RFC 0007 now owns per-family evidence, exact required-provider links and no-provider prohibitions, including pending negative metadata. The correction also preserves M2 rejection of nested implementations and reconciles M4.5 structural contexts with M4.6 source-call completion.
+
+Spec hand-checked fresh-tuple separation and occurs-checked correlation. Standards ran the documentation checker and whitespace checks. Neither reviewer executed a model/compiler or granted owner approval. Their original staged reviews exclude the later corrections and this review record. No second delegated review is claimed.
+
+After correction, documentation validation passed 1676 destinations with zero errors. Added RFC sentences remained within the local length limit; formal vocabulary compliance remains unverified. The exact-wildcard decision is recorded, but P1 through P4 still require scoped owner approval before model/compiler implementation.
+
 ## Completion record
 
 The following M1 statement belongs to the original planning baseline. M1/M2 later merged as recorded above; M3 evidence is separate.
