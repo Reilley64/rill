@@ -55,9 +55,17 @@ The validation host is macOS 27.0.1 AArch64, build 26A434. mise 2026.11.4 select
 
 The only earlier-stage source extension is `Syntax::work`, exposing M2's existing charged-operation counter. The loader limits each parse by its remaining shared work allowance and charges the returned count. No grammar, parser commitment, recovery or source-span behavior changes. The M3 public loader regression checks this statistic, and the complete existing M1/M2 suite remains intact.
 
-The exercised filesystem cannot establish distinct alternate-case or normalization-equivalent files for the requested spellings. The negative tests disclose that host limitation and reject rather than merging identities. Positive distinct-pair behavior on case-sensitive/normalization-sensitive filesystems remains unrun. Linux and macOS x86-64 execution are unrun. Windows-native loading is unsupported.
+The exercised filesystem cannot establish distinct alternate-case or normalization-equivalent files for the requested spellings. The negative tests disclose that host limitation and reject rather than merging identities. Positive distinct-pair behavior on case-sensitive/normalization-sensitive filesystems remains unrun. Linux and macOS x86-64 were unrun during local validation. The hosted publication results below supersede that limit for their named scaffold profiles. Windows-native loading remains unsupported.
 
 Permission denial, symbolic links and hard links were available on this host. The permission test reports a limitation if another host's privileges bypass denial. Arbitrary syscall failure injection, hostile concurrent change/restore schedules, host OOM recovery and wall-clock limits were not established. No standard library was shipped and no Rill user code, LLVM backend or LSP client ran.
+
+## Hosted publication evidence
+
+At implementation revision `862704bea6af46e1446b3b7942e690f877b116c1`, the [pull-request scaffold run](https://github.com/Reilley64/rill/actions/runs/44033556098) passed every configured runner profile. Its logs show all 47 M3 tests passing on ubuntu-24.04, ubuntu-24.04-arm, macos-15 and macos-15-intel. The [push scaffold run](https://github.com/Reilley64/rill/actions/runs/44033436859) also passed. These runs include check, build:scaffold and check:ci. The unchanged workflow pins mise 2026.11.8; the local run above used 2026.11.4.
+
+The [native-acceptance run](https://github.com/Reilley64/rill/actions/runs/44033556021) failed on all four profiles at the unchanged unavailable test:runtime gate, each with exit 2. Its logs were inspected. These failures do not invalidate the scoped resolver results, but they remain failed native/runtime acceptance. No backend, runtime, standard-library execution or client support follows from green scaffold jobs.
+
+Distinct alternate-case/normalization file-pair validation remains unrun. The four hosted profiles establish their exercised Rust/filesystem tests, not arbitrary filesystems or physical-CPU/backend guarantees. These observations identify the tested source revision rather than claiming future documentation-only revisions have already completed CI.
 
 ## Final review corrections
 
@@ -78,4 +86,4 @@ The review found four behavior/provenance gaps, all corrected within M3:
 
 The original reviewed revision passed 39 M3 tests. The corrected revision passes the 47 M3 tests and the unchanged 91 M1/M2/unit tests reported above. These are resolution/compiler tests, not typed or runtime acceptance.
 
-Workflows did not change, so check:ci is not applicable. Product build, language/stdlib/runtime/client acceptance and release gates remain unavailable and nonzero. Historical prototypes and recorded experiment evidence remain unchanged. This record clears none of those later-stage or support obligations.
+Workflows did not change, so check:ci was not run locally. The hosted scaffold workflow did run it successfully at the source revision identified above. Product build, language/stdlib/runtime/client acceptance and release gates remain unavailable and nonzero. Historical prototypes and recorded experiment evidence remain unchanged. This record clears none of those later-stage or support obligations.

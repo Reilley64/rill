@@ -558,7 +558,7 @@ Draft RFCs [0004](0004-functions-overloads-and-generic-requirements.md) and [000
 
 ### Implementation/validation gates
 
-M3 supplies scoped resolution and real filesystem tests on the recorded macOS AArch64 host. Other host profiles remain unrun. The typed checker, persistent source cache, runtime and complete client workflows remain unimplemented. Structural text checks cannot replace those gates. #28 retains formalization; #42 retains actual LSP delivery.
+M3 supplies scoped resolution and real filesystem tests on the recorded local macOS AArch64 host. The [hosted record](../../crates/compiler/tests/m3-acceptance.md#hosted-publication-evidence) adds passing resolver tests on four Linux/macOS runner profiles. Native/runtime acceptance still fails as unavailable. The typed checker, persistent source cache, runtime and complete client workflows remain unimplemented. Structural text checks cannot replace those gates. #28 retains formalization; #42 retains actual LSP delivery.
 
 ### Future/out-of-scope work
 
