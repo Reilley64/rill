@@ -1,4 +1,4 @@
-name: Native acceptance gate
+name: "Test: Native acceptance"
 
 on:
   push:
@@ -21,24 +21,41 @@ on:
 permissions:
   contents: read
 
+# Explicit homes keep nested mise commands on the same Rustup provider.
+env:
+  CARGO_HOME: ${{ github.workspace }}/target/ci/cargo
+  RUSTUP_HOME: ${{ github.workspace }}/target/ci/rustup
+
 jobs:
   native:
+    name: "Test: Native acceptance (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - name: "Source: Check out the repository"
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: "Setup: Install mise"
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.11.8
           install: false
           cache: false
-      - run: mise install --locked
+
+      - name: "Setup: Install the locked tools"
+        run: mise install --locked
+
       # This gate is unavailable, not successful, until native acceptance exists.
       # Do not substitute a C-API installation smoke for Rill runtime acceptance.
-      - run: mise run test:runtime
-      - if: github.event_name == 'workflow_dispatch'
+      - name: "Test: Run native runtime acceptance"
+        run: mise run test:runtime
+
+      - name: "Build and test: Verify release acceptance"
+        if: github.event_name == 'workflow_dispatch'
         run: mise run verify:release

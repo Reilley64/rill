@@ -63,7 +63,11 @@ These are task groups, not alternate Rust compiler profiles. Invoke each task as
 | `test:llvm` | LLVM C-API compile/link smoke only, not a Rill backend or inkwell integration test. |
 | `experiment:*` | Explicit entry points for existing reproductions, with their original scope and prerequisites. |
 
-`Scaffold checks` configures the LLVM-free checks on four GitHub-hosted OS/architecture profiles. `Native acceptance gate` runs for native-impacting changes and manual dispatch. It currently fails at `test:runtime` because native acceptance is absent; this is intentional, not a passing native profile. A manual run also requires `verify:release` after native acceptance succeeds. Neither workflow installs LLVM or publishes releases. These workflows have been syntax-checked locally, not executed on GitHub.
+`Test: Scaffold checks` configures the LLVM-free checks on four GitHub-hosted OS/architecture profiles. `Test: Native acceptance` runs for native-impacting changes and manual dispatch. It currently fails at `test:runtime` because native acceptance is absent; this is intentional, not a passing native profile. A manual run also requires `verify:release` after native acceptance succeeds. Neither workflow installs LLVM or publishes releases.
+
+Both workflows use explicit runner-local Cargo and Rustup homes before mise installs tools. Nested mise tasks then retain the same Rustup provider, instead of losing the runner's external provider during tool lookup. Workflow names and YAML layout follow the [GitHub automation guide](../.github/AGENTS.md).
+
+The 2026-11-17 [hosted scaffold run](https://github.com/Reilley64/rill/actions/runs/44001670793) passed Linux x86-64/AArch64 and macOS x86-64. macOS AArch64 failed during nested mise tool lookup. Native acceptance exited 2 as unavailable on every profile. Local reproduction confirms the tool-lookup failure and the explicit-home correction. Hosted validation of that correction remains unrun.
 
 Unavailable product tasks must not become successful empty suites. Infrastructure tests can prove routing, nonzero unavailable responses or manifest constraints; they cannot prove language semantics. Consult [test ownership](../tests/README.md) before adding acceptance tests.
 
