@@ -344,7 +344,7 @@ Follow the implement and TDD skills. Run focused tests regularly, then test:comp
 
 Use the code-review skill for independent Standards and Spec reviews against the exact starting commit. Address findings before the implementation commit. Record any local follow-up corrections without implying another independent review occurred.
 
-Commit and push only the approved slice. Use the PR skill to open a clearly scoped draft PR against main. Link the umbrella, slice ticket and acceptance evidence. Leave the umbrella open. Do not merge or add M5 work.
+The initial delivery proposal used separate slice PRs. The owner later requested all eight M4 slices in [existing PR #58](https://github.com/Reilley64/rill/pull/58). Keep that PR draft and M4-scoped. Add each slice only after its required procedure and seam approvals. Preserve separate slice reviews, commits and acceptance records. Link the umbrella and slice tickets. Leave the umbrella open until all typed obligations have acceptance evidence. Do not merge without explicit authorization. Do not add M5 work.
 
 No successful rill check/build/run/test command is authorized. Keep unavailable product tasks nonzero and preserve historical evidence. Typed-stage success is not ownership safety, complete source checking or execution.
 
@@ -377,6 +377,112 @@ Both corrections were made locally without another delegated review. The prose p
 ### M4.1 Stage 2 acceptance
 
 [Slice #57](https://github.com/Reilley64/rill/issues/57) records the approved M4.1 work. The [M4.1 acceptance record](../crates/compiler/tests/m4-1-acceptance.md) maps real tests to the checkpoint requirements. It preserves unimplemented checks and later-slice boundaries. It does not complete M4 or enable any product command.
+
+## M4.2 design checkpoint
+
+### Delivery and current baseline
+
+The owner requested completion of all M4 slices in existing PR #58. This supersedes separate slice PRs and intermediate merge gates. It does not approve unwritten language policies or unreviewed procedures. PR #58 remains draft and unmerged; #56 remains open.
+
+[M4.2 ticket #59](https://github.com/Reilley64/rill/issues/59) starts design work from branch commit `f405adaa01058849025105b11ed77fe32f6271b7`. M4.1 implementation revision `7602ed55f8b344646218e8cc0af8089bfee18efb` provides its input facts. The overall M4 starting main remains `ee12588f2cba912025900e1ac587586fb9cb6235`.
+
+M4.1 has completed scoped implementation review and acceptance evidence, including four hosted scaffold profiles. Its integration remains pending as part of M4. No intermediate merge is needed before M4.2 design or subsequently approved implementation. The later documentation commit records hosted results without claiming it was itself already tested on those hosts.
+
+No M4.2 compiler/model code or tests have been written. The new procedures and choices below await scoped owner approval. Full RFC statuses and earlier approvals remain unchanged.
+
+### Owning procedures and exact prerequisites
+
+[RFC 0005's proposed M4.2 procedure](rfcs/0005-types-records-enums-and-inference.md#proposed-m42-declaration-validity-and-inline-containment) owns duplicate members, type positions, inline summaries and containment. [RFC 0004's proposed M4.2 procedure](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m42-header-validity-and-prelude-signatures) owns parameter uniqueness and canonical prelude signature compatibility.
+
+At baseline f405ada, RFC 0005 owns the confirmed summary/containment policy and T13 through T16. RFC 0004 owns explicit headers and fixed reference constructors. The library catalogue section 2 supplies the canonical borrowed-copy and consuming-dispose signatures. RFC 0002 supplies canonical ownership, source visibility and graph membership. RFC 0010 supplies original-source identity and truthful incomplete outcomes.
+
+The callable capture distinction also follows RFC 0007. No ownership, capture-transfer or cleanup algorithm is imported into M4.2. Protected-operation and target ABI contracts remain separate.
+
+### Proposed input/output contract and TDD seams
+
+```text
+check_declarations(completed M4.1 receipt, explicit prelude contracts, limits)
+    -> scoped declaration/inline-containment receipt
+       or rejected/incomplete/resource/request failure
+result.declaration(canonical declaration identity)
+    -> checked member/header facts with original declaration provenance
+result.layout(canonical nominal identity)
+    -> ordered inline-parameter summary, containment edges and source witnesses
+```
+
+These are behavioral names, not fixed Rust signatures. The request reuses the exact retained graph capture. It cannot consume a failed annotation attempt, invented types or contracts from another capture. Explicit prelude inputs must identify M3's selected copy/dispose declarations and the fixed approved schemas. They supply no runtime trust.
+
+A completed result covers member/header uniqueness, required prelude signatures, the approved type-position rule and source-nominal inline containment. It must not claim full declaration validity or general signature compatibility. Public-interface visibility, implementations, bodies, capture storage, target layout/size, evidence, ownership and execution remain explicitly unperformed.
+
+Each summary retains canonical declaration/binder identities and finite derivation evidence. Each containment edge retains its canonical endpoints, original storage member span and relevant forwarding substitutions. Aliases never create new graph vertices. Failed results retain known findings and explicitly partial facts without exposing a completed receipt.
+
+| Public seam | Catches | Does not establish |
+| --- | --- | --- |
+| check_declarations | Whole requested-stage completion, canonical contract validation, unused duplicate/cycle rejection, incomplete storage and resource outcomes. | Complete source checking, body/evidence validity, target ABI or ownership. |
+| declaration query | Distinct member scopes, source provenance and canonical prelude signature compatibility. | Implementation ranking, protected-operation admission or correct runtime copying/disposal. |
+| layout query | Summary forwarding, finite nesting, phantom arguments, canonical edges and cycle witnesses. | Runtime layout sizes, constructibility, capture layout or safety. |
+
+Tests must load real sources through M3, elaborate through M4.1 and call this analysis interface. A reference-model test supplements these seams; it cannot replace their direct compiler assertions.
+
+### Owner decisions requested before code
+
+| Decision | Recommendation and consequence |
+| --- | --- |
+| D1. Type positions | Permit void and never in every existing type position. Keep inhabitation and control-flow checks separate. This permits declarations such as UnitHolder with a void field and BottomHolder with a never field, without inventing an initializer or constructible BottomHolder value. |
+| D2. Stored variants | Use the parent enum application's inline representation for stored variant types. Thus Choice<Node>.Empty forwards the parent enum's stored Node dependency and rejects the proposed Node example. A selected-payload representation would produce a different result and needs different rules. This is a new policy choice, not prior confirmed behavior. |
+| D3. Missing representation contracts | Admit no nominal indirection exemptions in this slice. Actual source references stop traversal; names and private fields do not. Directly stored callables without a justified representation contract return Incomplete. Callable signatures do not become capture storage. Keep that obligation assigned to later callable/core integration before M4 completion. |
+| D4. Scope, contracts and seams | Approve the two owning procedures, exact prelude schemas, three public seams and scoped completion boundary. Defaults, requirements and implementations retain M4.1's incomplete behavior. Approve the model-first validation and compiler TDD sequence below. |
+
+These recommendations complete a proposed procedure, not an approved language rule. Do not implement a recommendation before its owner decision. A changed decision requires corresponding owning-text and acceptance revisions.
+
+### Model validation before compiler implementation
+
+After approval, first write the finite reference model and its direct expected cases. Keep it beside compiler tests. Run it through mise-selected Python without new dependencies. Record ReferenceExecuted only after actual execution.
+
+Use independently stated expected summary sets, graph edges and outcome categories. Include direct/mutual recursion, finite Box nesting, forwarded parameters, phantom arguments and Growing<Box<T>>. Include the approved variant rule, empty declarations, private fields and callable/reference storage boundaries. A model resource limit must not become a cycle proof or finite-layout success.
+
+Then start Rust vertical TDD through the approved entry and queries. Observe one failing behavior, implement that behavior and rerun focused tests. Preserve M4.1 and M1 through M3. Model results are supporting evidence, not compiler acceptance or a soundness proof.
+
+### Planned direct acceptance, not observed results
+
+| Requirement | Positive, rejected and boundary assertions | Provenance |
+| --- | --- | --- |
+| Member scopes | Distinct records can reuse field names. Reject unused duplicate record fields, enum variants and record-payload fields. Preserve all conflicting identities/spans. | RFC 0005 declarations and the new uniqueness procedure. |
+| Parameters | Distinct names and repeated underscores are valid. Reject repeated named value parameters. Type/value namespaces remain separate. | RFC 0004 proposed header procedure; confirmed parameter syntax. |
+| Actual prelude contracts | Accept canonical copy<P0>(&P0):P0 and dispose<P0>(P0):void after binder renaming. Reject wrong arity, access constructor, binder relationship or result. Reject foreign/missing contract identities as requests. Source shadowing cannot change canonical void. | Library catalogue section 2 and RFC 0004 proposed schemas. |
+| Type positions | Exercise approved void/never positions without asserting construction or runtime values. A never field cannot hide an inline self-cycle. | RFC 0005 type forms and decision D1. |
+| Summary forwarding | Store T directly, through tuples and through wrappers. Preserve ordered parameter indices. Unused generic arguments contribute nothing. | Confirmed inline-summary policy; T15. |
+| Finite and cyclic layouts | Accept finite nested wrappers and reference-broken cycles. Reject direct, mutual, enum-payload and type-growing by-value cycles even when unused. | RFC 0005 T13/T15/T16, R0406. |
+| Genuine versus fake indirection | Inspect user/standard-origin source records alike. A same-spelled List containing a by-value cycle rejects. An explicit reference field stops traversal. No unsupported public marker grants trust. | Confirmed trusted-boundary policy and D3. |
+| Variant storage | Keep variant type identity distinct. Exercise the approved Choice<Node>.Empty outcome and variants with different parent substitutions. | Decision D2; no earlier representation outcome is claimed. |
+| Callable storage | Function signature callables do not imply nominal storage. Reference-wrapped or unused-argument callable terms do not create capture edges. Direct unknown storage prevents completion. | RFC 0005 callable/capture distinction and D3. |
+| Determinism and witnesses | Repeated/relocated inputs preserve semantic summaries, ordered edges and original-source cycle/duplicate witnesses without equating fresh capture IDs. | M1 through M4.1 provenance and RFC 0010. |
+| Limits and incompleteness | Exact and one-short work/storage/depth budgets have controlled outcomes. Test long graphs and retained known errors before exhaustion. Unsupported M4.1 inputs never acquire a completed M4.2 receipt. | Explicit stage and resource contracts. |
+| Completion honesty | Every result lists the scoped checks actually performed. Unresolved layout, capture storage, later visibility and body checks do not become successful complete source checking. | M4 stage boundary and RFC authority rules. |
+
+After implementation, map these rows to real test names, model commands, observed outcomes and limits in a separate M4.2 acceptance record. Run test:compiler, test, check and build:scaffold through mise. Run check:ci if workflows change. Complete independent final Standards/Spec review before committing the implemented slice into PR #58. Keep the umbrella open and the PR draft until all M4 obligations have evidence and the owner authorizes merge.
+
+### Checkpoint verification
+
+Only this plan and proposed sections in RFCs 0004/0005 changed. No M4.2 compiler/model code or tests exist. Every planned M4.2 assertion remains NotChecked.
+
+On the existing macOS 27.0.1 AArch64 host, mise 2026.11.4 selected Rust/Cargo 1.98.0, Python 3.13.18 and uv 0.13.8. The unchanged 158-test compiler suite passed through test:compiler. The test, check and build:scaffold tasks also passed. Documentation validation found zero errors across 1629 local destinations. Diff whitespace checks passed.
+
+These are baseline/document checks, not M4.2 or model acceptance. User-global CMake/Ninja/Go warnings did not change project locks. Workflows did not change, so local check:ci was unrun. Product build/suites, release, LLVM and native experiments were unrun. Earlier hosted results retain their exact M4.1 source revision and failed unavailable native/runtime gates.
+
+### Independent checkpoint review
+
+Both axes reviewed the staged three-document proposal against `f405adaa01058849025105b11ed77fe32f6271b7`. Review preceded the checkpoint commit. Neither reviewer edited files or reran the recorded checks.
+
+#### Standards
+
+No actionable documented-standard violation or heuristic finding was identified. The review confirmed the distinction between current delivery instructions, earlier approvals and recorded evidence.
+
+#### Spec
+
+No actionable finding was identified. The review checked summary forwarding, incomplete-storage propagation, finite/growing cases, canonical prelude contracts and the explicit D1 through D4 choices. It confirmed that those decisions and model/compiler acceptance remain pending.
+
+These are design-checkpoint reviews, not owner approval or final implementation review. Every M4.2 model/compiler assertion remains NotChecked. Formal ASD-STE100 dictionary compliance remains unverified.
 
 ## Completion record
 

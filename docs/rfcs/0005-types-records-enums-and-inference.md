@@ -330,6 +330,112 @@ This is a confirmed representation-validity policy, not a target ABI. It needs f
 
 A finite layout can still exceed a target's representation limits. Such target checks must remain distinct from a recursive-layout error. Finite layout does not prove that a value can be constructed or safely borrowed.
 
+### Proposed M4.2 declaration validity and inline containment
+
+[M4.2 ticket #59](https://github.com/Reilley64/rill/issues/59) proposes this next procedure. Owner approval is pending. The existing inline-layout policy remains confirmed; the new choices below are not yet approved.
+
+The input is a completed M4.1 receipt, explicit canonical prelude signature contracts and checking limits. Reuse its graph, declaration identities, canonical terms, substitutions and original spans. Do not accept a failed M4.1 attempt as a completed receipt. Do not read live files.
+
+#### Declaration checks and type positions
+
+Check every module-level record and enum in the receipt, including unused declarations. Reject repeated field names within one record or record-payload variant. Reject repeated variant names within one enum. Keep distinct records, variants and parameter lists as separate member scopes.
+
+Retain all conflicting member identities and declaration spans. A private field still participates in its record's uniqueness check. Apply [RFC 0004's header and prelude checks](0004-functions-overloads-and-generic-requirements.md#proposed-m42-header-validity-and-prelude-signatures) to function and family headers.
+
+The proposed position policy permits void and never wherever an existing type production admits a type. Void has its implicit value; never remains uninhabited. This policy supplies no initializer, constructor or normal continuation. It requires owner approval.
+
+Do not remove stored fields from containment merely because another field is uninhabited. A by-value cycle still rejects. Empty enums and never do not excuse such a cycle.
+
+Public-interface visibility, constructor field sets, implementation signatures and body validity remain separate checks. This stage does not mark them complete. Existing source-name access checks remain with M4.1.
+
+#### Layout inputs and unsupported storage
+
+Analyze the written fields and every enum payload. Module-level function parameter/result annotations are not stored fields of a nominal declaration. Reference referents do not occupy the reference's inline storage.
+
+Use actual canonical primitive identities as finite leaves. This classification fixes no target size, alignment, tag or ABI. Generic parameters remain symbolic storage dependencies on their ordered binder positions.
+
+This slice accepts no supplied nominal indirection exemptions. Inspect the actual source fields of every record and enum, including standard-origin declarations. No spelling, private field or public metadata flag can make List, Shared or another nominal declaration indirect.
+
+Later genuine opaque/native containers require a separately approved admission procedure and actual implementation metadata. Their omission here is not evidence that a same-spelled source wrapper has their representation.
+
+A callable's parameter/result signature is not its capture layout. A directly stored callable without an established capture-representation contract makes layout incomplete. Do not treat that unknown storage as an empty summary or finite leaf. Stop at references before inspecting their referents.
+
+A callable term inside an unused nominal argument does not occupy storage merely because the argument is written. Inspect only arguments selected by the nominal summary. Actual capture layout and trusted representation admission remain later obligations.
+
+#### Inline-parameter summaries
+
+For each record or enum D, create a summary S[D] over D's ordered binder indices. Start with empty known sets. Also track whether storage analysis is complete. Every enum contributes all of its variant payloads.
+
+For a stored term t in D's fields, compute these contributions:
+
+```text
+primitive                 contributes no binder index
+parameter D.i             contributes i
+reference                 stops traversal
+structural tuple          unions its element contributions
+nominal N<a0, ..., an>     unions contributions of ai for each i in S[N]
+variant E<args>.V          uses the proposed parent-enum rule below
+stored callable           marks analysis incomplete; its signature contributes no capture facts
+```
+
+The variant notation above describes a canonical term, not new source syntax. For a nominal application, inspect argument subterms without expanding N's field definitions. Preserve D as the originating binder environment.
+
+Scan declarations in canonical order until no known set or completeness state changes. Union known indices monotonically. Propagate incomplete storage through every stored nominal application whose declaration has incomplete storage. Do not propagate it through a stopped reference or unused argument.
+
+Every binder fact needs a finite derivation from written storage or an earlier justified summary fact. A cyclic pending fact cannot justify itself. Empty initial sets implement the least fixed point, not assumed recursive evidence.
+
+There are finitely many declarations and binder indices. A complete analysis can add at most their total binder-index count. Incompleteness can propagate to each declaration once. Limits still bound all scans and retained facts.
+
+#### Proposed stored-variant rule
+
+The recommendation treats a stored variant type as its parent enum application for inline representation. Use the parent's complete inline-parameter summary and containment dependencies. Variant identity remains distinct for typing and overload selection.
+
+This is a new representation-validity choice requiring owner approval. The confirmed parent-enum policy does not by itself decide variant-type storage. A selected-payload representation is an alternative, not an equivalent implementation.
+
+For example, consider this independent declaration excerpt:
+
+```rill
+enum Choice<T> { Empty, Value(T) }
+type Node = { tag: Choice<Node>.Empty };
+```
+
+The recommendation rejects Node's inline cycle, R0406. A selected-payload representation could instead make this Empty field finite. This case is NotChecked. Do not choose either behavior through code before approval.
+
+#### Containment graph and cycle witnesses
+
+After summary closure, create one vertex per canonical record/enum declaration. Traverse each declaration's stored terms with that declaration as origin O:
+
+```text
+primitive or parameter    adds no nominal edge
+reference                 stops traversal
+structural tuple          visits each stored element
+nominal N<args>            adds O -> N, then visits arguments selected by S[N]
+variant E<args>.V          follows the approved stored-variant rule
+stored callable           preserves an incomplete layout obligation
+```
+
+Keep O unchanged when traversing forwarded arguments. Do not change the origin to the wrapper declaration. Repeated visits to Box in finite Box<Box<i32>> therefore create no artificial Box self-cycle.
+
+Deduplicate edges by canonical origin and target. Keep the least witness by storage-member identity, type-use position and forwarding binder-index sequence. Retain its relevant substitutions. Original snapshots and declaration/member spans remain attached. Do not enumerate unbounded cyclic route histories.
+
+Find strongly connected components with an iterative algorithm. A self-edge or component with several vertices proves an inline cycle. Report each cyclic component once, ordered by its least canonical declaration identity. Use R0406.
+
+Within a cyclic component, traverse from its least vertex with an explicit depth-first stack and canonically ordered edges. Retain the first back-edge cycle as its witness. Do not wait for identical closed type arguments to recur.
+
+Retain known cycle findings when other work becomes incomplete. No incomplete summary, unresolved storage obligation or exhausted budget can justify a completed finite-layout result. A finite graph result is not a target size, constructibility or ownership proof.
+
+#### Outcomes, limits and procedure validation
+
+A completed result covers member/header uniqueness, the supplied required prelude signatures, approved type-position policy and source-nominal inline containment. It does not certify full declaration validity, general signature compatibility, capture layouts, public interfaces or bodies.
+
+Reject definite declaration/signature errors and proved cycles. Return Incomplete for unsupported storage. Return InvalidRequest for inconsistent contract inputs or cross-capture identities. Return ResourceLimit when a checked budget prevents completion. Preserve known findings in explicitly partial results.
+
+Validate request identities and contracts first. After that validation, ResourceLimit takes priority over Incomplete, which takes priority over source rejection. This matches M4.1's failure boundary. A known rejection finding remains visible when incomplete work prevents the rest of the requested checks.
+
+Charge member comparisons, term visits, fixed-point scans, summary facts, completeness propagation, edges, substitutions and witnesses before growth. Charge iterative graph work too. Counters must not wrap. Work, retained-entry and traversal limits are implementation budgets, not valid-program restrictions.
+
+Before compiler implementation, validate a separate finite reference model against independently stated expected summaries and containment graphs. Include T13 through T16, mutual cycles, forwarding, unused arguments and type growth. Include the approved stored-variant case and callable/reference boundaries. Record actual outcomes and limitations. Model execution is not compiler or Rill execution.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

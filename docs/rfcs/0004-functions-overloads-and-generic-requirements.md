@@ -136,6 +136,31 @@ The canonical copy/dispose declarations remain those selected by M3's explicit p
 
 No operation gains compiler privileges through its spelling or standard-root location. This stage uses no semantic standard-library definitions or trusted-operation registry. Later operation checks need actual canonical declarations and explicit supplied contracts.
 
+### Proposed M4.2 header validity and prelude signatures
+
+[M4.2 ticket #59](https://github.com/Reilley64/rill/issues/59) proposes these checks after M4.1 elaboration. Owner approval is pending. Full RFC status and previous approvals remain unchanged.
+
+Check every module-level named-function and family header in the retained receipt. Reject repeated value-parameter names within one header. Exclude `_`, which binds no usable name. Preserve each conflicting declaration identity and source span. Type parameters and value parameters remain separate namespaces.
+
+This procedure does not check bodies or implementation-family compatibility. Defaults, requirements and implementation headers remain incomplete under M4.1. Public generic requirements, selection, symbolic evidence and function-value compatibility retain their later procedures.
+
+The request explicitly supplies the canonical copy/dispose identities and the following required signature contracts:
+
+```text
+copy:    <P0>(&P0) -> P0
+dispose: <P0>(P0)  -> canonical-void
+```
+
+Each schema has exactly one type binder and one value parameter. P0 denotes that declaration's own binder at position zero. The copy parameter has one fixed read-only reference layer. Dispose consumes its parameter type without adding a reference layer.
+
+Use the actual M3 prelude declaration identities. Reject absent, foreign-capture or substituted contract identities as InvalidRequest. The supplied schemas must equal the two contracts above. Caller data cannot weaken those required shapes.
+
+Compare actual signatures after binder renaming by ordered position. Preserve tuple, nominal, reference and callable constructors during comparison. Parameter names do not affect signature compatibility. Primitive void uses its actual compiler identity, not a same-spelled user declaration.
+
+A structurally admitted prelude declaration with the wrong signature rejects this stage. Retain the declaration span and the mismatched parameter/result type facts. No new stable diagnostic code is assigned by this proposal.
+
+The [library catalogue](../standard-library-contracts.md#2-callable-and-ownership-evidence) supplies the existing contract provenance. These checks do not admit implementations, protected actions or native providers. A signature match proves neither copyability nor correct disposal behavior. It grants no runtime trust.
+
 ### Bodies, state and invocation
 
 Named functions receive runtime state through parameters. They cannot capture module startup lets or enclosing runtime lets. Arrows can capture state under the ownership rules. Static function and type names are not captured runtime lets.
