@@ -222,7 +222,7 @@ Collect each implementation record once per canonical module and declaration pos
 
 #### Exact filesystem probes
 
-Establish canonical application and selected standard roots before discovery. Validate exact directory-entry spelling for requested components, including the entry file. Follow internal symbolic links and repeat confinement and exact-spelling checks for their targets. Resolve self and super from the importing module's canonical parent. Reject a parent step beyond its origin with R0404 before probing outside that origin.
+Establish canonical application and selected standard roots before discovery. Validate exact directory-entry spelling for requested components, including the entry file. Follow internal symbolic links. Repeat confinement and exact-spelling checks for their targets. Resolve self and super from the importing module's canonical parent. Reject a parent step beyond its origin with R0404 before probing outside that origin.
 
 A probe checks one explicitly derived path, not a recursive directory search. Directory enumeration may verify spelling but cannot enroll other files. A regular file with the exact .rill suffix can supply a module. A directory supplies only traversal. A missing component or a non-directory intermediate component supplies no candidate through that route. Do not try index.rill, mod.rill, extension variants or normalization fallbacks.
 
@@ -238,17 +238,21 @@ For an ungrouped path with n remaining segments, probe every nonempty filesystem
 
 For each shorter prefix, traverse only exported bindings. Each nonterminal segment must resolve to a module identity in the type/module namespace. A nominal type cannot supply an import-path directory. At the terminal segment, retain exported candidates in both namespaces. Do not search filesystem children after entering an exported module route. Several prefix splits can supply competing routes; none has precedence.
 
+Inspect the binding table for diagnostic-only privacy witnesses at each requested segment. A witness records an existing private binding, its defining module and the blocked route position. Record both private terminal names and private intermediate module bindings. Stop that route at the private barrier. Never traverse the private target or add its identity to public candidate sets.
+
+A witness cannot create ambiguity, install a binding or anchor a public alias cycle. A public result suppresses private counterparts of that requested name in either namespace. If no public result exists, preserve private barriers separately from absent names and unresolved alias dependencies. This distinction supplies R0401 without granting private access.
+
 A grouped path uses the same discovery procedure but requires exactly one module identity in the type/module namespace. A value candidate does not make another module. A nominal type is not an acceptable group base. Resolve each selected group name only through that module's exports. Never probe a child file for a group member.
 
-Cache route states by import obligation, canonical module identity, namespace and remaining segment position. Keep predecessor edges as provenance instead of enumerating complete route histories. Each route step consumes one segment. Re-export aliases use the finite equations below rather than recursive path expansion. Repeated aliases cannot produce infinitely many route histories.
+Cache route states by import obligation, canonical module identity, namespace and remaining segment position. Keep predecessor edges as provenance instead of enumerating complete route histories. Each route step consumes one segment. Re-export aliases use the closure procedure below rather than recursive path expansion. Repeated aliases cannot produce infinitely many route histories.
 
 Every parsed prefix module is a required resolution dependency, even if it supplies no final candidate. Its imports, declarations and expectations therefore join the graph. This proposed rule makes candidate inspection explicit and reproducible. It can enlarge the declaration set compared with retaining only the winning terminal module. The owner must approve this consequence before coding. An existence-only probe that does not parse a source contributes an observation, not declarations.
 
 #### Closure, canonical reduction and installation
 
-Maintain a queue of canonical modules, import obligations and route states. Capture and parse a newly required module once. Collect its declaration seeds before adding its imports and re-exports to the queue. A failed parse retains its failure and cannot supply accepted exports. Revisit dependent obligations when a new module or candidate fact appears.
+Maintain a queue of canonical modules, import obligations and route states. Capture a newly required module once. Parse its saved snapshot once. Collect its declaration seeds before adding its imports and re-exports to the queue. A failed parse retains its failure and cannot supply accepted exports. Revisit dependent obligations when a new module or candidate fact appears.
 
-Represent each export or import obligation as separate type/module and value/function candidate sets. Seed declarations with canonical identities and propagate identities along permitted export edges. Union repeated routes to the same target within each namespace. Preserve all distinct targets and their provenance. Never choose one candidate because the other has not yet been discovered.
+Represent each export or import obligation as separate type/module and value/function candidate sets. Seed declarations with canonical identities. Propagate identities along permitted export edges. Union repeated routes to the same target within each namespace. Preserve all distinct targets and their provenance. Never choose one candidate because the other has not yet been discovered.
 
 Continue until the queue is empty and a full pass adds no modules, route states or candidate identities. During closure, facts are provisional. Collision and uniqueness checks cannot publish bindings early. Discovery and candidate propagation must not depend on whether an earlier source import installed successfully.
 
@@ -256,7 +260,9 @@ After closure, a terminal set with several identities in one namespace fails wit
 
 Stage all bindings from one import declaration, including every grouped member and both namespaces. Compare staged targets against local declarations, other imports and each other. Repeated bindings to the same canonical target in one namespace are idempotent. Distinct targets under one same-scope spelling fail with R0403. Stage no implementation as an ordinary value binding. Family attachments follow their separate rules.
 
-Commit the complete staged import only after every collision and selection check succeeds. A failed grouped member rejects the whole declaration. Exported imports publish only those successfully staged source bindings. Provisional facts cannot appear as installed bindings in a failed result. These transaction and repeated-binding rules require owner approval.
+Use one publication barrier for the entire attempted graph. Validate every import's selections and collisions before publishing any imported or re-exported binding. A failed grouped member rejects the whole declaration. Any failed import prevents publication of all staged imports in that attempted graph. Publish only after family-target validation and input replay also succeed. A rejected result exposes provisional candidates and failures, not installed imports or a successful export lookup interface.
+
+This barrier prevents downstream publication through a failed exported import. Provisional targets can affect other provisional candidates and cycle anchors, but they cannot establish a resolved result when any transaction fails. No invalidation algorithm or traversal-order retry is needed. Dependent diagnostics may be incomplete after another import fails. The result must disclose that limit rather than claim every secondary error. These transaction and repeated-binding rules require owner approval.
 
 The M3 implementation resolves module bindings, exported qualification and implementation-family targets. It inventories nested lexical scopes without claiming expression or type checking. Full local binding, capture, pattern and control-target resolution remains later work. Module startup binding syntax must still participate in same-scope collision inventory. Typed pattern validity remains unchecked. The checkpoint must explicitly approve this scope boundary.
 
@@ -264,17 +270,19 @@ The M3 implementation resolves module bindings, exported qualification and imple
 
 Use an iterative least fixed point over canonical candidate identities. Declaration seeds and direct file-module identities anchor propagation. A cyclic chain reaching one seed retains that seed once. Different seeds remain different candidates; a cycle does not erase ambiguity. A module import cycle alone does not fail.
 
-After closure, compute strongly connected components of unresolved alias obligations without host recursion. A component with no path to a canonical seed and an internal dependency cycle is unanchored. Report R0405 for those obligations. An acyclic missing export remains R0400; it is not a cycle merely because its module has cyclic imports. A private declaration cannot anchor an external public route.
+After closure, compute strongly connected components of unresolved alias obligations without host recursion. A component with no path to a canonical seed and an internal dependency cycle is unanchored. Mark those obligations with a cyclic cause. A private declaration cannot anchor an external public route.
 
-Report independent missing, private and cycle causes when several failed branches exist. Do not report R0400 merely because a still-pending cycle has not produced a candidate. Successful anchoring does not establish finite type layouts. R0406 remains a later type-layout assertion.
+Build the acyclic graph of those components. Propagate cyclic, missing and private causes from dependencies to their dependents in reverse dependency order. An acyclic alias feeding an unanchored cycle therefore retains R0405, not a fabricated missing-name R0400. An actually absent export retains R0400. A private barrier retains R0401. A branch can retain several independent causes.
+
+Report missing or private causes only when the requested name has no public result in either namespace. Retain failures of explicitly exported unresolved obligations, including cyclic causes. Do not invent an error for an absent or private opposite namespace. A module import cycle alone is not an alias failure. Successful anchoring does not establish finite type layouts. R0406 remains a later type-layout assertion.
 
 #### Captured graphs and source changes
 
-Capture one immutable M1 snapshot for each canonical module before lexing and M2 module parsing. Retain actual canonical source paths separately from origin-relative keys. Diagnostic spans always refer to these captured snapshots. Reuse the M1 and M2 interfaces without rescanning source syntax in the resolver.
+Capture one immutable M1 snapshot for each canonical module before lexing or M2 module parsing. Retain actual canonical source paths separately from origin-relative keys. Diagnostic spans always refer to these captured snapshots. Reuse the M1 and M2 interfaces without rescanning source syntax in the resolver.
 
 A graph snapshot records the selected entry, target/options, roots, explicit prelude inputs, source snapshots and resolution observations. Its opaque identity belongs to this capture, not a content digest. Declaration identities are meaningful only with this graph and its source versions. Fresh captures cannot merge declarations through matching paths or snapshot digests.
 
-Before returning a complete resolution result, replay every relevant path observation and compare every captured source's bytes. Include negative probes so a newly created competing file invalidates uniqueness. Compare bytes directly, not only timestamps, sizes or hashes. Recheck root mappings, canonical targets, spelling and regular-file status. A changed or vanished observation returns SourceChanged or an input failure, not a source diagnostic or automatic retry.
+Before returning a complete resolution result, replay every relevant path observation. Compare every captured source's bytes. Include negative probes so a newly created competing file invalidates uniqueness. Compare bytes directly, not only timestamps, sizes or hashes. Recheck root mappings, canonical targets, spelling and regular-file status. A changed or vanished observation returns SourceChanged or an input failure, not a source diagnostic or automatic retry.
 
 The caller can explicitly validate a retained graph again. Later validation never mutates old snapshots or their spans. A later load creates a new graph identity and new observations. No source edit, automatic restart or persistent source cache belongs to M3.
 
@@ -293,11 +301,15 @@ Keep graph closure, source validity and later checking separate. A source-reject
 | SourceChanged | Replay observes changed bytes, roots, routes, file kinds or previously absent candidates. The attempted graph remains incomplete. |
 | ResourceLimit | A configured work, storage, probe, byte, module or parser budget prevents completion. This is not a language rejection. |
 
-A stable missing import has meaning R0400. A private-only requested export has meaning R0401. An inaccessible counterpart does not invalidate a uniquely public counterpart. R0402, R0403, R0404 and R0405 retain their meanings above. A boundary escape is R0404, not a missing file. Filesystem link loops are host failures, not alias-cycle R0405. Non-family implementation targets are source errors with no new stable diagnostic code assigned here.
+A stable missing import has meaning R0400. A private-only requested export has meaning R0401. An inaccessible counterpart does not invalidate a uniquely public counterpart. R0402, R0403, R0404 and R0405 retain their meanings above. A boundary escape is R0404, not a missing file.
+
+Filesystem link loops are host failures, not alias-cycle R0405. Non-family implementation targets are source errors with no new stable diagnostic code assigned here.
 
 Do not report absence, privacy, ambiguity or a unique binding until all applicable routes finish. An unreadable alternative prevents that conclusion. Keep observed source findings when processing becomes incomplete, but do not assert complete diagnostics. Order findings by canonical module, source position, finding kind, namespace and canonical target. This order does not depend on discovery order or localized host error text.
 
-Charge new modules, source bytes, parser operations, filesystem probes, inspected directory entries, route states, candidate insertions and dependency visits. Check limits before allocating or enqueueing the charged item. Bound individual reads and retained bytes, including validation reads. Include failed probes and tentative work in accounting. Checked counters must not wrap. Parser ResourceLimit remains incomplete, not a syntax error. Existing M1/M2 limits remain in force.
+Charge new modules, source bytes, parser operations, filesystem probes, inspected directory entries, route states, candidate insertions and dependency visits. Charge privacy witnesses and cause propagation too. Check limits before allocating or enqueueing the charged item.
+
+Bound individual reads and retained bytes, including validation reads. Include failed probes and tentative work in accounting. Checked counters must not wrap. Parser ResourceLimit remains incomplete, not a syntax error. Existing M1/M2 limits remain in force.
 
 A fixed captured input has finitely many declaration seeds and segment positions. Memoized states and monotone finite candidate sets reach a fixed point. Iterative graph algorithms avoid recursive resolver stack growth. A changing or excessively large host graph instead reaches an explicit budget or replay failure. Budgets bound compiler work, not host syscall latency, allocation success or wall-clock completion. Abrupt host exhaustion need not produce a final outcome.
 

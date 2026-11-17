@@ -120,7 +120,7 @@ Each recommendation below needs an explicit decision. Rejecting one requires a r
 | --- | --- | --- |
 | O1. Candidate dependency membership | Parse every applicable filesystem-prefix facade and retain it as a required resolution dependency. Traverse exports without filesystem-child fallback. | Even a parsed facade without a winning export contributes declarations and expectations. Retaining only winning-route sources needs a different graph-membership rule and tests. |
 | O2. Closure and cycles | Use monotone candidate sets, then classify unresolved alias components. Accept cycles anchored by canonical declarations or modules. | No traversal-order winner. Distinct anchors remain ambiguous. Empty alias cycles get R0405 rather than missing-name errors. |
-| O3. Import transactions | Treat repeated same-target bindings as idempotent. Stage every grouped member and both namespaces together. Reject the entire import on any collision or failed member. | This chooses whole-declaration atomicity, beyond merely installing both namespaces of one selected name together. |
+| O3. Import transactions | Treat repeated same-target bindings as idempotent. Stage every grouped member and both namespaces together. Publish imports only after every M3 obligation and input replay succeeds. | This chooses whole-graph publication atomicity. Failed results expose provisional facts but no installed imports, so failed exported imports cannot supply downstream installed bindings. |
 | O4. Graph capture | Retain immutable per-file snapshots and replay all positive/negative path and byte observations once before completion. Return SourceChanged on observed differences, without retries. | This is not simultaneous filesystem capture or a current-live-filesystem guarantee. Stronger coherence needs a different capture mechanism. |
 | O5. Host uncertainty | Treat unreadable competing routes, broken links, filesystem link loops and unrepresentable exact spellings as incomplete input failures. | Do not silently ignore a route and declare another unique. Stable absence remains a source-level missing import. |
 | O6. M3 checking boundary | Resolve module/import/export bindings and implementation-family targets. Inventory all loaded declaration syntax, member privacy and nested scopes. | Defer expression/type/local-use resolution, typed pattern checks, captures, layout, overloads, conversions, coherence and protected operations. Include syntactic module-startup binders in collision inventory. |
@@ -130,7 +130,7 @@ O7 selects known declarations, not trusted runtime implementations. A path under
 
 Implementation choices do not need new language-policy approval. These include flat storage, private work queues, memoization containers and helper-file boundaries. Proposed budget defaults are 4,096 modules, 64 MiB per source, 256 MiB total retained source bytes and 10,000,000 resolver work units. Limit probes to 100,000 and inspected directory entries to 1,000,000. Keep existing M2 limits as explicit parser inputs. Charge validation reads too, with at most twice the total retained-source allowance for cumulative capture/replay bytes. Any exhausted budget returns ResourceLimit, not source rejection. These numbers are implementation limits, not valid-program limits or host-support guarantees.
 
-### Public interfaces and agreed TDD seams
+### Proposed public interfaces and TDD seams
 
 The following interface is proposed, not implemented or agreed yet. Rust names can change without changing these behaviors. Keep filesystem mechanics behind a small compiler interface. Do not introduce a mock filesystem or editor-provider framework for this milestone.
 
@@ -194,7 +194,7 @@ On macOS 27.0.1 AArch64, mise 2026.11.4 selected Rust/Cargo 1.98.0, Python 3.13.
 
 Workflows did not change, so check:ci was not run. M3 host filesystem cases, other host profiles, product build, language/stdlib/runtime/client gates and release verification were not run. The unavailable commands remain unchanged and nonzero under existing scaffold tests. No LLVM or user code ran. The drafting pass applied unslop and checked local links. Formal ASD-STE100 dictionary compliance remains unverified.
 
-At this checkpoint, M3 implementation and every proposed acceptance test are NotChecked. Full RFC statuses, prior policy decisions and historical evidence remain unchanged. Final implementation review, commit, push and an M3-only draft PR follow approval and implementation. Do not merge the PR or begin M4.
+At this checkpoint, M3 implementation and every proposed acceptance test are NotChecked. Full RFC statuses, prior policy decisions and historical evidence remain unchanged. The checkpoint's Standards review found multi-action RFC instructions and misleading agreement/algorithm references. The Spec review found missing rules for failed-export publication, dependent cycle errors and diagnostic-only private routes. The revision splits those instructions, corrects the references and adds a whole-graph publication barrier, component-cause propagation and privacy witnesses. These reviews assess the proposed contract, not completed compiler behavior. Final implementation review, commit, push and an M3-only draft PR follow approval and implementation. Do not merge the PR or begin M4.
 
 ## Completion record
 
