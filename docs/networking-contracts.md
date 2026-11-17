@@ -253,7 +253,7 @@ export enum NetErrorKind {
 export enum NetOperation {
   ParseIpv4, ParseIpv6, ParseIp, ParseSocketAddress,
   ResolveAddresses, ScopeIndex, Connect, Listen, Accept,
-  Read, Write, Flush, ShutdownWrite, Close, DialHost,
+  Read, Write, Flush, ShutdownWrite, Close, DialHost, Progress,
 }
 export type DialFailure = { address: SocketAddress; error: Err<NetError> };
 export enum DialError {
@@ -367,6 +367,16 @@ Initial live TCP, system hostname lookup and interface-name lookup are **native 
 
 Portable numeric types/parsing/formatting remain available on `wasm32-wasip1`. Standard networking names/types stay typecheck-visible there; otherwise-valid live requests fail with typed `NetErrorKind.Unsupported` (retained in the appropriate DialError envelope where applicable), not disappearing names, fabricated results or a fake resolver. Input/control validation is not bypassed by unsupported status. There is no silent preview2/custom-import upgrade or inherited-socket capability handoff. Standard preview1 does not provide general creation/connect/bind/listen/DNS merely because it has operations on an already supplied socket. Existing stdio/filesystem contracts and Wasm backend gates remain unchanged. Any different host-capability/ABI/target support requires a separate explicit decision and evidence.
 
+### 10.1 Whole-stream resumable progress (#45)
+
+The [progress contract](progress-io-contracts.md) adds opaque `TcpProgress`, opaque `TcpProgressWait` and `tcpProgress(TcpStream):TcpProgress`. This consumes the unsplit owner; no conversion back, raw handle or split progress body exists. Its canonical progress implementations bind every lane/driver error to NetError and wait guard to TcpProgressWait. Failures naturally owned by read/write/flush/close retain those NetOperation values; background wait/job/stop/release uses NetOperation.Progress.
+
+One public owner can privately retain at most one native read job and one native write job at once. This is an explicit private amendment to the earlier whole-stream exclusivity boundary, not public overlapping canonical calls. Same-direction work remains serialized; jobs use stable owned storage, generation-scoped wake/completion, immediate native error capture and mandatory join/release. A live progress wait guard borrows the whole driver and must quiesce before mutation. #47 must validate this mechanism.
+
+Standard progress writes admit at most16384 bytes; larger input returns unchanged with LimitExceeded. Positive reads return at most min(requested,16384) owned bytes without fill/EOF probing. TCP FIN/reset/prefix/flush semantics remain section6: raw flush is ordered no-op, graceful close needs quiescent lanes, terminal stop can destructively wake jobs but must return truthful outcomes after join. No generic half-close is added.
+
+The progress names remain typecheck-visible on WASI under the existing target rule. There is no live standard TcpStream creation/progress provider, hidden blocking fallback or preview2 upgrade there. The infallible ownership wrapper itself performs no native request; otherwise-valid live operations remain typed Unsupported where reachable. Design closure supplies no target support.
+
 ## 11. Narrow refinements and consumer boundaries
 
 - #15/Q93 permits ordinary public fields and binding/exclusive-access mutability only. Captured option/control snapshots are stable, not field-level immutability or live reconfiguration.
@@ -375,7 +385,7 @@ Portable numeric types/parsing/formatting remain available on `wasm32-wasip1`. S
 - Under #23/#29, explicitly distinguish fatal managed/runtime allocation from reported native-operation resource shortage. Preserve original Err origins/causes and erased-cause evidence; no recoverable managed allocation or public error downcast is added.
 - #41's item-site exports, `implement` family bodies and exact selected error evidence apply. Parsing/formatting is separately named domain behavior, not implicit conversion/serialization.
 - For [#38 TLS](https://github.com/Reilley64/rill/issues/38), the caller's intended hostname, numeric endpoint, TCP success and authenticated peer identity remain distinct. TCP EOF is not TLS close-notify; raw shutdown/disposal is not TLS shutdown. No provider, public raw-handle bridge, thread pinning or independent TLS directional concurrency is promised.
-- For [#39 HTTP](https://github.com/Reilley64/rill/issues/39), preserve prefix/EOF/framing distinctions, bounded buffering and explicit control dependencies. Canceled transport or selected deadline does not establish request nonexecution, replay safety, complete body consumption or reusable connection state.
+- The [#39 HTTP contract](http-contracts.md) consumes whole `TcpProgress` through one explicit connection runner. Preserve prefix/EOF/framing distinctions,16KiB lower units, bounded buffering and explicit control dependencies. Canceled transport or selected deadline does not establish request nonexecution, replay safety, complete body consumption or reusable connection state. HTTP close-delimited completion uses real drained FIN; reset stays failure.
 - For [#40 database consumers](https://github.com/Reilley64/rill/issues/40), transport cancellation/close cannot prove rollback, command nonexecution, protocol resynchronization or pool reuse. Protocol-specific cancellation/upgrade buffering/unknown outcomes remain that ticket/driver's design, not a standard DB provider or raw-FD entitlement.
 
 These integration requirements refine only the stated interfaces; they do not reopen unrelated closed foundation decisions or declare consumer/provider implementation complete.
@@ -397,7 +407,7 @@ These integration requirements refine only the stated interfaces; they do not re
 | Teardown/descriptor reuse | Test half release without joining the peer owner, last-owner/native-use retention, buffered-write discard then raw direction release, close failure/interruption and recycled descriptor/stale event adversaries. Check that there is no blind retry/double release/leak or outcome replacement. NOT RUN. |
 | Platform options/signals | Pin Linux/macOS kernel/libc/SDK/header modes. Test NODELAY/keepalive accepted normalization, actual option support, reuse wildcard/specific/credential/TIME_WAIT rules, v6-only/dual-stack mapped peers, backlog caps, disabled linger and all send paths' local SIGPIPE suppression. NOT RUN. |
 | Backend/Wasm boundary | Test typed Unsupported with a stable public interface; actual host imports/capabilities; guest pointer stability across growth/reentrancy; native state retention and bounded cleanup traversal; and the pinned LLVM/native/Wasm pipeline. NOT RUN; #30 retains the support gate. |
-| Protocol composition | Test actual TLS/provider bidirectional retries/errors/close-notify, HTTP abandonment/framing/reuse and DB upgrade/cancel/unknown outcome. Do not infer security/rollback/replay from TCP. NOT RUN; consumer gates remain. |
+| Protocol composition | Test actual TLS/provider bidirectional retries/errors/close-notify, the [HTTP contract](http-contracts.md) abandonment/framing/reuse over plain TCP and DB upgrade/cancel/unknown outcome. Do not infer security/rollback/replay from TCP. NOT RUN; #48/consumer gates remain. |
 
 #28 must formalize pre-monomorphization family/property/dependency evidence, borrowed controls/views and result escape, exact progress/envelope rebasing, snapshot admission, one-selection/late-completion accounting, exactly-once ownership and cancellation-masked joins, and bounded input-dependent standard traversal/default disposal. #30 must validate actual native/backend/ABI/Wasm mechanisms and supported configurations; research mechanism names do not clear it. Unworkable required rules return to [map #1](https://github.com/Reilley64/rill/issues/1), not an invented safety claim or silently weakened policy. #24 owns compiler diagnostics; design closure does not accept future RFCs.
 

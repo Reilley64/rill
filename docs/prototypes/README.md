@@ -48,6 +48,8 @@ Keep a group's source and case-note numbers aligned. Update the index, reference
 | [21-diagnostics/](../../prototypes/21-diagnostics/) | [Diagnostic/report fixtures and checker](21-diagnostics.md). | [d30cabe](https://github.com/Reilley64/rill/commit/d30cabe) |
 | [22-networking.rill](../../prototypes/22-networking.rill) | [Addresses and controlled networking](22-networking.md). | [d30cabe](https://github.com/Reilley64/rill/commit/d30cabe) |
 | [23-tls/](../../prototypes/23-tls/) | [TLS values, composition and checker](23-tls.md). | [2121a68](https://github.com/Reilley64/rill/commit/2121a68) |
+| [24-progress-io.rill](../../prototypes/24-progress-io.rill) | [Channel wakes and single-owner I/O progress](24-progress-io.md). | [d47c1fc](https://github.com/Reilley64/rill/commit/d47c1fca8e01a4c8c98b070a50b553e9f1b323e7) |
+| [25-http.rill](../../prototypes/25-http.rill) | [HTTP values and strict HTTP/1 boundaries](25-http.md). | [d47c1fc](https://github.com/Reilley64/rill/commit/d47c1fca8e01a4c8c98b070a50b553e9f1b323e7) |
 
 The stack and diagnostic programs arrived later than their old reserved numbers suggested. Error and concurrency examples retain the earlier chronology of the port and channel programs they absorbed.
 

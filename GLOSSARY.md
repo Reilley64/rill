@@ -100,6 +100,14 @@ _Avoid_: thread, task, fiber, green thread
 A statement of the form `guard <condition> else { ... }` whose `else` block must leave its scope, with `return`, `break`, `continue`, or a call to a `never` function. It can also unwrap a value, as in `guard let user = findUser(id) else { ... }`.
 _Avoid_: precondition, assert, early return
 
+**HTTP exchange**:
+One request and its corresponding informational/final response sequence, bodies, trailers and terminal outcome on an HTTP connection. It is distinct from the connection that may carry a later exchange.
+_Avoid_: request, connection, transaction
+
+**HTTP reuse disposition**:
+The post-exchange classification Eligible, MustClose or Unusable. Eligibility records known completed boundaries and no known fault; it is not a future-health guarantee or pool insertion.
+_Avoid_: healthy connection, automatic keep-alive, replay safety
+
 **I/O progress**:
 Bytes appended to a read destination or accepted from a write input by the current stream layer. Acceptance does not imply durable storage, peer receipt or application acknowledgement.
 _Avoid_: delivered bytes, committed transaction, rollback guarantee
@@ -187,6 +195,10 @@ _Avoid_: filename string, canonical identity, sandbox boundary
 **Prelude**:
 The fixed primitive types, intrinsic predicates, and canonical copy/dispose declarations available without explicit imports. It introduces no runtime global bindings.
 _Avoid_: wildcard std import, module initializer
+
+**Progress driver**:
+A single owning I/O coordinator that retains admitted operations and results across bounded local advances and explicit external waits. Ordinary streaming I/O capability alone does not make a value a progress driver.
+_Avoid_: future, pollable stream, split transport, readiness handle
 
 **Private field**:
 A record field accessible only in its defining module. Its presence prevents external whole-record construction or rebuilding, regardless of aliases.
@@ -295,6 +307,14 @@ _Avoid_: routing hostname, authenticated client account, resolver identity
 **Unique violation**:
 A reported primary-key or unique-key collision, including composite keys whose values are unique as a tuple. The category does not guarantee that every backend supplies the key's column names.
 _Avoid_: duplicate UUID, individually unique columns, automatic retry
+
+**Wait registration**:
+A one-shot scoped dependency that asks a progress driver to signal when retained work might advance. It carries no operation result and must quiesce before the driver is mutated again.
+_Avoid_: future, cancellation handle, native descriptor subscription
+
+**Wake hint**:
+A coalescing notification that authoritative retained state might have changed. It is neither an event count nor proof that an operation completed or remains ready.
+_Avoid_: completion event, result channel, readiness reservation
 
 **Timestamp**:
 A Unix wall-time value with nanosecond precision, distinct from a monotonic Instant and a civil date/time. A numeric representation does not imply clock accuracy.

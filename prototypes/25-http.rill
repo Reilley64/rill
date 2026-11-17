@@ -1,0 +1,155 @@
+// #39: intended-valid HTTP value/plan declarations, NOT executed Rill tests.
+// No parser, transport, connection runner, TLS, native resource or fake provider is created.
+import std::panic;
+import std::bytes::{Bytes, length};
+import std::collection::{List, length as listLength};
+import std::compare::eq;
+import std::option::Option;
+import std::result::{Result, isOk};
+import std::error::value;
+import std::http::{
+  HttpError, HttpErrorKind, kind,
+  Method, method, methodBytes, getMethod,
+  Status, status, statusCode,
+  ReasonPhrase, reasonBytes, emptyReasonPhrase,
+  Authority, authority,
+  RequestTarget, requestTarget, targetBytes,
+  HeaderName, HeaderValue, Header, Headers,
+  headerName, headerValue, headerValueBytes, header, headerNameOf, headerValueOf,
+  headers, append, values, requireOne, replaceAll,
+  HttpVersion, http11,
+  RequestHead, requestHead, requestMethod, requestTargetValue,
+  HttpLimits, httpLimits,
+  HttpControl, uncontrolled,
+  TrailerName, TrailerPlan, contentDigestTrailer, reprDigestTrailer, trailerPlan,
+};
+
+function mustHttp<T>(result: Result<T,HttpError>): T {
+  guard let observed = result else (error) { panic(&"invalid HTTP fixture"); }
+  return observed;
+}
+
+function asciiHostName(): HeaderName {
+  return mustHttp(headerName(Bytes([72u8, 111u8, 115u8, 116u8])));
+}
+
+function asciiLowerHostName(): HeaderName {
+  return mustHttp(headerName(Bytes([104u8, 111u8, 115u8, 116u8])));
+}
+
+function hostValue(): HeaderValue {
+  return mustHttp(headerValue(Bytes([
+    101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8,
+    116u8, 101u8, 115u8, 116u8,
+  ])));
+}
+
+function extensionMethodIsCaseSensitive(): bool {
+  let lower = mustHttp(method(Bytes([103u8, 101u8, 116u8])));
+  let upper = getMethod();
+  return !eq(&lower, &upper) && length(methodBytes(&upper)) == 3u64;
+}
+
+function unknownStatusPreserved(): bool {
+  let custom = mustHttp(status(599u16));
+  return statusCode(&custom) == 599u16;
+}
+
+function emptyReasonIsOpaque(): bool {
+  let phrase = emptyReasonPhrase();
+  return length(reasonBytes(&phrase)) == 0u64;
+}
+
+function targetSpellingPreserved(): bool {
+  let target = mustHttp(requestTarget(Bytes([
+    47u8, 97u8, 47u8, 37u8, 50u8, 70u8, 63u8, 120u8, 61u8, 49u8,
+  ])));
+  return length(targetBytes(&target)) == 10u64;
+}
+
+function headerNamesIgnoreAsciiCase(): bool {
+  let upper = asciiHostName();
+  let lower = asciiLowerHostName();
+  let field = header(copy(&upper), hostValue());
+  return eq(&upper, &lower)
+    && eq(headerNameOf(&field), &lower)
+    && length(headerValueBytes(headerValueOf(&field))) == 12u64;
+}
+
+function repeatedHeadersRemainOrdered(): bool {
+  let mut fields = headers([]);
+  append(&mut fields, header(asciiHostName(), hostValue()));
+  append(&mut fields, header(asciiLowerHostName(), mustHttp(headerValue(Bytes([120u8])))));
+  let matches = values(&fields, &asciiHostName());
+  return listLength(&matches) == 2u64;
+}
+
+function requireOneRejectsRepeat(): bool {
+  let mut fields = headers([]);
+  append(&mut fields, header(asciiHostName(), hostValue()));
+  append(&mut fields, header(asciiLowerHostName(), hostValue()));
+  return !isOk(requireOne(&fields, &asciiHostName()));
+}
+
+function replacementKeepsOneValue(): bool {
+  let mut fields = headers([]);
+  append(&mut fields, header(asciiHostName(), hostValue()));
+  replaceAll(
+    &mut fields,
+    asciiLowerHostName(),
+    [mustHttp(headerValue(Bytes([121u8])))],
+  );
+  return listLength(&values(&fields, &asciiHostName())) == 1u64;
+}
+
+function defaultLimitsAreFiniteStreaming(): bool {
+  let limits = httpLimits();
+  return limits.startLineBytes == 8192u64
+    && limits.headBytes == 65536u64
+    && limits.bodyChunkBytes == 65536u64
+    && limits.queuedBodyBytes == 1048576u64
+    && (match (limits.totalBodyBytes) { Option.None => true, _ => false });
+}
+
+function uncontrolledHasNoDeadline(): bool {
+  let control = uncontrolled();
+  return match (control.deadline) { Option.None => true, _ => false };
+}
+
+function digestTrailerPlan(): bool {
+  let plan = trailerPlan([contentDigestTrailer(), reprDigestTrailer()]);
+  return isOk(plan);
+}
+
+function validRequestHead(): bool {
+  let target = mustHttp(requestTarget(Bytes([47u8])));
+  let mut fields = headers([]);
+  append(&mut fields, header(asciiHostName(), hostValue()));
+  let head = mustHttp(requestHead(getMethod(), target, http11(), fields));
+  return eq(requestMethod(&head), &getMethod())
+    && length(targetBytes(requestTargetValue(&head))) == 1u64;
+}
+
+function emptyMethodIsInvalid(): bool {
+  guard let parsed = method(Bytes([])) else (error) {
+    return match (kind(value(&error))) {
+      HttpErrorKind.InvalidInput => true,
+      _ => false,
+    };
+  }
+  return false;
+}
+
+expect extensionMethodIsCaseSensitive();
+expect unknownStatusPreserved();
+expect emptyReasonIsOpaque();
+expect targetSpellingPreserved();
+expect headerNamesIgnoreAsciiCase();
+expect repeatedHeadersRemainOrdered();
+expect requireOneRejectsRepeat();
+expect replacementKeepsOneValue();
+expect defaultLimitsAreFiniteStreaming();
+expect uncontrolledHasNoDeadline();
+expect digestTrailerPlan();
+expect validRequestHead();
+expect emptyMethodIsInvalid();

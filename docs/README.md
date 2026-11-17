@@ -20,13 +20,15 @@ Rill's design is recorded in the documents below. Source-ticket approval, RFC ac
 | JSON | [Values, parsing, formatting and limits](json-contracts.md) |
 | Time | [Temporal values](time-contracts.md), [clocks and cancellation](clock-cancellation-contracts.md) |
 | Networking | [Addresses, DNS and TCP](networking-contracts.md) |
+| Resumable I/O progress | [Single-owner progress, channel wakes and standard drivers](progress-io-contracts.md) |
+| HTTP | [Shared values, strict HTTP/1 codec and explicit client/server drivers](http-contracts.md) |
 | TLS | [TLS contracts](tls-contracts.md), [native provider boundary](tls-native-boundary.md) |
 | SQL | [Standard SQL contracts](sql-contracts.md) |
 | SQLite provider | [Provider contracts](sqlite-provider-contracts.md), [binding metadata](sqlite-provider-binding-v1.md), [metadata schema](sqlite-provider-binding-v1.schema.json) |
 | Diagnostics and reports | [Diagnostic contracts](diagnostic-contracts.md), [code registry](diagnostic-codes.md), [report schema](diagnostic-report.schema.json) |
 | Editor integration | [LSP contracts](lsp-contracts.md) |
 
-HTTP work is tracked in [#39](https://github.com/Reilley64/rill/issues/39). Its current ticket and any later published contracts determine that work's status.
+The HTTP contract records #39's design only. [#48](https://github.com/Reilley64/rill/issues/48) retains implementation/conformance/security evidence; #47/#44 retain lower progress/TLS delivery.
 
 ## Examples and evidence
 
