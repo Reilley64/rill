@@ -450,6 +450,132 @@ For example, assume f(i32):i32 and g(bool):void. The expression g(f(stop())) sti
 
 This proposal adds no general container variance or implicit width conversion. Existing variant admission retains its owning rules. An unimplemented permitted relationship must remain incomplete, not become a fabricated mismatch or successful check.
 
+### Proposed M4.4 data and pattern procedure
+
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) proposes this next bounded procedure. Owner approval is pending. Earlier nominal, numeric, variant, bracket and privacy approvals remain unchanged. This section does not accept the full RFC.
+
+#### Inputs, namespaces and nominal construction
+
+Use the completed M4.2 declaration receipt and the existing M4.3 expression/control engine. Do not require a scalar-only success receipt for data-bearing source. Do not create a second parser or scalar checker.
+
+Named brace construction resolves its constructor through the type/module namespace. Preserve the actual declaration, application, variant and field identities. Expected types constrain that application; they never select another record by matching fields.
+
+The proposed qualification precision gives a syntactic name's enum binding priority before dot-variant selection. A grouped or computed base uses ordinary value-field lookup. Thus `(name).field` forces value lookup when an enum shares that spelling. A failed chosen lookup never retries another namespace or parser interpretation.
+
+The namespace decision uses the canonical binding kind, not whether a field happens to exist. Preserve installed import routes and private barriers. Qualification never autoloads filesystem children.
+
+Check record fields against one ordered substitution. Require every field once unless a leading rebuild base supplies it. Reject unknown or repeated explicit fields. A declared field supplies immediate literal context without widening an already typed number.
+
+Support complete written type arguments and complete applications established by immediate expected context or the exact rebuild base. Require agreement among those sources. General inference from payload/field constraints and trailing defaults remains with M4.6. Missing completion is incomplete, not an arbitrary argument or width choice.
+
+Unit variants produce their distinct variant type through bare qualification. Tuple payloads use calls; record payloads use named braces. Require the declared payload shape and arity. Unit values are not zero-argument tuple constructors.
+
+Parent arguments precede the variant name. Do not invent another variant argument list or ordinary family fallback.
+
+A rebuild base must have the exact record application. Evaluate its source position before explicit replacement positions. Retain both orders as facts without executing, moving or disposing fields.
+
+Any private record field forbids external whole-record construction and rebuilding. Public fields remain readable through a canonical public type even without a local type binding. A genuinely private nominal remains opaque outside its defining module.
+
+Field access requires a known record or statically established record-payload variant. A parent enum has no structural common-field interface. Resolve the actual field identity after substitution. Reject private or absent fields.
+
+A field base can supply owned storage or one reference layer. Preserve its static access mode and original projection. Deeper descriptor references require explicit dereference. The projected place has the field's declared type, not an invented owner or automatically flattened reference.
+
+#### Admission, joins and bracket categories
+
+Implement owned variant-to-parent and read-only variant-reference admission for the exact same parent application. Keep the actual variant identity and explicit admission evidence. A binding with a parent annotation retains the parent afterward.
+
+Mutable variant references remain invariant. Containers and tuples gain no covariance. Callable-mode relationships remain with M4.6. A permitted but unimplemented relationship stays incomplete.
+
+For uncontextualized joins, retain identical types. Join different variants of one application, or a variant with its parent, at that parent. Omit canonical never value alternatives. Reject unrelated nominal applications and numeric widths instead of inventing unions or conversions.
+
+An immediate expected type checks fresh branches/elements before finalizing literals. It does not convert an existing container. Fresh tuple elements can use per-position context; an existing tuple cannot widen its elements afterward.
+
+Fix bracket category before element checking. An immediate structural tuple fixes arity and per-position types. A validated canonical List application fixes one element type. Pending ordinary-family contexts remain incomplete until M4.5 supplies their agreed input contexts.
+
+Without category context, retain the confirmed List default. Do not reinterpret heterogeneous or empty brackets as tuples to repair inference. Empty elements and unresolved numeric widths still need established context.
+
+The current bounded implementation can complete tuple-context brackets without a library role. List construction requires canonical core admission, not a type named List or a matching field shape. Missing List admission remains incomplete for M4.8. No standard definition is fabricated to make tests succeed.
+
+Index syntax also retains its core/tuple-index contract prerequisite. It cannot guess a bounds/result policy from spelling or representation. These remaining typed obligations stay inside M4 completion.
+
+#### Pattern typing, scopes and explicit narrowing
+
+Start from an established scrutinee application and access category. Patterns inspect that source; they do not construct another nominal type. Resolve qualified variant parents and payload members through canonical identities.
+
+Names bind their matched position. Wildcards introduce no name. Reject repeated names within one pattern. Tuple patterns require exact tuple arity. Record patterns can omit fields but cannot inspect private or opaque representation.
+
+Check literal patterns with the scrutinee's established primitive context. Preserve M1 literal provenance and signed-minimum rules. Primitive literals remain value tests, not singleton types or overload patterns.
+
+Owned payload bindings retain their substituted field types. Borrowed binding types require the [pattern-copy classification seam](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification). An unresolved classification cannot silently choose copying or borrowing.
+
+Borrowed projection preserves descriptor layers, access mode and source routes. A read-only reference field can copy its descriptor without erasing dependencies. An exclusive-reference field cannot silently become shared referent access.
+
+Constructor/literal inspection can use one reference layer at that pattern position. Deeper descriptors require explicit scrutinee dereference. A plain name binds its original position without automatic peeling. Inherited read-only projection cannot grant mutable access through a contained exclusive descriptor.
+
+A qualified arm establishes an explicit scoped variant view, as required by ADR 0012. Stable place uses can carry that view within the arm. Preserve their original declaration identity and declared parent type separately.
+
+A refinable place has one named root with canonical field/dereference projections. It contains no call or dynamic index. Match occurrences of that same path, not a repeated textual expression. A computed scrutinee retains only its original match-temporary view.
+
+The proposed mutable-view precision forbids tag-changing replacement of that place or its ancestors while the arm view is active. Payload mutation that preserves the variant remains possible. Mutable variant-to-parent widening remains forbidden.
+
+Retain the view's required tag-stability constraint for later alias/ownership checking. These lexical checks do not prove loan compatibility, alias exclusion or initialized storage.
+
+Restore the declared type outside the arm. Failed guards establish no refinement for later arms. Do not restore a variant from optimizer knowledge or ordinary function return contents.
+
+Pattern bindings scope over their arm's guard and body only. Ordinary let introduces names after its initializer and requires an irrefutable pattern. Determine irrefutability through the complete coverage procedure, not a guessed default.
+
+#### Finite constructor coverage
+
+Use only static types and canonical constructors for coverage. A parent enum includes every declared variant. A known variant includes only its own payloads. Primitive Boolean types include both values despite literal or flow knowledge.
+
+A record or tuple has its declared product shape. Specialize nested fields and payloads rather than counting one refutable row as an entire variant. Omitted accessible fields act as wildcards for coverage, without granting access to omitted private fields.
+
+Bindings and wildcards cover their position. An all-wildcard row covers the remaining columns immediately. Guarded rows do not contribute to the coverage proof, including a syntactic true guard. Their patterns and bodies still require checking.
+
+Prove coverage with a constructor-specialization matrix. For each possible constructor, specialize matching rows and wildcard rows. Replace that column with its ordered payload columns. Continue until all remaining positions are covered or an uncovered declared shape is established.
+
+Check missing outer constructors before payload inhabitation. Never-valued fields do not remove a declared record or enum alternative from this conservative criterion. This procedure does not solve arbitrary recursive inhabitation.
+
+Mark the initial scrutinee column Root. Mark introduced payload, record-field and tuple-element columns Component. These marks are coverage bookkeeping, not source types.
+
+A proved zero-constructor domain means canonical never or an inspectable empty enum. Opaque or unresolved types do not qualify. A zero-constructor Root domain is vacuously covered. A zero-constructor Component becomes one symbolic coverage hole.
+
+Cover a hole only with a wildcard or binding. Consume only that column. Continue checking every remaining column. A nested empty domain must not discard other refutable positions.
+
+Preserve these marks through specialization, column permutations and memoization. Column selection must not change coverage or irrefutability. A symbolic hole is not a never value or an Error/Unknown source type.
+
+The following planned model cases are NotChecked. E has only the shown V variant. Empty denotes an inspectable empty enum. Each witness denotes a declared shape, not an inhabited runtime value.
+
+| Static schema | Pattern rows | Required coverage result |
+| --- | --- | --- |
+| E with V(never, bool) | `E.V(_, true)` | Uncovered `E.V(_, false)`. |
+| E with V(bool, never) | `E.V(true, _)` | Uncovered `E.V(false, _)`. |
+| E with V(never, bool) | `E.V(_, true)`, `E.V(_, false)` | Covered. |
+| E with V(bool, never) | `E.V(true, _)`, `E.V(false, _)` | Covered. |
+| Either payload order above | `E.V(_, _)` | Covered. |
+| Replace never with Empty in either order | The corresponding rows above | Identical results. |
+| Root never or Empty | No rows | Covered by the root-empty rule. |
+
+Boolean and finite integer/character domains can use exact distinct literal coverage. Strings and floating domains require a wildcard/default row for complete coverage. Floating literal rows cannot cover NaN. Normalize literal equality under RFC 0006, without evaluating user code.
+
+For literal columns, compare established distinct values with the finite domain. Find an omitted scalar without enumerating a huge numeric domain. Opaque symbolic/callable positions require a wildcard or binding; they do not reveal structural constructors.
+
+An uncovered witness identifies a declared constructor/literal shape with symbolic holes. It is not a constructed Rill value or witnessed execution. This proposed conservative diagnostic means that the required static coverage proof failed.
+
+Use explicit worklists and bounded canonical substitutions. Reuse normalized matrix states where justified. A pending or repeated unresolved state cannot prove coverage or noncoverage. Exhausted work, entry or depth budgets return ResourceLimit.
+
+Match and irrefutable-binding checks share this procedure. A single row proves an ordinary binding only if it covers its complete static input. Nested refutable payload rows therefore remain refutable even when their outer tag matches.
+
+#### Facts, outcomes and procedure validation
+
+Retain actual constructor/member identities, substitutions, explicit admissions, source evaluation order, pattern binder identities and scoped narrowing evidence. Keep original snapshots, type-use routes and coverage witness sites. No Error/Unknown term can stand for a successful value type.
+
+Combine matches with the [data-control procedure](0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control). Require every written arm to type-check. A coverage proof cannot repair a body mismatch or an unresolved core protocol.
+
+Before Rust implementation, validate finite coverage with a separate reference model. Use independently enumerated finite shape cases and expected nested/refutable cases. Include guarded rows, empty enums, conservative never-payload policy and exact/short budgets. This is reference evidence, not Rill execution or a universal proof.
+
+Direct compiler tests must cross the agreed data entry/body/node seams using real M3/M4 declarations. Missing core contracts, generic completion or copy classification remain explicit incomplete obligations. Full interface admission, evidence, ownership, cleanup and execution remain unperformed.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

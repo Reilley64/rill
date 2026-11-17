@@ -120,6 +120,22 @@ An unrelated function named dispose cannot redirect compiler cleanup. Explicitly
 
 Custom copy/dispose overlap and implicit-copy eligibility need complete formal reconciliation. Protected negative capabilities remain mandatory. This draft does not assume that a user body proves safe duplication merely because it has the expected result type.
 
+### Proposed M4.4 pattern binding type classification
+
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) proposes this typing prerequisite. Owner approval is pending. It does not approve ownership checking or complete this RFC.
+
+A borrowed pattern binder needs a static choice between the contained value type and a projected reference type. Use the existing implicit-copy classification, not canonical copy(T) evidence. Explicit copying does not authorize silent copying.
+
+Classify established scalar primitives and read-only descriptors under their fixed existing rules. Strings and exclusive references have no implicit-copy exception. An unconstrained symbolic T remains non-implicit-copyable even when an eventual concrete instantiation could copy.
+
+Preserve that symbolic body's classification through monomorphization. Do not retype its pattern binding from later caller values or implementation counts.
+
+Aggregate classification also needs custom-disposer and protected-capability reconciliation. If that classification is unresolved, return an incomplete typed obligation. Do not assume copying from field shape. Do not choose borrowing as a fallback for an unresolved proof.
+
+A positive classification chooses the binder's static value type only. It performs no copy. A non-copying borrowed projection retains its access mode and descriptor/referent layers. Both retain their original source dependencies for later ownership checking.
+
+No classification proves initialized storage, exclusive access, valid partial moves, safe guard commitment or cleanup. Those operations remain outside M4.4.
+
 ### Borrow acquisition, overlap and reborrowing
 
 Read-only `&T` permits observation without ownership. Exclusive `&mut T` permits mutation without ownership. For overlapping storage, permit multiple read-only loans or one exclusive loan.

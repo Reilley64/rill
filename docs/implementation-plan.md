@@ -584,6 +584,95 @@ Neither reviewer reran tests or documentation checks. Their staged reviews exclu
 
 After the correction, `mise run check:docs` again passed 1644 destinations with zero errors. Staged and unstaged diff checks passed. No compiler, model, product, hosted or other-host execution was run for this documentation-only checkpoint.
 
+### M4.3 implementation acceptance
+
+Implementation `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd` is pushed in draft PR #58. [The acceptance record](../crates/compiler/tests/m4-3-acceptance.md) maps 28 public-interface tests, all 203 compiler tests and passing post-review required tasks. Standards had no findings. The one P2 Spec defect in unsigned-never negation was corrected locally with a red-first regression. No second independent review or Rill execution is claimed.
+
+## M4.4 design checkpoint
+
+### Baseline and owning procedures
+
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) starts at reviewed M4.3 revision `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd`. All slices remain in existing draft PR #58. No intermediate merge is required or authorized. #56 remains open.
+
+No M4.4 model/compiler code or tests exist. The following procedures and choices are pending owner approval. Earlier scoped approvals, source examples, evidence and full RFC statuses remain unchanged.
+
+[RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m44-data-and-pattern-procedure) owns constructors, field access, variant admission/joins, categories and finite coverage. [RFC 0003](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control) owns match/guard scopes and complete expression exit composition. [RFC 0007](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification) supplies the typing prerequisite for borrowed binders, not ownership execution.
+
+Exact existing authorities include nominal named construction in ADRs 0004/0008, current enum/narrowing rules in ADR 0012, RFC 0002 privacy and confirmed bracket defaults. Superseded union, structural-record and primitive-singleton examples remain historical. The new procedures must not restore them.
+
+### Bounded delivery and prerequisites
+
+Extend the existing scalar/control engine rather than create a second checker. The data entry requires the M4.2 receipt, not a successful scalar-only receipt. Otherwise every data-bearing body would fail at its deliberately unsupported M4.3 boundary before M4.4 could check it.
+
+Support named record/enum construction, exact rebuilding, public field projections, owned patterns, eligible borrowed patterns, scoped variant narrowing, permitted variant admission/joins, tuple-context brackets and nested constructor coverage. Preserve all existing scalar checks and original provenance.
+
+Complete written generic arguments and immediately established full nominal applications supply one substitution. General field/payload generic inference and trailing defaults remain with M4.6. Do not repair conflicts from defaults or later uses.
+
+List construction, dynamic/index protocols and direct Option/Result guards require canonical core admission. That prerequisite remains with M4.8. Preserve the confirmed uncontextualized List default; never retry a tuple merely because core admission is missing.
+
+Borrowed binders requiring unresolved aggregate implicit-copy classification remain incomplete until its custom-disposer/protected-capability reconciliation exists. General family/callback/evidence and core obligations remain within M4.5 through M4.8. No obligation moves beyond M4 completion merely because this slice is bounded.
+
+### Public TDD seams
+
+```text
+check_data(completed M4.2 receipt, limits)
+    -> scoped scalar/data receipt or source/incomplete/resource failure
+receipt.body(module, actual source owner)
+    -> supported scalar/data completion and full exit alternatives
+receipt.node(module, original NodeId)
+    -> construction, projection, admission, pattern, refinement and coverage facts
+```
+
+These are behavioral names. Reuse actual M3 owners, binders, fields and variants. Reject foreign captures and invalid queries. Keep private incomplete state outside canonical value types.
+
+| Seam | Catches | Does not establish |
+| --- | --- | --- |
+| Data entry | Every requested supported scalar/data context, unresolved prerequisites, known source errors and checked budgets. | Full typed M4, ownership safety or runtime execution. |
+| Body query | Matches/blocks with correctly composed returns, loop transfers, normal paths and recognized divergence. | Termination, cleanup or arbitrary path correlations. |
+| Node query | Named identities/substitutions, field context/privacy, pattern types/scopes, explicit narrowing and finite coverage witnesses. | Implicit-copy execution, loans, physical addresses or initialized storage. |
+
+### Owner decisions requested before model or compiler code
+
+| Choice | Recommendation and consequence |
+| --- | --- |
+| K1. Construction and qualification | Approve the RFC 0005 procedure. Named brace constructors use type/module bindings. For syntactic dot qualification, an enum binding takes priority; a grouped/computed base uses value fields. `(name).field` therefore forces the value meaning in a collision. Failed chosen lookup never retries another namespace. Field inspection admits one reference layer and preserves its access/provenance; deeper descriptors need explicit dereference. |
+| K2. Binding views and guards | Approve the classification seam and scoped variant views. Original declarations retain parent types, but explicit matched-arm uses can have the variant view required by ADR 0012. Changing that scrutinee's tag while its view is active rejects; payload mutation can preserve it. Unresolved aggregate copy classification cannot choose owned versus borrowed output. Permit refutable success patterns only with unnamed failure blocks; a named Result error requires an irrefutable success pattern. |
+| K3. Coverage and block exits | Approve finite constructor specialization using static types, not literal/flow singleton knowledge. Ignore guarded rows for coverage, even with a true guard. Require declared outer constructors despite never payloads. Only an initial Root empty domain is vacuously covered; nested zero-constructor Components are symbolic holes and cannot erase other refutable columns. Witnesses are symbolic uncovered shapes, not runtime values. Permit noncontinuing block arms to contribute no join value through actual outward returns/loop transfers or recognized divergence. This extends the earlier draft's return/never-call wording. |
+| K4. Scope, interfaces and validation | Approve the three public seams, shared-engine layering, explicit deferred core/generic/classification prerequisites and acceptance plan. Validate coverage with a separate finite reference model before Rust. Then use vertical public-interface TDD, required mise checks and final independent review in PR #58. |
+
+K2 deliberately uses lexical variant views instead of implementing mutation-sensitive refinement invalidation. A matched mutable place cannot change variants before its arm ends. Whole replacement of an ancestor also rejects while that view is active. Outside the arm its original declared parent type remains. This is a proposed precision limit, not an ownership proof.
+
+K3 deliberately requires static constructor coverage despite constant Boolean flow information. A match on true still has bool as its source type. A literal or guarded arm cannot create singleton dispatch permission. Written unreachable arms still require typing.
+
+### Planned acceptance, not observed results
+
+| Requirement | Planned public-interface contrasts |
+| --- | --- |
+| Named identities and generic substitution | Record/variant construction retains actual defining identities and one complete substitution. Reject same-shape unrelated targets, missing/duplicate/unknown fields and conflicting established applications. Missing inference remains incomplete. |
+| Declared field literal context | Unsuffixed fields receive declared numeric context after substitution. Already typed incompatible widths reject. Nested fields and payloads cannot default widths or repair conflicts. |
+| Rebuilding and privacy | Exact same application, one leading base and written replacement order. Reject external rebuilding whenever any field is private, even from an existing value. Preserve public unimported versus genuinely opaque distinctions. |
+| Qualification and field places | Enum/value collisions follow K1 without parse retries. Grouping forces value fields. Retain canonical field IDs, reference layers, original access requirements and private barriers. |
+| Variant admission and joins | Owned/read-only admission and same-parent variant joins. Reject mutable widening, generic-argument conflicts, container covariance and unrelated structural joins. Parent boundaries do not recover variants except explicit scoped patterns. |
+| Bracket categories | Tuple context fixes arity and element context. Uncontextualized brackets remain List-category even when heterogeneous. Missing List/core or family-input context stays incomplete, never tuple fallback or fabricated standard identity. |
+| Patterns and bindings | Exact tuples, accessible partial records, all variant payload forms, nested refutability, literal tests and duplicate binders. Irrefutable lets introduce names after initialization. Borrowed scalar/string/reference projections preserve the classification and descriptor distinctions. |
+| Scoped narrowing | Canonical variant views inside arms, declared parents outside, guard-failure scope restoration and tag-changing rejection. No optimizer or callee-body narrowing. Unresolved copy classification remains incomplete. |
+| Complete expression exits | Match expression/block arms retain actual return/break/continue targets through short-circuiting and enclosing expressions. An inner-loop break cannot falsely discharge an outer arm/guard. Normal blocks yield only void. |
+| Coverage | Closed enums, known variants, nested products, Boolean and literal domains, guarded rows, empty enums and never payloads. Both V(never, bool) and V(bool, never) require their remaining Boolean coverage. Test wildcard, single refutable and complementary rows in both orders; substitute empty enums too. Root-empty coverage remains vacuous. No outer-tag-only proof or inhabited-witness claim. |
+| Guard-let prerequisites and policy | Missing canonical Option/Result admission stays incomplete, including same-spelled user enums. The reference policy distinguishes Err, Some/Ok mismatch and forbidden invented error wrappers. Actual core integration remains an M4.8 gate. |
+| Provenance and limits | Original Unicode/CRLF snapshots, alias routes, member/binder IDs, substitutions and coverage sites. Repeated and relocated normalized facts agree; foreign queries reject. Exact/short budgets, recursive shapes and wide products cannot turn uncertainty into negative evidence. |
+
+### Model-first and checkpoint verification
+
+After approval, the finite model will compare constructor coverage with independently enumerated finite cases. Its public seam is `coverage(static_shapes, pattern_rows, limits)`. Outcomes distinguish Covered, UncoveredDeclaredShape, Incomplete and ResourceLimit. Separate expected cases will cover conservative never/empty-enum payload holes in both column orders and guard/refutability policy. The model must distinguish its abstract shape witnesses from real Rill values.
+
+Before approval, all M4.4 model/compiler assertions remain NotChecked. Pre-review `mise run check:docs` passed 1658 local destinations with zero errors. Added RFC prose passed a local sentence-length scan. Formal ASD-STE100 vocabulary compliance remains unverified.
+
+Independent Standards and Spec reviews covered the four staged documents against `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd`. Standards found no documented violations or judgement-call findings. Spec found one P2 ambiguity in nested zero-constructor columns. The local correction distinguishes vacuous Root domains from symbolic Component holes and adds expected model cases for both payload orders.
+
+Neither reviewer executed a model/compiler. The original staged reviews exclude the later local correction and review record. No second delegated review is claimed. Neither review grants owner approval. K1 through K4 remain pending.
+
+After the local correction, `mise run check:docs` passed 1658 destinations with zero errors. The added-RFC sentence-length scan and staged/unstaged diff checks passed. No M4.4 model/compiler code or execution was run. Formal vocabulary compliance remains unverified.
+
 ## Completion record
 
 The following M1 statement belongs to the original planning baseline. M1/M2 later merged as recorded above; M3 evidence is separate.

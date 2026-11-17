@@ -530,6 +530,34 @@ Unsupported constructs produce Incomplete. Exhausted checked work/storage/depth 
 
 Charge source/scope visits, digits, constraints, substitutions, queue operations, Boolean/exit facts and provenance before growth. Use bounded term traversal and iterative processing for flat expression/statement chains. Do not recursively grow the host stack along arbitrarily long binary chains. No source validity, wall-clock or OOM guarantee follows from implementation budgets.
 
+### Proposed M4.4 match and guard control
+
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) proposes these data/control refinements. Owner approval is pending. Earlier sequencing, scope and expectation approvals remain unchanged.
+
+Match evaluates its original scrutinee position once. Pattern guards and bodies retain source order. Check every written pattern, guard and body without executing them. Coverage uses RFC 0005's static constructor procedure rather than known runtime values.
+
+Create an arm scope for its canonical pattern binders and explicit variant view. Check the guard there with Boolean context. A failed guard restores the preceding scope before the next arm. The original scrutinee is not reevaluated.
+
+Expression arms use the established immediate context and permitted joins. A block arm supplies void only when it can continue normally. Its final expression never supplies a value.
+
+The proposed control precision also permits a block arm that has no normal continuation to supply no ordinary join value. Valid returns, outward loop transfers and recognized divergence can establish that property. This extends the earlier draft's return/never-call wording; it requires scoped approval.
+
+Retain each return, break and continue target separately from divergence. A break consumed by a loop inside the arm does not leave the arm. A transfer to an actual enclosing loop does. A noncontinuing block is not an invented ordinary value.
+
+Expression composition must carry these exit alternatives through calls, operators, conditional branches and short-circuiting. A skipped arm or operand contributes no executed transfer. Its static errors still reject. No normal-continuation path can reappear after a noncontinuing prefix.
+
+Ordinary pattern bindings introduce names only after their initializer and require proved irrefutability. Guard success bindings introduce names only after their failure block. They cannot enter the failure scope. A named error binding belongs only to that failure scope.
+
+Guard-let requires admitted canonical Option/Result contracts. A same-spelled enum or matching payload shape is insufficient. Missing core admission remains incomplete for later M4 integration, not a fabricated library definition or negative requirement proof.
+
+The proposed refutable-payload policy permits a pattern mismatch to enter an unnamed failure block. For Result, that block can therefore handle Err or an Ok payload mismatch. It receives no invented Err wrapper on the latter path.
+
+A Result failure block with an error-name requires a proved irrefutable success-payload pattern. Only a real Err branch can supply that error wrapper. Option still cannot bind an error-name. Refutable or unresolved patterns cannot manufacture an envelope to satisfy this syntax.
+
+Check failure-block noncontinuation with the actual enclosing callable/loop context. Resource or unresolved coverage cannot prove fallthrough or irrefutability. No ownership transfer, payload destruction, cloning or loan commitment occurs during these checks.
+
+No direct Option/Result guard can complete until actual canonical core admission exists. The bounded M4.4 implementation must retain this prerequisite explicitly. It can still check ordinary user-enum matches and irrefutable patterns without assuming core identities.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Dependency state |
