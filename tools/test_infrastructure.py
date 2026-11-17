@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 import doctor
 from check_docs import anchors, check
 
@@ -100,6 +102,35 @@ class WorkspaceTests(unittest.TestCase):
                 self.assertLessEqual(internal, allowed[name])
                 if name in {"compiler", "ide", "lsp"}:
                     self.assertFalse({"inkwell", "llvm-sys"} & {dep["name"] for dep in package["dependencies"]})
+
+
+class WorkflowTests(unittest.TestCase):
+    def workflows(self):
+        paths = sorted((doctor.ROOT / ".github/workflows").glob("*.yml"))
+        self.assertTrue(paths, "No GitHub workflows found")
+        for path in paths:
+            yield path.name, yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+
+    def test_workflow_job_and_step_names_have_type_prefixes(self):
+        stage = r"^(Build|Test|Release|Deploy|Operations)(?: and (build|test|release|deploy|operations))?: .+"
+        for name, workflow in self.workflows():
+            with self.subTest(workflow=name):
+                self.assertRegex(workflow["name"], stage)
+                for job in workflow["jobs"].values():
+                    self.assertRegex(job.get("name", ""), stage)
+                    for step in job["steps"]:
+                        self.assertRegex(step.get("name", ""), r"^[A-Z][A-Za-z ,]+: .+")
+
+    def test_rust_workflows_use_explicit_ci_homes(self):
+        for name, workflow in self.workflows():
+            if not any("jdx/mise-action@" in step.get("uses", "")
+                       for job in workflow["jobs"].values() for step in job["steps"]):
+                continue
+            with self.subTest(workflow=name):
+                self.assertEqual(workflow.get("env", {}).get("CARGO_HOME"),
+                                 "${{ github.workspace }}/target/ci/cargo")
+                self.assertEqual(workflow.get("env", {}).get("RUSTUP_HOME"),
+                                 "${{ github.workspace }}/target/ci/rustup")
 
 
 class ScaffoldStatusTests(unittest.TestCase):

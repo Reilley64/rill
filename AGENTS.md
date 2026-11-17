@@ -23,6 +23,7 @@ Before writing or reviewing RFCs, follow [docs/rfcs/README.md](docs/rfcs/README.
 ### Toolchain development
 
 Before changing production source, tooling or CI, follow [docs/agents/development.md](docs/agents/development.md).
+For GitHub workflow names and YAML layout, also follow [.github/AGENTS.md](.github/AGENTS.md).
 
 ### Repository maintenance
 
