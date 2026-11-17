@@ -1,4 +1,5 @@
-//! Owns Rill's shared compiler front end and diagnostics.
-//!
-//! Implementation is absent. This crate establishes the workspace dependency
-//! boundary only; it provides no parsing, checking, or compiler data APIs.
+//! Shared, LLVM-free source and lexical facts. Lexical completion is not source checking.
+
+pub mod lexer;
+pub mod source;
+mod unicode;
