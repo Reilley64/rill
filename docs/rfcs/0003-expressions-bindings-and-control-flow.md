@@ -440,7 +440,7 @@ Check unexecuted source as well as executed paths. Invalid literals and type err
 
 ### Proposed M4.3 scalar and static-control procedure
 
-[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) proposes this bounded next stage. Owner approval is pending. Earlier confirmed scope, sequencing and expectation rules remain unchanged. This procedure does not accept the full RFC.
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this bounded stage. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Earlier confirmed scope, sequencing and expectation rules remain unchanged. This procedure does not accept the full RFC.
 
 #### Inputs, scope and source identities
 

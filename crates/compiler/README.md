@@ -1,6 +1,6 @@
 # Compiler front end
 
-This crate implements M1 source snapshots/lexing, the M2 parser, M3 module resolution/declaration collection, M4.1 explicit declaration types and M4.2 declaration/inline-containment checks. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
+This crate implements M1 source snapshots/lexing, the M2 parser, M3 module resolution/declaration collection, M4.1 explicit declaration types and M4.2 declaration/inline-containment checks, and M4.3 scoped scalar/control typing. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
 
 The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. [M2 ticket #52](https://github.com/Reilley64/rill/issues/52) records the baseline, acceptance evidence and limitations.
 
@@ -172,3 +172,26 @@ Completed checks are MemberUniqueness, PreludeSignatures, ExistingTypePositions 
 Limits use the existing AnalysisLimits shape. Work and entry counters charge before growth. Entry accounting includes temporary indexes, route reservations and graph traversal storage without refunds, so limits are conservative. Containment graph algorithms are iterative; term traversal has the existing absolute 64-level ceiling. These budgets are not source restrictions, precise heap quotas or wall-clock/OOM guarantees.
 
 [The M4.2 acceptance record](tests/m4-2-acceptance.md) maps real tests in m4_2.rs. The separate Python model in tests/models was validated before compiler implementation. Its ReferenceExecuted results do not replace direct public-interface Rust tests or establish Rill execution. Neither layer enables a product command or adds M5 work.
+
+## M4.3 scoped scalar and control typing
+
+The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint `e4750b8579ea11aa80f76f86f93014c78854fac0`. [Slice #60](https://github.com/Reilley64/rill/issues/60) stays in draft PR #58. RFCs 0003/0004/0005/0006 own the bounded procedure. Full RFC statuses remain unchanged.
+
+`analysis::scalars::check_scalars` requires a completed M4.2 DeclarationReceipt and AnalysisLimits. It checks supported standalone bodies, loaded startup statements and expectations without executing Rill. It reuses captured M1/M2 facts and canonical M3/M4 types, including body annotation uses. It does not reopen sources or reinterpret syntax.
+
+| Query | Scoped facts |
+| --- | --- |
+| `receipt.body(module, BodyOwner)` | Supported scalar/control completion for an actual function, expectation or module startup context. Retains finite exit facts and declared result context. |
+| `receipt.node(module, NodeId)` | Canonical expression types, literal evidence, explicit call substitutions, binding causes, original annotation uses and control targets. Statement/annotation facts are not expression values. |
+
+Queries reject foreign modules, body identities and invalid node indices. Missing node facts are not fabricated types. Incomplete attempts return no ScalarReceipt. Partial facts retain known findings and explicit obligations; secondary diagnostics remain incomplete.
+
+Literal checking has no numeric default. Finite contextual propagation precedes literal finalization. The primitive matrix uses concrete canonical primitives, not nominal spellings. Never admission does not retag declared intermediate results. Explicit standalone calls use one substitution across their complete signature, without body inspection or overload retries.
+
+Boolean/exit analysis follows the approved finite proof. It uses literals, logical operations and immutable Boolean initializer facts. It omits cross-statement correlations and arithmetic/comparison evaluation. It checks written source even after normal continuation ends. Unsupported scope-changing constructs block dependent checking rather than fabricate missing-name proofs.
+
+Static places distinguish writable, read-only and value contexts. Descriptor borrowing does not silently become referent borrowing. These facts establish no physical owner address, access loan, initialized storage, move, implicit copy or cleanup permission.
+
+Data/pattern protocols, ordinary families, omitted generic inference, callable creation/invocation, interpolation, errors and remaining core integration stay incomplete. Nested declarations and mutable temporary acquisition also retain later M4 obligations. `not_performed()` lists full body/signature/position/inference/layout/coverage/evidence/ownership/execution stages. A scoped receipt is not a checked program or completed M4.
+
+The [M4.3 acceptance record](tests/m4-3-acceptance.md) maps direct public-interface tests and separate verification evidence. No product routing, native/LLVM dependency, shipped standard definition or M5 behavior is added.

@@ -496,7 +496,7 @@ The [M4.2 acceptance record](../crates/compiler/tests/m4-2-acceptance.md) maps a
 
 [M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) starts from `dcc4b1390fbbf163b54618a5b4c59151d71fdb9a`, the reviewed M4.2 implementation on the existing branch. All eight slices remain in draft PR #58. No intermediate merge or new PR is required. M4 as a whole remains incomplete, and #56 remains open.
 
-The next procedures are proposed, not approved. No M4.3 compiler/model code or tests have been written. Full RFC statuses, earlier scoped approvals and historical evidence remain unchanged.
+The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint `e4750b8579ea11aa80f76f86f93014c78854fac0` before M4.3 code. The implementation and [acceptance record](../crates/compiler/tests/m4-3-acceptance.md) now cover this bounded stage. Full RFC statuses, earlier scoped approvals and historical evidence remain unchanged.
 
 [RFC 0003](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m43-scalar-and-static-control-procedure) owns supported scalar contexts, lexical bindings, static places and finite control analysis. [RFC 0006](rfcs/0006-numbers-strings-and-primitive-operations.md#proposed-m43-literal-and-primitive-checking) owns literal/context propagation and primitive operation admission. [RFC 0004](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m43-explicit-standalone-calls) owns explicit standalone calls. [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m43-never-admission) owns the proposed never precision rule.
 
@@ -553,7 +553,7 @@ function choose(b: bool): i32 {
 }
 ```
 
-The proposed diagnostic means insufficient coverage under the approved finite checking rule, not a recorded runtime fallthrough. It is NotChecked. An explicit if/else with both returns is the positive counterpart. Arithmetic traps remain runtime events; they never become a substitute return proof.
+The diagnostic means insufficient coverage under the approved finite checking rule, not a recorded runtime fallthrough. The acceptance record now maps direct compiler assertions for this case and its explicit if/else counterpart. Rill execution remains NotChecked. Arithmetic traps remain runtime events; they never become a substitute return proof.
 
 ### Planned direct acceptance, not observed results
 
@@ -572,7 +572,7 @@ The proposed diagnostic means insufficient coverage under the approved finite ch
 | Expectations/startup | Check loaded sources in both modes. Expectations require bool without numeric default or hidden fallible return context. Reject startup capture/return escapes; unsupported inner callables are not mistaken for outer targets. | Accepted RFC 0001; RFC 0002 startup rules. |
 | Determinism, provenance and limits | Repeated/relocated contexts retain ordered canonical facts and original Unicode/CRLF/literal evidence. Foreign queries reject. Test long flat expressions/scopes, exact/one-short budgets, retained errors and unsupported-body refusal. | M1 through M4.2, RFC 0010 and explicit resource limits. |
 
-No acceptance row authorizes ownership/runtime assertions as typing evidence. Do not rewrite historical examples as executed results. Any earlier-stage fix needs a direct regression and explanation. M4.3 implementation/model assertions remain NotChecked until real tests exist and run.
+These rows preserve the approved test plan, not its execution record. The [M4.3 acceptance mapping](../crates/compiler/tests/m4-3-acceptance.md) records actual compiler assertions and verification separately. No row authorizes ownership/runtime assertions as typing evidence. No separate M4.3 reference model or Rill execution is claimed.
 
 ### Checkpoint verification
 

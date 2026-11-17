@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub mod declarations;
+pub mod scalars;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AnalysisLimits {
@@ -105,13 +106,13 @@ pub struct DeclarationFacts<'g> {
     pub binders: Vec<Binder<'g>>,
     pub shape: DeclarationShape<'g>,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Substitution<'g> {
     pub binder: &'g DeclarationId,
     pub position: usize,
     pub argument: Type<'g>,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TypeUse<'g> {
     pub module: &'g ModuleKey,
     pub node: NodeId,

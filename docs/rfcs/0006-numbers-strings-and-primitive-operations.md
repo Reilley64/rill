@@ -188,7 +188,7 @@ Finite floating arithmetic may produce infinity. That differs from rejecting an 
 
 ### Proposed M4.3 literal and primitive checking
 
-[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) proposes this procedure and admission matrix. Owner approval is pending. Confirmed spelling, explicit widths and trap timing remain unchanged.
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this procedure and admission matrix. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Confirmed spelling, explicit widths and trap timing remain unchanged.
 
 Use M1's retained literal/token facts and original source maps. Do not rescan source grammar or reinterpret parser commitments. A suffix names the actual compiler primitive identity despite source shadowing. A user nominal type with the same spelling is not that primitive.
 

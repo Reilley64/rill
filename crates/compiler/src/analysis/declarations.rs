@@ -159,7 +159,7 @@ pub struct CheckFailure<'r, 'g> {
 }
 #[derive(Debug)]
 pub struct DeclarationReceipt<'r, 'g> {
-    types: &'r Receipt<'g>,
+    pub(super) types: &'r Receipt<'g>,
     facts: CheckFacts<'r, 'g>,
     statistics: Statistics,
 }

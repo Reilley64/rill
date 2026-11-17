@@ -438,7 +438,7 @@ Before compiler implementation, validate a separate finite reference model again
 
 ### Proposed M4.3 never admission
 
-[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) proposes this precision rule. Owner approval is pending. Earlier policies and full RFC status remain unchanged.
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this precision rule. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Earlier policies and full RFC status remain unchanged.
 
 An expression whose canonical static type is primitive never can satisfy an immediate expected value type without conversion. It produces no normal value. Preserve never as its static type rather than inventing a value of the expected type.
 

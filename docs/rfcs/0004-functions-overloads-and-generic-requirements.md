@@ -163,7 +163,7 @@ The [library catalogue](../standard-library-contracts.md#2-callable-and-ownershi
 
 ### Proposed M4.3 explicit standalone calls
 
-[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) proposes this bounded call procedure. Owner approval is pending. Full RFC status and earlier approvals remain unchanged.
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this bounded call procedure. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Full RFC status and earlier approvals remain unchanged.
 
 Resolve a direct standalone callee through the caller's lexical/module context. Preserve its canonical function identity. Qualification uses installed exports, without filesystem probes or child autoload.
 
