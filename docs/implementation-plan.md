@@ -388,7 +388,7 @@ The owner requested completion of all M4 slices in existing PR #58. This superse
 
 M4.1 has completed scoped implementation review and acceptance evidence, including four hosted scaffold profiles. Its integration remains pending as part of M4. No intermediate merge is needed before M4.2 design or subsequently approved implementation. The later documentation commit records hosted results without claiming it was itself already tested on those hosts.
 
-No M4.2 compiler/model code or tests have been written. The new procedures and choices below await scoped owner approval. Full RFC statuses and earlier approvals remain unchanged.
+At checkpoint creation, no M4.2 compiler/model code or tests had been written. The owner subsequently [approved D1 through D4](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) at `c26d737439fd4c426d362655ad15984cc70108dc`. Approval covers both owning procedures, canonical prelude contracts, the three public TDD seams and model-first/compiler-TDD sequence. Full RFC statuses and earlier approvals remain unchanged.
 
 ### Owning procedures and exact prerequisites
 
@@ -426,6 +426,8 @@ Tests must load real sources through M3, elaborate through M4.1 and call this an
 
 ### Owner decisions requested before code
 
+The owner approved all four recommendations at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. The table preserves the exact review choices and their consequences.
+
 | Decision | Recommendation and consequence |
 | --- | --- |
 | D1. Type positions | Permit void and never in every existing type position. Keep inhabitation and control-flow checks separate. This permits declarations such as UnitHolder with a void field and BottomHolder with a never field, without inventing an initializer or constructible BottomHolder value. |
@@ -433,7 +435,7 @@ Tests must load real sources through M3, elaborate through M4.1 and call this an
 | D3. Missing representation contracts | Admit no nominal indirection exemptions in this slice. Actual source references stop traversal; names and private fields do not. Directly stored callables without a justified representation contract return Incomplete. Callable signatures do not become capture storage. Keep that obligation assigned to later callable/core integration before M4 completion. |
 | D4. Scope, contracts and seams | Approve the two owning procedures, exact prelude schemas, three public seams and scoped completion boundary. Defaults, requirements and implementations retain M4.1's incomplete behavior. Approve the model-first validation and compiler TDD sequence below. |
 
-These recommendations complete a proposed procedure, not an approved language rule. Do not implement a recommendation before its owner decision. A changed decision requires corresponding owning-text and acceptance revisions.
+The scoped owner decision approves these recommendations for M4.2. It does not accept either full RFC or authorize later unwritten procedures. A changed decision requires corresponding owning-text and acceptance revisions.
 
 ### Model validation before compiler implementation
 
@@ -483,6 +485,10 @@ No actionable documented-standard violation or heuristic finding was identified.
 No actionable finding was identified. The review checked summary forwarding, incomplete-storage propagation, finite/growing cases, canonical prelude contracts and the explicit D1 through D4 choices. It confirmed that those decisions and model/compiler acceptance remain pending.
 
 These are design-checkpoint reviews, not owner approval or final implementation review. Every M4.2 model/compiler assertion remains NotChecked. Formal ASD-STE100 dictionary compliance remains unverified.
+
+### M4.2 implementation acceptance
+
+The [M4.2 acceptance record](../crates/compiler/tests/m4-2-acceptance.md) maps actual reference-model and compiler tests to the approved procedure. It preserves the distinction between model execution, compiler analysis assertions and Rill execution. M4.3 through M4.8 retain their separate procedure and approval gates. M4.2 does not complete the umbrella or authorize merge.
 
 ## Completion record
 

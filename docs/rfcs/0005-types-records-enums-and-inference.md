@@ -332,7 +332,7 @@ A finite layout can still exceed a target's representation limits. Such target c
 
 ### Proposed M4.2 declaration validity and inline containment
 
-[M4.2 ticket #59](https://github.com/Reilley64/rill/issues/59) proposes this next procedure. Owner approval is pending. The existing inline-layout policy remains confirmed; the new choices below are not yet approved.
+The owner [approved this M4.2 procedure and D1 through D4](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. [Ticket #59](https://github.com/Reilley64/rill/issues/59) records implementation and acceptance. Earlier approvals remain confirmed. This scoped decision does not accept the full RFC.
 
 The input is a completed M4.1 receipt, explicit canonical prelude signature contracts and checking limits. Reuse its graph, declaration identities, canonical terms, substitutions and original spans. Do not accept a failed M4.1 attempt as a completed receipt. Do not read live files.
 
@@ -342,7 +342,7 @@ Check every module-level record and enum in the receipt, including unused declar
 
 Retain all conflicting member identities and declaration spans. A private field still participates in its record's uniqueness check. Apply [RFC 0004's header and prelude checks](0004-functions-overloads-and-generic-requirements.md#proposed-m42-header-validity-and-prelude-signatures) to function and family headers.
 
-The proposed position policy permits void and never wherever an existing type production admits a type. Void has its implicit value; never remains uninhabited. This policy supplies no initializer, constructor or normal continuation. It requires owner approval.
+The proposed position policy permits void and never wherever an existing type production admits a type. Void has its implicit value; never remains uninhabited. This policy supplies no initializer, constructor or normal continuation. The scoped checkpoint approval covers it.
 
 Do not remove stored fields from containment merely because another field is uninhabited. A by-value cycle still rejects. Empty enums and never do not excuse such a cycle.
 
@@ -388,9 +388,9 @@ There are finitely many declarations and binder indices. A complete analysis can
 
 #### Proposed stored-variant rule
 
-The recommendation treats a stored variant type as its parent enum application for inline representation. Use the parent's complete inline-parameter summary and containment dependencies. Variant identity remains distinct for typing and overload selection.
+The approved rule treats a stored variant type as its parent enum application for inline representation. Use the parent's complete inline-parameter summary and containment dependencies. Variant identity remains distinct for typing and overload selection.
 
-This is a new representation-validity choice requiring owner approval. The confirmed parent-enum policy does not by itself decide variant-type storage. A selected-payload representation is an alternative, not an equivalent implementation.
+This is a new representation-validity choice approved at the M4.2 checkpoint. The earlier parent-enum approval did not itself decide variant-type storage. A selected-payload representation was an alternative, not an equivalent implementation.
 
 For example, consider this independent declaration excerpt:
 
@@ -399,7 +399,7 @@ enum Choice<T> { Empty, Value(T) }
 type Node = { tag: Choice<Node>.Empty };
 ```
 
-The recommendation rejects Node's inline cycle, R0406. A selected-payload representation could instead make this Empty field finite. This case is NotChecked. Do not choose either behavior through code before approval.
+The approved rule rejects Node's inline cycle, R0406. A selected-payload representation could instead make this Empty field finite. This case was NotChecked at checkpoint creation. The [M4.2 acceptance record](../../crates/compiler/tests/m4-2-acceptance.md) records later checking.
 
 #### Containment graph and cycle witnesses
 

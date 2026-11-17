@@ -1,6 +1,6 @@
 # Compiler front end
 
-This crate implements M1 source snapshots/lexing, the M2 parser, M3 module resolution/declaration collection and M4.1 explicit declaration types. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
+This crate implements M1 source snapshots/lexing, the M2 parser, M3 module resolution/declaration collection, M4.1 explicit declaration types and M4.2 declaration/inline-containment checks. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
 
 The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. [M2 ticket #52](https://github.com/Reilley64/rill/issues/52) records the baseline, acceptance evidence and limitations.
 
@@ -145,3 +145,30 @@ Nominal terms never expand their fields. Recording `Growing<Box<T>>` therefore d
 Default limits permit 1,000,000 work units, 100,000 retained/index entries and 64 annotation traversal levels. Traversal has an absolute ceiling of 64. Entries include analysis indexes, type terms, written uses, members, substitutions, provenance references and findings. Checked counters charge before growth. Work charges scans, traversal and indexed lookups. Limits do not promise wall-clock bounds, precise heap-byte quotas or host OOM recovery.
 
 The [acceptance record](tests/m4-1-acceptance.md) maps the public-seam tests in `tests/m4_1.rs`. Run them with `mise exec -- cargo test --locked -p compiler --no-default-features --test m4_1`. No Rill code, LLVM, ownership mechanism or editor behavior executes in this suite. M4.1 leaves all product commands and unavailable gates unchanged.
+
+## M4.2 declaration and source-nominal containment checks
+
+The owner [approved D1 through D4](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. [Slice #59](https://github.com/Reilley64/rill/issues/59) remains in the same draft M4 PR #58. The umbrella stays open. The proposed sections in RFCs 0004/0005 own the scoped rules; full RFC statuses remain unchanged.
+
+`analysis::declarations::check_declarations` requires a completed M4.1 Receipt, explicit PreludeContracts and AnalysisLimits. Both canonical prelude identities and their fixed schemas are mandatory. A foreign identity, unrelated declaration or schema swap returns InvalidRequest before source checking. A wrong actual copy/dispose signature produces a source finding. Signature agreement grants no runtime trust or protected-operation permission.
+
+The stage checks duplicate record fields, enum variants, record-payload fields and named value parameters, including unused declarations. Repeated `_` parameters bind no name. It admits void/never annotations without supplying inhabitation, constructors or normal continuation.
+
+The layout procedure computes least-fixed-point inline-parameter summaries, then canonical containment edges. It preserves the originating declaration when traversing forwarded arguments. It rejects inline cycles with R0406, including type-growing cycles, without expanding nominal definitions. References stop traversal. Stored variant types use their parent's complete representation. No nominal name or private field grants indirection.
+
+A directly stored callable without an established representation contract produces Incomplete. Signature parameter/results are not capture storage. Reference referents and unused nominal arguments do not introduce stored dependencies. Known findings remain visible when other work is incomplete or reaches a resource limit.
+
+| Interface or fact | Scope |
+| --- | --- |
+| `receipt.declaration(&DeclarationId)` | Checked member uniqueness and any required prelude schema agreement. Original M4.1 type facts remain available. |
+| `receipt.layout(&DeclarationId)` | Inline-parameter evidence and containment edges for one canonical record/enum. Function and genuine out-of-scope member identities return None. Foreign/unknown IDs reject as request misuse. |
+| `layout.inline_parameters` | Ordered binder indices with written-storage provenance, forwarding arguments and earlier summary-generation references. A pending fact cannot prove itself. |
+| `layout.edges` | Canonical origin/target identities and the least written witness under the approved ordering. Forwarding retains actual argument types and selected summary evidence. |
+| `layout.complete` | Storage-summary knowledge only. Even a complete summary can have a proved cycle; this flag is not layout validity or successful checking. |
+| Failure partial facts | Known declarations, summaries, edges, cycle/member/signature findings and unresolved storage obligations. No completed receipt is exposed. |
+
+Completed checks are MemberUniqueness, PreludeSignatures, ExistingTypePositions and SourceNominalInlineContainment. Full declaration/general signature validity, full layout including captures/target ABI, public interfaces, bodies, evidence, ownership and execution remain unperformed. The receipt is not complete source checking.
+
+Limits use the existing AnalysisLimits shape. Work and entry counters charge before growth. Entry accounting includes temporary indexes, route reservations and graph traversal storage without refunds, so limits are conservative. Containment graph algorithms are iterative; term traversal has the existing absolute 64-level ceiling. These budgets are not source restrictions, precise heap quotas or wall-clock/OOM guarantees.
+
+[The M4.2 acceptance record](tests/m4-2-acceptance.md) maps real tests in m4_2.rs. The separate Python model in tests/models was validated before compiler implementation. Its ReferenceExecuted results do not replace direct public-interface Rust tests or establish Rill execution. Neither layer enables a product command or adds M5 work.

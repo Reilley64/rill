@@ -138,7 +138,7 @@ No operation gains compiler privileges through its spelling or standard-root loc
 
 ### Proposed M4.2 header validity and prelude signatures
 
-[M4.2 ticket #59](https://github.com/Reilley64/rill/issues/59) proposes these checks after M4.1 elaboration. Owner approval is pending. Full RFC status and previous approvals remain unchanged.
+The owner [approved these M4.2 checks](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) after M4.1 elaboration at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. [Ticket #59](https://github.com/Reilley64/rill/issues/59) records the slice. Full RFC status and previous approvals remain unchanged.
 
 Check every module-level named-function and family header in the retained receipt. Reject repeated value-parameter names within one header. Exclude `_`, which binds no usable name. Preserve each conflicting declaration identity and source span. Type parameters and value parameters remain separate namespaces.
 

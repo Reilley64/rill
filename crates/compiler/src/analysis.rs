@@ -8,6 +8,8 @@ use crate::source::Span;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+pub mod declarations;
+
 #[derive(Clone, Copy, Debug)]
 pub struct AnalysisLimits {
     pub max_work: usize,
