@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub mod declarations;
+pub mod ordinary;
 pub mod scalars;
 pub use scalars::data;
 
@@ -543,12 +544,17 @@ impl<'g> Analyzer<'g> {
         Ok(ty)
     }
     fn binding(&mut self, module: &ModuleKey, name: &str) -> Work<Option<&'g Binding>> {
+        self.namespace_binding(module, Namespace::TypeModule, name)
+    }
+    fn namespace_binding(
+        &mut self,
+        module: &ModuleKey,
+        namespace: Namespace,
+        name: &str,
+    ) -> Work<Option<&'g Binding>> {
         for binding in self.graph.bindings() {
             self.step(1)?;
-            if binding.module == *module
-                && binding.namespace == Namespace::TypeModule
-                && binding.name == name
-            {
+            if binding.module == *module && binding.namespace == namespace && binding.name == name {
                 return Ok(Some(binding));
             }
         }
@@ -823,7 +829,7 @@ impl<'g> Analyzer<'g> {
         }
         Ok(valid.then_some(members))
     }
-    fn analyze(&mut self) -> Work<()> {
+    fn analyze(&mut self, mut metadata: Option<&mut ordinary::metadata::Headers<'g>>) -> Work<()> {
         for module in self.graph.modules() {
             self.step(1)?;
             for declaration in &module.declarations {
@@ -838,7 +844,7 @@ impl<'g> Analyzer<'g> {
                 if declaration.scope.is_some() {
                     continue;
                 }
-                if declaration.id.kind == DeclarationKind::Implementation {
+                if declaration.id.kind == DeclarationKind::Implementation && metadata.is_none() {
                     self.unsupported(module, declaration.node, Unsupported::Implementation)?;
                     continue;
                 }
@@ -918,7 +924,9 @@ impl<'g> Analyzer<'g> {
                 }
                 if !matches!(
                     declaration.id.kind,
-                    DeclarationKind::Function | DeclarationKind::Family
+                    DeclarationKind::Function
+                        | DeclarationKind::Family
+                        | DeclarationKind::Implementation
                 ) {
                     continue;
                 }
@@ -935,11 +943,28 @@ impl<'g> Analyzer<'g> {
                         NodeKind::Requirements => {
                             self.unsupported(module, child, Unsupported::Requirements)?
                         }
-                        NodeKind::Name | NodeKind::GenericParameters { .. } => {}
+                        NodeKind::Name
+                        | NodeKind::QualifiedName
+                        | NodeKind::GenericParameters { .. } => {}
+                        NodeKind::TypeArguments => {
+                            for &argument in &module.syntax.nodes[child].children {
+                                self.ty(module, argument, &binders, 1)?;
+                            }
+                        }
                         _ => {
                             result = self.ty(module, child, &binders, 1)?;
                         }
                     }
+                }
+                if let Some(metadata) = metadata.as_deref_mut() {
+                    ordinary::metadata::capture(
+                        metadata,
+                        self,
+                        module,
+                        declaration,
+                        header,
+                        &binders,
+                    )?;
                 }
                 if let (Some(parameters), Some(result)) = (parameters, result) {
                     self.reserve(1)?;
@@ -969,7 +994,7 @@ pub fn analyze_declaration_types(
         facts: PartialFacts::default(),
         declarations: BTreeMap::new(),
     };
-    let kind = if analyzer.analyze().is_err() {
+    let kind = if analyzer.analyze(None).is_err() {
         Some(FailureKind::ResourceLimit)
     } else if !analyzer.facts.obligations.is_empty() {
         Some(FailureKind::Incomplete)

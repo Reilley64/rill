@@ -685,7 +685,7 @@ The implemented scope retains explicit missing core and aggregate-classification
 
 [M4.5 #62](https://github.com/Reilley64/rill/issues/62) starts from M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. Its predecessor has 36 public-interface tests and 239 passing compiler tests. The [M4.4 acceptance record](../crates/compiler/tests/m4-4-acceptance.md) preserves its model, review, correction and verification scopes.
 
-The owner [approved exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287), including the stated parent-pattern incomparability. That approval does not approve this complete checkpoint, its seams, models or compiler implementation. No M4.5 model/compiler code exists.
+The owner [approved exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287), including the stated parent-pattern incomparability. The owner then [approved P1 through P4](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) at `3392baaac8f2ee50e86167700349273a76ce61c4`, before model or Rust work. The exact-wildcard decision alone did not approve the checkpoint.
 
 All slices stay in existing draft PR #58. #56 remains open. No intermediate merge, new PR, M5 or complete-M4 claim is authorized.
 
@@ -747,7 +747,7 @@ P1 does not reopen the owner's exact-wildcard decision. It proposes the executab
 
 ### Planned model and compiler acceptance
 
-All cases below are NotChecked for M4.5. They are expected results, not compiler observations or executed proof.
+The table records planned contrasts. They were NotChecked at the checkpoint. See the [M4.5 acceptance record](../crates/compiler/tests/m4-5-acceptance.md) for observed results and gates that remain unrun.
 
 | Requirement | Planned contrasts |
 | --- | --- |
@@ -769,7 +769,7 @@ Required local verification remains `mise run test:compiler`, `mise run test`, `
 
 ### Checkpoint verification and review
 
-No M4.5 model, compiler assertion or Rill execution has run. Pre-review documentation validation passed 1675 destinations with zero errors. Added RFC prose passed a local sentence-length scan. Formal ASD-STE100 vocabulary compliance remains unverified.
+No model, compiler assertion or Rill execution had run at the checkpoint. Pre-review documentation validation passed 1675 destinations with zero errors. Added RFC prose passed a local sentence-length scan. Formal ASD-STE100 vocabulary compliance remains unverified.
 
 Independent Standards and Spec axes reviewed five staged documents against `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. Their staged diff SHA-256 was `db7bdda5a51bdb491112e3eb7c538bc469894551cdb05951c59c18b74e35a701`.
 
@@ -779,7 +779,7 @@ The local correction ranks original patterns after candidate filtering through r
 
 Spec hand-checked fresh-tuple separation and occurs-checked correlation. Standards ran the documentation checker and whitespace checks. Neither reviewer executed a model/compiler or granted owner approval. Their original staged reviews exclude the later corrections and this review record. No second delegated review is claimed.
 
-After correction, documentation validation passed 1676 destinations with zero errors. Added RFC sentences remained within the local length limit; formal vocabulary compliance remains unverified. The exact-wildcard decision is recorded, but P1 through P4 still require scoped owner approval before model/compiler implementation.
+After correction, documentation validation passed 1676 destinations with zero errors. Added RFC sentences remained within the local length limit; formal vocabulary compliance remains unverified. The checkpoint awaited separate P1 through P4 approval, which the owner later granted at the revision recorded above.
 
 ## Completion record
 

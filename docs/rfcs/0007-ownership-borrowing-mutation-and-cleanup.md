@@ -306,7 +306,7 @@ Panic, stack overflow and fatal exhaustion retain no-unwind behavior. Normal top
 
 ### Proposed M4.5 protected-overlap boundary
 
-[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes this collection prerequisite. Checkpoint approval remains pending. This section approves no provider, ownership operation or runtime mechanism.
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes this collection prerequisite. The owner [approved the scoped checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018). This approval admits no provider, ownership operation or runtime mechanism.
 
 A catalogue belongs to one graph capture and one admitted metadata identity. Each family record retains actual role-admission evidence and its provenance. It states whether required-winner and prohibited-input inventories are complete. Missing evidence is not a validated empty inventory.
 

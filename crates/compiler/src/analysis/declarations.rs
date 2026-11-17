@@ -191,12 +191,12 @@ impl<'r, 'g> DeclarationReceipt<'r, 'g> {
         Ok(self.facts.declarations.get(id))
     }
 }
-struct Budget {
-    limits: AnalysisLimits,
-    statistics: Statistics,
+pub(super) struct Budget {
+    pub(super) limits: AnalysisLimits,
+    pub(super) statistics: Statistics,
 }
 impl Budget {
-    fn step(&mut self, n: usize) -> Work<()> {
+    pub(super) fn step(&mut self, n: usize) -> Work<()> {
         let next = self.statistics.work.checked_add(n).ok_or(())?;
         if next > self.limits.max_work {
             return Err(());
@@ -204,7 +204,8 @@ impl Budget {
         self.statistics.work = next;
         Ok(())
     }
-    fn reserve(&mut self, n: usize) -> Work<()> {
+    // Materializing entries charges both storage and per-entry work.
+    pub(super) fn reserve(&mut self, n: usize) -> Work<()> {
         let next = self.statistics.entries.checked_add(n).ok_or(())?;
         if next > self.limits.max_entries {
             return Err(());
@@ -221,7 +222,8 @@ struct Stored<'r, 'g> {
     ty: &'r Type<'g>,
 }
 struct Checker<'r, 'g> {
-    types: &'r Receipt<'g>,
+    graph: &'g Graph,
+    types: &'r PartialFacts<'g>,
     budget: Budget,
     facts: CheckFacts<'r, 'g>,
     inputs: Vec<Stored<'r, 'g>>,
@@ -259,6 +261,70 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         Ok(unique)
     }
+    fn names_without_types(&mut self) -> Work<()> {
+        // In a partial inventory, a bad annotation can hide the typed shape.
+        // Use actual captured declarations to check its independent names.
+        for module in self.graph.modules() {
+            let nodes = &module.syntax.nodes;
+            let mut by_node = BTreeMap::new();
+            for scope in &module.declarations {
+                self.budget.step(1)?;
+                if scope.scope.is_some() || self.types.declarations.contains_key(&scope.id) {
+                    continue;
+                }
+                if !matches!(
+                    scope.id.kind,
+                    DeclarationKind::Record
+                        | DeclarationKind::Enum
+                        | DeclarationKind::Function
+                        | DeclarationKind::Family
+                        | DeclarationKind::Implementation
+                ) {
+                    continue;
+                }
+                if by_node.is_empty() {
+                    self.budget.reserve(module.declarations.len())?;
+                    by_node.extend(module.declarations.iter().map(|d| (d.node, d)));
+                }
+                let members =
+                    |container: NodeId| nodes[container].children.iter().map(|node| by_node[node]);
+                let children = &nodes[scope.node].children;
+                match scope.id.kind {
+                    DeclarationKind::Record => {
+                        self.names(scope, members(*children.last().unwrap()))?;
+                    }
+                    DeclarationKind::Enum => {
+                        let variants = || {
+                            children
+                                .iter()
+                                .copied()
+                                .filter(|&node| nodes[node].kind == NodeKind::EnumVariant)
+                        };
+                        self.budget.step(children.len())?;
+                        self.names(scope, variants().map(|node| by_node[&node]))?;
+                        self.budget.step(children.len())?;
+                        for variant in variants() {
+                            if let Some(&payload) = nodes[variant].children.get(1)
+                                && nodes[payload].kind == NodeKind::RecordPayload
+                            {
+                                self.names(by_node[&variant], members(payload))?;
+                            }
+                        }
+                    }
+                    _ => {
+                        let signature = &nodes[children[0]].children;
+                        self.budget.step(signature.len())?;
+                        let parameters = *signature
+                            .iter()
+                            .find(|&&node| nodes[node].kind == NodeKind::ValueParameters)
+                            .unwrap();
+                        self.names(scope, members(parameters))?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
     fn prelude(&mut self, facts: &'r DeclarationFacts<'g>, schema: Schema) -> Work<bool> {
         self.budget.step(1)?;
         let DeclarationShape::Function { parameters, result } = &facts.shape else {
@@ -274,7 +340,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 Schema::ConsumingDispose => {
                     let mut void = None;
-                    for primitive in &self.types.graph.prelude().intrinsics {
+                    for primitive in &self.graph.prelude().intrinsics {
                         self.budget.step(1)?;
                         if primitive.namespace() == Namespace::TypeModule
                             && primitive.name() == "void"
@@ -307,7 +373,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(valid)
     }
     fn owner(&mut self, key: &ModuleKey) -> Work<&'g Module> {
-        for module in self.types.graph.modules() {
+        for module in self.graph.modules() {
             self.budget.step(1)?;
             if module.key == *key {
                 return Ok(module);
@@ -324,9 +390,9 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<()> {
         let module = self.owner(&member.id.module)?;
         self.budget
-            .step(self.types.facts.uses.len().checked_ilog2().unwrap_or(0) as usize + 1)?;
+            .step(self.types.uses.len().checked_ilog2().unwrap_or(0) as usize + 1)?;
         let annotation =
-            &self.types.facts.uses[&(&module.key, module.syntax.nodes[node].span.start(), node)];
+            &self.types.uses[&(&module.key, module.syntax.nodes[node].span.start(), node)];
         self.budget.reserve(1)?;
         self.inputs.push(Stored {
             origin,
@@ -728,6 +794,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 },
             );
         }
+        if !self.types.findings.is_empty() || !self.types.obligations.is_empty() {
+            self.names_without_types()?;
+        }
         self.layout_inputs()?;
         loop {
             self.changed = false;
@@ -748,6 +817,28 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
 }
 
+pub(super) fn check_inventory<'r, 'g>(
+    graph: &'g Graph,
+    types: &'r PartialFacts<'g>,
+    contracts: PreludeContracts<'g>,
+    budget: &mut Budget,
+) -> (Work<()>, CheckFacts<'r, 'g>) {
+    let mut checker = Checker {
+        graph,
+        types,
+        budget: Budget {
+            limits: budget.limits,
+            statistics: budget.statistics,
+        },
+        facts: CheckFacts::default(),
+        inputs: Vec::new(),
+        changed: false,
+    };
+    let result = checker.run(contracts);
+    budget.statistics = checker.budget.statistics;
+    (result, checker.facts)
+}
+
 pub fn check_declarations<'r, 'g>(
     types: &'r Receipt<'g>,
     contracts: PreludeContracts<'g>,
@@ -765,21 +856,16 @@ pub fn check_declarations<'r, 'g>(
             complete_diagnostics: false,
         });
     }
-    let mut checker = Checker {
-        types,
-        budget: Budget {
-            limits,
-            statistics: Statistics::default(),
-        },
-        facts: CheckFacts::default(),
-        inputs: Vec::new(),
-        changed: false,
+    let mut budget = Budget {
+        limits,
+        statistics: Statistics::default(),
     };
-    let kind = if checker.run(contracts).is_err() {
+    let (result, facts) = check_inventory(types.graph, &types.facts, contracts, &mut budget);
+    let kind = if result.is_err() {
         Some(CheckFailureKind::ResourceLimit)
-    } else if !checker.facts.obligations.is_empty() {
+    } else if !facts.obligations.is_empty() {
         Some(CheckFailureKind::Incomplete)
-    } else if !checker.facts.findings.is_empty() {
+    } else if !facts.findings.is_empty() {
         Some(CheckFailureKind::SourceRejected)
     } else {
         None
@@ -787,15 +873,15 @@ pub fn check_declarations<'r, 'g>(
     if let Some(kind) = kind {
         Err(CheckFailure {
             kind,
-            partial: Box::new(checker.facts),
-            statistics: checker.budget.statistics,
+            partial: Box::new(facts),
+            statistics: budget.statistics,
             complete_diagnostics: false,
         })
     } else {
         Ok(DeclarationReceipt {
             types,
-            facts: checker.facts,
-            statistics: checker.budget.statistics,
+            facts,
+            statistics: budget.statistics,
         })
     }
 }

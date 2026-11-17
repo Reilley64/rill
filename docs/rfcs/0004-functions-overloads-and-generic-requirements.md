@@ -179,7 +179,7 @@ These call facts retain actual type arguments, the shared substitution and origi
 
 ### Proposed M4.5 ordinary input procedure
 
-[M4.5 #62](https://github.com/Reilley64/rill/issues/62) follows M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. This procedure is a proposal. Model/compiler implementation approval remains pending. Full RFC status and earlier approvals remain unchanged.
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) follows M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. The owner [approved P1 through P4](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) at checkpoint `3392baaac8f2ee50e86167700349273a76ce61c4`. This approval is for scoped implementation. Full RFC status and earlier approvals remain unchanged.
 
 The owner [confirmed exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287). Repeated implementation variables bind identical established static terms. They do not choose a shared admissible parent to repair unequal occurrences.
 
@@ -317,7 +317,7 @@ The proposed public seams are ordinary analysis, canonical family-fact queries a
 
 Before Rust, validate normalization, inclusion, intersection and selection with a separate finite model. Compare bounded ground enumerations against symbolic comparisons. Include fresh-arity separation and adversarial correlations. Model execution is not a universal proof or Rill execution.
 
-No M4.5 model/compiler code or successful acceptance exists at this checkpoint. The exact-wildcard decision does not approve the remaining procedures or seams. Obtain scoped checkpoint approval before implementation.
+See the [M4.5 acceptance record](../../crates/compiler/tests/m4-5-acceptance.md) for the reference model, compiler assertions and unrun acceptance gates. Neither the model nor these compiler assertions execute Rill.
 
 ### Bodies, state and invocation
 

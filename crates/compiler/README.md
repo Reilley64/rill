@@ -209,3 +209,15 @@ Static constructor coverage handles nested products, finite scalar domains and g
 A simple name binding keeps its initializer's value type. Reading a borrowed string field into an owning string does not gain an implicit copy or transfer permission. Borrowed destructuring uses the separate fixed classification rule. Unresolved aggregate classification remains incomplete.
 
 Tuple-context brackets need no fabricated library definition. List construction, indexing and Option/Result guards retain missing canonical core admission explicitly. General inference/defaults, families, callbacks, conversions and other remaining typed obligations stay within M4.5 through M4.8. This receipt grants no ownership, storage initialization, implicit-copy execution, cleanup, runtime, codegen or editor acceptance.
+
+## M4.5 ordinary input analysis
+
+The owner [approved P1 through P4](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) before implementation. The [M4.5 acceptance record](tests/m4-5-acceptance.md) separates model results, compiler assertions and unrun gates.
+
+`analysis::ordinary::analyze_ordinary` takes an M3 graph and AnalysisLimits. It reuses declaration elaboration and M4.2 prerequisites without requiring the bounded M4.1 entry to accept implementation headers. It preserves the original headers and checks each implementation against one complete family substitution. Written defaults and requirements remain separate from input matching.
+
+Query `analysis.family(id)` for canonical implementation records, installed routes, normalized input keys, placement and comparisons. Repeated variables capture exact established static terms. Fixed outer parent, shared-reference and callable-mode admissions do not extend into nested invariant types. A comparison witness identifies the admitted alternatives; it does not prove an inhabited value.
+
+`select_inputs` takes established static input contracts and optional leading family arguments. Explicit input-relevant arguments filter matches. They do not change the original patterns' priority. Output-only arguments and selected requirements remain pending. This entry does not supply a source expression context or use a callee's body.
+
+M3 supplies no canonical role and protection catalogue. The report keeps those obligations and labels every settled selection hypothetical. A missing candidate, unfinished prerequisite or exhausted budget cannot establish absence. An ordinary input fact is not a checked call, a provider clearance, or completed source checking. Actual admission remains in M4.8.

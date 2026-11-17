@@ -594,7 +594,7 @@ Direct compiler tests must cross the agreed data entry/body/node seams using rea
 
 The owner [confirmed exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) for ordinary input patterns. A repeated wildcard cannot merge different actual static terms at their shared enum parent. Fixed parent patterns retain this RFC's permitted owned/read-only admissions.
 
-[RFC 0004's proposed finite procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) owns normalization and whole-vector comparison. Its complete M4.5 checkpoint remains pending approval. It does not add covariance through existing tuples, generic arguments or mutable references.
+[RFC 0004's proposed finite procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) owns normalization and whole-vector comparison. Its [scoped M4.5 checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) has implementation approval. It does not add covariance through existing tuples, generic arguments or mutable references.
 
 Canonical never's no-value admission checks an immediate value expectation without retagging its type. The proposed type-vector query does not turn that rule into wildcard inference or an ordinary matching alternative. A bare canonical never result supplies no inferred input shape by itself. Other noncontinuing expressions retain their independently declared static types. Preserve unresolved positions separately from established input contracts.
 

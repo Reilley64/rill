@@ -357,7 +357,7 @@ Private fields alone do not prevent interception. Later #23 cleanup rules also p
 
 ### Proposed M4.5 collection handoff
 
-[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes the next bounded collection handoff. Full RFC status remains unchanged. Only the [exact-wildcard precision](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) is approved; the complete checkpoint remains pending.
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes the next bounded collection handoff. Full RFC status remains unchanged. The owner approved the [exact-wildcard precision](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) and then [the scoped P1–P4 checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018).
 
 Pass the actual loaded implementation inventory and installed routes to [RFC 0004's proposed ordinary procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure). Do not discover bodies from imports, filenames or calls again. Preserve canonical defining modules through aliases and repeated routes.
 
