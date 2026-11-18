@@ -164,6 +164,28 @@ fn ownership_from_installed_source() {
                 let mut flag = true;
                 return usePair(&mut flag, &flag);
             }
+            function nestedView(text: string): void {
+                let view = &text;
+                let slot = &view;
+                let taken = text;
+                let last = slot;
+            }
+            function reinitialized(seed: &string): void {
+                let mut view = seed;
+                let mut owner = "old";
+                view = &owner;
+                owner = "new";
+            }
+            function groupedBorrow(): bool {
+                let mut flag = true;
+                return readMut((&mut flag));
+            }
+            function localEscape(): &bool { let invalid = true; return &invalid; }
+            function transitivelyBad(): bool { let result = localEscape(); return *result; }
+            function recursive(flag: bool): bool {
+                if (flag) { return true; }
+                return recursive(true);
+            }
         "#,
         )
         .unwrap();
@@ -235,6 +257,33 @@ fn ownership_from_installed_source() {
                 id,
                 AnalysisLimits {
                     max_work: limits.max_work - 1,
+                    ..limits
+                },
+            )
+            .unwrap();
+            assert_eq!(limited.completion(), Completion::ResourceLimit);
+            assert!(limited.mir().is_none());
+            let entries = split.statistics().entries;
+            assert!(
+                lower_body(
+                    &receipt,
+                    module,
+                    id,
+                    AnalysisLimits {
+                        max_entries: entries,
+                        ..limits
+                    }
+                )
+                .unwrap()
+                .mir()
+                .is_some()
+            );
+            let limited = lower_body(
+                &receipt,
+                module,
+                id,
+                AnalysisLimits {
+                    max_entries: entries - 1,
                     ..limits
                 },
             )
@@ -316,6 +365,17 @@ fn ownership_from_installed_source() {
                     if dependent.span.bytes() == b"dependent" && source.span.bytes() == b"source")
             }));
 
+            let replaced = lower("reinitialized");
+            let mir = replaced.mir().unwrap();
+            assert!(mir.blocks.iter().any(|b| matches!(&b.operation, Operation::ScopeExit(order)
+                if matches!(order.as_slice(), [Obligation::Drop(owner), Obligation::EndStorage(view)]
+                    if owner.span.bytes() == b"owner" && view.span.bytes() == b"view"))));
+            let caller = lower("transitivelyBad");
+            assert_eq!(caller.completion(), Completion::SourceRejected);
+            assert!(caller.mir().is_none());
+            assert_eq!(caller.findings()[0].code(), "R0202");
+            assert_eq!(caller.findings()[0].related.span.bytes(), b"invalid");
+
             let rejected = lower("bad");
             assert_eq!(rejected.completion(), Completion::SourceRejected);
             assert!(rejected.mir().is_none());
@@ -357,6 +417,8 @@ fn ownership_from_installed_source() {
                 "resumeParent",
                 "freeze",
                 "keepBacking",
+                "groupedBorrow",
+                "recursive",
             ] {
                 let report = lower(name);
                 assert_eq!(
@@ -378,6 +440,7 @@ fn ownership_from_installed_source() {
                 ("suspendParent", "R0201"),
                 ("descriptorSlot", "R0202"),
                 ("conflictingArgs", "R0201"),
+                ("nestedView", "R0203"),
             ] {
                 let report = lower(name);
                 assert_eq!(

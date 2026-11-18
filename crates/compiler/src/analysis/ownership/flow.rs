@@ -23,8 +23,14 @@ struct Loan {
     source: Slot,
     site: NodeId,
     exclusive: bool,
-    /// A suspended parent is not backing storage for the reborrow.
-    suspension: bool,
+    kind: LoanKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum LoanKind {
+    Backing,
+    Contents,
+    Suspension,
 }
 
 #[derive(Clone, Copy)]
@@ -146,7 +152,7 @@ fn conflict(
                 let blocks = match access {
                     Access::Observe => loan.exclusive,
                     Access::Exclusive => true,
-                    Access::EndScope => !loan.suspension,
+                    Access::EndScope => loan.kind != LoanKind::Suspension,
                 };
                 if loan.source == source && blocks {
                     return Err(Stop::Rejected {
@@ -229,7 +235,7 @@ fn cleanup_boundary<'g>(
         )?;
         for loan in held.loans.iter() {
             budget.step(1)?;
-            if !loan.suspension
+            if loan.kind != LoanKind::Suspension
                 && let Ok(source) = scope.binary_search(&loan.source)
                 && matches!(state[loan.source], State::Initialized(_))
             {
@@ -253,7 +259,7 @@ fn cleanup_boundary<'g>(
         };
         for loan in held.loans.iter() {
             budget.step(1)?;
-            if !loan.suspension
+            if loan.kind != LoanKind::Suspension
                 && let Ok(source) = scope.binary_search(&loan.source)
                 && matches!(state[loan.source], State::Initialized(_))
             {
@@ -280,7 +286,27 @@ fn cleanup_boundary<'g>(
     for &slot in scope {
         state[slot] = State::Vacant;
     }
+    retire_loans(state, scope, budget)?;
     Ok(Operation::ScopeExit(actions))
+}
+
+// No surviving future use may depend on a retired storage version. Forget the
+// obsolete edges of holders that are dead, and drop parent-only restrictions
+// when the parent descriptor's storage ends without retiring its referent.
+fn retire_loans(state: &mut [State], retired: &[Slot], budget: &mut Budget) -> ResultOf<()> {
+    budget.step(state.len())?;
+    for slot in state {
+        let State::Initialized(held) = slot else {
+            continue;
+        };
+        budget.step(held.loans.len())?;
+        let current = |loan: &Loan| retired.binary_search(&loan.source).is_err();
+        if held.loans.iter().any(|loan| !current(loan)) {
+            budget.reserve(held.loans.len())?;
+            held.loans = Arc::from_iter(held.loans.iter().copied().filter(current));
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> ResultOf<Mir<'g>> {
@@ -361,6 +387,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 conflict(&state, &live[pc], from, node, kind, access, budget)?;
                 if moves {
                     state[from] = State::Moved(node);
+                    retire_loans(&mut state, &[from], budget)?;
                 }
                 if let Some(into) = into {
                     state[into] = State::Initialized(held);
@@ -382,7 +409,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 into,
                 exclusive,
             } => {
-                initialized(&state[from], node)?;
+                let held = initialized(&state[from], node)?;
                 conflict(
                     &state,
                     &live[pc],
@@ -396,14 +423,28 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     },
                     budget,
                 )?;
-                budget.reserve(1)?;
+                budget.reserve(2 * (held.loans.len() + 1))?;
+                let mut loans = Vec::with_capacity(held.loans.len() + 1);
+                loans.push(Loan {
+                    source: from,
+                    site: node,
+                    exclusive,
+                    kind: LoanKind::Backing,
+                });
+                // A borrowed descriptor exposes its stored reference. Preserve
+                // that backing without calling it the address of the descriptor.
+                loans.extend(held.loans.iter().map(|loan| Loan {
+                    kind: if loan.kind == LoanKind::Suspension {
+                        LoanKind::Suspension
+                    } else {
+                        LoanKind::Contents
+                    },
+                    ..*loan
+                }));
+                loans.sort_unstable();
+                loans.dedup();
                 state[into] = State::Initialized(Held {
-                    loans: Arc::from([Loan {
-                        source: from,
-                        site: node,
-                        exclusive,
-                        suspension: false,
-                    }]),
+                    loans: Arc::from(loans),
                     capture_drop: None,
                 });
                 Operation::Borrow {
@@ -440,7 +481,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                         source: parent,
                         site: node,
                         exclusive: true,
-                        suspension: true,
+                        kind: LoanKind::Suspension,
                     });
                     loans.sort_unstable();
                     loans.dedup();
@@ -527,6 +568,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     budget,
                 )?;
                 state[slot] = State::Moved(node);
+                retire_loans(&mut state, &[slot], budget)?;
                 Operation::Dispose {
                     callee: dispose.ok_or(Stop::Pending(node))?,
                     operand: local(slot),
@@ -543,6 +585,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     budget,
                 )?;
                 let displaced = std::mem::replace(&mut state[target], State::Vacant);
+                retire_loans(&mut state, &[target], budget)?;
                 cleanup_operation(module, slots[target], displaced)
             }
             Action::Install { target, incoming } => {
@@ -554,11 +597,9 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 }
             }
             Action::Export(slot) => {
-                if let Some(loan) = initialized(&state[slot], node)?
-                    .loans
-                    .iter()
-                    .find(|loan| !loan.suspension)
-                {
+                let loans = &initialized(&state[slot], node)?.loans;
+                budget.step(loans.len())?;
+                if let Some(loan) = loans.iter().find(|loan| loan.kind == LoanKind::Backing) {
                     return Err(Stop::Rejected {
                         site: node,
                         related: slots[loan.source].node,
@@ -589,6 +630,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                         budget,
                     )?;
                     let ended = std::mem::replace(&mut state[slot], State::Vacant);
+                    retire_loans(&mut state, &[slot], budget)?;
                     cleanup_operation(module, slots[slot], ended)
                 } else {
                     state[slot] = State::Vacant;

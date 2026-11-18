@@ -412,11 +412,18 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;
         for (i, &arg) in call.arguments.iter().enumerate().rev() {
             let slot = self.calls[index].args[i];
-            let existing_exclusive =
-                matches!(
-                    self.value(arg)?.ty.as_ref(),
-                    TypeTerm::Reference { mutable: true, .. }
-                ) && !matches!(self.module.syntax.nodes[arg].kind, NodeKind::Prefix("&mut"));
+            let mut root = arg;
+            while self.module.syntax.nodes[root].kind == NodeKind::Group {
+                self.budget.step(1)?;
+                root = self.module.syntax.nodes[root].children[0];
+            }
+            let existing_exclusive = matches!(
+                self.value(arg)?.ty.as_ref(),
+                TypeTerm::Reference { mutable: true, .. }
+            ) && !matches!(
+                self.module.syntax.nodes[root].kind,
+                NodeKind::Prefix("&mut")
+            );
             next = if existing_exclusive {
                 self.emit(
                     arg,

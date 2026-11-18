@@ -1,13 +1,14 @@
 //! Ownership checking and cleanup MIR for a checked function body.
+use super::DeclarationFacts;
 use super::declarations::Budget;
 use super::scalars::{NodeFactKind, NodeFacts, Site};
-use super::typed::TypedReceipt;
+use super::typed::{TypedReceipt, TypedReport};
 use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics,
     TypeTerm,
 };
 use crate::loader::{DeclarationId, DeclarationKind};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 mod build;
 mod flow;
@@ -146,8 +147,8 @@ pub enum Terminator {
     Return,
 }
 
-/// Lower only the selected body, not the entire capture. A body MIR is not an
-/// ownership receipt for the program or evidence of execution.
+/// Lower the selected body after validating its supported direct call graph.
+/// A body MIR is not a whole-capture ownership receipt or evidence of execution.
 pub fn lower_body<'g>(
     receipt: &TypedReceipt<'_, 'g>,
     module: &'g Module,
@@ -177,65 +178,17 @@ pub fn lower_body<'g>(
         limits,
         statistics: Statistics::default(),
     };
-    let entry_site = header.declaration.node;
-    let result = (|| {
-        let DeclarationShape::Function { parameters, .. } = &header.shape else {
-            return Err(Stop::Pending(entry_site));
-        };
-        let Some(&body) = module.syntax.nodes[entry_site].children.get(1) else {
-            return Err(Stop::Pending(entry_site));
-        };
-        let mut build = Build {
-            module,
-            facts: BTreeMap::new(),
-            locals: BTreeMap::new(),
-            slots: Vec::new(),
-            code: Vec::new(),
-            calls: Vec::new(),
-            cleanups: Vec::new(),
-            dispose: typed.dispose_role().map(|d| &d.id),
-            budget: &mut budget,
-        };
-        for fact in typed.bodies().typed_nodes() {
-            build.budget.step(1)?;
-            if fact.site.module == &module.key {
-                build.budget.reserve(1)?;
-                build.facts.insert(fact.site.node, fact);
-            }
-        }
-        build.budget.reserve(parameters.len())?;
-        let mut params = Vec::with_capacity(parameters.len());
-        for parameter in parameters {
-            if matches!(parameter.ty.as_ref(), TypeTerm::Callable { .. }) {
-                return Err(Stop::Pending(parameter.declaration.node));
-            }
-            let slot = build.local(
-                &parameter.declaration.id,
-                parameter.declaration.node,
-                &parameter.ty,
-            )?;
-            params.push(slot);
-        }
-        let end = build.emit(body, Action::None, Edges::End)?;
-        let finish = build.cleanup(body, &params, end)?;
-        let entry = build.statement(
-            body,
-            finish,
-            Exits {
-                returning: finish,
-                looping: None,
-            },
-            1,
-        )?;
-        flow::run(build, entry, &params)
-    })();
+    let result = checked_graph(typed, module, header, &mut budget);
     let (completion, findings, blocked_at, mir) = match result {
         Ok(mir) => (Completion::Checked, Vec::new(), None, Some(mir)),
-        Err(Stop::Rejected {
-            site,
-            related,
-            kind,
-        }) => (
+        Err((
+            module,
+            Stop::Rejected {
+                site,
+                related,
+                kind,
+            },
+        )) => (
             Completion::SourceRejected,
             vec![Finding {
                 site: site_at(module, site),
@@ -245,13 +198,13 @@ pub fn lower_body<'g>(
             None,
             None,
         ),
-        Err(Stop::Pending(node)) => (
+        Err((module, Stop::Pending(node))) => (
             Completion::Incomplete,
             Vec::new(),
             Some(site_at(module, node)),
             None,
         ),
-        Err(Stop::Limit) => (Completion::ResourceLimit, Vec::new(), None, None),
+        Err((_, Stop::Limit)) => (Completion::ResourceLimit, Vec::new(), None, None),
     };
     Ok(Report {
         completion,
@@ -260,6 +213,121 @@ pub fn lower_body<'g>(
         mir,
         statistics: budget.statistics,
     })
+}
+
+// Prove the declared dependency contracts of every direct callee reached by
+// the selected body. Recursion uses those declarations provisionally; no MIR
+// escapes until the worklist has validated each reached body.
+fn checked_graph<'g>(
+    typed: &TypedReport<'g>,
+    module: &'g Module,
+    header: &DeclarationFacts<'g>,
+    budget: &mut Budget,
+) -> Result<Mir<'g>, (&'g Module, Stop)> {
+    let reached = |mir: &Mir<'g>,
+                   pending: &mut VecDeque<(&'g Module, &'g DeclarationId)>,
+                   seen: &mut BTreeSet<&'g DeclarationId>,
+                   budget: &mut Budget|
+     -> ResultOf<()> {
+        for block in &mir.blocks {
+            budget.step(1)?;
+            let Operation::Call(callee) = block.operation else {
+                continue;
+            };
+            if seen.contains(callee) {
+                continue;
+            }
+            let mut target = None;
+            for candidate in typed.inventory().graph().modules() {
+                budget.step(1)?;
+                if candidate.key == callee.module {
+                    target = Some(candidate);
+                    break;
+                }
+            }
+            let target = target.ok_or(Stop::Pending(block.site.node))?;
+            budget.reserve(2)?;
+            seen.insert(callee);
+            pending.push_back((target, callee));
+        }
+        Ok(())
+    };
+
+    budget.reserve(1).map_err(|()| (module, Stop::Limit))?;
+    let mut seen = BTreeSet::from([&header.declaration.id]);
+    let mut pending = VecDeque::new();
+    let root = lower(typed, module, header, budget).map_err(|stop| (module, stop))?;
+    reached(&root, &mut pending, &mut seen, budget).map_err(|stop| (module, stop))?;
+    while let Some((target, id)) = pending.pop_front() {
+        budget.step(1).map_err(|()| (target, Stop::Limit))?;
+        let header = typed
+            .inventory()
+            .type_facts()
+            .declarations
+            .get(id)
+            .ok_or((module, Stop::Pending(header.declaration.node)))?;
+        let mir = lower(typed, target, header, budget).map_err(|stop| (target, stop))?;
+        reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
+    }
+    Ok(root)
+}
+
+fn lower<'g>(
+    typed: &TypedReport<'g>,
+    module: &'g Module,
+    header: &DeclarationFacts<'g>,
+    budget: &mut Budget,
+) -> ResultOf<Mir<'g>> {
+    let entry_site = header.declaration.node;
+    let DeclarationShape::Function { parameters, .. } = &header.shape else {
+        return Err(Stop::Pending(entry_site));
+    };
+    let Some(&body) = module.syntax.nodes[entry_site].children.get(1) else {
+        return Err(Stop::Pending(entry_site));
+    };
+    let mut build = Build {
+        module,
+        facts: BTreeMap::new(),
+        locals: BTreeMap::new(),
+        slots: Vec::new(),
+        code: Vec::new(),
+        calls: Vec::new(),
+        cleanups: Vec::new(),
+        dispose: typed.dispose_role().map(|d| &d.id),
+        budget,
+    };
+    for fact in typed.bodies().typed_nodes() {
+        build.budget.step(1)?;
+        if fact.site.module == &module.key {
+            build.budget.reserve(1)?;
+            build.facts.insert(fact.site.node, fact);
+        }
+    }
+    build.budget.reserve(parameters.len())?;
+    let mut params = Vec::with_capacity(parameters.len());
+    for parameter in parameters {
+        if matches!(parameter.ty.as_ref(), TypeTerm::Callable { .. }) {
+            return Err(Stop::Pending(parameter.declaration.node));
+        }
+        let slot = build.local(
+            &parameter.declaration.id,
+            parameter.declaration.node,
+            &parameter.ty,
+        )?;
+        params.push(slot);
+    }
+    let end = build.emit(body, Action::None, Edges::End)?;
+    let finish = build.cleanup(body, &params, end)?;
+    let entry = build.statement(
+        body,
+        finish,
+        Exits {
+            returning: finish,
+            looping: None,
+        },
+        1,
+    )?;
+    flow::run(build, entry, &params)
 }
 
 fn site_at(module: &Module, node: NodeId) -> Site<'_> {
