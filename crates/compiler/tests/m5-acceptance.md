@@ -42,6 +42,26 @@ On macOS AArch64, [`m5.rs`](m5.rs) stages first-party sources and linked artifac
 
 The reborrow test exposed an M4 handoff issue. Mutable primitive calls removed saved Boolean facts and treated their loss as unresolved Result storage. The change discards those Boolean facts without a blocker and keeps the blocker for every other affected fact. The installed tests still require the M4 receipt before invoking M5.
 
+## Independent review and verification
+
+Standards and Spec independently reviewed `068bd37bf7ca10e2e462556a06c3dc1dbeb26eff` against the M4 input. The checked code revision is `9838f3729b27e2b199e553f0ed1ba94ef0df608f`. Its binary diff from the reviewed revision has SHA-256 `2fb6336176f6bb805ba4f73aa47dfbc2fa13ce813090b7d90cb47da58bb08b52`. The corrections passed the tests below and were not independently re-reviewed.
+
+| Axis | Findings and corrections |
+| --- | --- |
+| Standards | Charge branch-state copies before allocation, and share cleanup classification across boundary and replacement paths. The tests now require a replacement drop, include drops inside scope batches, and require exactly one captured-string drop. This record separates code checks and unrun product gates. |
+| Spec | Carry stored backing through nested descriptor borrows. Verify reached direct callee exits before returning caller MIR. Remove retired storage dependencies before reinitialization. Classify a grouped fresh borrow as fresh rather than as an existing mutable descriptor. Public regressions cover all four. |
+
+| Check at `9838f37` | Outcome |
+| --- | --- |
+| `mise run test:compiler`, `mise run test` | 424 compiler tests and 440 workspace tests passed on macOS AArch64. These totals include the installed M5 probe, which checks both load modes. |
+| `mise run check`, `mise run build:scaffold` | Passed. Formatting, LLVM-free Clippy, tests, tools and fixtures passed. The documentation checker found zero errors across 1,856 destinations. The compiler dependency tree has no LLVM dependency. |
+| Installed M4 staging command | Both modes returned `Checked` with zero core blockers. Both issued typed receipts, with ownership and execution unperformed by the M4 runner. |
+| Existing Python compiler models | 55 passed. They are not M5 compiler or runtime evidence. |
+| [Hosted scaffold checks](https://github.com/Reilley64/rill/actions/runs/44319992775) | All four profiles passed. The first M5 revision failed on profiles without the M4 linked archive. The corrected installed M5 test runs only on macOS AArch64. A scaffold pass elsewhere does not run that probe. |
+| [Hosted native acceptance](https://github.com/Reilley64/rill/actions/runs/44319990794) | Failed at the intentionally unavailable `test:runtime` gate. This is not runtime evidence. |
+
+No workflow changed, so `check:ci` was not run. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM, provider ABI and Rill execution were not tested.
+
 ## Open acceptance obligations
 
 - Place projections, nested mutable storage effects and callee-exit checks for retained destinations. These must distinguish transferring a contained reference from borrowing its slot.
