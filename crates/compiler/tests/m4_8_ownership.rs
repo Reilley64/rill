@@ -79,6 +79,7 @@ fn installed_ownership_requires_the_built_archive() {
         guard_and_endpoint_regions(&request);
         missing_evidence(&root, &request);
         partial_collection(&request);
+        combined_installed_capture(&request);
 
         let graph = loader::load_installed(request.clone()).unwrap();
         fs::write(root.join(ARCHIVE), b"substituted archive").unwrap();
@@ -130,10 +131,27 @@ fn installed_ownership_requires_the_built_archive() {
     let executable = root.join("bin/m48-ownership-probe");
     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
-    for module in ["core.rill", "shared.rill", "mutex.rill", "channel.rill"] {
+    for module in [
+        "core.rill",
+        "shared.rill",
+        "mutex.rill",
+        "channel.rill",
+        "option.rill",
+        "result.rill",
+        "error.rill",
+        "collection.rill",
+        "iter.rill",
+        "format.rill",
+        "convert.rill",
+    ] {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();
     }
     fs::copy(env!("RILL_OWNERSHIP_ARCHIVE"), root.join(ARCHIVE)).unwrap();
+    fs::copy(
+        source.join("../runtime/error.rs"),
+        root.join(ARCHIVE).with_file_name("error.rs"),
+    )
+    .unwrap();
     fs::write(
         root.join("app/main.rill"),
         "
@@ -161,6 +179,90 @@ fn installed_ownership_requires_the_built_archive() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn combined_installed_capture(request: &InstalledRequest) {
+    use compiler::analysis::scalars::{BodyOwner, ScalarFailureKind};
+    fs::write(
+        &request.entry,
+        r#"
+        import std::shared::Shared as Counted;
+        import std::result::{Result as Outcome, isOk};
+        import std::convert::into;
+        import std::collection::List;
+        function convertAndShow(value: u8): Outcome<string> {
+            let xs: List<i32> = [into<i32>(value)];
+            return Outcome.Ok(`${xs[0u64]}`);
+        }
+        function iterateAll(xs: List<i32>): void { for (let _ of xs) { continue; } }
+        function retainType(value: &Counted<i32>): void { }
+        let startup = convertAndShow(5u8);
+        let _ = isOk(&startup);
+        expect isOk(&convertAndShow(6u8));
+    "#,
+    )
+    .unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert!(report.option_role().is_some());
+        assert!(report.result_role().is_some());
+        assert!(report.error_storage_source().is_some());
+        assert!(report.result_use().is_some());
+        assert!(report.show_role().is_some());
+        assert!(report.into_role().is_some());
+        assert!(report.list_role().is_some());
+        assert!(
+            report
+                .ownership_protection()
+                .iter()
+                .any(|scope| scope.provider.is_some())
+        );
+        assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+        let app = graph
+            .modules()
+            .iter()
+            .find(|module| module.key.origin == Origin::Application)
+            .unwrap();
+        let convert = app
+            .declarations
+            .iter()
+            .find(|declaration| declaration.name.as_deref() == Some("convertAndShow"))
+            .unwrap();
+        assert!(
+            report
+                .bodies()
+                .body(app, BodyOwner::Declaration(&convert.id))
+                .unwrap()
+                .is_some(),
+            "{:?}\n{:?}",
+            report.bodies().findings(),
+            report.bodies().obligations()
+        );
+        assert!(
+            graph
+                .modules()
+                .iter()
+                .any(|module| module.key.path == "iter.rill")
+        );
+        let expectation = app
+            .declarations
+            .iter()
+            .find(|declaration| declaration.id.kind == loader::DeclarationKind::Expectation)
+            .unwrap();
+        for owner in [BodyOwner::Startup, BodyOwner::Declaration(&expectation.id)] {
+            assert!(report.bodies().body(app, owner).unwrap().is_some());
+        }
+        assert!(
+            report.bodies().findings().is_empty(),
+            "{:?}",
+            report.bodies().findings()
+        );
+    }
 }
 
 fn guard_and_endpoint_regions(request: &InstalledRequest) {
