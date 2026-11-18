@@ -3,6 +3,8 @@ use compiler::analysis::{AnalysisLimits, typed::analyze_typed};
 use compiler::loader::{self, InstalledRequest, Limits, Origin};
 use std::{fs, path::PathBuf, process::Command};
 
+mod support;
+
 #[test]
 fn destructuring_commits_only_written_components() {
     installed(
@@ -636,12 +638,12 @@ fn installed_with(
         root.join("lib/rill/runtime/aarch64-apple-darwin/error.rs"),
     )
     .unwrap();
-    let probe = root.join("bin/result-use-probe");
-    fs::copy(std::env::current_exe().unwrap(), &probe).unwrap();
-    let output = Command::new(probe)
-        .args(["--exact", test, "--nocapture"])
-        .output()
-        .unwrap();
+    let output = support::run_copied_probe(Command::new(root.join("bin/result-use-probe")).args([
+        "--exact",
+        test,
+        "--nocapture",
+    ]))
+    .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",

@@ -6,6 +6,8 @@ use compiler::loader::{self, InstalledRequest, Limits, Origin};
 use compiler::parser::NodeKind;
 use std::{fs, path::PathBuf, process::Command};
 
+mod support;
+
 #[test]
 fn installed_result_discards_keep_original_storage_and_early_exit() {
     installed(
@@ -1602,8 +1604,6 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
         runtime.join("error.rs"),
     )
     .unwrap();
-    let executable = root.join("bin/probe");
-    fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
     for module in [
         "core.rill",
@@ -1616,12 +1616,13 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
     ] {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();
     }
-    let output = Command::new(executable)
-        .args(["--exact", test, "--nocapture"])
-        .env("RILL_RESULT_PROBE_ROOT", &root)
-        .current_dir(root.join("app"))
-        .output()
-        .unwrap();
+    let output = support::run_copied_probe(
+        Command::new(root.join("bin/probe"))
+            .args(["--exact", test, "--nocapture"])
+            .env("RILL_RESULT_PROBE_ROOT", &root)
+            .current_dir(root.join("app")),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",
