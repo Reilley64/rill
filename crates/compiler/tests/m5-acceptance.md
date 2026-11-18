@@ -170,6 +170,23 @@ The installed probe `tuples::fixed_tuple_places_preserve_initialization_and_orde
 
 Independent Standards and Spec review requests for `9dda758778e874262c93e9c4fc6fcc25d237afcb...ef2493630f5302a7e41a48570e1fdc0fab8c5e2c` failed with provider HTTP 429. Both reviews remain required. No workflow changed; `check:ci` was not run. No Rill code ran. Product, runtime and client acceptance remain unavailable; LLVM and provider ABI acceptance were not run.
 
+## Irrefutable owned tuple bindings
+
+[#75](https://github.com/Reilley64/rill/issues/75) uses the [approved M4 pattern handoff](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163). It lowers a flat owned tuple with names and wildcards only after M4 proves the pattern irrefutable and supplies the binder routes. The initializer evaluates once into an owned statement temporary. Each name gets its matched element under the existing copy and move rules. Wildcard elements stay in the temporary for statement-exit cleanup under the [approved ordering policy](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379). Named bindings remain in lexical scope and carry their dependencies with them.
+
+The installed probe `patterns::owned_tuple_binding_transfers_and_cleans_initialized_elements` first returned `Incomplete` for the typed `unpack` body. At `163338c2dcb84650e3efec09363ea0e6073707a7`, it checks these cases in both load modes:
+
+| Cases | Observed compiler and MIR obligations |
+| --- | --- |
+| `unpack` | Call the initializer once. Move positions 0 and 2 to `first` and `third`. At statement exit, drop positions 3 and 1. At scope exit, drop `third` then `first`. A one-short work budget returns no MIR. |
+| `reuse`, `alreadyPartial` | Reject a subsequent read from the moved source and reject whole initialization from an already partial tuple. Both return `R0200` and no MIR. |
+| `copyPair` | Copy the eligible element into `first`. The original tuple stays readable. |
+| `forward`, `expires` | Returning a stored caller reference is valid. The wildcard string still drops at the binding statement. Returning a reference to a by-value parameter through the same route rejects with `R0202` and publishes no MIR. |
+
+At that revision, `mise run test:compiler` passed 429 tests and `mise run test` passed 445. `mise run check`, `mise run build:scaffold`, and `git diff --check` passed on macOS AArch64 with a fresh short `TMPDIR` under `/tmp`. The staged M4 replay issued both typed receipts. Independent #75 reviews were requested at `163338c`. The earlier #74 Standards and Spec retries failed again with HTTP 429.
+
+Separate installed preflights for an owned record pattern, a borrowed tuple pattern and an `Option` propagation exit issued both M4 receipts. This increment does not claim an ownership result for those cases. Guard commitment, nested patterns, iterators and cancellation remain open. No workflow changed; `check:ci` was not run. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
