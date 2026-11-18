@@ -57,7 +57,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<bool> {
         let mut call = inference.calls.remove(&node).unwrap();
         let id = call.fact.callee;
-        let signature = if self.collections.is_bridge(id) {
+        let signature = if self.installed_bridge(id)? {
             &self
                 .input
                 .ordinary

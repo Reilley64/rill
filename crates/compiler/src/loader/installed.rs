@@ -105,6 +105,7 @@ impl InstalledProfile {
 
     pub(super) fn source(self, path: &str) -> Option<&'static [u8]> {
         match (self, path) {
+            (Self::DarwinArm64, "std.rill") => Some(include_bytes!("../../../../stdlib/std.rill")),
             (Self::DarwinArm64, "core.rill") => {
                 Some(include_bytes!("../../../../stdlib/core.rill"))
             }

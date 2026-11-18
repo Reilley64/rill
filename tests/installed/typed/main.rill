@@ -1,0 +1,21 @@
+import std::{List, Result};
+import std::convert::into;
+import std::result::isOk;
+import std::shared::Shared;
+import checks::ready;
+
+function convertAndShow(value: u8): Result<string> {
+    let values: List<i32> = [into<i32>(value)];
+    return Result.Ok(`${values[0u64]}`);
+}
+
+function visit(values: List<i32>): void {
+    for (let _ of values) { continue; }
+}
+
+function acceptsShared(source: &Shared<i32>): void { }
+
+let startup = convertAndShow(5u8);
+let _ = isOk(&startup);
+expect ready();
+expect isOk(&convertAndShow(6u8));

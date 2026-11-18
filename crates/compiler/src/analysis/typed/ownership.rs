@@ -58,6 +58,16 @@ pub struct NativeOwnershipProvider<'g> {
     pub artifact: &'g Path,
 }
 
+/// Exact installed provider selected at a source call. Not transfer permission.
+#[derive(Clone, Debug)]
+pub struct NativeOwnershipCall<'g> {
+    pub action: NativeOwnershipAction,
+    pub implementation: &'g DeclarationId,
+    pub entry: &'g DeclarationId,
+    pub artifact: &'g Path,
+    pub substitution: Vec<crate::analysis::Substitution<'g>>,
+}
+
 #[derive(Debug)]
 pub struct OwnershipProtection<'g> {
     pub owner: &'g Declaration,
@@ -83,10 +93,29 @@ impl OwnershipOverlap<'_> {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeRepresentationKind {
+    /// Each handle retains the shared payload; it does not own a distinct copy.
+    CountedPayload,
+    /// The acquired payload is held until it is returned to the retained source.
+    GuardPayloadAndSource,
+    /// The two endpoints share a queue containing in-flight payloads.
+    ChannelQueue,
+}
+
+#[derive(Debug)]
+pub struct NativeRepresentation<'g> {
+    pub owner: &'g Declaration,
+    pub argument: &'g Declaration,
+    pub kind: NativeRepresentationKind,
+    pub artifact: &'g Path,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct Report<'g> {
     pub(super) protection: Vec<OwnershipProtection<'g>>,
     pub(super) overlaps: Vec<OwnershipOverlap<'g>>,
+    pub(super) representations: Vec<NativeRepresentation<'g>>,
 }
 
 struct Owner(
@@ -94,17 +123,43 @@ struct Owner(
     &'static str,
     NativeOwnershipAction,
     Option<NativeOwnershipAction>,
+    NativeRepresentationKind,
 );
 
 // Distinct canonical record heads give disjoint regions within each family.
 // Absence of retain here is an explicit prohibition, not a provider gap.
 const OWNERS: &[Owner] = {
     use NativeOwnershipAction::*;
+    use NativeRepresentationKind::*;
     &[
-        Owner("shared.rill", "Shared", SharedRelease, Some(SharedRetain)),
-        Owner("mutex.rill", "LockGuard", GuardRelease, None),
-        Owner("channel.rill", "Sender", SenderRelease, Some(SenderRetain)),
-        Owner("channel.rill", "Receiver", ReceiverRelease, None),
+        Owner(
+            "shared.rill",
+            "Shared",
+            SharedRelease,
+            Some(SharedRetain),
+            CountedPayload,
+        ),
+        Owner(
+            "mutex.rill",
+            "LockGuard",
+            GuardRelease,
+            None,
+            GuardPayloadAndSource,
+        ),
+        Owner(
+            "channel.rill",
+            "Sender",
+            SenderRelease,
+            Some(SenderRetain),
+            ChannelQueue,
+        ),
+        Owner(
+            "channel.rill",
+            "Receiver",
+            ReceiverRelease,
+            None,
+            ChannelQueue,
+        ),
     ]
 };
 
@@ -119,7 +174,7 @@ pub(super) fn check<'g>(
         if !graph.is_pinned_standard_source(module) {
             continue;
         }
-        for &Owner(path, name, dispose, retain) in OWNERS {
+        for &Owner(path, name, dispose, retain, kind) in OWNERS {
             budget.step(1)?;
             if path != module.key.path {
                 continue;
@@ -130,13 +185,37 @@ pub(super) fn check<'g>(
             let Some(facts) = unconditional_declaration(inventory, owner, budget)? else {
                 continue;
             };
-            let (DeclarationShape::Record { fields }, [_]) =
+            let (DeclarationShape::Record { fields }, [argument]) =
                 (&facts.shape, facts.binders.as_slice())
             else {
                 continue;
             };
-            if !matches!(fields.as_slice(), [field] if !field.declaration.public) {
+            let [field] = fields.as_slice() else {
                 continue;
+            };
+            let TypeTerm::Nominal {
+                declaration: seal,
+                arguments,
+            } = field.ty.as_ref()
+            else {
+                continue;
+            };
+            budget.step(1)?;
+            if field.declaration.public || !arguments.is_empty() || seal.module != module.key
+                || !inventory.type_facts().declarations.get(seal).is_some_and(|seal| {
+                    !seal.declaration.public && seal.binders.is_empty()
+                        && matches!(&seal.shape, DeclarationShape::Enum { variants } if variants.is_empty())
+                }) {
+                continue;
+            }
+            if let Some(artifact) = graph.ownership_archive() {
+                budget.reserve(1)?;
+                report.representations.push(NativeRepresentation {
+                    owner,
+                    argument: argument.declaration,
+                    kind,
+                    artifact,
+                });
             }
             let release = Scope {
                 module,

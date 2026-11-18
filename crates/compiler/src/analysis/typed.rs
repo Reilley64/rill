@@ -20,8 +20,9 @@ pub use core::{OptionRole, ResultRole};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
 pub use numeric::{InfallibleNumericContract, NumericConversion, NumericConversionError};
 pub use ownership::{
-    NativeOwnershipAction, NativeOwnershipProvider, OwnershipCoverage, OwnershipOverlap,
-    OwnershipProtection, OwnershipRule,
+    NativeOwnershipAction, NativeOwnershipCall, NativeOwnershipProvider, NativeRepresentation,
+    NativeRepresentationKind, OwnershipCoverage, OwnershipOverlap, OwnershipProtection,
+    OwnershipRule,
 };
 pub use primitive::{Primitive, PrimitiveValue};
 pub use result_use::{
@@ -120,6 +121,11 @@ impl<'g> TypedReport<'g> {
         &self.ownership.overlaps
     }
 
+    /// Attached storage contract, independent of the provider winner or protection coverage.
+    pub fn native_representations(&self) -> &[NativeRepresentation<'g>] {
+        &self.ownership.representations
+    }
+
     /// A partial pass over owned occurrences. `None` means no admitted role or no work reached.
     pub fn result_use(&self) -> Option<&ResultUseReport<'g>> {
         self.result_use.as_ref()
@@ -206,6 +212,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             show: core.show,
             into: core.into.as_ref(),
             collections,
+            native_ownership: &ownership.protection,
             exhausted: authority_exhausted,
         },
     );

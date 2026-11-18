@@ -480,6 +480,7 @@ struct Checker<'r, 'g> {
     show: Option<&'g Declaration>,
     installed_into: Option<&'r super::typed::IntoAdmission<'g>>,
     collections: super::typed::CollectionCore<'g>,
+    native_ownership: &'r [super::typed::OwnershipProtection<'g>],
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
@@ -513,6 +514,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             show: None,
             installed_into: None,
             collections: Default::default(),
+            native_ownership: &[],
             data_depth: 0,
             evidence: generics::Evidence::default(),
             conversions: None,
@@ -1592,7 +1594,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(None);
         };
         let closed_error = self.closed_err(&declaration.id);
-        let bridge = self.collections.is_bridge(&declaration.id);
+        let bridge = self.installed_bridge(&declaration.id)?;
         let family = declaration.id.kind == DeclarationKind::Family
             && self.input.ordinary.is_some()
             && !closed_error
@@ -3308,7 +3310,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                     && self.input.ordinary.is_some()
                 {
                     if let Some((typed, _)) = self.implementation_contract(module, declaration)? {
-                        self.check_named_body(module, typed, true, None)?;
+                        self.elab.step(self.native_ownership.len())?;
+                        let delivered = self
+                            .native_ownership
+                            .iter()
+                            .filter_map(|scope| scope.provider.as_ref())
+                            .any(|provider| provider.implementation.id == declaration.id);
+                        self.check_named_body(module, typed, !delivered, None)?;
                         self.clear_body_assumptions();
                     } else {
                         self.defer(module, declaration.node, ScalarUnsupported::FamilySelection)?;

@@ -123,6 +123,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         default_step: bool,
     ) -> Work<bool> {
+        if matches!(
+            inference.slots[&node].installed_operation,
+            Some(data::DataExpression::NativeOwnership(_))
+        ) {
+            return Ok(false);
+        }
         let mut call = inference.calls.remove(&node).unwrap();
         let module = inference.module;
         let family = self
@@ -269,6 +275,18 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
             }
         }
+        if blocker.is_none()
+            && let Some(HypotheticalOutcome::Winner(winner)) = outcome
+            && let Some((operation, result)) =
+                self.native_call(inference, node, &call, winner, &viable)?
+        {
+            self.elab.reserve(1)?;
+            call.fact.substitution = substitutions;
+            inference.slots.get_mut(&node).unwrap().installed_operation = Some(operation);
+            inference.calls.insert(node, call);
+            self.establish(inference, node, result, false)?;
+            return Ok(false);
+        }
         let output = if consistent {
             self.conditional_output(inference, node, &call, &inputs, &viable, outcome)?
         } else {
@@ -323,6 +341,69 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.reserve(1)?;
         inference.calls.insert(node, call);
         Ok(false)
+    }
+
+    fn native_call(
+        &mut self,
+        inference: &Inference<'g>,
+        node: NodeId,
+        call: &PreparedCall<'g>,
+        winner: &'g DeclarationId,
+        viable: &[SourceCandidate<'r, 'g>],
+    ) -> Work<Option<(data::DataExpression<'g>, Type<'g>)>> {
+        use crate::analysis::typed::{NativeOwnershipCall, OwnershipCoverage, OwnershipRule};
+        if inference.slots[&node].ordinary_context.is_some() || self.arrow_premise.is_some() {
+            return Ok(None);
+        }
+        self.elab
+            .step(call.fact.arguments.len() + self.native_ownership.len())?;
+        if call.fact.arguments.iter().any(|arg| {
+            let slot = &inference.slots[arg];
+            slot.blocked || slot.ordinary_context.is_some() || slot.ty.is_none()
+        }) {
+            return Ok(None);
+        }
+        let Some((action, provider)) = self.native_ownership.iter().find_map(|scope| {
+            let provider = scope.provider.as_ref()?;
+            let OwnershipRule::Required(action) = scope.rule else {
+                return None;
+            };
+            (scope.family == call.fact.callee
+                && scope.coverage == OwnershipCoverage::Clear
+                && provider.implementation.id == *winner)
+                .then_some((action, provider))
+        }) else {
+            return Ok(None);
+        };
+        self.elab.step(viable.len())?;
+        let Some(candidate) = viable
+            .iter()
+            .find(|candidate| candidate.covers && candidate.body.source.declaration == *winner)
+        else {
+            return Ok(None);
+        };
+        let header = &candidate.body.header;
+        let DeclarationShape::Function { result, .. } = &header.shape else {
+            unreachable!()
+        };
+        if candidate.substitution.len() != header.binders.len() {
+            return Ok(None);
+        }
+        // The admitted, closed header supplies this result, not the hypothetical
+        // output worklist or an assumption from the caller.
+        let result = self.substitute(result, &candidate.substitution, 1)?;
+        self.elab.reserve(1 + candidate.substitution.len())?;
+        let operation = NativeOwnershipCall {
+            action,
+            implementation: winner,
+            entry: &provider.entry.id,
+            artifact: provider.artifact,
+            substitution: candidate.substitution.clone(),
+        };
+        Ok(Some((
+            data::DataExpression::NativeOwnership(Arc::new(operation)),
+            result,
+        )))
     }
 
     fn compare_ordinary(
@@ -1208,7 +1289,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         let module = inference.module;
         for (&node, call) in &inference.calls {
             self.elab.step(1)?;
-            if !call.family {
+            if !call.family
+                || matches!(
+                    inference.slots[&node].installed_operation,
+                    Some(data::DataExpression::NativeOwnership(_))
+                )
+            {
                 continue;
             }
             let header = self

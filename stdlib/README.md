@@ -1,8 +1,8 @@
 # Standard-library source
 
-This directory owns Rill-language standard-library implementations. `core.rill` declares the fixed prelude families but supplies no providers for them. `option.rill` defines `Option` and five Rill helpers. The complete standard library and its `std.rill` facade are not present.
+This directory owns Rill-language standard-library implementations. The pinned `std.rill` facade re-exports selected prelude and type declarations without changing their identities. `core.rill` declares the fixed prelude families. The standard library remains incomplete.
 
-`shared.rill`, `mutex.rill` and `channel.rill` declare the opaque owner types and protected copy and disposal registrations for this increment. Their private entries bind to the [installed ownership archive](../runtime/README.md) for static analysis. The source markers do not describe native layout. The registrations do not supply Rill constructors or establish executable calls.
+`shared.rill`, `mutex.rill` and `channel.rill` declare the opaque owner types and protected copy and disposal registrations for this increment. Their private entries bind to the [installed ownership archive](../runtime/README.md) for static analysis. The source markers do not describe native layout. Static call facts require a clear protected region and the selected delivered provider. The registrations do not supply Rill constructors, transfer permission or executable calls.
 
 Keep language-level algorithms here. Target-runtime support belongs in [`runtime/`](../runtime/README.md); compiler analysis and intrinsics belong to their implementation owners. This boundary does not settle production ABI or provider integration details.
 

@@ -35,6 +35,16 @@ pub(super) struct GuardOperand<'g> {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
+    pub(super) fn installed_bridge(&mut self, id: &DeclarationId) -> Work<bool> {
+        self.elab.step(self.native_ownership.len())?;
+        Ok(self.collections.is_bridge(id)
+            || self
+                .native_ownership
+                .iter()
+                .filter_map(|scope| scope.provider.as_ref())
+                .any(|provider| provider.entry.id == *id))
+    }
+
     pub(super) fn guard_operand(&self, value: &ExpressionResult<'g>) -> Option<GuardOperand<'g>> {
         let (ty, access) = match value.ty.as_ref() {
             TypeTerm::Reference { mutable, referent } => (

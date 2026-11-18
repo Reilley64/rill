@@ -355,6 +355,7 @@ pub(in crate::analysis) struct IntegratedInputs<'r, 'g> {
     pub show: Option<&'g Declaration>,
     pub into: Option<&'r crate::analysis::typed::IntoAdmission<'g>>,
     pub collections: crate::analysis::typed::CollectionCore<'g>,
+    pub native_ownership: &'r [crate::analysis::typed::OwnershipProtection<'g>],
     pub exhausted: bool,
 }
 
@@ -407,6 +408,9 @@ fn analyze_bodies<'g>(
     checker.collections = integration
         .as_ref()
         .map_or_else(Default::default, |core| core.collections);
+    checker.native_ownership = integration
+        .as_ref()
+        .map_or(&[], |core| core.native_ownership);
     checker.elab.lexical = input.lexical().cloned();
     checker.conversions = conversions.map(|r| &r.families);
     let mut declaration_issues = Vec::new();

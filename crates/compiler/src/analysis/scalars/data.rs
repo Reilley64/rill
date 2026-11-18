@@ -77,6 +77,7 @@ pub enum DataExpression<'g> {
     Interpolation(Arc<[FormattingCall<'g>]>),
     PrimitiveShow(crate::analysis::typed::Primitive),
     NumericInto(crate::analysis::typed::NumericConversion),
+    NativeOwnership(Arc<crate::analysis::typed::NativeOwnershipCall<'g>>),
 }
 #[derive(Debug)]
 pub struct DataReceipt<'r, 'g>(ScalarReceipt<'r, 'g>);

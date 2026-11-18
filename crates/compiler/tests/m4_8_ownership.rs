@@ -68,12 +68,38 @@ fn installed_ownership_requires_the_built_archive() {
             assert_eq!(overlap.code(), "R0500");
             assert_eq!(overlap.rule, copy.rule);
             assert_eq!(overlap.implementation.id.module.origin, Origin::Application);
+            let app = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application)
+                .unwrap();
+            let invocation = app
+                .syntax
+                .nodes
+                .iter()
+                .position(|n| n.span.bytes() == b"duplicate(value)")
+                .unwrap();
+            assert!(
+                report.bodies().node(app, invocation).unwrap().is_none(),
+                "overlap cannot produce a checked call"
+            );
             let release = report
                 .ownership_protection()
                 .iter()
                 .find(|p| p.rule == OwnershipRule::Required(NativeOwnershipAction::SharedRelease))
                 .unwrap();
             assert_eq!(release.coverage, OwnershipCoverage::Clear);
+            // A protected overlap must not erase independent representation evidence.
+            let [storage] = report.native_representations() else {
+                panic!("expected one Shared representation");
+            };
+            assert_eq!(storage.owner.id, copy.owner.id);
+            assert_eq!(storage.argument.name.as_deref(), Some("T"));
+            assert_eq!(storage.artifact, provider.artifact);
+            assert_eq!(
+                storage.kind,
+                compiler::analysis::typed::NativeRepresentationKind::CountedPayload
+            );
         }
 
         guard_and_endpoint_regions(&request);
@@ -81,6 +107,14 @@ fn installed_ownership_requires_the_built_archive() {
         partial_collection(&request);
         combined_installed_capture(&request);
 
+        let facade = root.join("lib/rill/std/std.rill");
+        let bytes = fs::read(&facade).unwrap();
+        fs::write(&facade, [&bytes[..], b"\n// changed pin"].concat()).unwrap();
+        assert_eq!(
+            loader::load_installed(request.clone()).unwrap_err().kind,
+            FailureKind::InvalidRequest
+        );
+        fs::write(facade, bytes).unwrap();
         let graph = loader::load_installed(request.clone()).unwrap();
         fs::write(root.join(ARCHIVE), b"substituted archive").unwrap();
         // Static evidence stays with the original captured inputs.
@@ -132,6 +166,7 @@ fn installed_ownership_requires_the_built_archive() {
     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
     for module in [
+        "std.rill",
         "core.rill",
         "shared.rill",
         "mutex.rill",
@@ -160,6 +195,7 @@ fn installed_ownership_requires_the_built_archive() {
         type Payload<T> = { part: T; }
         implement<T> duplicate(value: &Counted<Payload<T>>): Counted<Payload<T>> { }
         implement dispose(value: Payload<bool>): void { }
+        function blocked(value: &Counted<Payload<bool>>): Counted<Payload<bool>> { return duplicate(value); }
     ",
     )
     .unwrap();
@@ -182,20 +218,24 @@ fn installed_ownership_requires_the_built_archive() {
 }
 
 fn combined_installed_capture(request: &InstalledRequest) {
-    use compiler::analysis::scalars::{BodyOwner, ScalarFailureKind};
+    use compiler::analysis::scalars::{
+        BodyOwner, NodeFactKind, ScalarFailureKind, data::DataExpression,
+    };
+    use compiler::parser::NodeKind;
     fs::write(
         &request.entry,
         r#"
         import std::shared::Shared as Counted;
-        import std::result::{Result as Outcome, isOk};
+        import std::{List, Result as Outcome};
+        import std::result::isOk;
         import std::convert::into;
-        import std::collection::List;
         function convertAndShow(value: u8): Outcome<string> {
             let xs: List<i32> = [into<i32>(value)];
             return Outcome.Ok(`${xs[0u64]}`);
         }
         function iterateAll(xs: List<i32>): void { for (let _ of xs) { continue; } }
-        function retainType(value: &Counted<i32>): void { }
+        function retainType(value: &Counted<i32>): Counted<i32> { return copy(value); }
+        function releaseType(value: Counted<i32>): void { dispose(value); }
         let startup = convertAndShow(5u8);
         let _ = isOk(&startup);
         expect isOk(&convertAndShow(6u8));
@@ -215,13 +255,31 @@ fn combined_installed_capture(request: &InstalledRequest) {
         assert!(report.result_use().is_some());
         assert!(report.show_role().is_some());
         assert!(report.into_role().is_some());
-        assert!(report.list_role().is_some());
-        assert!(
-            report
-                .ownership_protection()
-                .iter()
-                .any(|scope| scope.provider.is_some())
+        let list = report.list_role().expect("original List role");
+        assert_eq!(list.declaration.id.module.path, "collection.rill");
+        assert_eq!(
+            report.result_role().unwrap().declaration.id.module.path,
+            "result.rill"
         );
+        let shared = graph
+            .modules()
+            .iter()
+            .find(|module| module.key.path == "shared.rill")
+            .unwrap();
+        let protected = report.ownership_protection();
+        assert_eq!(protected.len(), 2);
+        for scope in protected {
+            let provider = scope.provider.as_ref().expect("delivered Shared provider");
+            assert!(
+                report
+                    .bodies()
+                    .body(shared, BodyOwner::Declaration(&provider.implementation.id))
+                    .unwrap()
+                    .is_some(),
+                "native wrapper body was not checked: {:?}",
+                report.bodies().obligations()
+            );
+        }
         assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
         let app = graph
             .modules()
@@ -249,6 +307,58 @@ fn combined_installed_capture(request: &InstalledRequest) {
                 .iter()
                 .any(|module| module.key.path == "iter.rill")
         );
+        for name in ["retainType", "releaseType"] {
+            let declaration = app
+                .declarations
+                .iter()
+                .find(|item| item.name.as_deref() == Some(name))
+                .unwrap();
+            assert!(
+                report
+                    .bodies()
+                    .body(app, BodyOwner::Declaration(&declaration.id))
+                    .unwrap()
+                    .is_some(),
+                "{name}"
+            );
+        }
+        for (span, action) in [
+            (
+                b"copy(value)".as_slice(),
+                NativeOwnershipAction::SharedRetain,
+            ),
+            (
+                b"dispose(value)".as_slice(),
+                NativeOwnershipAction::SharedRelease,
+            ),
+        ] {
+            let id = app
+                .syntax
+                .nodes
+                .iter()
+                .position(|n| n.kind == NodeKind::Call && n.span.bytes() == span)
+                .unwrap();
+            let NodeFactKind::Expression(value) =
+                &report.bodies().node(app, id).unwrap().unwrap().kind
+            else {
+                panic!("not a call")
+            };
+            let Some(DataExpression::NativeOwnership(operation)) = &value.data else {
+                panic!("no admitted operation")
+            };
+            assert!(value.ordinary_context.is_none());
+            assert_eq!(operation.action, action);
+            let evidence = protected
+                .iter()
+                .find(|scope| scope.rule == OwnershipRule::Required(action))
+                .unwrap()
+                .provider
+                .as_ref()
+                .unwrap();
+            assert_eq!(*operation.implementation, evidence.implementation.id);
+            assert_eq!(*operation.entry, evidence.entry.id);
+            assert_eq!(operation.artifact, evidence.artifact);
+        }
         let expectation = app
             .declarations
             .iter()
@@ -343,6 +453,7 @@ fn missing_evidence(root: &Path, request: &InstalledRequest) {
             .all(|p| p.provider.is_none() && p.coverage == OwnershipCoverage::Pending)
     );
     assert!(report.ownership_overlaps().is_empty());
+    assert!(report.native_representations().is_empty());
     fs::rename(&withheld, &archive).unwrap();
     assert_eq!(
         loader::validate_inputs(&graph, Limits::default())
