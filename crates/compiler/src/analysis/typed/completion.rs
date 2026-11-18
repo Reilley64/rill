@@ -29,15 +29,10 @@ pub(super) fn finish(report: &TypedReport<'_>, budget: &mut Budget) -> Work<Type
     }
     for pending in uses.pending() {
         budget.step(1)?;
-        if pending.blocker == ResultUseBlocker::TypedInput {
-            budget.step(bodies.findings().len())?;
-            if bodies.findings().iter().any(|finding| {
-                finding.site.module == pending.site.module && finding.site.node == pending.site.node
-            }) {
-                // The dependent fact cannot exist because this same node was
-                // rejected. This is not an independent unresolved judgment.
-                continue;
-            }
+        if pending.blocker == ResultUseBlocker::TypedInput
+            && rejected_input(report.inventory.graph(), bodies, pending.site, budget)?
+        {
+            continue;
         }
         return Ok(Incomplete);
     }
@@ -67,6 +62,32 @@ pub(super) fn finish(report: &TypedReport<'_>, budget: &mut Budget) -> Work<Type
         return Ok(Incomplete);
     }
     Ok(if rejected { SourceRejected } else { Checked })
+}
+
+fn rejected_input(
+    graph: &Graph,
+    bodies: &GenericReport<'_>,
+    site: Site<'_>,
+    budget: &mut Budget,
+) -> Work<bool> {
+    use crate::parser::NodeKind;
+    budget.step(graph.modules().len())?;
+    let Some(module) = graph.modules().iter().find(|m| &m.key == site.module) else {
+        return Ok(false);
+    };
+    let node = &module.syntax.nodes[site.node];
+    // A rejected return operand also prevents the enclosing return fact.
+    // Do not credit an unrelated finding in the same body or expression.
+    let operand = if node.kind == NodeKind::Return {
+        node.children.first().copied()
+    } else {
+        None
+    };
+    budget.step(bodies.findings().len())?;
+    Ok(bodies.findings().iter().any(|finding| {
+        finding.site.module == site.module
+            && (finding.site.node == site.node || operand == Some(finding.site.node))
+    }))
 }
 
 fn body_root(kind: DeclarationKind) -> bool {
