@@ -94,6 +94,12 @@ fn liveness(
             }
             Action::FormClosure { capture, into, .. } => (Some(capture), Some(into)),
             Action::Call(index) => (None, calls[index].into),
+            Action::InstallThrough {
+                descriptor,
+                contents,
+                ..
+            } => (Some(descriptor), Some(contents)),
+            Action::CheckRetained(contents) => (Some(contents), None),
             Action::TestVariant { operand, .. } => (Some(operand), None),
             Action::CopyOptionPayload { operand, into } => (Some(operand), Some(into)),
             Action::ConstructVariant { payload, into, .. } => (payload, Some(into)),
@@ -135,7 +141,11 @@ fn liveness(
             Action::Call(index) => calls[index].args.as_slice(),
             _ => &[],
         };
-        for slot in used.into_iter().chain(args.iter().copied()) {
+        let incoming = match instruction.action {
+            Action::InstallThrough { incoming, .. } => Some(incoming),
+            _ => None,
+        };
+        for slot in used.into_iter().chain(incoming).chain(args.iter().copied()) {
             for member in slots[slot].storage(slot) {
                 budget.step(1)?;
                 if !live[pc].contains(&member) {
@@ -955,6 +965,44 @@ pub(super) fn run<'g>(
                         target: local(target),
                         incoming: local(incoming),
                     }
+                }
+                Action::InstallThrough {
+                    descriptor,
+                    contents,
+                    incoming,
+                } => {
+                    initialized(&state[descriptor], node)?;
+                    initialized(&state[incoming], node)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        descriptor,
+                        (node, Conflict::Access),
+                        Access::Exclusive,
+                        budget,
+                    )?;
+                    // Overwrite the exact external contents, not the access loan.
+                    state[contents] = std::mem::replace(&mut state[incoming], State::Vacant);
+                    Operation::InstallThrough {
+                        descriptor: local(descriptor),
+                        incoming: local(incoming),
+                    }
+                }
+                Action::CheckRetained(contents) => {
+                    visit_loans(
+                        &state,
+                        slots[contents].storage(contents),
+                        budget,
+                        |loan, _| {
+                            Err(Stop::Rejected {
+                                site: node,
+                                related: loan.site,
+                                kind: Conflict::Escape,
+                            })
+                        },
+                    )?;
+                    Operation::None
                 }
                 Action::Export(slot) => {
                     require_initialized(&slots, &state, slot, node, budget)?;

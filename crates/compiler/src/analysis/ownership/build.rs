@@ -505,8 +505,25 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::ExpressionStatement => self.discard(node, children[0], next, depth + 1),
             NodeKind::Assignment("=") => {
-                let target = self.place(children[0])?;
-                let value = children[1];
+                let (left, value) = (children[0], children[1]);
+                let target = &self.module.syntax.nodes[left];
+                if target.kind == NodeKind::Prefix("*") {
+                    let descriptor = self.place(target.children[0])?;
+                    let contents = *self.retained.get(&descriptor).ok_or(Stop::Pending(left))?;
+                    let ty = self.value(value)?.ty.clone();
+                    let incoming = self.slot(value, &ty)?;
+                    let install = self.emit(
+                        node,
+                        Action::InstallThrough {
+                            descriptor,
+                            contents,
+                            incoming,
+                        },
+                        Edges::Next(next),
+                    )?;
+                    return self.expression(value, Some(incoming), install, depth + 1);
+                }
+                let target = self.place(left)?;
                 let ty = self.value(value)?.ty.clone();
                 let incoming = self.slot(value, &ty)?;
                 let initializer = self.ungroup(value)?;

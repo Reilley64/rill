@@ -24,6 +24,8 @@ mod patterns;
 mod propagation;
 #[path = "m5/records.rs"]
 mod records;
+#[path = "m5/retained.rs"]
+mod retained;
 mod support;
 #[path = "m5/tuples.rs"]
 mod tuples;

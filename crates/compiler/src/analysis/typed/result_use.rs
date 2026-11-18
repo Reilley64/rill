@@ -8,7 +8,7 @@ use crate::analysis::scalars::{
 };
 use crate::analysis::{
     Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
-    Type, TypeTerm,
+    Type, TypeTerm, retained_bool_slot,
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
@@ -615,10 +615,19 @@ impl<'a, 'g> Check<'a, 'g> {
                     _ => None,
                 });
                 let checked = self.facts(node)?.is_some();
+                let caller_bool_descriptor = checked
+                    && syntax.kind == NodeKind::Assignment("=")
+                    && matches!(path, Some(path) if path.root.kind == DeclarationKind::Parameter
+                        && path.projections.as_slice() == [PathProjection::Dereference])
+                    && self.module.syntax.nodes[left].kind == NodeKind::Prefix("*")
+                    && self
+                        .expression_facts(self.module.syntax.nodes[left].children[0])?
+                        .is_some_and(|value| retained_bool_slot(&value.ty).is_some());
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
                     let incoming = state.take(Root::Temporary(right), &[], self.budget)?;
-                    if let Some(target @ (root, path)) = &self.address(state, path)?
+                    let storage = self.place_storage(state, path)?;
+                    if let PlaceStorage::Exact(target @ (root, path)) = &storage
                         && checked
                     {
                         let displaced = state.take(*root, path, self.budget)?;
@@ -630,9 +639,20 @@ impl<'a, 'g> Check<'a, 'g> {
                             ResultDiscardKind::Replacement,
                         )?;
                         state.install(incoming, *root, path, self.budget)?;
+                    } else if caller_bool_descriptor
+                        && matches!(&storage, PlaceStorage::Indirect(locations) if locations.is_empty())
+                    {
+                        // No local address or Result occurrence can reside in this
+                        // scalar descriptor. The ownership pass checks its backing.
+                        self.budget.step(incoming.len())?;
+                        if incoming.iter().any(|entry| {
+                            matches!(entry.content, Content::Result(_) | Content::Unclassified(_))
+                        }) {
+                            self.pending(node, ResultUseBlocker::Storage)?;
+                        }
                     } else {
                         self.pending(node, ResultUseBlocker::Storage)?;
-                        for address in self.place_storage(state, path)?.addresses() {
+                        for address in storage.addresses() {
                             self.forget_address(state, &address, node)?;
                         }
                     }

@@ -71,6 +71,22 @@ pub enum TypeTerm<'g> {
         result: Type<'g>,
     },
 }
+// The scoped retained-destination handoff recognizes only a caller's
+// exclusive access to a shared bool descriptor, not general nested storage.
+fn retained_bool_slot<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+    if let TypeTerm::Reference {
+        mutable: true,
+        referent,
+    } = ty
+        && matches!(referent.as_ref(), TypeTerm::Reference { mutable: false, referent: inner }
+            if matches!(inner.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+    {
+        Some(referent)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Binder<'g> {
     pub declaration: &'g Declaration,

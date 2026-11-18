@@ -5,7 +5,7 @@ use super::scalars::{NodeFactKind, NodeFacts, Site};
 use super::typed::{TypedReceipt, TypedReport};
 use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
-    TypeTerm,
+    TypeTerm, retained_bool_slot,
 };
 use crate::loader::{Declaration, DeclarationId, DeclarationKind};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -188,6 +188,11 @@ pub enum Operation<'g> {
     },
     Install {
         target: Place<'g>,
+        incoming: Place<'g>,
+    },
+    /// Store into caller storage through the initialized exclusive descriptor.
+    InstallThrough {
+        descriptor: Place<'g>,
         incoming: Place<'g>,
     },
     Export(Place<'g>),
@@ -402,6 +407,7 @@ fn lower<'g>(
         module,
         facts: BTreeMap::new(),
         locals: BTreeMap::new(),
+        retained: BTreeMap::new(),
         slots: Vec::new(),
         code: Vec::new(),
         calls: Vec::new(),
@@ -430,6 +436,11 @@ fn lower<'g>(
             &parameter.ty,
         )?;
         params.push(slot);
+        if let Some(ty) = retained_bool_slot(&parameter.ty) {
+            let contents = build.slot(parameter.declaration.node, ty)?;
+            build.budget.reserve(1)?;
+            build.retained.insert(slot, contents);
+        }
     }
     let active = if start_disposer {
         let ([slot], [parameter]) = (params.as_slice(), parameters.as_slice()) else {
@@ -451,7 +462,14 @@ fn lower<'g>(
         Some(frame) => build.cleanup(body, &[frame.remainder], end)?,
         None => end,
     };
-    let finish = build.cleanup(body, &params, end)?;
+    let mut epilogue = end;
+    for &parameter in params.iter().rev() {
+        build.budget.step(1)?;
+        if let Some(&contents) = build.retained.get(&parameter) {
+            epilogue = build.emit(body, Action::CheckRetained(contents), Edges::Next(epilogue))?;
+        }
+    }
+    let finish = build.cleanup(body, &params, epilogue)?;
     let entry = build.statement(
         body,
         finish,
@@ -602,6 +620,12 @@ enum Action<'g> {
         target: Slot,
         incoming: Slot,
     },
+    InstallThrough {
+        descriptor: Slot,
+        contents: Slot,
+        incoming: Slot,
+    },
+    CheckRetained(Slot),
     End(Slot),
     Cleanup(usize),
     Export(Slot),
@@ -638,6 +662,8 @@ struct Build<'a, 'g> {
     module: &'g Module,
     facts: BTreeMap<NodeId, &'a NodeFacts<'g>>,
     locals: BTreeMap<&'g DeclarationId, Slot>,
+    /// Separate contents of checked caller destinations from the access descriptors.
+    retained: BTreeMap<Slot, Slot>,
     slots: Vec<Local<'g>>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'g>>,
