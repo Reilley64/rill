@@ -1013,7 +1013,13 @@ Standards and Spec reviewed `a3adbdbf1f7fc42022ef9ebe3b8e2949cfc07665` against `
 | Standards | Keep advisory findings nonblocking. Give guard checking one owner. Pin the exact diagnostic and catalogue sections. Add traceable NotChecked cases. Split long RFC paragraphs and distinguish the tracked location from the source site. |
 | Spec | Keep positive admission blocked until an authority source exists. Commit pattern acknowledgements only on the guard-true edge. Track unyielded iterator components. Check intrinsic predicate identity without a public path. Classify aggregate binder and capture demands with disposal and protection evidence. Require owned input and outer display evidence for infix wrapping. Keep advisories nonblocking. |
 
-The corrections were checked locally, not independently re-reviewed. No model or compiler work has started. Owner approval of the corrected U1–U4 checkpoint is still required.
+The checkpoint corrections were checked locally, not independently re-reviewed. At that point, model and compiler work still required owner approval.
+
+### M4.8 partial implementation
+
+The owner [approved U1 through U4](https://github.com/Reilley64/rill/issues/65#issuecomment-6969612205) at `f3d65f72062237f87372f1896db5f2a66d9f2a54` before model or compiler work. The [M4.8 verification record](../crates/compiler/tests/m4-8-acceptance.md) lists the partial report, finite model, local checks and exact reviewed and verified revisions.
+
+Actual core admission still requires a shipped core implementation and approved authority source. Compiler Result-use checking, the remaining core-dependent checks and a typed-stage receipt are not established. Issues #65 and #56 remain open, and PR #58 remains draft and unmerged.
 
 ## Completion record
 

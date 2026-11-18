@@ -254,3 +254,9 @@ The destination is exact. Only a written fixed outer source can admit a variant,
 A proved false requirement can exclude a conversion candidate. Pending requirements block only if they can affect selection. A selected error or a frozen exact relation can feed a waiting equation, but a different expected error does not restart selection. Ordinary selection and its no-fallback rule remain separate.
 
 The [M4.7 verification record](tests/m4-7-acceptance.md) lists the tests, review findings and exact revisions. Hypothetical outcomes establish no core admission, checked conversion, or permission. M4.8 owns actual admission and integrated typing.
+
+## M4.8 bounded typed analysis
+
+`analysis::typed::analyze_typed` checks one M3 graph under one accumulated limit. Query `inventory` for captured declarations and conditional comparisons, `bodies` for local body and expression facts, and `public_interface_findings` for private origins in exposed types and requirements. `not_performed` lists stages not reached or outside the increment; leaving a stage off that list does not mean it passed.
+
+The report has no typed-stage receipt. `core_blockers` lists missing evidence for roles, providers, protection and representations. The compiler has no source-level Result-use solver. See the [M4.8 verification record](tests/m4-8-acceptance.md) for the finite model, compiler tests and remaining obligations.
