@@ -40,7 +40,7 @@ impl<'a, 'g> Check<'a, 'g> {
             self.pending(node, ResultUseBlocker::Containment)?;
             return self.singleton(Residence::default());
         };
-        if iteration.traversal != ListTraversal::Owned {
+        if iteration.traversal != Some(ListTraversal::Owned) {
             self.pending(node, ResultUseBlocker::Control)?;
             return self.singleton(Residence::default());
         }

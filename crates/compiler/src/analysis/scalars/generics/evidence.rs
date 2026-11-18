@@ -269,7 +269,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             RequirementTarget::Family(id) if self.is_error_display(id) => None,
             RequirementTarget::Family(id) => match &judgment {
                 GoalJudgment::Determine { inputs, .. }
-                    if self.collection_winner(id, inputs).is_some() =>
+                    if self.collections.is_iteration_family(id)
+                        || self
+                            .collection_scope(id, inputs)
+                            .and_then(|scope| scope.winner())
+                            .is_some() =>
                 {
                     None
                 }
@@ -456,6 +460,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let admitted = conversion
             || (self.ordinary_scalar_role(&source.family).is_some()
                 || self.is_error_display(&source.family)
+                || self.collections.is_iteration_family(&source.family)
                 || primitive)
                 && body.compatibility == ordinary::Compatibility::Compatible;
         Ok(Some((&body.header, admitted)))
@@ -1040,17 +1045,16 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(id)
     }
 
-    fn collection_winner(
+    fn collection_scope(
         &self,
         id: &DeclarationId,
         inputs: &[Type<'g>],
-    ) -> Option<&'g DeclarationId> {
-        let scope = match inputs {
+    ) -> Option<crate::analysis::typed::CollectionProtection<'g>> {
+        match inputs {
             [source] => self.collections.scope(id, &[Some(source)]),
             [source, key] => self.collections.scope(id, &[Some(source), Some(key)]),
             _ => None,
-        }?;
-        scope.winner()
+        }
     }
 
     fn expand_determination(&mut self, goal: usize) -> Work<GoalState> {
@@ -1094,7 +1098,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                 },
             );
         }
-        let required = self.collection_winner(id, &inputs);
+        let mut required = None;
+        if let Some(scope) = self.collection_scope(id, &inputs) {
+            required = scope.winner();
+            if required.is_none() {
+                return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
+            }
+        }
         if required.is_none()
             && let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)?
         {

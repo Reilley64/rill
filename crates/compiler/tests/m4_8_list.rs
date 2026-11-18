@@ -129,6 +129,77 @@ fn installed_list() {
                 report.bodies().obligations()
             );
         }
+        fs::write(
+            &request.entry,
+            "
+            import std::iter::{iterate, next};
+            import std::option::Option;
+            type Source = { ready: bool; };
+            type Cursor = { ready: bool; };
+            implement iterate<Source, Cursor>(source: Source): Cursor {
+                return Cursor { ready: source.ready };
+            }
+            implement next<Cursor, bool>(cursor: &mut Cursor): Option<bool> {
+                if (cursor.ready) { cursor.ready = false; return Option.Some(true); }
+                return Option.None;
+            }
+            function visit(source: Source): void {
+                for (let item of source) { let checked: bool = item; }
+            }
+        ",
+        )
+        .unwrap();
+        for test_mode in [false, true] {
+            let graph = loader::load_installed(InstalledRequest {
+                test_mode,
+                ..request.clone()
+            })
+            .unwrap();
+            let report = analyze_typed(&graph, AnalysisLimits::default());
+            let app = graph
+                .modules()
+                .iter()
+                .find(|module| module.key.origin == Origin::Application)
+                .unwrap();
+            let loop_node = app
+                .syntax
+                .nodes
+                .iter()
+                .position(|node| node.kind == NodeKind::For)
+                .unwrap();
+            let Some(NodeFactKind::Iteration(iteration)) = report
+                .bodies()
+                .node(app, loop_node)
+                .unwrap()
+                .map(|facts| &facts.kind)
+            else {
+                panic!("missing non-List loop: {:?}", report.bodies().obligations());
+            };
+            assert!(
+                matches!(iteration.yielded.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+            );
+            for id in [&iteration.iterate, &iteration.next] {
+                let goal = report.bodies().goal(id).unwrap();
+                assert!(goal.premise.is_none());
+                assert!(
+                    goal.selection
+                        .as_ref()
+                        .is_some_and(|s| s.implementation.module.origin == Origin::Application)
+                );
+            }
+            let visit = app
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("visit"))
+                .unwrap();
+            assert!(
+                report
+                    .bodies()
+                    .body(app, BodyOwner::Declaration(&visit.id))
+                    .unwrap()
+                    .is_some()
+            );
+        }
         fs::write(&request.entry, "import std::collection::{List as Items, get}; import std::option::Option; function read(xs: &Items<i32>): Option<&i32> { return get(xs, 0); }").unwrap();
         for test_mode in [false, true] {
             let graph = loader::load_installed(InstalledRequest {

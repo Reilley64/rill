@@ -202,6 +202,11 @@ impl<'g> CollectionCore<'g> {
         })
     }
 
+    pub fn is_iteration_family(&self, id: &DeclarationId) -> bool {
+        self.iteration
+            .is_some_and(|role| role.iterate.id == *id || role.next.id == *id)
+    }
+
     pub fn is_wrapper(&self, id: &DeclarationId) -> bool {
         self.protection.into_iter().flatten().any(|scope| {
             scope

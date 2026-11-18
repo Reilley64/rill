@@ -14,7 +14,8 @@ pub struct Iteration<'g> {
     pub yielded: Type<'g>,
     pub some: &'g DeclarationId,
     pub none: &'g DeclarationId,
-    pub traversal: ListTraversal,
+    /// No storage handoff is implied by a user iterator's checked signatures.
+    pub traversal: Option<ListTraversal>,
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
@@ -83,7 +84,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(output) = goal
             .output
             .as_ref()
-            .filter(|_| goal.state == GoalState::Proved)
+            .filter(|_| goal.state == GoalState::Proved && goal.premise.is_none())
         else {
             self.defer(
                 module,
@@ -96,25 +97,32 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             return Ok(None);
         };
-        let Some(CollectionOperation::Iterate(traversal)) = scope.map(|scope| scope.operation)
-        else {
-            unreachable!("checked List iterate")
-        };
         let iterator = output.result.clone();
         self.elab.reserve(2)?;
         let mutable_iterator = Arc::new(TypeTerm::Reference {
             mutable: true,
             referent: iterator.clone(),
         });
+        let next_scope = self
+            .collections
+            .scope(&role.next.id, &[Some(&mutable_iterator)]);
         let next =
             self.determine_source(site, &role.next.id, vec![mutable_iterator], &[], &[], None)?;
         let goal = self.evidence.get(&next).unwrap();
         let Some(output) = goal
             .output
             .as_ref()
-            .filter(|_| goal.state == GoalState::Proved)
+            .filter(|_| goal.state == GoalState::Proved && goal.premise.is_none())
         else {
-            self.defer(module, node, ScalarUnsupported::CoreProtection)?;
+            self.defer(
+                module,
+                node,
+                if next_scope.is_some() {
+                    ScalarUnsupported::CoreProtection
+                } else {
+                    ScalarUnsupported::FamilySelection
+                },
+            )?;
             return Ok(None);
         };
         let yielded = match output.result.as_ref() {
@@ -133,6 +141,17 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         let [pattern, source, _] = module.syntax.nodes[node].children.as_slice() else {
             unreachable!()
+        };
+        let traversal = match (scope, next_scope) {
+            (Some(iterate), Some(next)) => match (iterate.operation, next.operation) {
+                (CollectionOperation::Iterate(input), CollectionOperation::Next(output))
+                    if input == output =>
+                {
+                    Some(input)
+                }
+                _ => None,
+            },
+            _ => None,
         };
         self.elab.reserve(2)?;
         Ok(Some(Iteration {
