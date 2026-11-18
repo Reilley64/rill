@@ -110,15 +110,17 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 state.observe(*owner, path, self.budget)?;
             }
-            let mutable_referent =
-                self.expression_facts(argument)?
-                    .and_then(|value| match value.ty.as_ref() {
-                        TypeTerm::Reference {
-                            mutable: true,
-                            referent,
-                        } => Some(referent.as_ref()),
-                        _ => None,
-                    });
+            let ty = self
+                .expression_facts(argument)?
+                .map(|value| value.ty.as_ref());
+            let bool_descriptor = ty.is_some_and(|ty| retained_bool_contents_type(ty).is_some());
+            let mutable_referent = ty.and_then(|ty| match ty {
+                TypeTerm::Reference {
+                    mutable: true,
+                    referent,
+                } => Some(referent.as_ref()),
+                _ => None,
+            });
             for address @ (owner, _) in referents {
                 if observer && exact.is_none() || mutable_referent.is_some() && !observer {
                     if matches!(mutable_referent, Some(TypeTerm::Primitive(_))) {
@@ -128,6 +130,16 @@ impl<'a, 'g> Check<'a, 'g> {
                         self.budget.step(affected.len())?;
                         if affected.iter().any(|entry| {
                             !matches!(&entry.content, Content::Test(tag, _) if matches!(tag.as_ref(), Constructor::Boolean(_)))
+                        }) {
+                            self.pending(argument, ResultUseBlocker::Storage)?;
+                        }
+                    } else if bool_descriptor && exact.as_ref() == Some(&address) {
+                        // The call can replace this shared bool descriptor. Discard
+                        // the stale alias fact, but never a tracked Result residence.
+                        let affected = state.take(address.0, &address.1, self.budget)?;
+                        self.budget.step(affected.len())?;
+                        if affected.iter().any(|entry| {
+                            !matches!(entry.content, Content::Alias(_) | Content::PossibleAlias(_))
                         }) {
                             self.pending(argument, ResultUseBlocker::Storage)?;
                         }

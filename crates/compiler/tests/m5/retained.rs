@@ -143,6 +143,168 @@ fn caller_owned_descriptor_cannot_retain_body_local_sources() {
 }
 
 #[test]
+fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
+    probe(
+        "retained::direct_calls_retain_compatible_inputs_not_the_access_loan",
+        r#"
+            function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function clearLike(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function inReverse(input: &bool, slot: &mut &bool): void { *slot = input; }
+            function broken(slot: &mut &bool, input: &bool): void {
+                let inner = true;
+                *slot = &inner;
+            }
+            function valid(seed: &bool, flag: bool): bool {
+                let mut out = seed;
+                remember(&mut out, &flag);
+                return *out;
+            }
+            function expires(seed: &bool): bool {
+                let mut out = seed;
+                { let flag = true; remember(&mut out, &flag); }
+                return *out;
+            }
+            function maybeExpires(seed: &bool, choose: bool): bool {
+                let mut out = seed;
+                { let flag = true; if (choose) { remember(&mut out, &flag); } }
+                return *out;
+            }
+            function reverse(seed: &bool, flag: bool): bool {
+                let mut out = seed;
+                inReverse(&flag, &mut out);
+                return *out;
+            }
+            function keepsOld(seed: &bool): bool {
+                let mut out = seed;
+                { let old = true; out = &old; clearLike(&mut out, seed); }
+                return *out;
+            }
+            function replaced(seed: &bool): bool {
+                let mut out = seed;
+                { let flag = true; remember(&mut out, &flag); out = seed; }
+                return *out;
+            }
+            function dead(seed: &bool): bool {
+                let mut out = seed;
+                { let flag = true; remember(&mut out, &flag); }
+                return false;
+            }
+            function checkedCallee(seed: &bool): bool {
+                let mut out = seed;
+                broken(&mut out, seed);
+                return *out;
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let remember = &declaration("remember").id;
+            let valid = lower("valid");
+            let mir = valid
+                .mir()
+                .unwrap_or_else(|| panic!("valid: {:?}", valid.completion()));
+            let events: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. }
+                            | Operation::CallRetaining { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            let [
+                Operation::Borrow {
+                    source: dest,
+                    exclusive: true,
+                    ..
+                },
+                Operation::Borrow {
+                    source,
+                    holder,
+                    exclusive: false,
+                },
+                Operation::CallRetaining {
+                    callee,
+                    destination,
+                    input,
+                },
+                Operation::Dereference(read),
+            ] = events.as_slice()
+            else {
+                panic!("expected access, input, retention and read: {events:?}")
+            };
+            assert_eq!(*callee, remember);
+            assert_eq!(dest.root.span.bytes(), b"out");
+            assert_eq!(source.root.span.bytes(), b"flag: bool");
+            assert_eq!(destination.root.node, dest.root.node);
+            assert_eq!(read.root.node, dest.root.node);
+            assert_eq!(input.root.node, holder.root.node);
+
+            let reverse = lower("reverse");
+            let mir = reverse.mir().expect("same contract with reversed formals");
+            assert!(linear(mir, mir.entry).iter().any(|op| matches!(op,
+                Operation::CallRetaining { callee, destination, input }
+                if *callee == &declaration("inReverse").id && destination.root.span.bytes() == b"out" && input.root.span.bytes() == b"&flag")));
+
+            for name in ["replaced", "dead"] {
+                let report = lower(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                assert!(linear(mir, mir.entry).iter().any(|op| matches!(op,
+                    Operation::CallRetaining { callee, destination, .. }
+                    if *callee == remember && destination.root.span.bytes() == b"out")));
+            }
+            for (name, code, source) in [
+                ("expires", "R0203", b"&flag".as_slice()),
+                ("maybeExpires", "R0203", b"&flag".as_slice()),
+                ("keepsOld", "R0203", b"&old".as_slice()),
+                ("checkedCallee", "R0202", b"&inner".as_slice()),
+            ] {
+                let rejected = lower(name);
+                assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                assert!(rejected.mir().is_none());
+                let [finding] = rejected.findings() else {
+                    panic!("{name}: expected diagnostic")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.related.span.bytes(), source, "{name}");
+            }
+            let limits = AnalysisLimits {
+                max_work: valid.statistics().work,
+                max_entries: valid.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("valid", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("valid", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
     use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 

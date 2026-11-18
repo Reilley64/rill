@@ -156,6 +156,12 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
+    /// A direct call may retain the shared input in the destination's contents.
+    CallRetaining {
+        callee: &'g DeclarationId,
+        destination: Place<'g>,
+        input: Place<'g>,
+    },
     /// Select the success variant of an admitted postfix operand.
     TestVariant {
         operand: Place<'g>,
@@ -315,7 +321,9 @@ fn checked_graph<'g>(
         for block in &mir.blocks {
             budget.step(1)?;
             let call = match block.operation {
-                Operation::Call(callee) => Some((callee, false)),
+                Operation::Call(callee) | Operation::CallRetaining { callee, .. } => {
+                    Some((callee, false))
+                }
                 _ => None,
             };
             let cleanup = match &block.operation {
@@ -674,4 +682,11 @@ struct Call<'g> {
     args: Vec<Slot>,
     into: Option<Slot>,
     retains: bool,
+    destination: Option<CallDestination>,
+}
+
+#[derive(Clone, Copy)]
+struct CallDestination {
+    place: Slot,
+    input: Slot,
 }

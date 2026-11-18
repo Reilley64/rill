@@ -856,6 +856,18 @@ pub(super) fn run<'g>(
                 Action::Call(index) => {
                     let call = &calls[index];
                     let mut retained = BTreeSet::new();
+                    let contents = if let Some(destination) = call.destination {
+                        let mut loans = BTreeSet::new();
+                        for slot in [destination.place, destination.input] {
+                            initialized(&state[slot], node)?;
+                            include_loans(&mut loans, &state, slots[slot].storage(slot), budget)?;
+                        }
+                        // The access argument is temporary. It cannot become a
+                        // backing source of the very descriptor it gives access to.
+                        Some((destination, loan_set(loans, budget)?))
+                    } else {
+                        None
+                    };
                     for &arg in &call.args {
                         require_initialized(&slots, &state, arg, node, budget)?;
                         forbid_active_escape(&state[arg], node)?;
@@ -875,7 +887,19 @@ pub(super) fn run<'g>(
                             ..Held::default()
                         });
                     }
-                    Operation::Call(call.callee)
+                    if let Some((destination, loans)) = contents {
+                        state[destination.place] = State::Initialized(Held {
+                            loans,
+                            ..Held::default()
+                        });
+                        Operation::CallRetaining {
+                            callee: call.callee,
+                            destination: local(destination.place),
+                            input: local(destination.input),
+                        }
+                    } else {
+                        Operation::Call(call.callee)
+                    }
                 }
                 Action::FormClosure {
                     capture,

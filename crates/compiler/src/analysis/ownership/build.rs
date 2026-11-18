@@ -1214,6 +1214,54 @@ impl<'a, 'g> Build<'a, 'g> {
         self.expression(body, Some(capture), form, depth + 1)
     }
 
+    fn call_destination(
+        &mut self,
+        node: NodeId,
+        call: &crate::analysis::scalars::CallFacts<'g>,
+        position: usize,
+    ) -> ResultOf<(Slot, usize)> {
+        // This contract is determined by the declaration, not by inspecting
+        // its body for a narrower effect. Only one possible input is admitted.
+        self.budget.step(1)?;
+        let signature = self
+            .typed
+            .inventory()
+            .type_facts()
+            .declarations
+            .get(call.callee)
+            .ok_or(Stop::Pending(node))?;
+        let DeclarationShape::Function { parameters, result } = &signature.shape else {
+            return Err(Stop::Pending(node));
+        };
+        if parameters.len() != 2
+            || call.arguments.len() != 2
+            || call.pipe_input.is_some()
+            || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
+        {
+            return Err(Stop::Pending(node));
+        }
+        let contents =
+            retained_bool_contents_type(&parameters[position].ty).ok_or(Stop::Pending(node))?;
+        let input = 1 - position;
+        if parameters[input].ty != *contents || self.value(call.arguments[input])?.ty != *contents {
+            return Err(Stop::Pending(node));
+        }
+        let argument = self.ungroup(call.arguments[position])?;
+        let syntax = &self.module.syntax.nodes[argument];
+        if syntax.kind != NodeKind::Prefix("&mut") {
+            return Err(Stop::Pending(argument));
+        }
+        let target = syntax.children[0];
+        let facts = self.value(target)?;
+        if facts.access != Access::Owned
+            || facts.ty != *contents
+            || !matches!(&facts.path, Some(path) if path.root.kind == DeclarationKind::Binding && path.projections.is_empty())
+        {
+            return Err(Stop::Pending(target));
+        }
+        Ok((self.place(target)?, input))
+    }
+
     fn call(&mut self, node: NodeId, into: Option<Slot>, next: Pc, depth: usize) -> ResultOf<Pc> {
         let facts = self.value(node)?;
         let call = facts.call.as_deref().ok_or(Stop::Pending(node))?;
@@ -1263,20 +1311,28 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         self.budget.reserve(1 + call.arguments.len())?;
         let mut args = Vec::with_capacity(call.arguments.len());
-        for arg in call.argument_evaluation_order() {
+        let mut destination = None;
+        for (position, arg) in call.argument_evaluation_order().enumerate() {
             self.budget.step(1)?;
             let ty = self.value(arg)?.ty.clone();
-            if !self.direct_call_type(&ty) {
+            if retained_bool_contents_type(&ty).is_some() {
+                destination = Some(self.call_destination(node, call, position)?);
+            } else if !self.direct_call_type(&ty) {
                 return Err(Stop::Pending(arg));
             }
             args.push(self.slot(arg, &ty)?);
         }
         let index = self.calls.len();
+        let destination = destination.map(|(place, input)| CallDestination {
+            place,
+            input: args[input],
+        });
         self.calls.push(Call {
             callee: call.callee,
             args,
             into,
             retains,
+            destination,
         });
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;
         for (i, &arg) in call.arguments.iter().enumerate().rev() {
