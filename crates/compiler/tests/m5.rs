@@ -6,7 +6,7 @@ use compiler::analysis::AnalysisLimits;
 use compiler::analysis::ownership::{
     Cleanup as Obligation, Completion, Mir, Operation, Terminator, lower_body,
 };
-use compiler::analysis::typed::analyze_typed;
+use compiler::analysis::typed::{TypedReceipt, analyze_typed};
 use compiler::loader::{self, InstalledRequest, Origin};
 use std::{
     fs,
@@ -14,25 +14,15 @@ use std::{
     process::Command,
 };
 
+#[path = "m5/records.rs"]
+mod records;
 mod support;
 
 #[test]
 fn ownership_from_installed_source() {
-    installed(|request| {
-        fs::write(
-            &request.entry,
-            r#"
-            import std::{List, Result, Err};
-            import std::channel::{Receiver, Sender};
-            import std::convert::{into, tryInto};
-            import std::error::formatError;
-            import std::iter::iterate;
-            import std::mutex::LockGuard;
-            import std::number::ParseError;
-            import std::option::{Option, map as mapOption};
-            import std::result::{isOk, map as mapResult};
-            import std::shared::Shared;
-
+    probe(
+        "ownership_from_installed_source",
+        r#"
             function split(flag: bool, text: string): void {
                 if (flag) { let taken = text; }
             }
@@ -187,44 +177,7 @@ fn ownership_from_installed_source() {
                 return recursive(true);
             }
         "#,
-        )
-        .unwrap();
-        for test_mode in [false, true] {
-            let graph = loader::load_installed(InstalledRequest {
-                test_mode,
-                ..request.clone()
-            })
-            .unwrap();
-            let typed = analyze_typed(&graph, AnalysisLimits::default());
-            let receipt = typed.receipt().unwrap_or_else(|| {
-                panic!(
-                    "{:?}: {:?}; {:?}; {:?}; pending Result uses {:?}",
-                    typed.completion(),
-                    typed.core_blockers(),
-                    typed
-                        .bodies()
-                        .findings()
-                        .iter()
-                        .map(|f| f.kind)
-                        .collect::<Vec<_>>(),
-                    typed
-                        .bodies()
-                        .obligations()
-                        .iter()
-                        .map(|o| o.reason)
-                        .collect::<Vec<_>>(),
-                    typed.result_use().map(|r| r
-                        .pending()
-                        .iter()
-                        .map(|p| (p.blocker, p.site.span.bytes().escape_ascii().to_string()))
-                        .collect::<Vec<_>>())
-                )
-            });
-            let module = graph
-                .modules()
-                .iter()
-                .find(|m| m.key.origin == Origin::Application)
-                .unwrap();
+        |request, module, receipt| {
             let lower = |name| {
                 let id = &module
                     .declarations
@@ -232,7 +185,7 @@ fn ownership_from_installed_source() {
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap()
                     .id;
-                lower_body(&receipt, module, id, AnalysisLimits::default()).unwrap()
+                lower_body(receipt, module, id, AnalysisLimits::default()).unwrap()
             };
             let split = lower("split");
             let id = &module
@@ -246,7 +199,7 @@ fn ownership_from_installed_source() {
                 ..AnalysisLimits::default()
             };
             assert!(
-                lower_body(&receipt, module, id, limits)
+                lower_body(receipt, module, id, limits)
                     .unwrap()
                     .mir()
                     .is_some()
@@ -290,17 +243,13 @@ fn ownership_from_installed_source() {
             .unwrap();
             assert_eq!(limited.completion(), Completion::ResourceLimit);
             assert!(limited.mir().is_none());
-            let other = loader::load_installed(InstalledRequest {
-                test_mode,
-                ..request.clone()
-            })
-            .unwrap();
+            let other = loader::load_installed(request.clone()).unwrap();
             let foreign = other
                 .modules()
                 .iter()
                 .find(|m| m.key == module.key)
                 .unwrap();
-            assert!(lower_body(&receipt, foreign, id, limits).is_err());
+            assert!(lower_body(receipt, foreign, id, limits).is_err());
             let unsupported = lower("unsupported");
             assert_eq!(unsupported.completion(), Completion::Incomplete);
             assert!(unsupported.mir().is_none());
@@ -309,29 +258,19 @@ fn ownership_from_installed_source() {
                 b"value: List<bool>"
             );
             let mir = split.mir().unwrap_or_else(|| panic!("{split:?}"));
-            let mut block = mir.entry;
-            let (taken, not_taken) = (0..mir.blocks.len())
-                .find_map(|_| match mir.blocks[block].terminator {
-                    Terminator::Goto(next) => {
-                        block = next;
-                        None
-                    }
-                    Terminator::Branch { yes, no } => Some((yes, no)),
-                    other => panic!("expected a branch, found {other:?}"),
-                })
-                .expect("expected a reachable branch");
+            let (taken, not_taken) = branch_targets(mir);
             assert!(
-                matches!(path_drops(mir, taken).as_slice(), [Obligation::Drop(taken)] if taken.span.bytes() == b"taken")
+                matches!(path_drops(mir, taken).as_slice(), [Obligation::Drop(taken)] if taken.root.span.bytes() == b"taken")
             );
             assert!(
-                matches!(path_drops(mir, not_taken).as_slice(), [Obligation::Drop(text)] if text.span.bytes() == b"text: string")
+                matches!(path_drops(mir, not_taken).as_slice(), [Obligation::Drop(text)] if text.root.span.bytes() == b"text: string")
             );
             let leave = lower("leave");
             let mir = leave
                 .mir()
                 .unwrap_or_else(|| panic!("{:?}", leave.completion()));
             assert!(
-                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(second), Obligation::Drop(first)] if second.span.bytes() == b"second" && first.span.bytes() == b"first")
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(second), Obligation::Drop(first)] if second.root.span.bytes() == b"second" && first.root.span.bytes() == b"first")
             );
             let restore = lower("restore");
             let mir = restore
@@ -342,7 +281,7 @@ fn ownership_from_installed_source() {
                     |(i, block)| matches!(block.terminator, Terminator::Goto(next) if next < i)
                 )
             );
-            let drops: Vec<_> = mir.blocks.iter().filter(|b| matches!(b.operation, Operation::Drop(place) if place.span.bytes() == b"state")).collect();
+            let drops: Vec<_> = mir.blocks.iter().filter(|b| matches!(b.operation, Operation::Drop(place) if place.root.span.bytes() == b"state")).collect();
             assert_eq!(
                 drops.len(),
                 1,
@@ -352,7 +291,7 @@ fn ownership_from_installed_source() {
                 panic!("drop must continue to install");
             };
             assert!(
-                matches!(mir.blocks[next].operation, Operation::Install { target, .. } if target.span.bytes() == b"state")
+                matches!(mir.blocks[next].operation, Operation::Install { target, .. } if target.root.span.bytes() == b"state")
             );
 
             let ordered = lower("ordered");
@@ -360,16 +299,20 @@ fn ownership_from_installed_source() {
                 .mir()
                 .unwrap_or_else(|| panic!("{:?}", ordered.completion()));
             assert!(mir.blocks.iter().any(|b| {
-                let Operation::ScopeExit(order) = &b.operation else { return false; };
-                matches!(order.as_slice(), [Obligation::EndStorage(dependent), Obligation::Drop(source)]
-                    if dependent.span.bytes() == b"dependent" && source.span.bytes() == b"source")
-            }));
+            let Operation::Cleanup(order) = &b.operation else { return false; };
+            matches!(order.as_slice(), [Obligation::EndStorage(dependent), Obligation::Drop(source)]
+                if dependent.root.span.bytes() == b"dependent" && source.root.span.bytes() == b"source")
+        }));
 
             let replaced = lower("reinitialized");
             let mir = replaced.mir().unwrap();
-            assert!(mir.blocks.iter().any(|b| matches!(&b.operation, Operation::ScopeExit(order)
-                if matches!(order.as_slice(), [Obligation::Drop(owner), Obligation::EndStorage(view)]
-                    if owner.span.bytes() == b"owner" && view.span.bytes() == b"view"))));
+            assert!(
+                mir.blocks
+                    .iter()
+                    .any(|b| matches!(&b.operation, Operation::Cleanup(order)
+            if matches!(order.as_slice(), [Obligation::Drop(owner), Obligation::EndStorage(view)]
+                if owner.root.span.bytes() == b"owner" && view.root.span.bytes() == b"view")))
+            );
             let caller = lower("transitivelyBad");
             assert_eq!(caller.completion(), Completion::SourceRejected);
             assert!(caller.mir().is_none());
@@ -396,7 +339,7 @@ fn ownership_from_installed_source() {
                 .mir()
                 .unwrap_or_else(|| panic!("{:?}", wildcard.completion()));
             assert!(
-                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(value)] if value.span.bytes() == b"text")
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(value)] if value.root.span.bytes() == b"text")
             );
 
             let captured = lower("ownedCapture");
@@ -451,8 +394,81 @@ fn ownership_from_installed_source() {
                 assert_eq!(report.findings()[0].code(), code, "{name}: {report:?}");
                 assert!(report.mir().is_none());
             }
+        },
+    );
+}
+
+fn probe(
+    test: &str,
+    source: &str,
+    mut verify: impl for<'g> FnMut(&InstalledRequest, &'g loader::Module, &TypedReceipt<'_, 'g>),
+) {
+    const IMPORTS: &str = r#"
+            import std::{List, Result, Err};
+            import std::channel::{Receiver, Sender};
+            import std::convert::{into, tryInto};
+            import std::error::formatError;
+            import std::iter::iterate;
+            import std::mutex::LockGuard;
+            import std::number::ParseError;
+            import std::option::{Option, map as mapOption};
+            import std::result::{isOk, map as mapResult};
+            import std::shared::Shared;
+    "#;
+    installed(test, |request| {
+        fs::write(&request.entry, format!("{IMPORTS}\n{source}")).unwrap();
+        for test_mode in [false, true] {
+            let request = InstalledRequest {
+                test_mode,
+                ..request.clone()
+            };
+            let graph = loader::load_installed(request.clone()).unwrap();
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            let receipt = typed.receipt().unwrap_or_else(|| {
+                panic!(
+                    "{:?}: {:?}; {:?}; {:?}; pending Result uses {:?}",
+                    typed.completion(),
+                    typed.core_blockers(),
+                    typed
+                        .bodies()
+                        .findings()
+                        .iter()
+                        .map(|f| f.kind)
+                        .collect::<Vec<_>>(),
+                    typed
+                        .bodies()
+                        .obligations()
+                        .iter()
+                        .map(|o| o.reason)
+                        .collect::<Vec<_>>(),
+                    typed.result_use().map(|r| r
+                        .pending()
+                        .iter()
+                        .map(|p| (p.blocker, p.site.span.bytes().escape_ascii().to_string()))
+                        .collect::<Vec<_>>())
+                )
+            });
+            let module = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application)
+                .unwrap();
+
+            verify(&request, module, &receipt);
         }
     });
+}
+
+fn branch_targets(mir: &Mir<'_>) -> (usize, usize) {
+    let mut block = mir.entry;
+    for _ in 0..mir.blocks.len() {
+        match mir.blocks[block].terminator {
+            Terminator::Goto(next) => block = next,
+            Terminator::Branch { yes, no } => return (yes, no),
+            other => panic!("expected a branch, found {other:?}"),
+        }
+    }
+    panic!("expected a reachable branch");
 }
 
 fn path_drops<'g>(mir: &Mir<'g>, mut block: usize) -> Vec<Obligation<'g>> {
@@ -465,7 +481,7 @@ fn path_drops<'g>(mir: &Mir<'g>, mut block: usize) -> Vec<Obligation<'g>> {
                 closure: *closure,
                 field: *field,
             }),
-            Operation::ScopeExit(obligations) => drops.extend(
+            Operation::Cleanup(obligations) => drops.extend(
                 obligations
                     .iter()
                     .copied()
@@ -482,7 +498,7 @@ fn path_drops<'g>(mir: &Mir<'g>, mut block: usize) -> Vec<Obligation<'g>> {
     panic!("cleanup path did not reach its return");
 }
 
-fn installed(check: impl FnOnce(InstalledRequest)) {
+fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
     let target = "aarch64-apple-darwin";
     if let Some(root) = std::env::var_os("RILL_M5_PROBE_ROOT") {
         check(InstalledRequest {
@@ -494,7 +510,7 @@ fn installed(check: impl FnOnce(InstalledRequest)) {
         });
         return;
     }
-    let root = std::env::temp_dir().join(format!("rill-m5-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("rill-m5-{test}-{}", std::process::id()));
     fs::create_dir(&root).unwrap();
     let _cleanup = Cleanup(&root);
     let runtime = root.join("lib/rill/runtime").join(target);
@@ -518,7 +534,7 @@ fn installed(check: impl FnOnce(InstalledRequest)) {
     .unwrap();
     let output = support::run_copied_probe(
         Command::new(root.join("bin/m5-probe"))
-            .args(["--exact", "ownership_from_installed_source", "--nocapture"])
+            .args(["--exact", test, "--nocapture"])
             .env("RILL_M5_PROBE_ROOT", &root)
             .current_dir(root.join("app")),
     )

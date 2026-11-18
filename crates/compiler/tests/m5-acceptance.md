@@ -62,9 +62,28 @@ Standards and Spec independently reviewed `068bd37bf7ca10e2e462556a06c3dc1dbeb26
 
 No workflow changed, so `check:ci` was not run. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM, provider ABI and Rill execution were not tested.
 
+## Owned record places
+
+[#74](https://github.com/Reilley64/rill/issues/74) extends the same installed source-to-MIR seam. The input remains the verified M4 merge above. The increment starts at M5 publication `9d072a1a8a8657ff6b5af25d9b2b592f3a22af7b`.
+
+The checker admits monomorphic application records with primitive fields. It uses the canonical outer `dispose` family and exact typed input to distinguish default field cleanup from a selected unconditional disposer. Unknown or conditional selection stays incomplete. A whole read requires every field. A field read requires that field. Whole-place access overlaps each field, and distinct named fields of the same owned record do not overlap. The field identity in MIR is the original M4 declaration, not a spelling or field index.
+
+The [approved partial-move and cleanup policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379) require keeping initialized fields after a default partial move. Scope cleanup retires holders before their sources, then cleans the live fields in reverse declaration order. Construction evaluates the written initializers in source order. Replacement drops the old initialized storage before installing the new value. It does not drop fields already moved from that storage.
+
+The [record tests](m5/records.rs) run in both installed load modes:
+
+| Source cases | Observed compiler or MIR obligation |
+| --- | --- |
+| `splitField`, `movedField`, `movedWhole` | One path consumes `first`, the other keeps it. Both can return `second`. Reading the moved field or whole record rejects with `R0200`, with `pack.first` as the transfer witness. |
+| `construct`, `restoreField`, `replaceField`, `replacePartial` | Written move order differs from reverse declaration cleanup order. Restoring a moved field does not dispose its old value again. Replacement of an initialized field drops it before installation. Whole replacement cleans only the old live fields. |
+| `disjointFields`, `overlappingWhole`, `escapingField` | An exclusive loan of `first` does not block moving `second`. A live whole-record loan rejects the overlapping move. A field borrow cannot escape the body-local record. |
+| `customPartial`, `customWhole`, `customCleanup`, `borrowedFieldMove` | The compiler rejects a move from a record awaiting its custom disposer, and a move of non-copying data through a borrow. It permits whole transfer without local disposal. A required outer disposer returns `Incomplete`, never default cleanup MIR. |
+
+A monomorphic application disposer for its own record previously blocked the installed M4 receipt. The typed handoff now checks that body under the closed installed role inventory. Canonical identity, ordinary placement and compatibility, duplicate detection and the separate protection gate still apply. The alias in the fixture exercises the canonical family. The M4 receipt still grants no ownership permission.
+
 ## Open acceptance obligations
 
-- Place projections, nested mutable storage effects and callee-exit checks for retained destinations. These must distinguish transferring a contained reference from borrowing its slot.
+- Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. These must distinguish transferring a contained reference from borrowing its slot.
 - Aggregate initialization, pattern and guard commitment, partial moves, iteration, rebuilding and custom-disposer bodies. Confirm remaining-field cleanup without repeating moved fields or invoking the outer disposer again.
 - Callable invocation, borrowed passing and scoped jobs, multiple or computed captures, and erased/generic evidence. A known single captured value does not prove these modes.
 - Typed propagation/wrapping exits, statement-temporary dependencies, protected actions, cancellation edge obligations, and full graph coverage of bodies, startup and expectations. Pending call and provider contracts cannot produce a program receipt.

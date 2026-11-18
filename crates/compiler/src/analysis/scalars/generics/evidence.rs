@@ -450,6 +450,23 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(None);
         };
         let application_ordinary = self.has_application_ordinary_scope(&source.family);
+        // The closed installed role inventory also permits checking a canonical
+        // disposer in the module that defines its monomorphic record. The
+        // typed receipt still requires the separate protection inventory.
+        let local_disposer = self.ordinary_scope.is_some()
+            && self
+                .primitives
+                .and_then(|core| core.dispose)
+                .is_some_and(|role| role.id == source.family)
+            && declaration.id.module.origin == crate::loader::Origin::Application
+            && body.header.binders.is_empty()
+            && matches!(&body.header.shape, DeclarationShape::Function { parameters, .. } if matches!(
+                parameters.as_slice(), [parameter] if matches!(parameter.ty.as_ref(),
+                    TypeTerm::Nominal { declaration: owner, arguments } if arguments.is_empty()
+                        && body.placement == ordinary::Placement::ParameterOwner(owner)
+                        && self.input.facts.declarations.get(owner).is_some_and(|facts| matches!(facts.shape, DeclarationShape::Record { .. }))
+                )
+            ));
         if body.placement == ordinary::Placement::OutsideOwners
             && self.conversion_family(&source.family).is_none()
         {
@@ -462,7 +479,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 ScalarFindingKind::UnauthorizedImplementation,
             )?;
         }
-        if application_ordinary {
+        if application_ordinary || local_disposer {
             for group in &family.duplicate_keys {
                 self.elab.step(1 + group.len())?;
                 if group.contains(&&declaration.id) {
@@ -502,7 +519,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 || self.is_error_display(&source.family)
                 || self.is_error_observer(&source.family)
                 || self.collections.is_iteration_family(&source.family)
-                || primitive)
+                || primitive
+                || local_disposer)
                 && body.compatibility == ordinary::Compatibility::Compatible;
         Ok(Some((&body.header, admitted)))
     }

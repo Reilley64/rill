@@ -7,8 +7,9 @@ use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics,
     TypeTerm,
 };
-use crate::loader::{DeclarationId, DeclarationKind};
+use crate::loader::{Declaration, DeclarationId, DeclarationKind};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::ops::Range;
 
 mod build;
 mod flow;
@@ -32,6 +33,7 @@ pub struct Finding<'g> {
 enum Conflict {
     Moved,
     Access,
+    ForbiddenMove,
     Escape,
     Release,
 }
@@ -41,6 +43,7 @@ impl Finding<'_> {
         match self.kind {
             Conflict::Moved => "R0200",
             Conflict::Access => "R0201",
+            Conflict::ForbiddenMove => "R0501",
             Conflict::Escape => "R0202",
             Conflict::Release => "R0203",
         }
@@ -87,29 +90,36 @@ pub struct Block<'g> {
     pub terminator: Terminator,
 }
 
+/// A named or temporary storage root, optionally projected to one owned field.
+#[derive(Clone, Copy, Debug)]
+pub struct Place<'g> {
+    pub root: Site<'g>,
+    pub field: Option<&'g Declaration>,
+}
+
 #[derive(Debug)]
 pub enum Operation<'g> {
     None,
-    Initialize(Site<'g>),
+    Initialize(Place<'g>),
     Copy {
-        from: Site<'g>,
-        into: Option<Site<'g>>,
+        from: Place<'g>,
+        into: Option<Place<'g>>,
     },
     Move {
-        from: Site<'g>,
-        into: Option<Site<'g>>,
+        from: Place<'g>,
+        into: Option<Place<'g>>,
     },
     Borrow {
-        source: Site<'g>,
-        holder: Site<'g>,
+        source: Place<'g>,
+        holder: Place<'g>,
         exclusive: bool,
     },
     Reborrow {
-        parent: Site<'g>,
-        holder: Site<'g>,
+        parent: Place<'g>,
+        holder: Place<'g>,
         exclusive: bool,
     },
-    Dereference(Site<'g>),
+    Dereference(Place<'g>),
     FormClosure {
         closure: Site<'g>,
         capture: Site<'g>,
@@ -118,25 +128,25 @@ pub enum Operation<'g> {
     Call(&'g DeclarationId),
     Dispose {
         callee: &'g DeclarationId,
-        operand: Site<'g>,
+        operand: Place<'g>,
     },
     Install {
-        target: Site<'g>,
-        incoming: Site<'g>,
+        target: Place<'g>,
+        incoming: Place<'g>,
     },
-    Export(Site<'g>),
-    Drop(Site<'g>),
+    Export(Place<'g>),
+    Drop(Place<'g>),
     DropCapture {
         closure: Site<'g>,
         field: Site<'g>,
     },
-    ScopeExit(Vec<Cleanup<'g>>),
+    Cleanup(Vec<Cleanup<'g>>),
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum Cleanup<'g> {
-    EndStorage(Site<'g>),
-    Drop(Site<'g>),
+    EndStorage(Place<'g>),
+    Drop(Place<'g>),
     DropCapture { closure: Site<'g>, field: Site<'g> },
 }
 
@@ -286,6 +296,7 @@ fn lower<'g>(
         return Err(Stop::Pending(entry_site));
     };
     let mut build = Build {
+        typed,
         module,
         facts: BTreeMap::new(),
         locals: BTreeMap::new(),
@@ -357,10 +368,27 @@ type Slot = usize;
 type Pc = usize;
 
 #[derive(Clone, Copy)]
-struct Local {
+struct Local<'g> {
     node: NodeId,
+    owner: Slot,
+    field: Option<&'g Declaration>,
+    fields: usize,
+    disposer: Option<&'g DeclarationId>,
     moves: bool,
     drops: bool,
+}
+
+impl<'g> Local<'g> {
+    fn storage(self, slot: Slot) -> Range<Slot> {
+        slot..slot + 1 + self.fields
+    }
+
+    fn place(self, module: &'g Module) -> Place<'g> {
+        Place {
+            root: site_at(module, self.node),
+            field: self.field,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -371,6 +399,7 @@ enum Action {
         from: Slot,
         into: Option<Slot>,
     },
+    ForbiddenBorrowedMove(Slot),
     Borrow {
         from: Slot,
         into: Slot,
@@ -433,10 +462,11 @@ struct Loop {
 }
 
 struct Build<'a, 'g> {
+    typed: &'a TypedReport<'g>,
     module: &'g Module,
     facts: BTreeMap<NodeId, &'a NodeFacts<'g>>,
     locals: BTreeMap<&'g DeclarationId, Slot>,
-    slots: Vec<Local>,
+    slots: Vec<Local<'g>>,
     code: Vec<Instruction>,
     calls: Vec<Call<'g>>,
     cleanups: Vec<Vec<Slot>>,

@@ -1,9 +1,13 @@
 //! Construct ownership operations from the M4 type and control facts.
 use super::*;
+use crate::analysis::MemberType;
+use crate::analysis::ordinary::{self, HypotheticalOutcome};
 use crate::analysis::scalars::ExpressionFacts;
+use crate::analysis::scalars::data::{Access, DataExpression, PathProjection};
 use crate::analysis::scalars::generics::callables::CaptureForm;
 use crate::loader::Origin;
 use crate::parser::NodeKind;
+use std::sync::Arc;
 
 fn primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { referent, .. } if matches!(referent.as_ref(), TypeTerm::Primitive(_)))
@@ -32,17 +36,112 @@ impl<'a, 'g> Build<'a, 'g> {
     }
 
     fn slot(&mut self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<Slot> {
-        let (moves, drops) = match ty {
-            TypeTerm::Primitive(p) if p.name() == "string" => (true, true),
-            TypeTerm::Primitive(_) => (false, false),
-            TypeTerm::Reference { mutable, .. } => (*mutable, false),
-            TypeTerm::Callable { .. } => (true, false),
+        let slot = self.slots.len();
+        let (moves, drops, fields, disposer) = match ty {
+            TypeTerm::Primitive(p) if p.name() == "string" => (true, true, &[][..], None),
+            TypeTerm::Primitive(_) => (false, false, &[][..], None),
+            TypeTerm::Reference { mutable, .. } => (*mutable, false, &[][..], None),
+            TypeTerm::Callable { .. } => (true, false, &[][..], None),
+            TypeTerm::Nominal { .. } => {
+                let (fields, disposer) = self.record_layout(node, ty)?;
+                let mut moves = disposer.is_some();
+                for field in fields {
+                    self.budget.step(1)?;
+                    let TypeTerm::Primitive(p) = field.ty.as_ref() else {
+                        return Err(Stop::Pending(node));
+                    };
+                    moves |= p.name() == "string";
+                }
+                (moves, false, fields, disposer)
+            }
             _ => return Err(Stop::Pending(node)),
         };
-        self.budget.reserve(1)?;
-        let slot = self.slots.len();
-        self.slots.push(Local { node, moves, drops });
+        self.budget.reserve(1 + fields.len())?;
+        self.slots.push(Local {
+            node,
+            owner: slot,
+            field: None,
+            fields: fields.len(),
+            disposer,
+            moves,
+            drops,
+        });
+        for field in fields {
+            self.budget.step(1)?;
+            let owns_text =
+                matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string");
+            self.slots.push(Local {
+                node,
+                owner: slot,
+                field: Some(field.declaration),
+                fields: 0,
+                disposer: None,
+                moves: owns_text,
+                drops: owns_text,
+            });
+        }
         Ok(slot)
+    }
+
+    fn record_layout(
+        &mut self,
+        node: NodeId,
+        ty: &TypeTerm<'g>,
+    ) -> ResultOf<(&'a [MemberType<'g>], Option<&'g DeclarationId>)> {
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = ty
+        else {
+            return Err(Stop::Pending(node));
+        };
+        if declaration.module.origin != Origin::Application || !arguments.is_empty() {
+            return Err(Stop::Pending(node));
+        }
+        let inventory = self.typed.inventory();
+        let facts = inventory
+            .type_facts()
+            .declarations
+            .get(declaration)
+            .ok_or(Stop::Pending(node))?;
+        let DeclarationShape::Record { fields } = &facts.shape else {
+            return Err(Stop::Pending(node));
+        };
+        if !facts.binders.is_empty() {
+            return Err(Stop::Pending(node));
+        }
+        let dispose = self.dispose.ok_or(Stop::Pending(node))?;
+        let family = ordinary::source::admitted_family(inventory, dispose, self.budget)?
+            .map_err(|_| Stop::Pending(node))?;
+        self.budget.reserve(1)?;
+        let viable =
+            ordinary::source::project(family, &[Some(Arc::new(ty.clone()))], &[], self.budget)?;
+        match ordinary::source::rank(family, &viable, self.budget)? {
+            Some(HypotheticalOutcome::NoMatch) => Ok((fields, None)),
+            Some(HypotheticalOutcome::Winner(winner)) => {
+                // A selected but conditional implementation is not proof of a
+                // custom disposer. Keep substitution/evidence-dependent cases open.
+                self.budget.step(viable.len())?;
+                let selected = viable
+                    .iter()
+                    .find(|choice| &choice.body.source.declaration == winner && choice.covers)
+                    .ok_or(Stop::Pending(node))?;
+                if selected.body.header.binders.is_empty()
+                    && selected.substitution.is_empty()
+                    && [dispose, winner].into_iter().all(|id| {
+                        inventory
+                            .headers()
+                            .get(id)
+                            .is_some_and(|h| h.requirements.is_empty())
+                    })
+                {
+                    Ok((fields, Some(winner)))
+                } else {
+                    Err(Stop::Pending(node))
+                }
+            }
+            _ => Err(Stop::Pending(node)),
+        }
     }
 
     fn value(&self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
@@ -52,14 +151,24 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(value)
     }
 
-    fn place(&self, node: NodeId) -> ResultOf<Slot> {
-        self.value(node)?
-            .path
-            .as_ref()
-            .filter(|p| p.projections.is_empty())
-            .and_then(|p| self.locals.get(p.root))
-            .copied()
-            .ok_or(Stop::Pending(node))
+    fn place(&mut self, node: NodeId) -> ResultOf<Slot> {
+        let path = self.value(node)?.path.as_ref().ok_or(Stop::Pending(node))?;
+        let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
+        match path.projections.as_slice() {
+            [] => Ok(root),
+            [PathProjection::Field(field)] => self.field(node, root, field),
+            _ => Err(Stop::Pending(node)),
+        }
+    }
+
+    fn field(&mut self, node: NodeId, root: Slot, id: &DeclarationId) -> ResultOf<Slot> {
+        for field in self.slots[root].storage(root).skip(1) {
+            self.budget.step(1)?;
+            if self.slots[field].field.is_some_and(|f| f.id == *id) {
+                return Ok(field);
+            }
+        }
+        Err(Stop::Pending(node))
     }
 
     pub(super) fn emit(&mut self, node: NodeId, action: Action, edges: Edges) -> ResultOf<Pc> {
@@ -229,7 +338,11 @@ impl<'a, 'g> Build<'a, 'g> {
     ) -> ResultOf<Pc> {
         let ty = self.value(value)?.ty.clone();
         let slot = self.slot(value, &ty)?;
-        let end = self.emit(statement, Action::End(slot), Edges::Next(next))?;
+        let end = if self.slots[slot].fields > 0 {
+            self.cleanup(statement, &[slot], next)?
+        } else {
+            self.emit(statement, Action::End(slot), Edges::Next(next))?
+        };
         self.expression(value, Some(slot), end, depth)
     }
 
@@ -273,7 +386,15 @@ impl<'a, 'g> Build<'a, 'g> {
         let action = match syntax.kind {
             NodeKind::Group => return self.expression(syntax.children[0], into, next, depth + 1),
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
-            NodeKind::ValueReference => Action::Read {
+            NodeKind::Field
+                if facts.access != Access::Owned
+                    && matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string") =>
+            {
+                let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
+                let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
+                Action::ForbiddenBorrowedMove(root)
+            }
+            NodeKind::ValueReference | NodeKind::Field => Action::Read {
                 from: self.place(node)?,
                 into,
             },
@@ -307,6 +428,24 @@ impl<'a, 'g> Build<'a, 'g> {
                     from: self.place(syntax.children[0])?,
                     into,
                 }
+            }
+            NodeKind::Construction => {
+                let into = into.ok_or(Stop::Pending(node))?;
+                let Some(DataExpression::Construction(data)) = facts.data.as_ref() else {
+                    return Err(Stop::Pending(node));
+                };
+                if data.base.is_some()
+                    || !data.arguments.is_empty()
+                    || self.slots[into].fields != data.fields.len()
+                {
+                    return Err(Stop::Pending(node));
+                }
+                let mut tail = self.emit(node, Action::Init(into), Edges::Next(next))?;
+                for field in data.fields.iter().rev() {
+                    let target = self.field(node, into, &field.field.id)?;
+                    tail = self.expression(field.expression, Some(target), tail, depth + 1)?;
+                }
+                return Ok(tail);
             }
             NodeKind::Arrow => {
                 return self.closure(node, into.ok_or(Stop::Pending(node))?, next, depth + 1);
@@ -382,7 +521,8 @@ impl<'a, 'g> Build<'a, 'g> {
             } else {
                 next
             };
-            return self.emit(node, Action::Dispose(self.place(*arg)?), Edges::Next(next));
+            let operand = self.place(*arg)?;
+            return self.emit(node, Action::Dispose(operand), Edges::Next(next));
         }
         if call.callee.kind != DeclarationKind::Function
             || call.callee.module.origin != Origin::Application
@@ -425,10 +565,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 NodeKind::Prefix("&mut")
             );
             next = if existing_exclusive {
+                let parent = self.place(arg)?;
                 self.emit(
                     arg,
                     Action::Reborrow {
-                        parent: self.place(arg)?,
+                        parent,
                         into: slot,
                         exclusive: true,
                         suspends: true,
