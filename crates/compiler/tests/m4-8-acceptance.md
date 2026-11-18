@@ -42,9 +42,9 @@ Code revision [`853af9a64e11da1555cbae8fc0096221885ee039`](https://github.com/Re
 
 ## Remaining obligations
 
-The worktree has no shipped core implementation or validated toolchain authority source. Required provider and protected-operation admission, complete protection inventories, opaque representations and real numeric conversion providers are unverified. Captured paths, selectors and fixtures cannot supply that evidence.
+The [installed Option checks](#installed-option-checks) verify a limited set of first-party sources. The complete installed bundle, provider and protection inventories, opaque representations and real numeric conversion providers are unverified. Captured paths, selectors and fixtures cannot supply that evidence.
 
-The compiler has no source-level Result-use solver. Canonical Option, Result, Err, List, formatting and iterator checks still need admitted contracts. Exact propagation, including through a pipe, is pending. Aggregate cases that depend on custom disposal or protection also remain pending. A partial report cannot issue a typed-stage receipt.
+The compiler has no source-level Result-use solver. Canonical Result, Err, List, formatting and iterator checks still need admitted contracts. Propagation through a pipe and aggregate checks that depend on custom disposal or protection remain pending. A partial report cannot issue a typed-stage receipt.
 
 The tests did not execute a Rill program. No full M4 or RFC acceptance, ownership permission, runtime, hosted runner, LLVM or product result follows. RFC 0001 remains Accepted at its recorded snapshot; RFCs 0002 through 0010 remain Draft. Workflows did not change, so `check:ci` was not run.
 
@@ -54,4 +54,40 @@ Standards and Spec independently reviewed `5b10326e9ffc6dd638287f2fe3714c22a22e3
 
 Three public regressions reproduced the problems. The corrections check written arms when coverage is pending. They defer missing receiving context, keep known sibling binder types and variant views, and derive guard fallthrough from reachable flow. The partial report does not publish unsettled match coverage or arm reachability.
 
-The corrected code at `d6e76d91e649d3d834f246a14812bbb87eadd90b` passed the four mise gates locally. `test:compiler` passed 368 tests including 18 M4.8 tests, and `test` passed 376. `check` verified 1,817 documentation destinations with no errors. The correction diff has SHA-256 `8b4e034a763e75008e0faff15801ca68f7fb5fd3847a22b2eb15eb76e66ffd9f`. The corrections were not independently re-reviewed. The [A1 through A3 authority checkpoint](../../../docs/implementation-plan.md#m48-completion-checkpoint-first-party-core-authority) is unchanged. No installed core test or Rill execution ran.
+The corrected code at `d6e76d91e649d3d834f246a14812bbb87eadd90b` passed the four mise gates locally. `test:compiler` passed 368 tests including 18 M4.8 tests, and `test` passed 376. `check` verified 1,817 documentation destinations with no errors. The correction diff has SHA-256 `8b4e034a763e75008e0faff15801ca68f7fb5fd3847a22b2eb15eb76e66ffd9f`. The corrections were not independently re-reviewed. No installed core test or Rill execution ran at that revision.
+
+## Installed Option checks
+
+The owner [approved A1 through A3](https://github.com/Reilley64/rill/issues/65#issuecomment-6971033745) at `3c7e9bb0664ecb866630fbc1f349e333aef57ac5` before compiler and core changes. This increment checks the first installed source group. It does not complete the approved authority or provider inventories.
+
+Run `mise exec -- cargo test --locked -p compiler --no-default-features --test m4_8_installed`. The Rust test runs a copy of itself under a temporary `bin/` directory beside the staged `stdlib/core.rill` and `stdlib/option.rill` sources in `lib/rill/std/`. It calls `loader::load_installed` and `analyze_typed` from another working directory. It does not stage a full distribution or exercise a product command.
+
+| Case | Observed outcome |
+| --- | --- |
+| Pinned sources in both load modes | The report admits the `Option` schema and the checked `isSome` provider. It checks the Rill bodies of `asRef`, `asMut`, `map` and `andThen`. The prelude declarations still lack providers. |
+| Postfix propagation through an import alias | The shared checker keeps the canonical variants and the callable target. Unknown, exact `None` and exact `Some` operands retain different flow facts. A borrowed operand or incompatible return type is rejected. |
+| Source-only load with identical bytes, unsupported target, or unsupported options | The source graph loads but carries no first-party admission. |
+| Question-mark trigger without a source import | The loader captures the pinned metadata file without adding an application binding. The local same-shaped enum is not `Option`. If the optional file is missing, the source graph still loads and the role remains pending. |
+| Changed pin and retained graph | Stable mismatched bytes are `InvalidRequest`. Revalidating an earlier capture after editing the file is `SourceChanged`. The typed checker still uses its immutable captured bytes. |
+| One-short limits | The metadata dependency is charged against the module limit. The shared analysis budget also reports exhaustion when shortened by one unit of work. |
+
+### Review and verification
+
+Standards and Spec independently reviewed `d3cdbfa9df2de0ec36ce1728169c353311741c2c` against `a6b763216e41f2b55f9b6d47c0973e6f5fa895ae`. The diff has SHA-256 `2ccb252e0ec589bbc41ce52477850c5d6918c6279eef31532c1cd99872f9fd3a`.
+
+| Axis | Findings and corrections |
+| --- | --- |
+| Standards | A known invalid propagation target became pending. The checker now validates that target before it depends on the operand's core role. Admission lookups lacked work charges. A test checks the exact role budget and the one-short limit. Public and metered body queries share the identity comparison. |
+| Spec | A source error in the operand created a false core blocker. Pending arrow flow caused a false return-coverage error. Option schema and inspection checks allowed extra defaults or requirements. Regressions distinguish all of these cases, including an admitted `Some` path that can fall through. |
+
+The correction at `7490ce4ae063ae1bbe77e7347f1799f0e9bd6f02` has diff SHA-256 `cd6b1b534b6c6c00124db35db157f07798d380b309b111058cd8979a39bda640` from the reviewed revision. Local tests verified the corrections. They were not independently re-reviewed.
+
+| Check | Result on macOS 27.0.1 AArch64 |
+| --- | --- |
+| `mise run test:compiler` | 370 passed, including the installed test and header-schema unit test. |
+| `mise run test` | 378 passed. |
+| `mise run check` and `mise run build:scaffold` | Passed. The documentation check verified 1,820 destinations with no errors. |
+| Python models | 55 passed. |
+| Rust formatting, LLVM-free Clippy, dependency tree, and diff | Passed. The compiler dependency tree contains only `compiler`. |
+
+The installed test results are static checks. No Rill program ran. Native artifacts, complete inventories, and positive typed-stage receipts in both modes remain NotChecked.

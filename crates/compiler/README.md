@@ -101,7 +101,7 @@ Implementation records identify the original family, defining module and source 
 
 Each `Request` requires a standard source root and two root-relative `.rill` selectors naming exported body-less families. Tests supply minimal `core.rill` families. The compiler records its fixed primitive/predicate identities separately. Local shadowing does not replace the selected canonical copy/dispose identities.
 
-Prelude admission checks source structure and visibility, not typed signature compatibility. Target and option inputs identify the capture; M3 does not validate backend or standard-library compatibility. Selected standard paths never grant native-provider or protected-operation authority. There is no shipped standard library, empty-prelude mode, implicit helper import or installed-toolchain discovery.
+Prelude admission checks source structure and visibility, not typed signature compatibility. Target and option inputs identify the capture. The source-only loader does not validate backend or standard-library compatibility. Selected standard paths never grant native-provider or protected-operation authority. The separate M4.8 installed entry point is described below.
 
 ### Failures and resource limits
 
@@ -259,4 +259,6 @@ The [M4.7 verification record](tests/m4-7-acceptance.md) lists the tests, review
 
 `analysis::typed::analyze_typed` checks one M3 graph under one accumulated limit. Query `inventory` for captured declarations and conditional comparisons, `bodies` for local body and expression facts, and `public_interface_findings` for private origins in exposed types and requirements. `not_performed` lists stages not reached or outside the increment; leaving a stage off that list does not mean it passed.
 
-The report has no typed-stage receipt. `core_blockers` lists missing evidence for roles, providers, protection and representations. The compiler has no source-level Result-use solver. See the [M4.8 verification record](tests/m4-8-acceptance.md) for the finite model, compiler tests and remaining obligations.
+`loader::load_installed` derives the standard root from the running executable under `<prefix>/bin/`. For `aarch64-apple-darwin` with no options, the compiler verifies its pinned prelude and `Option` sources against the captured bytes. The typed report can expose the admitted `Option` schema and the checked `isSome` provider. The shared checker types postfix `?` on an owned canonical `Option` and records the success and early-return alternatives. The source-only `loader::load` cannot supply these facts, even with identical sources.
+
+The report has no typed-stage receipt. `core_blockers` lists remaining evidence for roles, providers, protection and representations. The compiler has no source-level Result-use solver. See the [M4.8 verification record](tests/m4-8-acceptance.md) for the finite model, installed tests and remaining obligations.
