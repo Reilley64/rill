@@ -13,6 +13,7 @@ fn active_disposer_cleans_only_remaining_fields() {
             }
             function normal(value: Bag, later: string): void { let inner = "inner"; }
             function explicit(value: Bag, later: string): void { release(value); }
+            function groupedExplicit(value: Bag): void { dispose<Bag>((value)); }
             function explicitTwice(value: Bag): void { dispose(value); release(value); }
             function explicitLive(value: Bag): &string {
                 let view = &value.head;
@@ -140,6 +141,16 @@ fn active_disposer_cleans_only_remaining_fields() {
                 };
                 assert_eq!(finding.code(), code);
             }
+
+            let grouped = lower("groupedExplicit");
+            let grouped_mir = grouped
+                .mir()
+                .expect("explicit type and grouped named operand");
+            assert!(
+                matches!(path_drops(grouped_mir, grouped_mir.entry).as_slice(),
+                [Obligation::InvokeDisposer { operand, implementation: selected }]
+                    if operand.root.span.bytes() == b"value: Bag" && selected == implementation)
+            );
 
             let limits = AnalysisLimits {
                 max_work: explicit.statistics().work,

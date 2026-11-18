@@ -284,6 +284,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             if let Some(ty) = receiving[i].clone() {
                 let argument = call.fact.arguments[i];
                 let leaf = self.source_leaf(module, argument)?;
+                // A named operand has its own type even through grouping.
+                // Do not give it the call's hypothetical receiving premise
+                // before its independent type reaches the containing group.
+                if module.syntax.nodes[leaf].kind == NodeKind::ValueReference
+                    && self.local_disposer_subject(call.fact.callee, &ty)?
+                {
+                    continue;
+                }
                 if !inference.ordinary_tuples.contains(&leaf) {
                     // List get has a width context only after the receiver is
                     // known and ordinary context agreement establishes u64.
