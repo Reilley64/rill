@@ -384,7 +384,7 @@ impl<'g> Local<'g> {
         slot..slot + 1 + self.fields
     }
 
-    fn extraction_sources(self, slot: Slot) -> Slot {
+    fn carried_loan_root(self, slot: Slot) -> Slot {
         if self.reference_field {
             self.owner
         } else {

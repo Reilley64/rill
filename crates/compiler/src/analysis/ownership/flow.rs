@@ -78,11 +78,14 @@ fn liveness(
         let (used, killed) = match instruction.action {
             Action::None | Action::Cleanup(_) => (None, None),
             Action::Init(slot) | Action::End(slot) => (None, Some(slot)),
-            Action::Read { from, into } => (Some(slots[from].extraction_sources(from)), into),
-            Action::Dereference { from, into } => (Some(from), into),
+            Action::Read { from, into } | Action::Dereference { from, into } => {
+                (Some(slots[from].carried_loan_root(from)), into)
+            }
             Action::ForbiddenBorrowedMove(slot) => (Some(slot), None),
             Action::Borrow { from, into, .. } => (Some(from), Some(into)),
-            Action::Reborrow { parent, into, .. } => (Some(parent), Some(into)),
+            Action::Reborrow { parent, into, .. } => {
+                (Some(slots[parent].carried_loan_root(parent)), Some(into))
+            }
             Action::Dispose(slot) | Action::Export(slot) => (Some(slot), Some(slot)),
             Action::Displace { target, incoming } | Action::Install { target, incoming } => {
                 (Some(incoming), Some(target))
@@ -203,6 +206,17 @@ fn insert_loan(loans: &mut BTreeSet<Loan>, loan: Loan, budget: &mut Budget) -> R
         loans.insert(loan);
     }
     Ok(())
+}
+
+fn include_loans(
+    loans: &mut BTreeSet<Loan>,
+    state: &[State],
+    storage: Range<Slot>,
+    budget: &mut Budget,
+) -> ResultOf<()> {
+    visit_loans(state, storage, budget, |loan, budget| {
+        insert_loan(loans, loan, budget)
+    })
 }
 
 fn loan_set(loans: BTreeSet<Loan>, budget: &mut Budget) -> ResultOf<Arc<[Loan]>> {
@@ -504,15 +518,10 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     {
                         return Err(Stop::Pending(node));
                     }
-                    let carried = if into.is_some() && slots[from].reference_field {
-                        let owner = slots[from].owner;
+                    let owner = slots[from].carried_loan_root(from);
+                    let carried = if into.is_some() && owner != from {
                         let mut carried = BTreeSet::new();
-                        visit_loans(
-                            &state,
-                            slots[owner].storage(owner),
-                            budget,
-                            |loan, budget| insert_loan(&mut carried, loan, budget),
-                        )?;
+                        include_loans(&mut carried, &state, slots[owner].storage(owner), budget)?;
                         Some(loan_set(carried, budget)?)
                     } else {
                         None
@@ -631,18 +640,23 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                         access,
                         budget,
                     )?;
-                    let loans = if suspends {
-                        budget.reserve(held.loans.len() + 1)?;
-                        let mut loans = held.loans.to_vec();
-                        loans.push(Loan {
-                            source: parent,
-                            site: node,
-                            exclusive: true,
-                            kind: LoanKind::Suspension,
-                        });
-                        loans.sort_unstable();
-                        loans.dedup();
-                        Arc::from(loans)
+                    let owner = slots[parent].carried_loan_root(parent);
+                    let loans = if suspends || owner != parent {
+                        let mut loans = BTreeSet::new();
+                        include_loans(&mut loans, &state, slots[owner].storage(owner), budget)?;
+                        if suspends {
+                            insert_loan(
+                                &mut loans,
+                                Loan {
+                                    source: parent,
+                                    site: node,
+                                    exclusive: true,
+                                    kind: LoanKind::Suspension,
+                                },
+                                budget,
+                            )?;
+                        }
+                        loan_set(loans, budget)?
                     } else {
                         held.loans.clone()
                     };
@@ -679,9 +693,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                         require_initialized(&slots, &state, arg, node, budget)?;
                         let storage = slots[arg].storage(arg);
                         if call.retains && call.into.is_some() {
-                            visit_loans(&state, storage.clone(), budget, |loan, budget| {
-                                insert_loan(&mut retained, loan, budget)
-                            })?;
+                            include_loans(&mut retained, &state, storage.clone(), budget)?;
                         }
                         budget.step(storage.len())?;
                         state[storage].fill(State::Vacant);

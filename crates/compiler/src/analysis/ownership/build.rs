@@ -436,7 +436,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 into,
             },
             NodeKind::Prefix("&" | "&mut") => {
-                let operand = syntax.children[0];
+                let operand = self.ungroup(syntax.children[0])?;
                 let into = into.ok_or(Stop::Pending(node))?;
                 let exclusive = syntax.kind == NodeKind::Prefix("&mut");
                 let source = &self.module.syntax.nodes[operand];

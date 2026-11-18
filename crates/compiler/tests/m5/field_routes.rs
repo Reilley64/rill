@@ -1,4 +1,11 @@
 use super::*;
+use compiler::analysis::ownership::Report;
+
+fn require_mir<'a, 'g>(report: &'a Report<'g>, name: &str) -> &'a Mir<'g> {
+    report
+        .mir()
+        .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()))
+}
 
 #[test]
 fn carried_field_and_slot_borrow_differ() {
@@ -70,12 +77,33 @@ fn carried_field_and_slot_borrow_differ() {
                 local = false;
                 return x.second;
             }
+            function reborrowEscape(seed: &bool): &bool {
+                let local = true;
+                let x = Two { first: &local, second: seed };
+                return &*x.second;
+            }
+            function reborrowAfterRelease(seed: &bool): &bool {
+                let mut local = true;
+                let x = Two { first: &local, second: seed };
+                local = false;
+                return &*x.second;
+            }
+            function groupedReborrow(x: Holder): &bool { return &(*x.value); }
             function borrowHolder(): void {
                 let mut local = true;
                 let x = Holder { value: &local };
                 let access = &x;
                 local = false;
                 let last = access;
+            }
+            function freeze(source: &mut bool): &bool { return &*source; }
+            function retainsExclusiveRestriction(): bool {
+                let mut local = true;
+                let view = freeze(&mut local);
+                let x = Holder { value: view };
+                let holder = x;
+                let before = local;
+                return *holder.value;
             }
             function branchRetains(flag: bool, seed: &bool): bool {
                 let mut local = true;
@@ -121,9 +149,8 @@ fn carried_field_and_slot_borrow_differ() {
             };
 
             let forwarded = lower("forward");
-            let mir = forwarded
-                .mir()
-                .unwrap_or_else(|| panic!("{:?}", forwarded.completion()));
+
+            let mir = require_mir(&forwarded, "forward");
             assert!(mir.blocks.iter().any(|block| matches!(block.operation, Operation::Copy { from, into: Some(_) }
                 if from.root.span.bytes() == b"x: Holder" && from.field.is_some_and(|field| field.name.as_deref() == Some("value")))));
             assert!(mir.blocks.iter().any(|block| matches!(block.operation, Operation::Export(place) if place.root.span.bytes() == b"x.value")));
@@ -134,18 +161,16 @@ fn carried_field_and_slot_borrow_differ() {
             assert!(path_drops(mir, mir.entry).is_empty());
 
             let mixed = lower("forwardAndClean");
-            let mir = mixed
-                .mir()
-                .unwrap_or_else(|| panic!("{:?}", mixed.completion()));
+
+            let mir = require_mir(&mixed, "forwardAndClean");
             assert!(
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)]
                 if place.root.span.bytes() == b"x: WithText" && place.field.is_some_and(|decl| decl.name.as_deref() == Some("text")))
             );
 
             let caller = lower("callerForward");
-            let mir = caller
-                .mir()
-                .unwrap_or_else(|| panic!("{:?}", caller.completion()));
+
+            let mir = require_mir(&caller, "callerForward");
             assert!(
                 mir.blocks
                     .iter()
@@ -156,17 +181,15 @@ fn carried_field_and_slot_borrow_differ() {
                 "the call owns the transferred text"
             );
             let replacement = lower("fieldReplacement");
-            let mir = replacement
-                .mir()
-                .unwrap_or_else(|| panic!("{:?}", replacement.completion()));
+
+            let mir = require_mir(&replacement, "fieldReplacement");
             assert!(mir.blocks.iter().any(
                 |block| matches!(block.operation, Operation::Install { target, .. }
                 if target.field.is_some_and(|decl| decl.name.as_deref() == Some("value")))
             ));
             let ordered = lower("storageBeforeSource");
-            let mir = ordered
-                .mir()
-                .unwrap_or_else(|| panic!("{:?}", ordered.completion()));
+
+            let mir = require_mir(&ordered, "storageBeforeSource");
             assert!(mir.blocks.iter().any(|block| matches!(&block.operation, Operation::Cleanup(cleanup)
                 if matches!(cleanup.as_slice(), [Obligation::EndStorage(field), Obligation::EndStorage(root), Obligation::EndStorage(source)]
                     if field.field.is_some_and(|decl| decl.name.as_deref() == Some("value"))
@@ -174,15 +197,28 @@ fn carried_field_and_slot_borrow_differ() {
                         && source.root.span.bytes() == b"local"))));
 
             let looped = lower("loopClears");
-            let mir = looped
-                .mir()
-                .unwrap_or_else(|| panic!("{:?}", looped.completion()));
+
+            let mir = require_mir(&looped, "loopClears");
             assert!(
                 mir.blocks
                     .iter()
                     .enumerate()
                     .any(|(pc, b)| matches!(b.terminator, Terminator::Goto(next) if next < pc))
             );
+
+            let grouped_reborrow = lower("groupedReborrow");
+            let mir = require_mir(&grouped_reborrow, "groupedReborrow");
+            assert!(mir.blocks.iter().any(|block| matches!(block.operation, Operation::Reborrow { parent, exclusive: false, .. }
+                if parent.field.is_some_and(|field| field.name.as_deref() == Some("value")))));
+
+            let exclusive = lower("retainsExclusiveRestriction");
+            assert_eq!(exclusive.completion(), Completion::SourceRejected);
+            assert!(exclusive.mir().is_none());
+            let [finding] = exclusive.findings() else {
+                panic!("expected exclusive restriction")
+            };
+            assert_eq!(finding.code(), "R0201");
+            assert_eq!(finding.related.span.bytes(), b"&mut local");
 
             let grouped = lower("groupedOnly");
             assert_eq!(grouped.completion(), Completion::Incomplete);
@@ -193,6 +229,7 @@ fn carried_field_and_slot_borrow_differ() {
                 "otherHolder",
                 "possibleSource",
                 "futureProjection",
+                "reborrowAfterRelease",
                 "borrowHolder",
                 "branchRetains",
                 "loopEscapes",
@@ -212,6 +249,7 @@ fn carried_field_and_slot_borrow_differ() {
                 ("escapeLocal", b"local".as_slice()),
                 ("escapeInRecord", b"local".as_slice()),
                 ("callerEscapes", b"local".as_slice()),
+                ("reborrowEscape", b"local".as_slice()),
             ] {
                 let rejected = lower(name);
                 assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
