@@ -84,10 +84,7 @@ impl<'a, 'g> Build<'a, 'g> {
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
                 if let Some(role) = self.bool_option_role(ty) =>
             {
-                if !self.option_no_disposer {
-                    self.prove_no_variant_disposer(node, ty, [role.some, role.none])?;
-                    self.option_no_disposer = true;
-                }
+                self.prove_no_variant_disposer(node, ty, [role.some, role.none])?;
                 (false, StorageCleanup::End)
             }
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
@@ -217,6 +214,15 @@ impl<'a, 'g> Build<'a, 'g> {
             TypeTerm::Variant { parent, .. } => parent,
             _ => ty,
         };
+        // The admitted parents have only scalar arguments, so comparison
+        // is bounded. A successful proof covers both variants of this exact
+        // instantiation, not other success or error types.
+        for proved in &self.proved_variant_cleanup {
+            self.budget.step(1)?;
+            if proved == parent {
+                return Ok(());
+            }
+        }
         if self.outer_disposer(node, parent)?.is_some() {
             return Err(Stop::Pending(node));
         }
@@ -230,6 +236,8 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             }
         }
+        self.budget.reserve(1)?;
+        self.proved_variant_cleanup.push(parent.clone());
         Ok(())
     }
 
@@ -806,19 +814,46 @@ impl<'a, 'g> Build<'a, 'g> {
             None
         };
         let scratch = self.slot(source, &operand.ty)?;
-        let success = if exit.can_continue {
-            Some(if wrapper.is_some() {
-                self.emit(
-                    node,
-                    Action::TakeResultSuccess {
-                        operand: scratch,
-                        into,
-                    },
-                    Edges::Next(next),
-                )?
-            } else {
+        let return_slot = if exit.can_return {
+            let output = self.slot(node, result)?;
+            let export = self.emit(node, Action::Export(output), Edges::Next(return_cleanup))?;
+            Some((output, export))
+        } else {
+            None
+        };
+        let (success, failure) = if let Some(wrapper) = wrapper {
+            let success = exit
+                .can_continue
+                .then(|| {
+                    self.emit(
+                        node,
+                        Action::TakeResultSuccess {
+                            operand: scratch,
+                            into,
+                        },
+                        Edges::Next(next),
+                    )
+                })
+                .transpose()?;
+            let failure = return_slot
+                .map(|(output, export)| {
+                    self.emit(
+                        node,
+                        Action::ForwardResultFailure {
+                            operand: scratch,
+                            into: output,
+                            variant: exit.failure,
+                            wrapper,
+                        },
+                        Edges::Next(export),
+                    )
+                })
+                .transpose()?;
+            (success, failure)
+        } else {
+            let success = if exit.can_continue {
                 let end = self.emit(node, Action::End(scratch), Edges::Next(next))?;
-                if let Some(into) = into {
+                Some(if let Some(into) = into {
                     self.emit(
                         node,
                         Action::CopyOptionPayload {
@@ -829,26 +864,11 @@ impl<'a, 'g> Build<'a, 'g> {
                     )?
                 } else {
                     end
-                }
-            })
-        } else {
-            None
-        };
-        let failure = if exit.can_return {
-            let output = self.slot(node, result)?;
-            let export = self.emit(node, Action::Export(output), Edges::Next(return_cleanup))?;
-            Some(if let Some(wrapper) = wrapper {
-                self.emit(
-                    node,
-                    Action::ForwardResultFailure {
-                        operand: scratch,
-                        into: output,
-                        variant: exit.failure,
-                        wrapper,
-                    },
-                    Edges::Next(export),
-                )?
+                })
             } else {
+                None
+            };
+            let failure = if let Some((output, export)) = return_slot {
                 let empty = self.emit(
                     node,
                     Action::ConstructVariant {
@@ -858,10 +878,11 @@ impl<'a, 'g> Build<'a, 'g> {
                     },
                     Edges::Next(export),
                 )?;
-                self.emit(node, Action::End(scratch), Edges::Next(empty))?
-            })
-        } else {
-            None
+                Some(self.emit(node, Action::End(scratch), Edges::Next(empty))?)
+            } else {
+                None
+            };
+            (success, failure)
         };
         let split = match (success, failure) {
             (Some(yes), Some(no)) => self.emit(

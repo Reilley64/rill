@@ -61,11 +61,23 @@ fn option_postfix_returns_through_initialized_cleanup() {
                 .mir()
                 .unwrap_or_else(|| panic!("paths: {:?}", report.completion()));
             let (flag_yes, flag_no) = branch_targets(mir);
-            for (start, expected) in [
-                (flag_yes, &[b"owner".as_slice()][..]),
-                (flag_no, &[b"owner".as_slice(), b"second: string"][..]),
+            let pass = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("pass"))
+                .unwrap();
+            for (flag, start, expected) in [
+                (true, flag_yes, &[b"owner".as_slice()][..]),
+                (
+                    false,
+                    flag_no,
+                    &[b"owner".as_slice(), b"second: string"][..],
+                ),
             ] {
-                let (some, none) = call_then_test(mir, start, &role.some.id);
+                for success in [true, false] {
+                    assert_eq!(calls_on_path(mir, [flag, success]), [&pass.id]);
+                }
+                let (some, none) = variant_edges(mir, start, &role.some.id);
                 let failure = linear(mir, none);
                 assert_return(&failure, &role.none.id, false, expected);
                 assert!(!failure.iter().any(|op| matches!(
@@ -224,11 +236,23 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
                 .mir()
                 .unwrap_or_else(|| panic!("paths: {:?}", report.completion()));
             let (flag_yes, flag_no) = branch_targets(mir);
-            for (start, expected) in [
-                (flag_yes, &[b"owner".as_slice()][..]),
-                (flag_no, &[b"owner".as_slice(), b"second: string"][..]),
+            let pass = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("pass"))
+                .unwrap();
+            for (flag, start, expected) in [
+                (true, flag_yes, &[b"owner".as_slice()][..]),
+                (
+                    false,
+                    flag_no,
+                    &[b"owner".as_slice(), b"second: string"][..],
+                ),
             ] {
-                let (ok, err) = call_then_test(mir, start, &role.ok.id);
+                for success in [true, false] {
+                    assert_eq!(calls_on_path(mir, [flag, success]), [&pass.id]);
+                }
+                let (ok, err) = variant_edges(mir, start, &role.ok.id);
                 let failure = linear(mir, err);
                 assert_forward(&failure, role, b"pass(input)", expected);
                 assert!(!failure.iter().any(|op| matches!(
@@ -312,29 +336,47 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
     );
 }
 
-fn call_then_test(
-    mir: &Mir<'_>,
-    mut pc: usize,
-    expected: &loader::DeclarationId,
-) -> (usize, usize) {
-    let mut calls = 0;
+fn variant_edges(mir: &Mir<'_>, mut pc: usize, expected: &loader::DeclarationId) -> (usize, usize) {
     for _ in 0..mir.blocks.len() {
         let block = &mir.blocks[pc];
         match (&block.operation, block.terminator) {
             (Operation::TestVariant { operand, success }, Terminator::Branch { yes, no }) => {
                 assert_eq!(operand.root.span.bytes(), b"pass(input)");
                 assert_eq!(*success, expected);
-                assert_eq!(calls, 1);
                 return (yes, no);
             }
-            (op, Terminator::Goto(next)) => {
-                calls += usize::from(matches!(op, Operation::Call(_)));
-                pc = next;
-            }
+            (_, Terminator::Goto(next)) => pc = next,
             other => panic!("expected reachable variant test: {other:?}"),
         }
     }
     panic!("path did not reach the variant test");
+}
+
+fn calls_on_path<'g>(mir: &Mir<'g>, branches: [bool; 2]) -> Vec<&'g loader::DeclarationId> {
+    let mut pc = mir.entry;
+    let mut choices = branches.into_iter();
+    let mut calls = Vec::new();
+    for _ in 0..mir.blocks.len() {
+        let block = &mir.blocks[pc];
+        if let Operation::Call(callee) = block.operation {
+            calls.push(callee);
+        }
+        match block.terminator {
+            Terminator::Goto(next) => pc = next,
+            Terminator::Branch { yes, no } => {
+                pc = if choices.next().expect("unexpected branch") {
+                    yes
+                } else {
+                    no
+                };
+            }
+            Terminator::Return => {
+                assert!(choices.next().is_none(), "exit skipped a branch");
+                return calls;
+            }
+        }
+    }
+    panic!("path did not reach a return");
 }
 
 fn assert_forward(
@@ -389,7 +431,13 @@ fn assert_export<'g>(
             _ => None,
         })
         .expect("export the return value");
-    assert!(ops[..export].iter().any(|op| defines_output(op, output)));
+    assert_eq!(
+        ops[..export]
+            .iter()
+            .filter(|op| defines_output(op, output))
+            .count(),
+        1
+    );
     let mut drops = Vec::new();
     for (index, op) in ops.iter().enumerate() {
         match op {

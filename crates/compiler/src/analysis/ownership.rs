@@ -408,7 +408,7 @@ fn lower<'g>(
         cleanups: Vec::new(),
         dispose: typed.dispose_role().map(|d| &d.id),
         return_contract: (&header.declaration.id, result),
-        option_no_disposer: false,
+        proved_variant_cleanup: Vec::new(),
         budget,
     };
     for fact in typed.bodies().typed_nodes() {
@@ -644,7 +644,7 @@ struct Build<'a, 'g> {
     cleanups: Vec<Vec<Slot>>,
     dispose: Option<&'g DeclarationId>,
     return_contract: (&'g DeclarationId, &'a Type<'g>),
-    option_no_disposer: bool,
+    proved_variant_cleanup: Vec<Type<'g>>,
     budget: &'a mut Budget,
 }
 
