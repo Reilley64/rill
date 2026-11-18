@@ -80,15 +80,27 @@ impl<'g> TypedReport<'g> {
 
 pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     let inventory = analyze_typed_inventory(graph, limits);
-    let bodies = analyze_integrated_bodies(&inventory, limits);
+    let mut budget = Budget {
+        limits,
+        statistics: inventory.statistics(),
+    };
+    let roles = if inventory.completion() == super::ordinary::Completion::ResourceLimit {
+        Err(())
+    } else {
+        core::check_roles(&inventory, &mut budget)
+    };
+    let mut core = core::InstalledCore {
+        option: roles.unwrap_or_default(),
+        ..Default::default()
+    };
+    let bodies = analyze_integrated_bodies(&inventory, budget, core.option, roles.is_err());
     let mut budget = Budget {
         limits,
         statistics: bodies.statistics(),
     };
     let mut completion = bodies.completion();
-    let mut core = core::InstalledCore::default();
     if completion != ScalarFailureKind::ResourceLimit
-        && core::check(&inventory, &bodies, &mut budget, &mut core).is_err()
+        && core::check_providers(&inventory, &bodies, &mut budget, &mut core).is_err()
     {
         completion = ScalarFailureKind::ResourceLimit;
     }

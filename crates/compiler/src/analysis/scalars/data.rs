@@ -62,6 +62,7 @@ pub enum DataExpression<'g> {
         component: usize,
     },
     Match(Box<Match<'g>>),
+    Propagation(Box<Propagation<'g>>),
 }
 #[derive(Debug)]
 pub struct DataReceipt<'r, 'g>(ScalarReceipt<'r, 'g>);

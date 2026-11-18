@@ -2,7 +2,7 @@ use super::collect::{self, Import};
 use super::filesystem::{self, Kind};
 use super::*;
 use crate::lexer::{LexStatus, lex};
-use crate::parser::{EntryPoint, parse};
+use crate::parser::{EntryPoint, NodeKind, parse};
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Component, Path};
 
@@ -121,9 +121,15 @@ impl Engine {
                     "prelude needs a root-relative .rill module",
                 ));
             }
-            prelude_keys.push(
-                self.require_source(Origin::Standard, self.roots[&Origin::Standard].join(path))?,
-            );
+            let key =
+                self.require_source(Origin::Standard, self.roots[&Origin::Standard].join(path))?;
+            if self.installed.is_some() && key.path != selector.module {
+                return Err(failure(
+                    FailureKind::InvalidRequest,
+                    "installed prelude does not have its pinned module key",
+                ));
+            }
+            prelude_keys.push(key);
         }
         while let Some(key) = self.pending.pop_front() {
             self.host.charge(1)?;
@@ -134,6 +140,7 @@ impl Engine {
             }
             self.imports.extend(imports);
         }
+        self.capture_question_mark_metadata()?;
         self.imports
             .sort_by(|a, b| (&a.module, a.span.start()).cmp(&(&b.module, b.span.start())));
         let (facts, names, public_names) = self.seeds()?;
@@ -503,6 +510,73 @@ impl Engine {
             }
         }
         Ok(privacy)
+    }
+
+    fn capture_question_mark_metadata(&mut self) -> Result<()> {
+        let Some(profile) = self.installed else {
+            return Ok(());
+        };
+        let mut requested = false;
+        'sources: for module in self.modules.values() {
+            for node in &module.syntax.nodes {
+                self.host.charge(1)?;
+                if matches!(
+                    node.kind,
+                    NodeKind::Propagate | NodeKind::Wrap | NodeKind::PipeStep { propagate: true }
+                ) {
+                    requested = true;
+                    break 'sources;
+                }
+            }
+        }
+        if !requested {
+            return Ok(());
+        }
+        let root = self.roots[&Origin::Standard].clone();
+        for path in profile.question_mark_dependencies() {
+            let key = ModuleKey {
+                origin: Origin::Standard,
+                path: (*path).into(),
+            };
+            self.host.charge(1)?;
+            if self.modules.contains_key(&key) {
+                continue; // An explicit source edge is already in the graph.
+            }
+            let path = root.join(path);
+            let Some(probe) = self.host.probe(&path, Some(&root))? else {
+                continue;
+            };
+            if probe.kind != Kind::File || probe.path != path {
+                return Err(failure(
+                    FailureKind::InvalidRequest,
+                    "installed metadata does not have its pinned module key",
+                ));
+            }
+            let loaded = self.add_module(Origin::Standard, probe.path)?;
+            let pending = self.pending.pop_front();
+            debug_assert_eq!(pending.as_ref(), Some(&loaded));
+            let module = self.modules.get_mut(&loaded).unwrap();
+            let imports = collect::collect(module, &mut self.host)?;
+            self.host.charge(module.declarations.len())?;
+            // This edge has no imports and admits no registrations. Do not let it
+            // change the source resolver's import, dispatch or execution roots.
+            if !imports.is_empty()
+                || module.declarations.iter().any(|d| {
+                    matches!(
+                        d.id.kind,
+                        DeclarationKind::Startup
+                            | DeclarationKind::Expectation
+                            | DeclarationKind::Implementation
+                    )
+                })
+            {
+                return Err(failure(
+                    FailureKind::InvalidRequest,
+                    "installed question-mark metadata exceeds its declared scope",
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn require_source(&mut self, origin: Origin, path: PathBuf) -> Result<ModuleKey> {

@@ -1,83 +1,36 @@
 //! Exercises installed capture with production core sources and no trust override.
-use compiler::analysis::AnalysisLimits;
+use compiler::analysis::scalars::data::DataExpression;
+use compiler::analysis::scalars::{
+    BodyOwner, NodeFactKind, PropagationTarget, ScalarFailureKind, ScalarFindingKind,
+    ScalarUnsupported,
+};
 use compiler::analysis::typed::{CoreBlocker, analyze_typed};
-use compiler::loader::{self, FailureKind, InstalledRequest, Limits, Prelude, Request, Selector};
+use compiler::analysis::{AnalysisLimits, TypeTerm};
+use compiler::loader::{
+    self, FailureKind, InstalledRequest, Limits, Origin, Prelude, Request, Selector,
+};
+use compiler::parser::NodeKind;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
 fn installed_option_uses_pinned_sources_in_both_modes() {
     if let Some(root) = std::env::var_os("RILL_INSTALLED_PROBE_ROOT") {
         let root = PathBuf::from(root);
-        let entry = root.join("app/main.rill");
-        let mut options = BTreeMap::new();
-        for test_mode in [false, true] {
-            let graph = loader::load_installed(InstalledRequest {
-                entry: entry.clone(),
-                target: "aarch64-apple-darwin".into(),
-                options: options.clone(),
-                test_mode,
-                limits: Limits::default(),
-            })
-            .unwrap();
-            let report = analyze_typed(&graph, AnalysisLimits::default());
-            let role = report.option_role().expect("admitted Option schema");
-            assert_eq!(role.declaration.name.as_deref(), Some("Option"));
-            assert_eq!(role.some.name.as_deref(), Some("Some"));
-            assert_eq!(role.none.name.as_deref(), Some("None"));
-            assert_eq!(role.declaration.id.context, graph.id());
-            let provider = report.option_inspection().expect("checked provider body");
-            assert_eq!(provider.name.as_deref(), Some("isSome"));
-            assert_eq!(provider.id.context, graph.id());
-            assert_eq!(
-                report.core_blockers().len(),
-                4,
-                "other contracts are still missing"
-            );
-            assert!(report.bodies().findings().is_empty());
-        }
-        let select = |name| Selector {
-            module: "core.rill".into(),
-            name,
-        };
-        let untrusted = loader::load(Request {
-            entry: entry.clone(),
-            standard_root: root.join("lib/rill/std"),
-            prelude: Prelude {
-                copy: select("copy".into()),
-                dispose: select("dispose".into()),
-            },
-            target: "aarch64-apple-darwin".into(),
-            options: options.clone(),
-            test_mode: false,
-            limits: Limits::default(),
-        })
-        .unwrap();
-        let report = analyze_typed(&untrusted, AnalysisLimits::default());
-        assert!(report.option_role().is_none() && report.option_inspection().is_none());
-        assert!(report.core_blockers().contains(&CoreBlocker::Roles));
-        let mut request = InstalledRequest {
-            entry,
+        let request = InstalledRequest {
+            entry: root.join("app/main.rill"),
             target: "aarch64-apple-darwin".into(),
             options: BTreeMap::new(),
             test_mode: false,
             limits: Limits::default(),
         };
-        options.insert("unsupported".into(), "1".into());
-        request.options = options;
-        let unknown = loader::load_installed(request.clone()).unwrap();
-        let report = analyze_typed(&unknown, AnalysisLimits::default());
-        assert!(report.option_role().is_none() && report.option_inspection().is_none());
-        request.options.clear();
-        fs::write(
-            root.join("lib/rill/std/option.rill"),
-            b"!unparseable pinned source\n",
-        )
-        .unwrap();
-        let rejected = loader::load_installed(request).unwrap_err();
-        assert_eq!(rejected.kind, FailureKind::InvalidRequest);
+        installed_option(&request);
+        reject_propagation(&root, &request);
+        untrusted_profiles(&root, &request);
+        metadata_trigger(&root, &request);
+        pin_mismatch(&root, request);
         return;
     }
 
@@ -95,7 +48,16 @@ fn installed_option_uses_pinned_sources_in_both_modes() {
     }
     fs::write(
         root.join("app/main.rill"),
-        "import std::option::{Option, isSome}; expect isSome(&Option<bool>.Some(true));",
+        "
+        import std::option::{Option as Maybe, isSome};
+        function propagate(x: Maybe<bool>): Maybe<i32> {
+            let b = x?;
+            return if (b) Maybe.Some(1i32) else Maybe.None;
+        }
+        function absent(): Maybe<i32> { let _ = Maybe<bool>.None?; }
+        function present(): Maybe<i32> { let _ = Maybe<bool>.Some(true)?; return Maybe.None; }
+        expect isSome(&Maybe<bool>.Some(true));
+    ",
     )
     .unwrap();
     let output = Command::new(executable)
@@ -113,6 +75,254 @@ fn installed_option_uses_pinned_sources_in_both_modes() {
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn installed_option(profile: &InstalledRequest) {
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..profile.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let role = report.option_role().expect("admitted Option schema");
+        assert_eq!(role.declaration.name.as_deref(), Some("Option"));
+        assert_eq!(role.some.name.as_deref(), Some("Some"));
+        assert_eq!(role.none.name.as_deref(), Some("None"));
+        assert_eq!(role.declaration.id.context, graph.id());
+        let provider = report.option_inspection().expect("checked provider body");
+        assert_eq!(provider.name.as_deref(), Some("isSome"));
+        assert_eq!(provider.id.context, graph.id());
+        let option = graph
+            .modules()
+            .iter()
+            .find(|m| m.key == role.declaration.id.module)
+            .unwrap();
+        for name in ["asRef", "asMut", "map", "andThen"] {
+            let helper = option
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some(name))
+                .expect(name);
+            assert!(
+                report
+                    .bodies()
+                    .body(option, BodyOwner::Declaration(&helper.id))
+                    .unwrap()
+                    .is_some(),
+                "{name}: {:?}; {:?}",
+                report.bodies().findings(),
+                report.bodies().obligations()
+            );
+        }
+        assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+        assert_eq!(
+            report.core_blockers().len(),
+            4,
+            "other contracts are still missing"
+        );
+        assert!(
+            report.bodies().findings().is_empty(),
+            "{:?}",
+            report.bodies().findings()
+        );
+        let item = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.origin == Origin::Application)
+            .unwrap();
+        for (name, normal, returns) in [
+            ("propagate", true, true),
+            ("absent", false, true),
+            ("present", true, false),
+        ] {
+            let declaration = item
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some(name))
+                .unwrap();
+            let step = item
+                .syntax
+                .nodes
+                .iter()
+                .position(|n| {
+                    n.kind == NodeKind::Propagate
+                        && declaration.span.start() <= n.span.start()
+                        && n.span.end() <= declaration.span.end()
+                })
+                .unwrap();
+            let facts = report
+                .bodies()
+                .node(item, step)
+                .unwrap()
+                .expect("typed propagation");
+            let NodeFactKind::Expression(value) = &facts.kind else {
+                panic!("not an expression")
+            };
+            let Some(DataExpression::Propagation(branch)) = &value.data else {
+                panic!("missing propagation branch")
+            };
+            assert!(
+                matches!(branch.target, PropagationTarget::Callable(id) if *id == declaration.id)
+            );
+            assert_eq!(branch.success, &role.some.id);
+            assert_eq!(branch.failure, &role.none.id);
+            assert!(matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"));
+            assert_eq!(
+                (facts.flow.normal, facts.flow.returns),
+                (normal, returns),
+                "{name}"
+            );
+            assert!(
+                report
+                    .bodies()
+                    .body(item, BodyOwner::Declaration(&declaration.id))
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        let short = AnalysisLimits {
+            max_work: report.statistics().work - 1,
+            ..AnalysisLimits::default()
+        };
+        assert_eq!(
+            analyze_typed(&graph, short).completion(),
+            ScalarFailureKind::ResourceLimit
+        );
+    }
+}
+
+fn reject_propagation(root: &Path, profile: &InstalledRequest) {
+    let entry = root.join("app/invalid.rill");
+    fs::write(&entry, "import std::option::Option; function borrowed(x: &Option<bool>): Option<bool> { let b = x?; return Option.Some(b); } function wrong(x: Option<bool>): bool { return x?; }").unwrap();
+    let graph = loader::load_installed(InstalledRequest {
+        entry,
+        ..profile.clone()
+    })
+    .unwrap();
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    assert_eq!(
+        report
+            .bodies()
+            .findings()
+            .iter()
+            .filter(|f| f.kind == ScalarFindingKind::InvalidTarget)
+            .count(),
+        2
+    );
+}
+
+fn untrusted_profiles(root: &Path, profile: &InstalledRequest) {
+    let select = |name: &str| Selector {
+        module: "core.rill".into(),
+        name: name.into(),
+    };
+    let source = loader::load(Request {
+        entry: profile.entry.clone(),
+        standard_root: root.join("lib/rill/std"),
+        prelude: Prelude {
+            copy: select("copy"),
+            dispose: select("dispose"),
+        },
+        target: profile.target.clone(),
+        options: profile.options.clone(),
+        test_mode: false,
+        limits: Limits::default(),
+    })
+    .unwrap();
+    let unknown_target = loader::load_installed(InstalledRequest {
+        target: "x86_64-apple-darwin".into(),
+        ..profile.clone()
+    })
+    .unwrap();
+    let unknown_options = loader::load_installed(InstalledRequest {
+        options: [("unsupported".into(), "1".into())].into(),
+        ..profile.clone()
+    })
+    .unwrap();
+    for graph in [&source, &unknown_target, &unknown_options] {
+        let report = analyze_typed(graph, AnalysisLimits::default());
+        assert!(report.option_role().is_none() && report.option_inspection().is_none());
+        assert!(report.core_blockers().contains(&CoreBlocker::Roles));
+        assert!(
+            report
+                .bodies()
+                .obligations()
+                .iter()
+                .any(|o| o.reason == ScalarUnsupported::CoreAdmission)
+        );
+    }
+}
+
+fn metadata_trigger(root: &Path, profile: &InstalledRequest) {
+    let entry = root.join("app/metadata.rill");
+    fs::write(&entry, "expect true;").unwrap();
+    let request = InstalledRequest {
+        entry,
+        ..profile.clone()
+    };
+    let idle = loader::load_installed(request.clone()).unwrap();
+    assert_eq!(idle.modules().len(), 2, "no trigger or explicit import");
+    fs::write(&request.entry, "enum Local<T> { Some(T), None } function pending(x: Local<bool>): Local<bool> { let _ = x?; return x; }").unwrap();
+    let graph = loader::load_installed(request.clone()).unwrap();
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    assert!(report.option_inspection().is_some());
+    assert!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::CoreAdmission)
+    );
+    assert!(
+        !graph
+            .bindings()
+            .iter()
+            .any(|b| b.module.origin == Origin::Application && b.name == "Option")
+    );
+    let mut short = request.clone();
+    short.limits.max_modules = 2;
+    assert_eq!(
+        loader::load_installed(short).unwrap_err().kind,
+        FailureKind::ResourceLimit
+    );
+
+    let installed = root.join("lib/rill/std/option.rill");
+    let temporary = installed.with_extension("saved");
+    fs::rename(&installed, &temporary).unwrap();
+    let absent = loader::load_installed(request).unwrap();
+    fs::rename(&temporary, installed).unwrap();
+    let report = analyze_typed(&absent, AnalysisLimits::default());
+    assert!(report.option_role().is_none());
+    assert!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::CoreAdmission)
+    );
+}
+
+fn pin_mismatch(root: &Path, request: InstalledRequest) {
+    let retained = loader::load_installed(request.clone()).unwrap();
+    fs::write(
+        root.join("lib/rill/std/option.rill"),
+        b"!unparseable pinned source\n",
+    )
+    .unwrap();
+    let rejected = loader::load_installed(request).unwrap_err();
+    assert_eq!(rejected.kind, FailureKind::InvalidRequest);
+    assert_eq!(
+        loader::validate_inputs(&retained, Limits::default())
+            .unwrap_err()
+            .kind,
+        FailureKind::SourceChanged
+    );
+    assert!(
+        analyze_typed(&retained, AnalysisLimits::default())
+            .option_inspection()
+            .is_some()
     );
 }
 

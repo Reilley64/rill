@@ -1,7 +1,106 @@
-//! Typed checking of independent source under unavailable core contracts.
+//! Core-dependent checking over admitted identities; absent contracts stay pending.
 use super::*;
 
+#[derive(Clone, Copy, Debug)]
+pub enum PropagationTarget<'g> {
+    Callable(&'g DeclarationId),
+    Arrow(NodeId),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Propagation<'g> {
+    pub target: PropagationTarget<'g>,
+    pub success: &'g DeclarationId,
+    pub failure: &'g DeclarationId,
+    pub can_continue: bool,
+    pub can_return: bool,
+}
+
 impl<'r, 'g> Checker<'r, 'g> {
+    pub(super) fn propagation_target<'a>(
+        &self,
+        context: &'a Context<'r, 'g>,
+    ) -> Option<(PropagationTarget<'g>, Option<&'a Type<'g>>)> {
+        if let Some(arrow) = &context.arrow_return {
+            Some((
+                PropagationTarget::Arrow(arrow.node),
+                arrow.expected.as_ref(),
+            ))
+        } else {
+            let signature = context.signature?;
+            let DeclarationShape::Function { result, .. } = &signature.shape else {
+                unreachable!()
+            };
+            Some((
+                PropagationTarget::Callable(&signature.declaration.id),
+                Some(result),
+            ))
+        }
+    }
+
+    pub(super) fn option_propagation(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        context: &Context<'r, 'g>,
+    ) -> Work<()> {
+        let module = inference.module;
+        let operand = module.syntax.nodes[node].children[0];
+        let slot = &inference.slots[&operand];
+        let (Some(role), Some(ty), Some((target, Some(result)))) = (
+            self.option,
+            slot.ty.as_ref(),
+            self.propagation_target(context),
+        ) else {
+            return Ok(());
+        };
+        if inference.slots[&node].propagation.is_some() || slot.blocked {
+            return Ok(());
+        }
+        let (container, variant) = match ty.as_ref() {
+            TypeTerm::Variant {
+                parent,
+                declaration,
+            } => (parent.as_ref(), Some(*declaration)),
+            container => (container, None),
+        };
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = container
+        else {
+            if !matches!(container, TypeTerm::Parameter { .. })
+                && primitive_name(ty) != Some("never")
+            {
+                self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+                inference.slots.get_mut(&node).unwrap().blocked = true;
+            }
+            return Ok(());
+        };
+        if *declaration != &role.declaration.id {
+            // Result and its contracts have not yet been admitted.
+            return Ok(());
+        }
+        if slot.access != data::Access::Owned
+            || !matches!(result.as_ref(), TypeTerm::Nominal { declaration, .. } if *declaration == &role.declaration.id)
+        {
+            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        }
+        let payload = arguments[0].clone();
+        let propagation = Propagation {
+            target,
+            success: &role.some.id,
+            failure: &role.none.id,
+            can_continue: variant != Some(&role.none.id),
+            can_return: variant != Some(&role.some.id),
+        };
+        self.elab.reserve(1)?;
+        inference.slots.get_mut(&node).unwrap().propagation = Some(propagation);
+        self.establish(inference, node, payload, false)
+    }
+
     pub(super) fn propagating_pipe(module: &Module, node: NodeId) -> bool {
         let syntax = &module.syntax.nodes[node];
         syntax.kind == NodeKind::Pipe
@@ -15,14 +114,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         context: &Context<'r, 'g>,
     ) -> Work<()> {
-        let result = if let Some(arrow) = &context.arrow_return {
-            arrow.expected.as_ref()
-        } else if let Some(signature) = context.signature {
-            let DeclarationShape::Function { result, .. } = &signature.shape else {
-                unreachable!()
-            };
-            Some(result)
-        } else {
+        let Some((_, result)) = self.propagation_target(context) else {
             self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
             return Ok(());
         };

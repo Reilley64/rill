@@ -337,31 +337,31 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
     conversions: Option<&ConversionReport<'_, 'g>>,
     limits: AnalysisLimits,
 ) -> GenericReport<'g> {
-    analyze_bodies(input, conversions, limits, false)
+    let budget = declarations::Budget {
+        limits,
+        statistics: Statistics::default(),
+    };
+    analyze_bodies(input, conversions, budget, None)
 }
 
 pub(in crate::analysis) fn analyze_integrated_bodies<'g>(
     input: &OrdinaryAnalysis<'g>,
-    limits: AnalysisLimits,
+    budget: declarations::Budget,
+    option: Option<crate::analysis::typed::OptionRole<'g>>,
+    exhausted: bool,
 ) -> GenericReport<'g> {
-    analyze_bodies(input, None, limits, true)
+    analyze_bodies(input, None, budget, Some((option, exhausted)))
 }
 
 fn analyze_bodies<'g>(
     input: &OrdinaryAnalysis<'g>,
     conversions: Option<&ConversionReport<'_, 'g>>,
-    limits: AnalysisLimits,
-    integrated: bool,
+    mut budget: declarations::Budget,
+    integration: Option<(Option<crate::analysis::typed::OptionRole<'g>>, bool)>,
 ) -> GenericReport<'g> {
     let graph = input.graph();
-    let mut budget = declarations::Budget {
-        limits,
-        statistics: if integrated {
-            input.statistics()
-        } else {
-            Statistics::default()
-        },
-    };
+    let limits = budget.limits;
+    let integrated = integration.is_some();
     let extension = if integrated {
         Ok(None)
     } else {
@@ -387,6 +387,7 @@ fn analyze_bodies<'g>(
             budget.statistics
         };
     checker.integrated = integrated;
+    checker.option = integration.and_then(|(option, _)| option);
     checker.elab.lexical = input.lexical().cloned();
     checker.conversions = conversions.map(|r| &r.families);
     let mut declaration_issues = Vec::new();
@@ -402,6 +403,7 @@ fn analyze_bodies<'g>(
             declaration_issues.push(issue.clone());
         }
         if preflight_exhausted
+            || integration.is_some_and(|(_, exhausted)| exhausted)
             || input.completion() == Completion::ResourceLimit
             || conversions.is_some_and(|r| r.completion() == Completion::ResourceLimit)
         {

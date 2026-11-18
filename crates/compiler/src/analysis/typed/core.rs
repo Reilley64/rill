@@ -43,12 +43,10 @@ fn export<'g>(
     Ok(None)
 }
 
-pub(super) fn check<'g>(
+pub(super) fn check_roles<'g>(
     inventory: &OrdinaryAnalysis<'g>,
-    bodies: &GenericReport<'g>,
     budget: &mut Budget,
-    admitted: &mut InstalledCore<'g>,
-) -> Work<()> {
+) -> Work<Option<OptionRole<'g>>> {
     let graph = inventory.graph();
     let mut module = None;
     for candidate in graph.modules() {
@@ -59,45 +57,73 @@ pub(super) fn check<'g>(
         }
     }
     let Some(module) = module else {
-        return Ok(());
+        return Ok(None);
     };
     let types = inventory.type_facts();
     let Some(option) = export(graph, module, Namespace::TypeModule, "Option", budget)? else {
-        return Ok(());
+        return Ok(None);
     };
     let Some(facts) = types.declarations.get(&option.id) else {
-        return Ok(());
+        return Ok(None);
     };
     let (DeclarationShape::Enum { variants }, [parameter]) =
         (&facts.shape, facts.binders.as_slice())
     else {
-        return Ok(());
+        return Ok(None);
     };
     let [some, none] = variants.as_slice() else {
-        return Ok(());
+        return Ok(None);
     };
     let Payload::Tuple(payload) = &some.payload else {
-        return Ok(());
+        return Ok(None);
     };
     let [element] = payload.as_slice() else {
-        return Ok(());
+        return Ok(None);
     };
-    let parameter_is = |term: &Type<'_>, binder: &Declaration| matches!(term.as_ref(), TypeTerm::Parameter { declaration, position: 0 } if **declaration == binder.id);
     if some.declaration.name.as_deref() != Some("Some")
         || none.declaration.name.as_deref() != Some("None")
         || !parameter_is(element, parameter.declaration)
         || !matches!(none.payload, Payload::Unit)
         || inventory.declaration_unusable(&option.id)
     {
-        return Ok(());
+        return Ok(None);
     }
     budget.reserve(1)?;
-    admitted.option = Some(OptionRole {
+    Ok(Some(OptionRole {
         declaration: option,
         some: some.declaration,
         none: none.declaration,
-    });
+    }))
+}
 
+fn parameter_is(term: &Type<'_>, binder: &Declaration) -> bool {
+    matches!(term.as_ref(), TypeTerm::Parameter { declaration, position: 0 } if **declaration == binder.id)
+}
+
+pub(super) fn check_providers<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    bodies: &GenericReport<'g>,
+    budget: &mut Budget,
+    admitted: &mut InstalledCore<'g>,
+) -> Work<()> {
+    let Some(OptionRole {
+        declaration: option,
+        ..
+    }) = admitted.option
+    else {
+        return Ok(());
+    };
+    let graph = inventory.graph();
+    let types = inventory.type_facts();
+    let mut owner = None;
+    for module in graph.modules() {
+        budget.step(1)?;
+        if module.key == option.id.module {
+            owner = Some(module);
+            break;
+        }
+    }
+    let module = owner.expect("the admitted Option declaration is in this graph");
     let Some(inspection) = export(graph, module, Namespace::ValueFunction, "isSome", budget)?
     else {
         return Ok(());

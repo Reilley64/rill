@@ -22,6 +22,12 @@ impl InstalledProfile {
             .then_some(Self::DarwinArm64)
     }
 
+    pub(super) fn question_mark_dependencies(self) -> &'static [&'static str] {
+        match self {
+            Self::DarwinArm64 => &["option.rill"],
+        }
+    }
+
     pub(super) fn source(self, path: &str) -> Option<&'static [u8]> {
         match (self, path) {
             (Self::DarwinArm64, "core.rill") => {

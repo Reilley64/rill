@@ -109,6 +109,8 @@ pub struct ExpressionFacts<'g> {
     pub read_only_projection: bool,
     pub access: data::Access,
 }
+pub use core::{Propagation, PropagationTarget};
+
 #[derive(Debug)]
 pub struct CallFacts<'g> {
     pub callee: &'g DeclarationId,
@@ -368,6 +370,7 @@ struct Slot<'g> {
     normal: bool,
     diverges: bool,
     boolean: Option<BooleanSet>,
+    propagation: Option<Propagation<'g>>,
     admission: Option<data::Admission<'g>>,
     path: Option<data::PlacePath<'g>>,
     refinement: Option<Arc<data::Refinement<'g>>>,
@@ -456,6 +459,7 @@ struct Checker<'r, 'g> {
     reached_expectations: bool,
     data: bool,
     integrated: bool,
+    option: Option<super::typed::OptionRole<'g>>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
@@ -484,6 +488,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             reached_expectations: false,
             data,
             integrated: false,
+            option: None,
             data_depth: 0,
             evidence: generics::Evidence::default(),
             conversions: None,
@@ -1916,8 +1921,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 NodeKind::Literal => (),
                 NodeKind::Propagate | NodeKind::Wrap if self.integrated => {
-                    self.pending_propagation(module, node, context)?;
-                    inference.slots.get_mut(&node).unwrap().blocked = true;
+                    if syntax.kind == NodeKind::Wrap || self.option.is_none() {
+                        self.pending_propagation(module, node, context)?;
+                        inference.slots.get_mut(&node).unwrap().blocked = true;
+                    } else if self.propagation_target(context).is_none() {
+                        self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+                        inference.slots.get_mut(&node).unwrap().blocked = true;
+                    }
                     for &child in &syntax.children {
                         self.elab.reserve(2)?;
                         inference.parents.insert(child, node);
@@ -2158,6 +2168,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                             }
                         }
                     }
+                    NodeKind::Propagate if self.option.is_some() => {
+                        self.option_propagation(&mut inference, node, context)?;
+                    }
                     NodeKind::IfExpression => self.conditional(&mut inference, node)?,
                     NodeKind::Prefix(operator) => {
                         self.prefix(&mut inference, node, operator, context)?
@@ -2238,6 +2251,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             for (&node, slot) in &mut inference.slots {
                 self.elab.step(1)?;
                 slot.blocked |= Self::propagating_pipe(module, node);
+                if !slot.blocked
+                    && slot.propagation.is_none()
+                    && module.syntax.nodes[node].kind == NodeKind::Propagate
+                {
+                    self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                    slot.blocked = true;
+                }
             }
         }
         let mut unavailable = BTreeSet::new();
@@ -2436,6 +2456,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             };
             let flow = self.expression_flow(&inference, node, &children)?;
             let slot = inference.slots.get_mut(&node).unwrap();
+            let (normal, boolean) = if slot.propagation.is_some() && !flow.normal {
+                (false, boolean.map(|_| BooleanSet::EMPTY))
+            } else {
+                (normal, boolean)
+            };
             slot.blocked |= blocked;
             slot.normal = boolean.map_or(normal, |b| b != BooleanSet::EMPTY);
             slot.diverges = flow.diverges;
@@ -2483,6 +2508,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                     (Some(a), Some(b)) => Some(a.combine(b)),
                     (a, b) => a.or(b),
                 };
+                let data = if let Some(propagation) = slot.propagation {
+                    self.elab.reserve(1)?;
+                    Some(data::DataExpression::Propagation(Box::new(propagation)))
+                } else {
+                    inference.data.remove(&node).map(|p| p.fact)
+                };
                 let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),
@@ -2496,7 +2527,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         ordinary_context: premise,
                         place: slot.place,
                         boolean: slot.boolean,
-                        data: inference.data.remove(&node).map(|p| p.fact),
+                        data,
                         admission: slot.admission.clone(),
                         path,
                         refinement: slot.refinement.clone(),
@@ -2593,6 +2624,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         } else {
             for child in children {
                 flow = self.sequence(flow, &inference.slots[child].flow)?;
+            }
+            if flow.normal
+                && let Some(propagation) = inference.slots[&node].propagation
+            {
+                flow.normal = propagation.can_continue;
+                flow.returns |= propagation.can_return;
             }
             if flow.normal
                 && inference.slots[&node]
