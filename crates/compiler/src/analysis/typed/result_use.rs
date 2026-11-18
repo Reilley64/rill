@@ -446,9 +446,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 DeclarationKind::Expectation => {
                     let value = syntax.children[0];
                     for mut state in self.expression(value, Residence::default(), 1)? {
-                        let root = Root::Temporary(value);
-                        let values = state.take(root, &[], self.budget)?;
-                        self.discard(values, root, node, ResultDiscardKind::Expression)?;
+                        self.discard_statement_temporaries(&mut state, node)?;
                     }
                 }
                 _ => {}
@@ -567,7 +565,7 @@ impl<'a, 'g> Check<'a, 'g> {
         self.depth(depth)?;
         let syntax = &self.module.syntax.nodes[node];
         let children = &syntax.children;
-        match syntax.kind {
+        let mut completed = match syntax.kind {
             NodeKind::Block | NodeKind::Module => self.block(node, state, depth),
             NodeKind::Export
             | NodeKind::Function
@@ -641,16 +639,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 Ok(alternatives)
             }
-            NodeKind::ExpressionStatement => {
-                let value = children[0];
-                let root = Root::Temporary(value);
-                let mut alternatives = self.expression(value, state, depth + 1)?;
-                for state in &mut alternatives {
-                    let values = state.take(root, &[], self.budget)?;
-                    self.discard(values, root, node, ResultDiscardKind::Expression)?;
-                }
-                Ok(alternatives)
-            }
+            NodeKind::ExpressionStatement => self.expression(children[0], state, depth + 1),
             NodeKind::Return => {
                 let mut alternatives = if let Some(&value) = children.first() {
                     let mut alternatives = self.expression(value, state, depth + 1)?;
@@ -680,7 +669,35 @@ impl<'a, 'g> Check<'a, 'g> {
                 self.pending(node, ResultUseBlocker::Control)?;
                 self.unsettled(node, depth + 1)
             }
+        }?;
+        for state in &mut completed {
+            self.discard_statement_temporaries(state, node)?;
         }
+        Ok(completed)
+    }
+
+    fn discard_statement_temporaries(
+        &mut self,
+        state: &mut Residence<'g>,
+        node: NodeId,
+    ) -> Work<()> {
+        let nodes = &self.module.syntax.nodes;
+        let span = &nodes[node].span;
+        // Preserve enclosing expression and loop state. Only temporaries
+        // created by this completed statement reach their end here.
+        let belongs = |root| {
+            let Root::Temporary(origin) = root else {
+                return false;
+            };
+            let origin = &nodes[origin].span;
+            span.start() <= origin.start() && origin.end() <= span.end()
+        };
+        self.budget.step(1)?;
+        for (root, value) in state.take_scope(belongs, self.budget)? {
+            self.budget.reserve(1)?;
+            self.discard(vec![value], root, node, ResultDiscardKind::Expression)?;
+        }
+        Ok(())
     }
 
     fn expression(

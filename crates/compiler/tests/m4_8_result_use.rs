@@ -267,6 +267,29 @@ fn a_computed_dereference_checks_the_discard_of_its_operand_temporary() {
 }
 
 #[test]
+fn a_statement_discards_its_borrowed_temporary_before_later_divergence() {
+    installed_with(
+        "a_statement_discards_its_borrowed_temporary_before_later_divergence",
+        "
+        import std::result::{Result, isOk};
+        function missedDiscard(): never { *(&Result.Ok(true)); while (true) {} }
+        function observed(): never { let _ = isOk(&Result.Ok(false)); while (true) {} }
+        ",
+        &[("Result.Ok(true)", None)],
+        |report| {
+            let witness = report
+                .result_use()
+                .unwrap()
+                .discards()
+                .iter()
+                .find(|w| w.origin.module.origin == Origin::Application)
+                .unwrap();
+            assert_eq!(witness.discard.span.bytes(), b"*(&Result.Ok(true));");
+        },
+    );
+}
+
+#[test]
 fn refined_projection_can_forward_a_payload_without_acknowledging_other_paths() {
     installed_with(
         "refined_projection_can_forward_a_payload_without_acknowledging_other_paths",

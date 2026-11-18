@@ -1104,6 +1104,10 @@ fn installed_receipts(request: &InstalledRequest) {
                  function dereference(answer: &bool): bool { return *pick(&Result.Ok(true), answer); }",
                 b"Result.Ok(true)".as_slice(),
             ),
+            (
+                "function missedDiscard(): never { *(&Result.Ok(true)); while (true) {} }",
+                b"Result.Ok(true)".as_slice(),
+            ),
         ] {
             fs::write(&request.entry, format!("{MAIN}\n{source}\n")).unwrap();
             let rejected = loader::load_installed(request.clone()).unwrap();
