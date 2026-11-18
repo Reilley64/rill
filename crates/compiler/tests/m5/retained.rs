@@ -373,6 +373,17 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 let moved = slot;
                 relay(slot, input);
             }
+            function storesIncomingReborrow(slot: &mut &bool, src: &mut bool): void {
+                *slot = &*src;
+            }
+            function forwardsIncomingReborrow(slot: &mut &bool, src: &mut bool): void {
+                relay(slot, &*src);
+            }
+            function forwardsLocalReborrow(slot: &mut &bool, input: &bool): void {
+                let mut local = true;
+                let src = &mut local;
+                relay(slot, &*src);
+            }
             function aliased(seed: &bool): bool {
                 let mut out = seed;
                 let access = &mut out;
@@ -514,7 +525,22 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                     assert_eq!(finding.site.span.bytes(), b"relay(slot, &flag)");
                 }
             }
-            for name in ["aliased", "projected"] {
+            let local = lower("forwardsLocalReborrow");
+            assert_eq!(local.completion(), Completion::SourceRejected);
+            assert!(local.mir().is_none());
+            let [finding] = local.findings() else {
+                panic!("expected a local backing escape")
+            };
+            assert_eq!(finding.code(), "R0202");
+            assert_eq!(finding.site.span.bytes(), b"relay(slot, &*src)");
+            assert_eq!(finding.related.span.bytes(), b"&mut local");
+
+            for name in [
+                "aliased",
+                "projected",
+                "storesIncomingReborrow",
+                "forwardsIncomingReborrow",
+            ] {
                 let pending = lower(name);
                 assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
                 assert!(pending.mir().is_none());

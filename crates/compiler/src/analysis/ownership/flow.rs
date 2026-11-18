@@ -1078,17 +1078,31 @@ pub(super) fn run<'g>(
                     }
                 }
                 Action::CheckRetained => {
+                    let mut suspended_input = None;
                     for &contents in retained.values() {
                         budget.step(1)?;
-                        if let State::Initialized(value) = &state[contents]
-                            && let Some(loan) = value.loans.first()
-                        {
-                            return Err(Stop::Rejected {
-                                site: value.stored_at.unwrap_or(node),
-                                related: loan.site,
-                                kind: Conflict::Escape,
-                            });
+                        let State::Initialized(value) = &state[contents] else {
+                            continue;
+                        };
+                        let site = value.stored_at.unwrap_or(node);
+                        for loan in value.loans.iter() {
+                            budget.step(1)?;
+                            if loan.kind == LoanKind::Suspension {
+                                suspended_input.get_or_insert(site);
+                            } else {
+                                return Err(Stop::Rejected {
+                                    site,
+                                    related: loan.site,
+                                    kind: Conflict::Escape,
+                                });
+                            }
                         }
+                    }
+                    // Suspending an incoming descriptor does not borrow its
+                    // local storage. Its outward exclusive restriction needs a
+                    // call contract beyond the admitted shared-input route.
+                    if let Some(site) = suspended_input {
+                        return Err(Stop::Pending(site));
                     }
                     Operation::None
                 }
