@@ -11,6 +11,10 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
             function unpack(value: [string, string, string, string]): void {
                 let [first, _, third, _] = pass(value);
             }
+            function grouped(value: [string, string]): string {
+                let (([((first)), (_)])) = value;
+                return first;
+            }
             function reuse(value: [string, string]): string {
                 let [first, _] = value;
                 return value[0];
@@ -32,6 +36,20 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
             function expires(flag: bool): &bool {
                 let [saved, _]: [&bool, string] = [&flag, "tag"];
                 return saved;
+            }
+            function liveAlias(p: &bool): bool {
+                let mut out = p;
+                { let x = true; let [r, _]: [&bool, string] = [&x, "s"]; out = r; }
+                return *out;
+            }
+            function deadAlias(p: &bool): bool {
+                let mut out = p;
+                { let x = true; let [r, _]: [&bool, string] = [&x, "s"]; out = r; }
+                return false;
+            }
+            function borrowed(value: &[bool, bool]): bool {
+                let [x, _] = value;
+                return x;
             }
         "#,
         |_, module, receipt| {
@@ -150,6 +168,42 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
                 assert_eq!(finding.site.span.bytes(), site, "{name}");
                 assert_eq!(finding.related.span.bytes(), source, "{name}");
             }
+
+            let grouped = lower("grouped");
+            let mir = grouped
+                .mir()
+                .unwrap_or_else(|| panic!("grouped: {:?}", grouped.completion()));
+            assert!(mir.blocks.iter().any(
+                |b| matches!(b.operation, Operation::Move { from, into: Some(to) }
+                if from.tuple_element() == Some(0) && to.root.span.bytes() == b"first")
+            ));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)]
+                if place.tuple_element() == Some(1))
+            );
+
+            let live = lower("liveAlias");
+            assert_eq!(live.completion(), Completion::SourceRejected);
+            assert!(live.mir().is_none());
+            let [finding] = live.findings() else {
+                panic!("expected one live-alias finding")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(
+                finding.site.span.bytes(),
+                b"{ let x = true; let [r, _]: [&bool, string] = [&x, \"s\"]; out = r; }"
+            );
+            assert_eq!(finding.related.span.bytes(), b"&x");
+            let dead = lower("deadAlias");
+            let mir = dead.mir().expect("dead alias does not block cleanup");
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)]
+                if place.tuple_element() == Some(1))
+            );
+
+            let borrowed = lower("borrowed");
+            assert_eq!(borrowed.completion(), Completion::Incomplete);
+            assert!(borrowed.mir().is_none());
 
             let report = lower("copyPair");
             let mir = report.mir().expect("copyable tuple stays initialized");

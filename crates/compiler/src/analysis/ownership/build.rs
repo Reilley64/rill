@@ -33,7 +33,10 @@ fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>
 enum Binding<'a, 'g> {
     Discard,
     Name(&'g DeclarationId, &'a Type<'g>),
-    IrrefutableOwnedTuple(&'a PatternFacts<'g>),
+    IrrefutableOwnedTuple {
+        shape: NodeId,
+        facts: &'a PatternFacts<'g>,
+    },
 }
 
 impl<'a, 'g> Build<'a, 'g> {
@@ -332,7 +335,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         let slot = self.locals[declaration];
                         self.expression(value, Some(slot), next, depth + 1)
                     }
-                    Binding::IrrefutableOwnedTuple(facts) => {
+                    Binding::IrrefutableOwnedTuple { facts, .. } => {
                         self.bind_tuple(node, facts, next, depth + 1)
                     }
                 }
@@ -432,10 +435,11 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
-    fn binding(&self, node: NodeId) -> ResultOf<Binding<'a, 'g>> {
+    fn binding(&mut self, node: NodeId) -> ResultOf<Binding<'a, 'g>> {
         let pattern = self.module.syntax.nodes[node].children[0];
-        match self.module.syntax.nodes[pattern].kind {
-            NodeKind::Wildcard => Ok(Binding::Discard),
+        let shape = self.ungroup(pattern)?;
+        match self.module.syntax.nodes[shape].kind {
+            NodeKind::Wildcard if shape == pattern => Ok(Binding::Discard),
             NodeKind::BracketPattern => {
                 let Some(NodeFactKind::Pattern(facts)) = self.facts.get(&pattern).map(|f| &f.kind)
                 else {
@@ -447,7 +451,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 {
                     return Err(Stop::Pending(pattern));
                 }
-                Ok(Binding::IrrefutableOwnedTuple(facts))
+                Ok(Binding::IrrefutableOwnedTuple { shape, facts })
             }
             _ => {
                 let Some(NodeFactKind::Binding(binding)) = self.facts.get(&node).map(|f| &f.kind)
@@ -470,15 +474,14 @@ impl<'a, 'g> Build<'a, 'g> {
                 locals.push(local);
                 Ok(())
             }
-            Binding::IrrefutableOwnedTuple(facts) => {
+            Binding::IrrefutableOwnedTuple { shape, facts } => {
                 let mut binders = facts.binders.iter();
                 self.budget.reserve(binders.len())?;
-                for (position, &child) in self.module.syntax.nodes[pattern]
-                    .children
-                    .iter()
-                    .enumerate()
+                for (position, &child) in
+                    self.module.syntax.nodes[shape].children.iter().enumerate()
                 {
                     self.budget.step(1)?;
+                    let child = self.ungroup(child)?;
                     match self.module.syntax.nodes[child].kind {
                         NodeKind::Wildcard => {}
                         NodeKind::NamePattern => {
@@ -553,7 +556,10 @@ impl<'a, 'g> Build<'a, 'g> {
     }
 
     fn ungroup(&mut self, mut node: NodeId) -> ResultOf<NodeId> {
-        while self.module.syntax.nodes[node].kind == NodeKind::Group {
+        while matches!(
+            self.module.syntax.nodes[node].kind,
+            NodeKind::Group | NodeKind::GroupPattern
+        ) {
             self.budget.step(1)?;
             node = self.module.syntax.nodes[node].children[0];
         }
