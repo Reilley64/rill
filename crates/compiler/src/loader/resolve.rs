@@ -23,9 +23,10 @@ struct Engine {
     outcomes: Vec<ImportOutcome>,
     findings: Vec<Finding>,
     pending: VecDeque<ModuleKey>,
+    installed: Option<InstalledProfile>,
 }
 
-pub(super) fn load(request: Request) -> Result<Graph> {
+pub(super) fn load(request: Request, installed: Option<InstalledProfile>) -> Result<Graph> {
     let mut engine = Engine {
         id: GraphId(Arc::new(())),
         host: Host::new(request.limits),
@@ -36,6 +37,7 @@ pub(super) fn load(request: Request) -> Result<Graph> {
         outcomes: Vec::new(),
         findings: Vec::new(),
         pending: VecDeque::new(),
+        installed,
     };
     match engine.run() {
         Ok((bindings, implementations, prelude)) => Ok(Graph {
@@ -47,6 +49,7 @@ pub(super) fn load(request: Request) -> Result<Graph> {
             implementations,
             prelude,
             host: engine.host,
+            installed,
         }),
         Err(mut error) => {
             error.findings.append(&mut engine.findings);
@@ -541,6 +544,28 @@ impl Engine {
         }
         self.host.charge(1)?;
         let bytes = self.host.read(&path, true)?;
+        if origin == Origin::Standard
+            && let Some(pinned) = self.installed.and_then(|profile| profile.source(&key.path))
+        {
+            self.host.charge(bytes.len())?;
+            if bytes != pinned {
+                // Preserve SourceChanged if the mismatch is not a stable observation.
+                self.host.replay(
+                    self.request.limits,
+                    self.modules
+                        .values()
+                        .map(|m| (m.path.as_path(), m.snapshot.bytes()))
+                        .chain(std::iter::once((path.as_path(), bytes.as_slice()))),
+                    true,
+                )?;
+                let mut error = failure(
+                    FailureKind::InvalidRequest,
+                    "installed source differs from toolchain pin",
+                );
+                error.path = Some(path);
+                return Err(error);
+            }
+        }
         let identity = path
             .to_str()
             .ok_or_else(|| filesystem::host_error(&path, "source identity is not UTF-8"))?;

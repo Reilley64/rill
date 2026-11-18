@@ -8,8 +8,11 @@ use std::sync::Arc;
 
 mod collect;
 mod filesystem;
+mod installed;
 mod resolve;
 use filesystem::Host;
+use installed::InstalledProfile;
+pub use installed::{InstalledRequest, load_installed};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Origin {
@@ -324,9 +327,20 @@ pub struct Graph {
     imports: Vec<ImportOutcome>,
     implementations: Vec<Implementation>,
     host: Host,
+    installed: Option<InstalledProfile>,
 }
 
 impl Graph {
+    /// This does not admit roles, implementations or representations.
+    pub(crate) fn is_pinned_standard_source(&self, module: &Module) -> bool {
+        module.context == self.id
+            && module.key.origin == Origin::Standard
+            && self
+                .installed
+                .and_then(|p| p.source(&module.key.path))
+                .is_some()
+    }
+
     pub fn id(&self) -> GraphId {
         self.id.clone()
     }
@@ -406,7 +420,7 @@ impl Graph {
 /// Load through M1 snapshots and M2 syntax. Success resolves only M3 bindings;
 /// types, bodies, ownership, protected operations and execution remain unchecked.
 pub fn load(request: Request) -> Result<Graph> {
-    resolve::load(request)
+    resolve::load(request, None)
 }
 
 /// Recheck a retained capture without changing its snapshots or graph identity.

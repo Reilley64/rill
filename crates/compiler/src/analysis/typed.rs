@@ -1,4 +1,4 @@
-//! Integrated but incomplete typed analysis. The capture carries no core admission.
+//! Integrated typed analysis with separately validated first-party contracts.
 use super::Work;
 use super::declarations::Budget;
 use super::generics::{GenericReport, analyze_integrated_bodies};
@@ -6,7 +6,9 @@ use super::ordinary::{OrdinaryAnalysis, analyze_typed_inventory};
 use super::scalars::ScalarFailureKind;
 use super::{AnalysisLimits, Graph, Stage, Statistics};
 
+mod core;
 mod interfaces;
+pub use core::OptionRole;
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,13 +24,14 @@ pub struct TypedReport<'g> {
     inventory: OrdinaryAnalysis<'g>,
     bodies: GenericReport<'g>,
     public_interface_findings: Vec<PublicInterfaceFinding<'g>>,
+    core: core::InstalledCore<'g>,
     completion: ScalarFailureKind,
     statistics: Statistics,
     not_performed: Vec<Stage>,
 }
 
 impl<'g> TypedReport<'g> {
-    /// No typed-stage receipt can follow from the current capture format.
+    /// The remaining unchecked contracts still prevent a typed-stage receipt.
     pub fn completion(&self) -> ScalarFailureKind {
         self.completion
     }
@@ -44,6 +47,15 @@ impl<'g> TypedReport<'g> {
     /// Stages not reached or outside this increment. An omitted stage is not a pass.
     pub fn not_performed(&self) -> &[Stage] {
         &self.not_performed
+    }
+
+    pub fn option_role(&self) -> Option<&OptionRole<'g>> {
+        self.core.option.as_ref()
+    }
+
+    /// The checked delivered inspection implementation, separate from the enum schema.
+    pub fn option_inspection(&self) -> Option<&'g super::Declaration> {
+        self.core.option_inspection
     }
 
     pub fn core_blockers(&self) -> &'static [CoreBlocker] {
@@ -74,18 +86,22 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         statistics: bodies.statistics(),
     };
     let mut completion = bodies.completion();
+    let mut core = core::InstalledCore::default();
+    if completion != ScalarFailureKind::ResourceLimit
+        && core::check(&inventory, &bodies, &mut budget, &mut core).is_err()
+    {
+        completion = ScalarFailureKind::ResourceLimit;
+    }
     let mut public_interface_findings = Vec::new();
     if completion != ScalarFailureKind::ResourceLimit
         && interfaces::check(&inventory, &mut budget, &mut public_interface_findings).is_err()
     {
         completion = ScalarFailureKind::ResourceLimit;
     }
-    let mut not_performed = vec![
-        Stage::CoreAdmission,
-        Stage::ResultUse,
-        Stage::Ownership,
-        Stage::Execution,
-    ];
+    let mut not_performed = vec![Stage::ResultUse, Stage::Ownership, Stage::Execution];
+    if core.option.is_none() {
+        not_performed.push(Stage::CoreAdmission);
+    }
     if inventory.lexical().is_none() {
         not_performed.push(Stage::DeclarationTypes);
     }
@@ -106,6 +122,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         inventory,
         bodies,
         public_interface_findings,
+        core,
         completion,
         statistics: budget.statistics,
         not_performed,

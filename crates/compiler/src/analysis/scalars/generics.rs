@@ -119,6 +119,21 @@ impl<'g> GenericReport<'g> {
             .find(|b| b.site.module == &module.key && b.owner == owner))
     }
 
+    pub(in crate::analysis) fn checked_body(
+        &self,
+        module: &Module,
+        owner: BodyOwner<'_>,
+        budget: &mut declarations::Budget,
+    ) -> Work<Option<&BodyFacts<'g>>> {
+        for body in &self.facts.bodies {
+            budget.step(1)?;
+            if body.site.module == &module.key && body.owner == owner {
+                return Ok(Some(body));
+            }
+        }
+        Ok(None)
+    }
+
     /// Scope completeness is independent of role/protection clearance elsewhere.
     pub fn body_status(
         &self,

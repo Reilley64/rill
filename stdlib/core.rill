@@ -1,0 +1,3 @@
+// Fixed prelude declarations. Providers are admitted separately.
+export function copy<T>(value: &T): T;
+export function dispose<T>(value: T): void;
