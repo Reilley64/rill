@@ -33,7 +33,9 @@ export function value<E>(wrapped: &Err<E>): &E {
 }
 
 export function intoValue<E>(wrapped: Err<E>): E {
-    return wrapped.payload;
+    let payload = wrapped.payload;
+    let _ = wrapped.retained;
+    return payload;
 }
 
 implement<E> origin(wrapped: &Err<E>): &SourceLocation { return &wrapped.site; }

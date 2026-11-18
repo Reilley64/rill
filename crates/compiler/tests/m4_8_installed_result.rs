@@ -1,5 +1,5 @@
 //! Installed Result checks use production sources and the actual installed entry point.
-use compiler::analysis::scalars::{NodeFactKind, ScalarFailureKind};
+use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFailureKind, Site};
 use compiler::analysis::typed::analyze_typed;
 use compiler::analysis::{AnalysisLimits, TypeTerm};
 use compiler::loader::{self, InstalledRequest, Limits, Origin};
@@ -1272,6 +1272,71 @@ fn installed_err_does_not_retry_display_after_failed_winner_requirement() {
                             && f.site.node == node
                             && f.kind == ScalarFindingKind::MissingRequirement)
                 );
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_into_value_acknowledges_cause_but_not_the_returned_payload() {
+    installed(
+        "installed_into_value_acknowledges_cause_but_not_the_returned_payload",
+        |request| {
+            fs::write(
+                &request.entry,
+                "
+                import std::error::intoValue;
+                import std::result::{Err, Result};
+                function extract(input: Err<Result<bool>>): void { intoValue(input); }
+                ",
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let result = graph
+                    .modules()
+                    .iter()
+                    .find(|module| module.key.path == "result.rill")
+                    .unwrap();
+                let extract = result
+                    .declarations
+                    .iter()
+                    .find(|declaration| declaration.name.as_deref() == Some("intoValue"))
+                    .unwrap();
+                assert!(
+                    report
+                        .bodies()
+                        .body(result, BodyOwner::Declaration(&extract.id))
+                        .unwrap()
+                        .is_some(),
+                    "{:?}\n{:?}",
+                    report.bodies().findings(),
+                    report.bodies().obligations()
+                );
+                let uses = report.result_use().unwrap();
+                let end = result.syntax.nodes[extract.node].span.end();
+                let in_extract = |site: Site<'_>| {
+                    site.module == &result.key
+                        && (extract.id.start..end).contains(&site.span.start())
+                };
+                if let Some(pending) = uses.pending().iter().find(|p| in_extract(p.site)) {
+                    panic!(
+                        "unexpected {:?} in intoValue at {}",
+                        pending.blocker,
+                        String::from_utf8_lossy(pending.site.span.bytes())
+                    );
+                }
+                assert!(!uses.discards().iter().any(|w| in_extract(w.discard)));
+                assert!(uses.discards().iter().any(|witness| {
+                    witness.origin.module.origin == Origin::Application
+                        && witness.origin.span.bytes() == b"intoValue(input)"
+                        && witness.code() == "R0103"
+                }));
             }
         },
     );
