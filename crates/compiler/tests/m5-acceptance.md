@@ -302,6 +302,23 @@ Spec independently reviewed `6d3f674`. A shared reborrow of incoming exclusive a
 
 General nested destinations, broader signatures, and cancellation remain outside this slice. No workflow changed. No Rill program ran.
 
+## Direct record fields and exact exclusive aliases
+
+The [#69 scalar call contract](https://github.com/Reilley64/rill/issues/69) uses the checked field identity for a single direct named field of an owned record. It grants exclusive access to that descriptor slot, not to the referent stored in it. The old and compatible new backing remain tracked. No new tuple, dynamic index, or indirect disjointness rule is introduced.
+
+An alias acquired with an exact `&mut` of a supported local or direct field records the target separately from its loans. A move or exclusive reborrow preserves this identity. `CallRetaining` with `RetainedPlace::ThroughAlias` names the access descriptor and the proved local target. It updates the target, not the alias. A live alias can still observe the target's current contents, so a source newly retained by a call must survive even when all later uses go through that alias.
+
+Both installed modes tested the public receipt-to-MIR boundary at `c3ba6187f7489ce771d292e0183c06a3b1256b6e`:
+
+| Probe | Observed compiler and MIR obligations |
+| --- | --- |
+| `direct_calls_retain_sources_in_named_record_fields` | The previously incomplete call borrows and updates the same checked field. A sibling descriptor stays readable in argument evaluation; a whole-record loan blocks the field borrow (`R0201`). The text field still cleans normally. Old and new expired backing, including a separately copied reference after overwrite, reject with `R0203`. |
+| `exclusive_aliases_retain_sources_in_the_proved_target` | An exclusive alias can move to another binding, reborrow and retain into its exact local or field target. A moved alias rejects (`R0200`), a still-live exclusive alias blocks direct access (`R0201`), and its target cannot go out of scope (`R0203`). |
+| `expiresThroughAlias`, `conflictsThroughAlias` | The first alias attempt let new contents go dead even though the alias could still read them. With current-target liveness, the same witnesses reject early scope exit (`R0203`) or conflicting exclusive access to the backing (`R0201`). |
+| Exact and one-short limits | The exact work and entry limits pass. Reducing either by one publishes no MIR. |
+
+All four local gates and the whitespace check passed at `c3ba618` on macOS AArch64 with a fresh short `TMPDIR` (437 compiler tests and 453 workspace tests). The staged M4 replay issued both receipts. Independent reviews were requested. The `incomingMoved` probe still returns incomplete with no MIR for an alias made by moving the incoming exclusive parameter. General reads or writes through aliases, indexed and nested places, broader call contracts and cancellation are outside this increment. No workflow changed. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
