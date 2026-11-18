@@ -12,6 +12,7 @@ fn formats_owned_heterogeneous_causes_with_original_sites() {
         SourceLocation::new("entry.rill", 3),
         inner,
         |number| format!("number {}", number.0),
+        drop,
     );
     drop(source_name);
     assert!(outer.origin().format().contains("entry.rill:byte 3"));
@@ -42,12 +43,12 @@ fn wrapping_operation_only_evaluates_outer_on_failure() {
         (String::from("outer"), SourceLocation::new("main.rill", 25))
     };
     assert!(matches!(
-        wrap_result::<_, _, u32, _>(Ok(true), outer, u32::to_string),
+        wrap_result::<_, _, u32, _>(Ok(true), outer, u32::to_string, drop),
         Ok(true)
     ));
     assert_eq!(visits.get(), 0);
     let inner = OwnedErr::new(7u32, SourceLocation::new("read.rill", 2));
-    let failure = wrap_result::<bool, _, _, _>(Err(inner), outer, u32::to_string)
+    let failure = wrap_result::<bool, _, _, _>(Err(inner), outer, u32::to_string, drop)
         .err()
         .unwrap();
     assert_eq!(visits.get(), 1);
@@ -59,28 +60,34 @@ fn wrapping_operation_only_evaluates_outer_on_failure() {
 
 #[test]
 fn deep_chain_releases_each_owned_payload_without_recursive_drop() {
-    struct Payload(usize, Arc<Mutex<Vec<usize>>>);
+    struct Payload(usize, Arc<Mutex<Vec<usize>>>, Arc<Mutex<Vec<usize>>>);
+    fn dispose(payload: Payload) {
+        payload.2.lock().unwrap().push(payload.0);
+    }
     impl Drop for Payload {
         fn drop(&mut self) {
             self.1.lock().unwrap().push(self.0);
         }
     }
     let released = Arc::new(Mutex::new(Vec::new()));
+    let disposed = Arc::new(Mutex::new(Vec::new()));
     let worker = {
         let released = released.clone();
+        let disposed = disposed.clone();
         std::thread::Builder::new()
             .stack_size(128 * 1024)
             .spawn(move || {
                 let mut current = OwnedErr::new(
-                    Payload(0, released.clone()),
+                    Payload(0, released.clone(), disposed.clone()),
                     SourceLocation::new("src.rill", 0),
                 );
                 for i in 1..10_000 {
                     current = OwnedErr::wrapping(
-                        Payload(i, released.clone()),
+                        Payload(i, released.clone(), disposed.clone()),
                         SourceLocation::new("src.rill", i as u64),
                         current,
                         |p| p.0.to_string(),
+                        dispose,
                     );
                 }
                 let rendered = current.format(|p| p.0.to_string());
@@ -88,11 +95,22 @@ fn deep_chain_releases_each_owned_payload_without_recursive_drop() {
                 assert!(rendered.ends_with("caused by: 0 (src.rill:byte 0)"));
                 assert_eq!(rendered.lines().count(), 10_000);
                 assert!(released.lock().unwrap().is_empty());
+                assert!(disposed.lock().unwrap().is_empty());
                 drop(current);
             })
             .unwrap()
     };
     worker.join().unwrap();
+    // The primary payload is not erased. Only retained payloads use the
+    // captured disposer, in order and once each, before their Rust storage drops.
+    assert!(
+        disposed
+            .lock()
+            .unwrap()
+            .iter()
+            .copied()
+            .eq((0..9_999).rev())
+    );
     assert!(
         released
             .lock()

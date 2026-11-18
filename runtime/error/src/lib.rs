@@ -53,17 +53,19 @@ impl<E> OwnedErr<E> {
         }
     }
 
-    /// A typed callback travels with its payload through erasure. No type lookup is needed.
+    /// Typed display and disposal travel with the payload through erasure.
     pub fn wrapping<C: Send + Sync + 'static>(
         value: E,
         origin: SourceLocation,
         inner: OwnedErr<C>,
         display: fn(&C) -> String,
+        dispose: fn(C),
     ) -> Self {
         let causes = CauseChain(Some(Box::new(Cause {
-            payload: Box::new(Formatted {
+            payload: Box::new(Retained {
                 value: inner.value,
                 display,
+                dispose,
             }),
             origin: inner.origin,
             next: inner.causes,
@@ -110,23 +112,24 @@ impl<E> OwnedErr<E> {
     }
 }
 
-/// Rust backing for the conditional wrapping operation; the caller supplies the checked
-/// inner formatter and constructs the outer value and origin only on the failure edge.
+/// Rust backing for conditional wrapping. The caller supplies the inner formatter
+/// and disposer, and constructs the outer value and origin only on the failure edge.
 pub fn wrap_result<T, E, C: Send + Sync + 'static, F: FnOnce() -> (E, SourceLocation)>(
     input: Result<T, OwnedErr<C>>,
     outer: F,
     display: fn(&C) -> String,
+    dispose: fn(C),
 ) -> Result<T, OwnedErr<E>> {
     input.map_err(|inner| {
         let (value, origin) = outer();
-        OwnedErr::wrapping(value, origin, inner, display)
+        OwnedErr::wrapping(value, origin, inner, display, dispose)
     })
 }
 
 struct CauseChain(Option<Box<Cause>>);
 
 pub struct Cause {
-    payload: Box<dyn DisplayPayload>,
+    payload: Box<dyn RetainedPayload>,
     origin: SourceLocation,
     next: CauseChain,
 }
@@ -162,24 +165,36 @@ impl Cause {
 
 impl Drop for CauseChain {
     fn drop(&mut self) {
-        while let Some(mut head) = self.0.take() {
-            self.0 = head.next.0.take();
-            drop(head);
+        while let Some(head) = self.0.take() {
+            let Cause {
+                payload,
+                origin,
+                mut next,
+            } = *head;
+            self.0 = next.0.take();
+            payload.dispose();
+            drop(origin);
         }
     }
 }
 
-trait DisplayPayload: Send + Sync {
+trait RetainedPayload: Send + Sync {
     fn display(&self) -> String;
+    fn dispose(self: Box<Self>);
 }
 
-struct Formatted<C> {
+struct Retained<C> {
     value: C,
     display: fn(&C) -> String,
+    dispose: fn(C),
 }
 
-impl<C: Send + Sync> DisplayPayload for Formatted<C> {
+impl<C: Send + Sync> RetainedPayload for Retained<C> {
     fn display(&self) -> String {
         (self.display)(&self.value)
+    }
+
+    fn dispose(self: Box<Self>) {
+        (self.dispose)(self.value);
     }
 }

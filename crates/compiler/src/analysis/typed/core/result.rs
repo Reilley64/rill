@@ -81,8 +81,9 @@ const fn bind_error_operations<
 }
 const fn assert_sealed<T: Send + Sync + 'static>() {}
 type Render<E> = fn(&OwnedErr<E>, fn(&E) -> String) -> String;
-type Retain<E, C> = fn(E, SourceLocation, OwnedErr<C>, fn(&C) -> String) -> OwnedErr<E>;
-type Wrap<T, E, C, F> = fn(Result<T, OwnedErr<C>>, F, fn(&C) -> String) -> Result<T, OwnedErr<E>>;
+type Retain<E, C> = fn(E, SourceLocation, OwnedErr<C>, fn(&C) -> String, fn(C)) -> OwnedErr<E>;
+type Wrap<T, E, C, F> =
+    fn(Result<T, OwnedErr<C>>, F, fn(&C) -> String, fn(C)) -> Result<T, OwnedErr<E>>;
 const _: () = bind_error_operations::<(), (), (), fn() -> ((), SourceLocation)>();
 
 #[derive(Clone, Copy, Debug)]
