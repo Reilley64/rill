@@ -1,9 +1,6 @@
 //! Host tests of the delivered representation source, not Rill execution.
-#[path = "../../../runtime/error.rs"]
-mod storage;
-
+use rill_error_storage::{Error, OwnedErr, SourceLocation};
 use std::sync::{Arc, Mutex};
-use storage::{Error, OwnedErr, SourceLocation};
 
 #[test]
 fn formats_owned_heterogeneous_causes_with_original_sites() {

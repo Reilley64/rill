@@ -42,3 +42,7 @@ dependencies = [
 [[package]]
 name = "rill-collection"
 version = "0.1.0-dev"
+
+[[package]]
+name = "rill-error-storage"
+version = "0.1.0-dev"

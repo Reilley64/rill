@@ -15,6 +15,7 @@ fn installed_result_discards_keep_original_storage_and_early_exit() {
                 &request.entry,
                 "
             import std::result::{Result as Outcome, isOk};
+            import std::collection::List;
             function make(): Outcome<bool> { return Outcome.Ok(true); }
             function discardTemporary(): void { make(); }
             function renamed(): void { let x = make(); let y = x; }
@@ -24,7 +25,9 @@ fn installed_result_discards_keep_original_storage_and_early_exit() {
             }
             function observe(value: Outcome<bool>): void { isOk(&value); }
             function inspectTemporary(): void { isOk(&make()); }
-            function inspectAlias(value: Outcome<bool>): void { let alias = &value; isOk(alias); }
+            function inspectAlias(value: Outcome<bool>, untouched: Outcome<bool>): void { let alias = &value; isOk(alias); }
+            function dead(): void { if (false) { make(); } }
+            function opaque(xs: List<Outcome<bool>>): void { }
             function propagate(outer: Outcome<bool>, sibling: Outcome<bool>): Outcome<bool> {
                 let b = outer?;
                 let _ = sibling;
@@ -56,7 +59,7 @@ fn installed_result_discards_keep_original_storage_and_early_exit() {
                     .collect();
                 assert_eq!(
                     witnesses.len(),
-                    5,
+                    7,
                     "{:?}",
                     witnesses
                         .iter()
@@ -67,6 +70,18 @@ fn installed_result_discards_keep_original_storage_and_early_exit() {
                         .collect::<Vec<_>>()
                 );
                 assert!(witnesses.iter().all(|f| f.code() == "R0103"));
+                assert!(
+                    witnesses
+                        .iter()
+                        .any(|w| w.origin.span.bytes().starts_with(b"untouched:"))
+                );
+                assert!(
+                    uses.pending()
+                        .iter()
+                        .any(|p| p.site.span.bytes().starts_with(b"xs: List<")
+                            && p.blocker
+                                == compiler::analysis::typed::ResultUseBlocker::Containment)
+                );
                 assert!(
                     witnesses
                         .iter()
@@ -281,6 +296,51 @@ fn installed_result_guards_check_canonical_payload_and_wrapper_access() {
                     report.bodies().obligations()
                 );
             }
+        },
+    );
+}
+
+#[test]
+fn installed_invalid_core_operands_do_not_become_pending() {
+    installed(
+        "installed_invalid_core_operands_do_not_become_pending",
+        |request| {
+            fs::write(
+                &request.entry,
+                "
+            import std::result::Result;
+            import std::option::Option;
+            type Plain = { payload: bool; };
+            function invalid(value: Plain): Result<bool> {
+                let _ = value?;
+                return Result.Ok(true);
+            }
+            function refutable(value: Result<[bool, i32]>): i32 {
+                guard let [true, n] = value else (err) { return 0i32; }
+                return n;
+            }
+        ",
+            )
+            .unwrap();
+            let graph = loader::load_installed(request).unwrap();
+            let report = analyze_typed(&graph, AnalysisLimits::default());
+            use compiler::analysis::scalars::ScalarFindingKind;
+            assert!(
+                report
+                    .bodies()
+                    .findings()
+                    .iter()
+                    .any(|f| f.kind == ScalarFindingKind::InvalidTarget
+                        && f.site.span.bytes() == b"value?")
+            );
+            assert!(
+                report
+                    .bodies()
+                    .findings()
+                    .iter()
+                    .any(|f| f.kind == ScalarFindingKind::RefutableBinding
+                        && f.site.span.bytes() == b"[true, n]")
+            );
         },
     );
 }
@@ -501,14 +561,20 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
     let runtime = root.join("lib/rill/runtime/aarch64-apple-darwin");
     fs::create_dir_all(&runtime).unwrap();
     fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/error.rs"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/error/src/lib.rs"),
         runtime.join("error.rs"),
     )
     .unwrap();
     let executable = root.join("bin/probe");
     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
-    for module in ["core.rill", "option.rill", "result.rill", "error.rill"] {
+    for module in [
+        "core.rill",
+        "option.rill",
+        "result.rill",
+        "error.rill",
+        "collection.rill",
+    ] {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();
     }
     let output = Command::new(executable)

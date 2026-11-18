@@ -206,6 +206,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }),
             )
         } else {
+            if self.option.is_some() && self.result.is_some() {
+                self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+                inference.slots.get_mut(&node).unwrap().blocked = true;
+            }
             return Ok(None);
         };
         let TypeTerm::Nominal {
@@ -417,8 +421,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         let input = self.expression(module, operand, None, context)?;
         let container = input.as_ref().and_then(|value| self.guard_operand(value));
         // Success bindings are not in scope during the failure block.
-        self.elab.reserve(2)?;
-        context.scopes.push(BTreeMap::new());
+        let scope = context.scopes.last().unwrap();
+        self.elab.reserve(2 + scope.len())?;
+        context.scopes.push(scope.clone());
         let pattern_truth = if let Some(container) = &container {
             if let Some(expected) = annotation
                 && !self.same(&container.payload, &expected)?
@@ -461,7 +466,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                         );
                     } else {
                         // An Ok-pattern mismatch cannot manufacture an Err binding.
-                        self.defer(module, node, ScalarUnsupported::MatchCoverage)?;
+                        if pattern_truth.is_some() {
+                            self.finding(module, pattern, ScalarFindingKind::RefutableBinding)?;
+                        } else {
+                            self.defer(module, node, ScalarUnsupported::MatchCoverage)?;
+                        }
                         self.pending_binder(binding, context)?;
                     }
                 } else {
@@ -475,7 +484,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let failure =
             self.guard_failure(module, node, *children.last().unwrap(), depth + 1, context)?;
         context.scopes.pop();
-        context.scopes.last_mut().unwrap().extend(success_bindings);
+        *context.scopes.last_mut().unwrap() = success_bindings;
         let mut flow = input.map_or_else(Flow::normal, |e| e.flow);
         if let (Some(container), Some(pattern_truth)) = (container, pattern_truth) {
             flow.normal = container.truth.can_be_true() && pattern_truth.can_be_true();

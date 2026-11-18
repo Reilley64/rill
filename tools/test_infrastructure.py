@@ -91,7 +91,7 @@ class WorkspaceTests(unittest.TestCase):
         metadata = json.loads(subprocess.check_output(
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
             cwd=doctor.ROOT, text=True))
-        allowed = {"rill-collection": set(), "compiler": {"rill-collection"},
+        allowed = {"rill-collection": set(), "rill-error-storage": set(), "compiler": {"rill-collection"},
                    "ide": {"compiler"}, "lsp": {"ide"},
                    "codegen-llvm": {"compiler"}, "cli": {"compiler", "lsp", "codegen-llvm"}}
         packages = {package["name"]: package for package in metadata["packages"]}
@@ -101,7 +101,7 @@ class WorkspaceTests(unittest.TestCase):
                 self.assertEqual(package["publish"], [])
                 internal = {dep["name"] for dep in package["dependencies"] if dep["name"] in packages}
                 self.assertLessEqual(internal, allowed[name])
-                if name in {"compiler", "ide", "lsp", "rill-collection"}:
+                if name in {"compiler", "ide", "lsp", "rill-collection", "rill-error-storage"}:
                     self.assertFalse({"inkwell", "llvm-sys"} & {dep["name"] for dep in package["dependencies"]})
 
 
@@ -139,7 +139,7 @@ class TestTaskTests(unittest.TestCase):
         tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
         self.assertEqual(tasks["test"]["depends"], ["doctor"])
         self.assertEqual(tasks["test"]["run"],
-                         "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection")
+                         "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage")
         self.assertEqual(tasks["test:compiler"]["depends"], ["doctor"])
         self.assertEqual(tasks["test:compiler"]["run"],
                          "cargo test --locked -p compiler --no-default-features")
@@ -150,7 +150,7 @@ class TestTaskTests(unittest.TestCase):
         self.assertIn("check:rust", tasks["check"]["depends"])
         self.assertEqual(tasks["check:rust"]["run"], [
             "cargo fmt --all -- --check",
-            "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection --all-targets -- -D warnings",
+            "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage --all-targets -- -D warnings",
         ])
 
 

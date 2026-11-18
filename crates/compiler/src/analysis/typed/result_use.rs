@@ -75,17 +75,31 @@ impl<'g> ResultUseReport<'g> {
 type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), &'a NodeFacts<'g>>;
 type Alternatives<'g> = Vec<Residence<'g>>;
 
+#[derive(Clone, Copy)]
+pub(super) struct Inputs<'g> {
+    pub result: &'g DeclarationId,
+    pub opaque_cause: Option<&'g DeclarationId>,
+    pub opaque_list: Option<&'g DeclarationId>,
+    pub outcome_observer: Option<&'g DeclarationId>,
+}
+
 pub(super) fn check<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     bodies: &GenericReport<'g>,
-    result: &'g DeclarationId,
-    opaque_cause: Option<&'g DeclarationId>,
-    outcome_observer: Option<&'g DeclarationId>,
+    core: Inputs<'g>,
     budget: &mut Budget,
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
     let mut nodes = BTreeMap::new();
+    let mut immutable_bindings = BTreeMap::new();
     for facts in bodies.typed_nodes() {
+        if let NodeFactKind::Binding(binding) = &facts.kind
+            && binding.ty.is_some()
+            && !binding.mutable
+        {
+            budget.reserve(1)?;
+            immutable_bindings.insert(binding.declaration, facts.site.node);
+        }
         budget.reserve(1)?;
         nodes
             .entry((facts.site.module, facts.site.node))
@@ -112,9 +126,8 @@ pub(super) fn check<'g>(
             checked: &checked,
             module,
             scopes,
-            result,
-            opaque_cause,
-            outcome_observer,
+            core,
+            immutable_bindings: &immutable_bindings,
             budget,
             report,
             loops: Vec::new(),
@@ -137,9 +150,8 @@ struct Check<'a, 'g> {
     checked: &'a BTreeSet<&'g DeclarationId>,
     module: &'g Module,
     scopes: BTreeMap<&'g DeclarationId, Option<usize>>,
-    result: &'g DeclarationId,
-    opaque_cause: Option<&'g DeclarationId>,
-    outcome_observer: Option<&'g DeclarationId>,
+    core: Inputs<'g>,
+    immutable_bindings: &'a BTreeMap<&'g DeclarationId, NodeId>,
     budget: &'a mut Budget,
     report: &'a mut ResultUseReport<'g>,
     loops: Vec<LoopExits<'g>>,
@@ -468,6 +480,16 @@ impl<'a, 'g> Check<'a, 'g> {
                 (truth.can_be_false(), rest.first().copied()),
             ] {
                 if !reachable {
+                    if let Some(child) = child {
+                        self.dead_depth += 1;
+                        let checked = if expression {
+                            self.expression(child, Residence::default(), depth + 1)
+                        } else {
+                            self.statement(child, Residence::default(), depth + 1)
+                        };
+                        self.dead_depth -= 1;
+                        checked?;
+                    }
                     continue;
                 }
                 let alternative = state.fork(self.budget)?;
@@ -653,14 +675,53 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
             }
         }
+        let limit = self.immutable_borrow_target(node)?;
         let mut alternatives = self.expression(node, state, depth)?;
         for state in &mut alternatives {
-            if state.has_values() {
+            if let Some((root, component)) = &limit {
+                // The written immutable reference limits which occurrence it can
+                // observe. This does not assert alias validity or a legal borrow.
+                state.observe(*root, component, self.budget)?;
+            } else if state.has_values() {
                 self.pending(node, ResultUseBlocker::Storage)?;
                 *state = Residence::default();
             }
         }
         Ok(alternatives)
+    }
+
+    fn immutable_borrow_target(
+        &mut self,
+        node: NodeId,
+    ) -> Work<Option<(Root<'g>, Vec<ResultComponent<'g>>)>> {
+        let Some(NodeFactKind::Expression(alias)) = self.facts(node)?.map(|f| &f.kind) else {
+            return Ok(None);
+        };
+        let Some(alias) = alias
+            .path
+            .as_ref()
+            .filter(|path| path.root.module == self.module.key && path.projections.is_empty())
+        else {
+            return Ok(None);
+        };
+        self.budget.step(1)?;
+        let Some(&binding) = self.immutable_bindings.get(alias.root) else {
+            return Ok(None);
+        };
+        let syntax = &self.module.syntax.nodes[binding];
+        if !matches!(syntax.kind, NodeKind::Binding { .. }) {
+            return Ok(None);
+        }
+        let source = &self.module.syntax.nodes[*syntax.children.last().unwrap()];
+        if source.kind != NodeKind::Prefix("&") {
+            return Ok(None);
+        }
+        let Some(NodeFactKind::Expression(referent)) =
+            self.facts(source.children[0])?.map(|f| &f.kind)
+        else {
+            return Ok(None);
+        };
+        self.exact_path(referent.path.as_ref())
     }
 
     fn propagate(
@@ -774,7 +835,7 @@ impl<'a, 'g> Check<'a, 'g> {
         for arg in call.argument_evaluation_order() {
             let mut next = Vec::new();
             for state in alternatives {
-                if Some(call.callee) == self.outcome_observer {
+                if Some(call.callee) == self.core.outcome_observer {
                     next.extend(self.inspect_argument(state, arg, depth + 1)?);
                     continue;
                 }
@@ -876,7 +937,7 @@ impl<'a, 'g> Check<'a, 'g> {
         } else {
             ty
         };
-        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, .. } if *declaration == self.result)
+        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, .. } if *declaration == self.core.result)
     }
 
     fn add_source(
@@ -973,11 +1034,13 @@ impl<'a, 'g> Check<'a, 'g> {
                 declaration,
                 arguments,
             } => {
-                if Some(*declaration) == self.opaque_cause {
-                    // A sealed source shape does not classify erased owned storage.
+                if Some(*declaration) == self.core.opaque_cause
+                    || Some(*declaration) == self.core.opaque_list
+                {
+                    // A sealed source shape does not classify opaque owned storage.
                     return Ok(true);
                 }
-                let is_result = *declaration == self.result;
+                let is_result = *declaration == self.core.result;
                 if is_result {
                     self.budget.reserve(1 + path.len())?;
                     out.push(path.clone());

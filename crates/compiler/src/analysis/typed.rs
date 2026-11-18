@@ -232,9 +232,12 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         if result_use::check(
             &inventory,
             &bodies,
-            &role.declaration.id,
-            Some(&role.cause.id),
-            core.result_inspection.map(|d| &d.id),
+            result_use::Inputs {
+                result: &role.declaration.id,
+                opaque_cause: Some(&role.cause.id),
+                opaque_list: collections.list.map(|list| &list.declaration.id),
+                outcome_observer: core.result_inspection.map(|d| &d.id),
+            },
             &mut budget,
             &mut report,
         )

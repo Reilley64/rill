@@ -98,7 +98,7 @@ impl InstalledProfile {
         match self {
             Self::DarwinArm64 => (
                 "runtime/aarch64-apple-darwin/error.rs",
-                include_bytes!("../../../../runtime/error.rs"),
+                include_bytes!("../../../../runtime/error/src/lib.rs"),
             ),
         }
     }

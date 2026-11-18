@@ -50,7 +50,7 @@ These are task groups, not alternate Rust compiler profiles. Invoke each task as
 | Task | Current scope |
 | --- | --- |
 | `setup` | Default developer setup, without LLVM or heavy experiment tools. |
-| `test` | Implemented Rust unit, integration and documentation tests for compiler, IDE, LSP and CLI crates, without LLVM. Not complete Rill product acceptance. |
+| `test` | Rust unit, integration and documentation tests for the compiler, IDE, LSP, CLI, and the collection and error-storage runtime crates. No LLVM or Rill execution. |
 | `test:compiler` | Focused compiler unit, integration and documentation tests, without LLVM. |
 | `check` | Rust tests, formatting, lint, documentation, fixture and tool checks. Not complete language, stdlib, runtime or client acceptance. |
 | `check:rust` | Rust formatting and LLVM-free clippy. Tests run through `test`. |

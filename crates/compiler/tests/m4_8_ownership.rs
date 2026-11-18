@@ -148,7 +148,7 @@ fn installed_ownership_requires_the_built_archive() {
     }
     fs::copy(env!("RILL_OWNERSHIP_ARCHIVE"), root.join(ARCHIVE)).unwrap();
     fs::copy(
-        source.join("../runtime/error.rs"),
+        source.join("../runtime/error/src/lib.rs"),
         root.join(ARCHIVE).with_file_name("error.rs"),
     )
     .unwrap();

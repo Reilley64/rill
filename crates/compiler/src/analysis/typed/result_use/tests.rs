@@ -87,9 +87,12 @@ fn typed_sources_preserve_origins_across_rename_projection_replacement_and_paths
     check(
         &inventory,
         &bodies,
-        &watched.id,
-        None,
-        None,
+        Inputs {
+            result: &watched.id,
+            opaque_cause: None,
+            opaque_list: None,
+            outcome_observer: None,
+        },
         &mut budget,
         &mut report,
     )
