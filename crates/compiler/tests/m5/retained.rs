@@ -787,6 +787,14 @@ fn exclusive_aliases_retain_sources_in_the_proved_target() {
                 remember(access, seed);
                 return value;
             }
+            function choosesTarget(seed: &bool, flag: bool, choose: bool): bool {
+                let mut left = seed;
+                let mut right = seed;
+                let mut access = &mut left;
+                if (choose) { access = &mut right; }
+                remember(access, &flag);
+                return *left;
+            }
             function viewOfAlias(seed: &bool): bool {
                 let mut out = seed;
                 let access = &mut out;
@@ -897,6 +905,16 @@ fn exclusive_aliases_retain_sources_in_the_proved_target() {
                 };
                 assert_eq!(finding.code(), code, "{name}");
                 assert_eq!(finding.related.span.bytes(), cause, "{name}");
+            }
+            let chosen = lower("choosesTarget");
+            let mir = chosen
+                .mir()
+                .expect("retain the exact target on each incoming path");
+            let (yes, no) = branch_targets(mir);
+            for (edge, expected) in [(yes, b"right".as_slice()), (no, b"left".as_slice())] {
+                assert!(linear(mir, edge).iter().any(|op| matches!(op,
+                    Operation::CallRetaining { callee, destination: RetainedPlace::ThroughAlias { target, .. }, .. }
+                        if *callee == role && target.root.span.bytes() == expected)));
             }
             let pending = lower("incomingMoved");
             assert_eq!(pending.completion(), Completion::Incomplete);
