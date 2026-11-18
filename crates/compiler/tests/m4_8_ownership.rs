@@ -585,6 +585,22 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
         );
     }
     fs::rename(&saved, &archive).unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert!(
+            !report
+                .core_blockers()
+                .contains(&CoreBlocker::Representation)
+        );
+        assert_eq!(report.native_representations().len(), 4);
+        assert_eq!(report.collection_representations().count(), 4);
+        assert!(report.error_representation().is_some());
+    }
 }
 
 fn partial_collection(request: &InstalledRequest) {

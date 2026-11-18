@@ -109,6 +109,13 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 return Ok(states);
             }
+            TypeTerm::Nominal { declaration, .. }
+                if Some(*declaration) == self.core.owned_bytes =>
+            {
+                // The linked buffer stores u8 values; the empty source seal
+                // neither contains Results nor makes Bytes uninhabited.
+                return Ok(states);
+            }
             TypeTerm::Nominal {
                 declaration,
                 arguments,

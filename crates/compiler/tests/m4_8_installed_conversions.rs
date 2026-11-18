@@ -26,6 +26,7 @@ fn installed_conversions() {
             numeric(&root, mode);
             parsing(&root, mode);
             text_and_bytes(&root, mode);
+            owned_bytes_has_no_result_storage(&root, mode);
             user_dispatch(&root, mode);
             rejected_registrations(&root, mode);
             authority(&root, mode);
@@ -96,6 +97,47 @@ fn capture(root: &Path, mode: bool, source: &str) -> Graph {
                 .collect::<Vec<_>>()
         )
     })
+}
+
+fn owned_bytes_has_no_result_storage(root: &Path, mode: bool) {
+    let graph = capture(
+        root,
+        mode,
+        "
+        import std::bytes::Bytes as OwnedBytes;
+        import std::result::Result;
+        function lost(pair: [OwnedBytes, Result<bool>.Ok]): void {}
+    ",
+    );
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let uses = report.result_use().unwrap();
+    let app = graph
+        .modules()
+        .iter()
+        .find(|module| module.key.origin == Origin::Application)
+        .unwrap();
+    let relevant: Vec<_> = uses
+        .discards()
+        .iter()
+        .filter(|w| w.origin.module == &app.key)
+        .collect();
+    let [witness] = relevant.as_slice() else {
+        panic!("the opaque Bytes seal must not erase the Result sibling");
+    };
+    assert_eq!(
+        witness.origin.span.bytes(),
+        b"pair: [OwnedBytes, Result<bool>.Ok]"
+    );
+    assert_eq!(
+        witness.component.as_ref(),
+        &[compiler::analysis::typed::ResultComponent::TupleElement(1)]
+    );
+    assert!(
+        !uses
+            .pending()
+            .iter()
+            .any(|pending| pending.site.module == &app.key)
+    );
 }
 
 fn numeric(root: &Path, mode: bool) {

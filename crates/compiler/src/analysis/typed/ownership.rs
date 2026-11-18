@@ -123,6 +123,10 @@ impl Report<'_> {
     pub(super) fn roles_complete(&self) -> bool {
         self.validated_owners == OWNERS.len()
     }
+
+    pub(super) fn representations_complete(&self) -> bool {
+        self.representations.len() == OWNERS.len()
+    }
 }
 
 struct Owner(

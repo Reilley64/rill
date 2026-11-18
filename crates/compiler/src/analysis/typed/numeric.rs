@@ -23,6 +23,12 @@ pub(in crate::analysis) struct ConversionCore<'g> {
 }
 
 impl<'g> ConversionCore<'g> {
+    /// The pinned opaque nominal is backed by the linked owned byte buffer.
+    /// Borrowed text/byte views are descriptors, not additional owned buffers.
+    pub(in crate::analysis) fn bytes_representation(&self) -> Option<&'g Declaration> {
+        self.bytes
+    }
+
     pub(super) fn roles_complete(&self) -> bool {
         self.into.is_some()
             && self.try_into.is_some()

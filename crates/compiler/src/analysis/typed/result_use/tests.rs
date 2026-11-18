@@ -104,6 +104,7 @@ fn typed_sources_preserve_origins_across_rename_projection_replacement_and_paths
             },
             option: None,
             opaque_cause: None,
+            owned_bytes: None,
             collections: Default::default(),
             native: &Default::default(),
             outcome_observer: None,

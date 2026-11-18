@@ -89,6 +89,7 @@ pub(super) struct Inputs<'a, 'g> {
     pub result: Container<'g>,
     pub option: Option<Container<'g>>,
     pub opaque_cause: Option<&'g DeclarationId>,
+    pub owned_bytes: Option<&'g DeclarationId>,
     pub collections: super::CollectionCore<'g>,
     pub native: &'a super::ownership::Report<'g>,
     pub outcome_observer: Option<&'g DeclarationId>,
