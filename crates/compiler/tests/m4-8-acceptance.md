@@ -170,3 +170,14 @@ The staged runner exits 0 for the complete entry and 1 for each staged negative 
 At the code revision above, `mise run test:compiler` passed 421 tests and `mise run test` passed 437 workspace tests. `mise run check` and `mise run build:scaffold` passed. The 55 Python model tests passed. The documentation checker found no errors across 1,830 destinations. The compiler tree is LLVM-free and links `rill-collection` and `rill-error-storage`. No new hosted checks ran at this revision.
 
 The runner source moved from `crates/compiler/examples/m4_8_installed.rs` to [`tests/installed/typed/runner.rs`](../../../tests/installed/typed/runner.rs). The Cargo example target and staging command are unchanged. The packaging list supplies files to the stager and installed tests. It does not grant loader authority.
+
+### Closeout review at `661163e`
+
+Standards and Spec independently reviewed `661163e552c4c781b47df7e238413c9e19adcc1d` against `2f3c63d39865b868e92fc89f561f2aa95ef49eb5`. The binary diff has SHA-256 `f4712d3dbcf2685c8cb4e39211dbac96491cc0e13ca7eb428f4d9515d34e9ab1`.
+
+| Axis | Findings and disposition |
+| --- | --- |
+| Standards | The Result-use pass did not charge every visited call argument or aggregate component. The cross-component runner and its inputs also had different owners. The changes meter the visits, colocate the runner and inputs, share the packaging list, and assert that the refined projection leaves no application-side blocker. This record names the code revision of each staged result. |
+| Spec | A computed dereference skipped an operand that discarded a Result, and the checker could issue a false receipt. The staged regression now rejects with R0103 in both modes. The review also found that the closed role inventory did not admit ordinary application families and that linked collection facts lacked exact artifact provenance. |
+
+The positive receipts above apply only to the entry at `661163e`. The expanded entry adds an ordinary application family and its call. Before the follow-up, it reports `Incomplete` with `FamilySelection` in both modes despite closed core inventories. That result and the provenance finding keep M4 open until the corrected revision passes the expanded check.
