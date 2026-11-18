@@ -483,6 +483,7 @@ struct Checker<'r, 'g> {
     option: Option<super::typed::OptionRole<'g>>,
     result: Option<super::typed::ResultRole<'g>>,
     show: Option<&'g Declaration>,
+    primitives: Option<&'r super::typed::PrimitiveCore<'g>>,
     installed_into: Option<&'r super::typed::IntoAdmission<'g>>,
     collections: CollectionCore<'g>,
     native_ownership: &'r [super::typed::OwnershipProtection<'g>],
@@ -517,6 +518,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             option: None,
             result: None,
             show: None,
+            primitives: None,
             installed_into: None,
             collections: Default::default(),
             native_ownership: &[],
@@ -2229,8 +2231,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                             self.closed_err_step(&mut inference, node, false)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.family) {
                             let id = inference.calls[&node].fact.callee;
-                            if self.is_installed_show(id) {
-                                self.primitive_show_step(&mut inference, node)?;
+                            if self.canonical_scalar_call(&inference, node) {
+                                self.canonical_call_step(&mut inference, node)?;
                             } else if self.is_installed_into(id) {
                                 self.numeric_into_step(&mut inference, node)?;
                             } else if self.conversion_family(id).is_some() {
@@ -2252,6 +2254,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 .zip(call.parameters.iter().cloned())
                                 .collect();
                             let result = call.result.clone();
+                            if let Some(operation) = self.primitive_bridge(call.fact.callee) {
+                                inference.slots.get_mut(&node).unwrap().installed_operation =
+                                    Some(data::DataExpression::PrimitiveOperation(operation));
+                            }
                             self.establish(&mut inference, node, result, false)?;
                             for (argument, ty) in contexts {
                                 self.establish(&mut inference, argument, ty, true)?;
@@ -3350,7 +3356,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else if declaration.id.kind == DeclarationKind::Implementation
                     && self.input.ordinary.is_some()
                 {
-                    if let Some((typed, _)) = self.implementation_contract(module, declaration)? {
+                    if let Some((typed, admitted)) =
+                        self.implementation_contract(module, declaration)?
+                    {
                         self.elab.step(self.native_ownership.len())?;
                         let delivered = self
                             .native_ownership
@@ -3360,7 +3368,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         self.check_named_body(
                             module,
                             typed,
-                            !delivered && !self.collections.is_wrapper(&declaration.id),
+                            !admitted
+                                && !delivered
+                                && !self.collections.is_wrapper(&declaration.id),
                             None,
                         )?;
                         self.clear_body_assumptions();

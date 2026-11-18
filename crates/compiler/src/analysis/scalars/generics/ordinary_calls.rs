@@ -1399,6 +1399,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                                     self.evidence.get(id).unwrap().state == GoalState::Proved
                                 })
                     })
+                || (self.is_canonical_scalar_family(call.fact.callee)
+                    && inference.slots[&node].blocked)
             {
                 continue;
             }

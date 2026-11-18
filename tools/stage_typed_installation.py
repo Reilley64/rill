@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROFILE = "aarch64-apple-darwin"
 SOURCES = (
     "std.rill", "core.rill", "option.rill", "result.rill", "error.rill",
-    "collection.rill", "iter.rill", "format.rill", "convert.rill", "shared.rill",
+    "collection.rill", "iter.rill", "format.rill", "compare.rill", "convert.rill", "shared.rill",
     "mutex.rill", "channel.rill",
 )
 

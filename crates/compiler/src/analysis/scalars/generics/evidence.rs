@@ -50,6 +50,7 @@ pub enum GoalBlocker {
     ConflictingAssumptions,
     SelectedOutput,
     UnavailableRequirement,
+    UnavailableProvider,
     Representation,
     CallableEnvironment,
     Cycle,
@@ -214,6 +215,7 @@ pub(super) struct SymbolicCallable<'g> {
 enum GoalChoice<'g> {
     Blocked,
     NoWinner,
+    NonUniform,
     Selected(GoalSelection<'g>),
 }
 
@@ -259,6 +261,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             RequirementTarget::Family(id) if self.conversion_family(id).is_some() => {
                 Some(InputPremise::HypotheticalConversionRole)
             }
+            RequirementTarget::Family(id) if self.ordinary_scalar_role(id).is_some() => None,
+            RequirementTarget::Family(id) if self.clear_primitive_goal(id, &judgment) => None,
             RequirementTarget::Family(id)
                 if self
                     .result
@@ -373,7 +377,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(self.input.ordinary.unwrap().captured_family(id))
     }
 
-    pub(super) fn evidence_module(&mut self, key: &ModuleKey) -> Work<&'g Module> {
+    pub(in crate::analysis::scalars) fn evidence_module(
+        &mut self,
+        key: &ModuleKey,
+    ) -> Work<&'g Module> {
         for module in self.input.graph.modules() {
             self.elab.step(1)?;
             if module.key == *key {
@@ -387,7 +394,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         &mut self,
         module: &'g Module,
         declaration: &'g Declaration,
-    ) -> Work<Option<(&'r DeclarationFacts<'g>, NodeId)>> {
+    ) -> Work<Option<(&'r DeclarationFacts<'g>, bool)>> {
         if self.input.ordinary.is_none() {
             return Ok(None);
         }
@@ -429,7 +436,20 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         self.add_body_assumptions(module, source.body_node, &source.family, substitutions)?;
         self.add_body_assumptions(module, source.body_node, &source.declaration, &[])?;
-        Ok(Some((&body.header, source.body_node)))
+        let primitive = if let Some(core) = self
+            .primitives
+            .filter(|p| p.prelude(&source.family).is_some())
+        {
+            self.elab.step(core.providers.len())?;
+            core.providers
+                .iter()
+                .any(|p| p.implementation.id == declaration.id)
+        } else {
+            false
+        };
+        let admitted = (self.ordinary_scalar_role(&source.family).is_some() || primitive)
+            && body.compatibility == ordinary::Compatibility::Compatible;
+        Ok(Some((&body.header, admitted)))
     }
 
     pub(in crate::analysis::scalars) fn nested_body(
@@ -740,7 +760,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
-    pub(super) fn solve_goal(&mut self, goal: &GoalId) -> Work<GoalState> {
+    pub(in crate::analysis::scalars) fn solve_goal(&mut self, goal: &GoalId) -> Work<GoalState> {
         debug_assert!(self.evidence.get(goal).is_ok());
         let root = goal.index;
         let state = self.evidence.goals[root].state;
@@ -997,7 +1017,7 @@ impl<'r, 'g> Checker<'r, 'g> {
 
     /// Source calls can attach their already selected header/substitution instead
     /// of running selection again. Only `solve_goal` can complete the judgment.
-    pub(super) fn issue_determination(
+    pub(in crate::analysis::scalars) fn issue_determination(
         &mut self,
         judgment: GoalJudgment<'g>,
         site: Site<'g>,
@@ -1039,15 +1059,43 @@ impl<'r, 'g> Checker<'r, 'g> {
             return self.begin_conversion_goal(goal, family, &inputs, &filters);
         }
         let prelude = self.input.graph.prelude();
-        if *id == prelude.copy || *id == prelude.dispose {
-            return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
-        }
         let family = self.evidence_family(id)?.unwrap();
+        if *id == prelude.copy || *id == prelude.dispose {
+            let Some((implementation, subject)) = self
+                .primitives
+                .and_then(|core| core.winner_for_inputs(id, &inputs))
+            else {
+                return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
+            };
+            for filter in &filters {
+                self.elab.step(1)?;
+                if filter.position != 0 || !self.same(&filter.argument, subject)? {
+                    return Ok(GoalState::Disproved);
+                }
+            }
+            // This ground region has already passed the required-winner comparison
+            // against every captured registration, even those not eligible to call.
+            return self.expand_selected_contract(
+                goal,
+                family,
+                GoalSelection {
+                    implementation,
+                    alternative: 0,
+                    substitution: Vec::new(),
+                },
+            );
+        }
         let required = self.collection_winner(id, &inputs);
         if required.is_none()
             && let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)?
         {
             return Ok(state);
+        }
+        if let (Some(role), Some(primitives)) = (self.ordinary_scalar_role(id), self.primitives) {
+            self.elab.step(primitives.providers.len())?;
+            if primitives.missing_provider(id, role, &inputs) {
+                return Ok(GoalState::Unresolved(GoalBlocker::UnavailableProvider));
+            }
         }
         let selection = if let Some(selection) = self.evidence.goals[goal].selection.take() {
             selection
@@ -1057,6 +1105,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                     return Ok(GoalState::Unresolved(GoalBlocker::InputSelection));
                 }
                 GoalChoice::NoWinner => return Ok(GoalState::Disproved),
+                GoalChoice::NonUniform => {
+                    return Ok(GoalState::Unresolved(GoalBlocker::MissingAssumption));
+                }
                 GoalChoice::Selected(selection) => selection,
             }
         };
@@ -1188,9 +1239,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             statistics: self.elab.statistics,
         };
         let selected = (|| {
-            let Ok(facts) =
-                ordinary::source::family(self.input.ordinary.unwrap(), family, &mut budget)?
-            else {
+            let admitted = self.ordinary_scalar_role(family).is_some();
+            let inventory = self.input.ordinary.unwrap();
+            let facts = if admitted {
+                ordinary::source::admitted_family(inventory, family, &mut budget)?
+            } else {
+                ordinary::source::family(inventory, family, &mut budget)?
+            };
+            let Ok(facts) = facts else {
                 return Ok(GoalChoice::Blocked);
             };
             budget.reserve(inputs.len() + filters.len())?;
@@ -1211,6 +1267,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }))
                 }
                 Some(_) => Ok(GoalChoice::NoWinner),
+                None if admitted => Ok(GoalChoice::NonUniform),
                 None => Ok(GoalChoice::Blocked),
             }
         })();

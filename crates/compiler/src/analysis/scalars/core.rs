@@ -39,6 +39,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     pub(super) fn installed_bridge(&mut self, id: &DeclarationId) -> Work<bool> {
         self.elab.step(self.native_ownership.len())?;
         Ok(self.collections.is_bridge(id)
+            || self.primitive_bridge(id).is_some()
             || self
                 .native_ownership
                 .iter()

@@ -8,6 +8,16 @@ macro_rules! primitives {
         pub enum PrimitiveValue<'a> { $($variant($type)),+ }
 
         impl Primitive {
+            pub(in crate::analysis) const ALL: &[Self] = &[$(Self::$variant),+];
+
+            pub(in crate::analysis) fn name(self) -> &'static str {
+                match self { $(Self::$variant => $name),+ }
+            }
+
+            pub(in crate::analysis) fn show_binding(self) -> &'static str {
+                match self { $(Self::$variant => concat!("render", stringify!($variant))),+ }
+            }
+
             pub(in crate::analysis) fn named(name: &str) -> Option<Self> {
                 match name {
                     $($name => Some(Self::$variant),)+
@@ -29,6 +39,29 @@ primitives! {
     I8(i8) => "i8", I16(i16) => "i16", I32(i32) => "i32", I64(i64) => "i64", I128(i128) => "i128",
     U8(u8) => "u8", U16(u16) => "u16", U32(u32) => "u32", U64(u64) => "u64", U128(u128) => "u128",
     F32(f32) => "f32", F64(f64) => "f64",
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrimitiveOperation {
+    Show(Primitive),
+    CopyText,
+    DisposeText,
+}
+
+impl PrimitiveOperation {
+    /// Copy the observed UTF-8 extent, without carrying a borrow of its source.
+    pub fn copy_text(self, value: &str) -> Option<String> {
+        (self == Self::CopyText).then(|| value.to_owned())
+    }
+
+    /// Release the owned text. A different operation does not consume it.
+    pub fn dispose_text(self, value: String) -> Result<(), String> {
+        if self != Self::DisposeText {
+            return Err(value);
+        }
+        drop(value);
+        Ok(())
+    }
 }
 
 impl Primitive {
@@ -82,7 +115,18 @@ fn format_float(value: impl std::fmt::Display + std::fmt::LowerExp, finite: bool
 
 #[cfg(test)]
 mod tests {
-    use super::{Primitive, PrimitiveValue as Value};
+    use super::{Primitive, PrimitiveOperation, PrimitiveValue as Value};
+
+    #[test]
+    fn text_copy_owns_only_the_observed_extent() {
+        let source = String::from("prefix café suffix");
+        let copy = PrimitiveOperation::CopyText
+            .copy_text(&source[7..12])
+            .unwrap();
+        drop(source);
+        assert_eq!(copy, "café");
+        assert_eq!(PrimitiveOperation::DisposeText.dispose_text(copy), Ok(()));
+    }
 
     #[test]
     fn primitive_show_operations_produce_owned_default_text() {

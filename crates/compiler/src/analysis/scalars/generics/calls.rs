@@ -32,7 +32,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 continue;
             }
-            if self.is_installed_show(callee) || self.conversion_family(callee).is_some() {
+            if self.is_canonical_scalar_family(callee) || self.conversion_family(callee).is_some() {
                 continue;
             }
             let advanced = self.with_node_premise(inference, node, |checker, inference| {

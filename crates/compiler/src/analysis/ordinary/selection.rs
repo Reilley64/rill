@@ -355,6 +355,15 @@ pub(super) fn eligible_family<'a, 'g>(
     {
         return Ok(Err(SelectionBlocker::DeclarationPrerequisite));
     }
+    eligible_captured_family(analysis, id, budget)
+}
+
+/// Integrated callers validate the canonical role and its dependent source inventory.
+pub(super) fn eligible_captured_family<'a, 'g>(
+    analysis: &'a OrdinaryAnalysis<'g>,
+    id: &DeclarationId,
+    budget: &mut Budget,
+) -> Work<Result<&'a FamilyFacts<'g>, SelectionBlocker>> {
     let Some(family) = analysis.families.get(id) else {
         return Ok(Err(SelectionBlocker::HeaderOrPlacement));
     };

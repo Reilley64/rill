@@ -18,10 +18,12 @@ pub use collections::{
     CollectionOperation, CollectionOverlap, CollectionProtection, CollectionProvider,
     CollectionRepresentation, CollectionStorage, ListRole, ListTraversal,
 };
-pub(super) use core::IntoAdmission;
 pub use core::{
-    DisplayProtection, ErrorOperation, ErrorProviders, ErrorRepresentation, OptionRole, ResultRole,
+    DisplayProtection, ErrorOperation, ErrorProviders, ErrorRepresentation, OptionRole,
+    PrimitiveBinding, PrimitiveCoverage, PrimitiveOverlap, PrimitiveProtection, PrimitiveProvider,
+    PrimitiveRole, ResultRole,
 };
+pub(super) use core::{IntoAdmission, PrimitiveCore};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
 pub use numeric::{InfallibleNumericContract, NumericConversion, NumericConversionError};
 pub use ownership::{
@@ -29,7 +31,7 @@ pub use ownership::{
     NativeRepresentationKind, OwnershipCoverage, OwnershipOverlap, OwnershipProtection,
     OwnershipRule,
 };
-pub use primitive::{Primitive, PrimitiveValue};
+pub use primitive::{Primitive, PrimitiveOperation, PrimitiveValue};
 pub use result_use::{
     PendingResultUse, ResultComponent, ResultDiscard, ResultDiscardKind, ResultUseBlocker,
     ResultUseReport,
@@ -105,6 +107,27 @@ impl<'g> TypedReport<'g> {
     /// The validated canonical formatting family, independent of any provider selection.
     pub fn show_role(&self) -> Option<&'g super::Declaration> {
         self.core.show
+    }
+
+    pub fn copy_role(&self) -> Option<&'g super::Declaration> {
+        self.core.primitives.copy
+    }
+
+    pub fn dispose_role(&self) -> Option<&'g super::Declaration> {
+        self.core.primitives.dispose
+    }
+
+    pub fn equality_role(&self) -> Option<&'g super::Declaration> {
+        self.core.primitives.equality
+    }
+
+    /// Pinned implementations and specific compiler operation bindings, not selection or representation.
+    pub fn primitive_providers(&self) -> &[PrimitiveProvider<'g>] {
+        &self.core.primitives.providers
+    }
+
+    pub fn primitive_protection(&self) -> &[PrimitiveProtection<'g>] {
+        &self.core.primitives.protection
     }
 
     /// The validated canonical infallible conversion family.
@@ -229,6 +252,11 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     let authority_exhausted = exhausted
         || result_roles.is_err()
         || ownership::check(&inventory, &mut budget, &mut ownership).is_err();
+    let authority_exhausted = authority_exhausted
+        || core
+            .primitives
+            .check(&inventory, core.show, &mut budget)
+            .is_err();
     let mut collections = CollectionCore::default();
     let mut collection_overlaps = Vec::new();
     let authority_exhausted = authority_exhausted
@@ -247,6 +275,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             option: core.option,
             result: core.result,
             show: core.show,
+            primitives: Some(&core.primitives),
             into: core.into.as_ref(),
             collections,
             native_ownership: &ownership.protection,
@@ -299,6 +328,9 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     }
     if core.option.is_none()
         && core.show.is_none()
+        && core.primitives.copy.is_none()
+        && core.primitives.dispose.is_none()
+        && core.primitives.equality.is_none()
         && core.into.is_none()
         && ownership.protection.iter().all(|p| p.provider.is_none())
     {

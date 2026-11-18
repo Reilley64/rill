@@ -121,8 +121,8 @@ fn formatting(graph: &Graph) {
         panic!("missing formatting calls")
     };
     assert_eq!(
-        calls.iter().map(|c| c.provider).collect::<Vec<_>>(),
-        [Primitive::Bool, Primitive::I32]
+        calls.iter().map(|c| c.primitive).collect::<Vec<_>>(),
+        [Some(Primitive::Bool), Some(Primitive::I32)]
     );
     assert!(calls.iter().all(|c| *c.family == role.id));
     assert!(calls[0].expression < calls[1].expression);

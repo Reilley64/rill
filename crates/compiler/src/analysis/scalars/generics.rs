@@ -353,6 +353,7 @@ pub(in crate::analysis) struct IntegratedInputs<'r, 'g> {
     pub option: Option<crate::analysis::typed::OptionRole<'g>>,
     pub result: Option<crate::analysis::typed::ResultRole<'g>>,
     pub show: Option<&'g Declaration>,
+    pub primitives: Option<&'r crate::analysis::typed::PrimitiveCore<'g>>,
     pub into: Option<&'r crate::analysis::typed::IntoAdmission<'g>>,
     pub collections: crate::analysis::typed::CollectionCore<'g>,
     pub native_ownership: &'r [crate::analysis::typed::OwnershipProtection<'g>],
@@ -404,6 +405,7 @@ fn analyze_bodies<'g>(
     checker.option = integration.as_ref().and_then(|core| core.option);
     checker.result = integration.as_ref().and_then(|core| core.result);
     checker.show = integration.as_ref().and_then(|core| core.show);
+    checker.primitives = integration.as_ref().and_then(|core| core.primitives);
     checker.installed_into = integration.as_ref().and_then(|core| core.into);
     checker.collections = integration
         .as_ref()

@@ -88,7 +88,7 @@ impl InstalledProfile {
                     path: "format.rill",
                     triggered_by: |kind| kind == NodeKind::TemplateHole,
                     dependencies: &[],
-                    families: &[],
+                    families: &["show"],
                 },
             ],
         }
@@ -114,6 +114,9 @@ impl InstalledProfile {
             }
             (Self::DarwinArm64, "format.rill") => {
                 Some(include_bytes!("../../../../stdlib/format.rill"))
+            }
+            (Self::DarwinArm64, "compare.rill") => {
+                Some(include_bytes!("../../../../stdlib/compare.rill"))
             }
             (Self::DarwinArm64, "option.rill") => {
                 Some(include_bytes!("../../../../stdlib/option.rill"))

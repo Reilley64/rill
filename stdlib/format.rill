@@ -1,2 +1,37 @@
-// Primitive providers are compiler operations bound to this family.
+// Primitive renderers call privately bound compiler operations.
 export function show<T>(value: &T): string;
+
+function renderBool(value: &bool): string;
+function renderChar(value: &char): string;
+function renderString(value: &string): string;
+function renderI8(value: &i8): string;
+function renderI16(value: &i16): string;
+function renderI32(value: &i32): string;
+function renderI64(value: &i64): string;
+function renderI128(value: &i128): string;
+function renderU8(value: &u8): string;
+function renderU16(value: &u16): string;
+function renderU32(value: &u32): string;
+function renderU64(value: &u64): string;
+function renderU128(value: &u128): string;
+function renderF32(value: &f32): string;
+function renderF64(value: &f64): string;
+
+implement show(value: &bool): string { return renderBool(value); }
+implement show(value: &char): string { return renderChar(value); }
+implement show(value: &string): string { return renderString(value); }
+implement show(value: &i8): string { return renderI8(value); }
+implement show(value: &i16): string { return renderI16(value); }
+implement show(value: &i32): string { return renderI32(value); }
+implement show(value: &i64): string { return renderI64(value); }
+implement show(value: &i128): string { return renderI128(value); }
+implement show(value: &u8): string { return renderU8(value); }
+implement show(value: &u16): string { return renderU16(value); }
+implement show(value: &u32): string { return renderU32(value); }
+implement show(value: &u64): string { return renderU64(value); }
+implement show(value: &u128): string { return renderU128(value); }
+implement show(value: &f32): string { return renderF32(value); }
+implement show(value: &f64): string { return renderF64(value); }
+
+implement<T> show(value: &&T): string where show(T) { return show<T>(*value); }
+implement<T> show(value: &&mut T): string where show(T) { return show<T>(&**value); }

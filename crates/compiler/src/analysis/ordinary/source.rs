@@ -17,6 +17,14 @@ pub(in crate::analysis) fn family<'r, 'g>(
     selection::eligible_family(ordinary, id, budget)
 }
 
+pub(in crate::analysis) fn admitted_family<'r, 'g>(
+    ordinary: &'r OrdinaryAnalysis<'g>,
+    id: &DeclarationId,
+    budget: &mut Budget,
+) -> Work<Result<&'r FamilyFacts<'g>, SelectionBlocker>> {
+    selection::eligible_captured_family(ordinary, id, budget)
+}
+
 pub(in crate::analysis) fn input_positions(
     family: &FamilyFacts<'_>,
     budget: &mut Budget,

@@ -78,6 +78,8 @@ pub enum DataExpression<'g> {
     /// Canonical show calls in hole evaluation order.
     Interpolation(Arc<[FormattingCall<'g>]>),
     PrimitiveShow(crate::analysis::typed::Primitive),
+    PrimitiveOperation(crate::analysis::typed::PrimitiveOperation),
+    CanonicalCall(generics::GoalId),
     NumericInto(crate::analysis::typed::NumericConversion),
     NativeOwnership(Arc<crate::analysis::typed::NativeOwnershipCall<'g>>),
 }

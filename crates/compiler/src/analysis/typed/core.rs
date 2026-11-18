@@ -8,9 +8,16 @@ use crate::analysis::{
 use crate::loader::{DeclarationKind, Module, Namespace, Target};
 
 mod result;
+mod scalar;
 pub(super) use result::check_result;
 pub use result::{
     DisplayProtection, ErrorOperation, ErrorProviders, ErrorRepresentation, ResultRole,
+};
+pub(in crate::analysis) use scalar::PrimitiveCore;
+pub(super) use scalar::check_show;
+pub use scalar::{
+    PrimitiveBinding, PrimitiveCoverage, PrimitiveOverlap, PrimitiveProtection, PrimitiveProvider,
+    PrimitiveRole,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -27,6 +34,7 @@ pub(super) struct InstalledCore<'g> {
     pub(super) result: Option<ResultRole<'g>>,
     pub(super) result_inspection: Option<&'g Declaration>,
     pub(super) show: Option<&'g Declaration>,
+    pub(super) primitives: PrimitiveCore<'g>,
     pub(super) into: Option<IntoAdmission<'g>>,
 }
 
@@ -135,58 +143,6 @@ fn pinned_module<'g>(
         if module.key.path == path && graph.is_pinned_standard_source(module) {
             return Ok(Some(module));
         }
-    }
-    Ok(None)
-}
-
-pub(super) fn check_show<'g>(
-    inventory: &OrdinaryAnalysis<'g>,
-    budget: &mut Budget,
-) -> Work<Option<&'g Declaration>> {
-    for module in inventory.graph().modules() {
-        budget.step(1)?;
-        if module.key.path != "format.rill" || !inventory.graph().is_pinned_standard_source(module)
-        {
-            continue;
-        }
-        let Some(show) = export(
-            inventory.graph(),
-            module,
-            Namespace::ValueFunction,
-            "show",
-            budget,
-        )?
-        else {
-            return Ok(None);
-        };
-        budget.step(3)?;
-        let Some(family) = inventory.captured_family(&show.id) else {
-            return Ok(None);
-        };
-        if inventory.declaration_unusable(&show.id)
-            || !inventory
-                .headers()
-                .get(&show.id)
-                .is_some_and(|h| h.defaults.is_empty() && h.requirements.is_empty())
-        {
-            return Ok(None);
-        }
-        let facts = &family.header;
-        let (DeclarationShape::Function { parameters, result }, [parameter]) =
-            (&facts.shape, facts.binders.as_slice())
-        else {
-            return Ok(None);
-        };
-        if show.id.kind == DeclarationKind::Family
-            && matches!(parameters.as_slice(), [value] if matches!(value.ty.as_ref(),
-                TypeTerm::Reference { mutable: false, referent }
-                    if binder_is(referent, parameter)))
-            && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")
-        {
-            budget.reserve(1)?;
-            return Ok(Some(show));
-        }
-        return Ok(None);
     }
     Ok(None)
 }
