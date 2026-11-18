@@ -34,7 +34,7 @@ pub(super) fn match_vector<'a, 'g>(
     Ok(p == pattern.len() && a == actual.len())
 }
 
-pub(in crate::analysis::ordinary) fn included(
+pub(in crate::analysis) fn included(
     left: &[InputKey<'_>],
     right: &[InputKey<'_>],
     budget: &mut Budget,
@@ -169,7 +169,7 @@ pub(super) fn unify<'a, 'g>(
     Ok(Some(solved))
 }
 
-pub(in crate::analysis::ordinary) fn intersection<'g>(
+pub(in crate::analysis) fn intersection<'g>(
     left: &[InputKey<'g>],
     right: &[InputKey<'g>],
     budget: &mut Budget,

@@ -6,8 +6,8 @@ use super::*;
 use crate::loader::Implementation;
 
 pub(super) mod metadata;
-mod patterns;
-mod selection;
+pub(super) mod patterns;
+pub(super) mod selection;
 pub(super) mod source;
 pub use metadata::{DefaultMetadata, HeaderMetadata, RequirementMetadata, RequirementTarget};
 pub use patterns::InputKey;

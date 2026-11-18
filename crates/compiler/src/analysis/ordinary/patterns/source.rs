@@ -161,7 +161,7 @@ fn write_domain<'g>(
     Ok(height + 1)
 }
 
-fn materialize<'g>(
+pub(super) fn materialize<'g>(
     root: Site<'_, 'g>,
     solved: &Solution<'_, 'g>,
     rigids: &[(&'g DeclarationId, usize)],

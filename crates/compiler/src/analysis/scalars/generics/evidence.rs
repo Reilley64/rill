@@ -41,6 +41,7 @@ pub enum GoalJudgment<'g> {
 pub enum GoalBlocker {
     MissingAssumption,
     OrdinaryAdmission,
+    ConversionAdmission,
     InputSelection,
     ConflictingAssumptions,
     SelectedOutput,
@@ -116,7 +117,7 @@ pub struct GoalFacts<'g> {
 }
 
 #[derive(Debug, Default)]
-pub(in crate::analysis::scalars) struct Evidence<'g> {
+pub(in crate::analysis) struct Evidence<'g> {
     report: Arc<()>,
     goals: Vec<GoalFacts<'g>>,
     output_equations: BTreeMap<usize, output::OutputEquation<'g>>,
@@ -125,11 +126,11 @@ pub(in crate::analysis::scalars) struct Evidence<'g> {
 }
 
 impl<'g> Evidence<'g> {
-    pub(super) fn goals(&self) -> &[GoalFacts<'g>] {
+    pub(in crate::analysis) fn goals(&self) -> &[GoalFacts<'g>] {
         &self.goals
     }
 
-    pub(super) fn get(&self, id: &GoalId) -> Result<&GoalFacts<'g>, QueryError> {
+    pub(in crate::analysis) fn get(&self, id: &GoalId) -> Result<&GoalFacts<'g>, QueryError> {
         if !Arc::ptr_eq(&self.report, &id.report) {
             return Err(QueryError::InvalidRequest);
         }
@@ -217,7 +218,7 @@ struct Frame {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
-    fn issue_goal(
+    pub(super) fn issue_goal(
         &mut self,
         judgment: GoalJudgment<'g>,
         site: Site<'g>,
@@ -266,7 +267,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(id)
     }
 
-    fn requirement_term(
+    pub(super) fn requirement_term(
         &mut self,
         requirement: &RequirementMetadata<'g>,
         substitutions: &[Substitution<'g>],
@@ -704,7 +705,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                         _ => None,
                     };
                     if self.evidence.goals[goal].hypothetical.is_some() {
-                        state = GoalState::Unresolved(GoalBlocker::OrdinaryAdmission);
+                        state = GoalState::Unresolved(match self.evidence.goals[goal].premise {
+                            Some(InputPremise::HypotheticalConversionRole) => {
+                                GoalBlocker::ConversionAdmission
+                            }
+                            _ => GoalBlocker::OrdinaryAdmission,
+                        });
                     }
                 }
                 if matches!(state, GoalState::Proved | GoalState::Disproved) {

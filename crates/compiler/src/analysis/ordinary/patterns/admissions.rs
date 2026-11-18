@@ -57,10 +57,31 @@ pub(in crate::analysis::ordinary) fn alternatives<'g>(
     types: &PartialFacts<'g>,
     budget: &mut Budget,
 ) -> Work<Option<Vec<InputKey<'g>>>> {
+    expand(key, 0, types, budget)
+}
+
+pub(in crate::analysis) fn conversion_alternatives<'g>(
+    key: &InputKey<'g>,
+    types: &PartialFacts<'g>,
+    budget: &mut Budget,
+) -> Work<Option<Vec<InputKey<'g>>>> {
+    expand(key, 1, types, budget)
+}
+
+fn expand<'g>(
+    key: &InputKey<'g>,
+    exact_prefix: usize,
+    types: &PartialFacts<'g>,
+    budget: &mut Budget,
+) -> Work<Option<Vec<InputKey<'g>>>> {
     let mut dimensions = Vec::new();
-    for term in terms(&key.nodes) {
+    for (index, term) in terms(&key.nodes).enumerate() {
         budget.reserve(2)?;
         let mut choices = vec![Admission::Exact];
+        if index < exact_prefix {
+            dimensions.push((term, choices));
+            continue;
+        }
         let nominal = match term[0].head {
             Head::Fixed(Constructor::Nominal(id)) => Some((id, false)),
             Head::Fixed(Constructor::Reference(false)) => match term[1].head {

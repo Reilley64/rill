@@ -4,6 +4,8 @@ use ordinary::{Completion, OrdinaryAnalysis};
 
 pub mod callables;
 mod calls;
+mod conversion_proof;
+pub(in crate::analysis) use conversion_proof::check_pair_candidates;
 mod ordinary_callbacks;
 mod ordinary_calls;
 pub use ordinary_callbacks::OrdinaryCallbackContext;
@@ -27,7 +29,7 @@ pub struct BodyStatus<'g> {
 }
 mod evidence;
 
-pub(in crate::analysis::scalars) use evidence::Evidence;
+pub(in crate::analysis) use evidence::Evidence;
 pub use evidence::{
     GoalBlocker, GoalEquality, GoalFacts, GoalId, GoalJudgment, GoalOutput, GoalSelection,
     GoalState, GoalVerdict,

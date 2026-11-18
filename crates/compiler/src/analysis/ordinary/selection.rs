@@ -31,6 +31,7 @@ pub struct InputMatch<'g> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputPremise {
     HypotheticalOrdinaryRole,
+    HypotheticalConversionRole,
 }
 
 #[derive(Debug)]
@@ -48,7 +49,7 @@ pub struct SelectionReport<'g> {
     pub statistics: Statistics,
 }
 
-fn declaration<'g>(
+pub(in crate::analysis) fn declaration<'g>(
     graph: &'g Graph,
     id: &DeclarationId,
     budget: &mut Budget,
@@ -82,13 +83,13 @@ fn binder_count(module: &Module, header: NodeId, budget: &mut Budget) -> Work<us
 }
 
 #[derive(PartialEq, Eq)]
-enum RequestShape {
+pub(in crate::analysis) enum RequestShape {
     Ground,
     Unestablished,
     Invalid,
 }
 
-fn validate<'a, 'g>(
+pub(in crate::analysis) fn validate<'a, 'g>(
     graph: &'g Graph,
     types: impl Iterator<Item = &'a Type<'g>>,
     budget: &mut Budget,

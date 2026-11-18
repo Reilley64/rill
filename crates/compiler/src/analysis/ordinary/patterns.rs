@@ -4,7 +4,8 @@ mod admissions;
 mod relations;
 mod source;
 pub(super) use admissions::alternatives;
-pub(super) use relations::{included, intersection};
+pub(in crate::analysis) use admissions::conversion_alternatives;
+pub(in crate::analysis) use relations::{included, intersection};
 pub(super) use source::project;
 
 fn terms<'a, 'g>(mut vector: &'a [Node<'g>]) -> impl Iterator<Item = &'a [Node<'g>]> {
@@ -54,7 +55,7 @@ impl<'g> InputKey<'g> {
         Ok(None)
     }
 
-    pub(super) fn same(&self, other: &Self, budget: &mut Budget) -> Work<bool> {
+    pub(in crate::analysis) fn same(&self, other: &Self, budget: &mut Budget) -> Work<bool> {
         budget.step(
             self.nodes
                 .len()
@@ -64,9 +65,16 @@ impl<'g> InputKey<'g> {
         )?;
         Ok(self == other)
     }
+
+    pub(in crate::analysis) fn equal_pair_endpoints(&self, budget: &mut Budget) -> Work<bool> {
+        let mut pair = terms(&self.nodes);
+        let (destination, source) = (pair.next().unwrap(), pair.next().unwrap());
+        budget.step(destination.len().min(source.len()))?;
+        Ok(destination == source)
+    }
 }
 
-pub(super) fn ground<'a, 'g>(
+pub(in crate::analysis) fn ground<'a, 'g>(
     types: impl Iterator<Item = &'a Type<'g>>,
     budget: &mut Budget,
 ) -> Work<InputKey<'g>>
@@ -120,6 +128,58 @@ pub(super) fn first_match<'g>(
         if agrees {
             return Ok(Some(index));
         }
+    }
+    Ok(None)
+}
+
+pub(in crate::analysis) fn match_pair<'g>(
+    key: &InputKey<'g>,
+    alternatives: &[InputKey<'g>],
+    variables: &[Option<usize>],
+    binders: &[Binder<'g>],
+    actual: &InputKey<'g>,
+    filter: Option<&InputKey<'g>>,
+    budget: &mut Budget,
+) -> Work<Option<(usize, Vec<Substitution<'g>>)>> {
+    for (index, alternative) in alternatives.iter().enumerate() {
+        budget.step(1)?;
+        let mut captured = BTreeMap::new();
+        if !relations::match_vector(&alternative.nodes, &actual.nodes, &mut captured, budget)? {
+            continue;
+        }
+        if let Some(filter) = filter
+            && !relations::match_vector(
+                terms(&key.nodes).nth(1).unwrap(),
+                &filter.nodes,
+                &mut captured,
+                budget,
+            )?
+        {
+            continue;
+        }
+        let mut substitutions = Vec::new();
+        let solved = BTreeMap::new();
+        for (binder, variable) in binders.iter().zip(variables) {
+            budget.step(1)?;
+            if let Some(variable) = variable {
+                let term = captured[variable];
+                let argument = source::materialize(
+                    relations::Site { side: false, term },
+                    &solved,
+                    &[],
+                    budget,
+                    1,
+                )?
+                .expect("established actual pair uses only fixed heads");
+                budget.reserve(1)?;
+                substitutions.push(Substitution {
+                    binder: &binder.declaration.id,
+                    position: binder.position,
+                    argument,
+                });
+            }
+        }
+        return Ok(Some((index, substitutions)));
     }
     Ok(None)
 }
@@ -189,16 +249,28 @@ pub(super) fn input_key<'g>(
     let DeclarationShape::Function { parameters, .. } = &header.shape else {
         unreachable!()
     };
-    budget.reserve(header.binders.len())?;
-    let mut indices = vec![None; header.binders.len()];
+    normalized(
+        parameters.iter().map(|member| &member.ty),
+        &header.binders,
+        budget,
+    )
+}
+
+pub(in crate::analysis) fn normalized<'a, 'g: 'a>(
+    terms: impl Iterator<Item = &'a Type<'g>>,
+    binders: &[Binder<'g>],
+    budget: &mut Budget,
+) -> Work<(InputKey<'g>, Vec<Option<usize>>)> {
+    budget.reserve(binders.len())?;
+    let mut indices = vec![None; binders.len()];
     let mut next = 0;
     let key = flatten(
-        parameters.iter().map(|member| &member.ty),
+        terms,
         |constructor, _| {
             let Constructor::Parameter(declaration, position) = constructor else {
                 return Ok(Head::Fixed(constructor));
             };
-            debug_assert_eq!(&header.binders[position].declaration.id, declaration);
+            debug_assert_eq!(&binders[position].declaration.id, declaration);
             let index = indices[position].get_or_insert_with(|| {
                 let previous = next;
                 next += 1;

@@ -2770,7 +2770,7 @@ fn text(ty: &Type<'_>) -> bool {
     primitive_name(ty) == Some("string")
         || matches!(ty.as_ref(), TypeTerm::Reference { referent, .. } if primitive_name(referent) == Some("string"))
 }
-fn numeric(ty: &Type<'_>) -> bool {
+pub(super) fn numeric(ty: &Type<'_>) -> bool {
     integer(ty) || matches!(primitive_name(ty), Some("f32" | "f64"))
 }
 fn primitive_name(ty: &Type<'_>) -> Option<&'static str> {
