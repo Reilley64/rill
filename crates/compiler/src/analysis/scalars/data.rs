@@ -53,7 +53,14 @@ pub struct Admission<'g> {
 pub enum DataExpression<'g> {
     Construction(Box<Construction<'g>>),
     Projection(Projection<'g>),
-    Tuple { elements: Vec<NodeId> },
+    Tuple {
+        elements: Vec<NodeId>,
+    },
+    TupleIndex {
+        base: NodeId,
+        selector: NodeId,
+        component: usize,
+    },
     Match(Box<Match<'g>>),
 }
 #[derive(Debug)]
@@ -253,6 +260,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         }) {
             return Ok(false);
         }
+        if let Some(local) = self.elab.lexical_declaration(
+            module,
+            node,
+            Namespace::TypeModule,
+            std::str::from_utf8(first).unwrap(),
+        )? {
+            return Ok(path.children.len() == 1 && local.id.kind == DeclarationKind::Enum);
+        }
         let mut key = &module.key;
         for (index, &segment) in path.children.iter().enumerate() {
             let name = std::str::from_utf8(module.syntax.nodes[segment].span.bytes()).unwrap();
@@ -426,6 +441,111 @@ impl<'r, 'g> Checker<'r, 'g> {
             .collect::<Work<Vec<_>>>()
             .map(Some)
     }
+    pub(super) fn untyped_index_literal(&mut self, module: &'g Module, node: NodeId) -> Work<bool> {
+        Ok(module.syntax.nodes[node].kind == NodeKind::Literal
+            && matches!(&self.token(module, node)?.kind, TokenKind::Number(number) if number.suffix.is_none()))
+    }
+
+    pub(super) fn tuple_index(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        context: &Context<'r, 'g>,
+    ) -> Work<()> {
+        if inference.data.contains_key(&node) {
+            return Ok(());
+        }
+        let module = inference.module;
+        let syntax = &module.syntax.nodes[node];
+        let [base, selector] = [syntax.children[0], syntax.children[1]];
+        let Some(mut ty) = inference.slots[&base].ty.clone() else {
+            return Ok(());
+        };
+        let slot = &inference.slots[&base];
+        let mut place = slot.place;
+        let mut access = slot.access;
+        let restricted = slot.read_only_projection;
+        let mut path = self.copy_path(slot.path.as_ref())?;
+        if let TypeTerm::Reference { mutable, referent } = ty.as_ref() {
+            path = self.project_path(path.as_ref(), PathProjection::Dereference)?;
+            (place, access) = if *mutable && !restricted {
+                (Place::Writable, Access::Writable)
+            } else {
+                (Place::ReadOnly, Access::ReadOnly)
+            };
+            ty = referent.clone();
+        }
+        let TypeTerm::Tuple(elements) = ty.as_ref() else {
+            if matches!(
+                ty.as_ref(),
+                TypeTerm::Nominal { .. } | TypeTerm::Parameter { .. }
+            ) {
+                self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+            } else {
+                self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
+            }
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        };
+        let component = if self.untyped_index_literal(module, selector)? {
+            let token = self.token(module, selector)?;
+            let TokenKind::Number(number) = &token.kind else {
+                unreachable!()
+            };
+            if number.form == NumberForm::Float {
+                None
+            } else {
+                let digits = token.span.bytes();
+                self.elab.step(digits.len())?;
+                let digits = if number.base == 10 {
+                    digits
+                } else {
+                    &digits[2..]
+                };
+                digits
+                    .iter()
+                    .copied()
+                    .filter(|&b| b != b'_')
+                    .try_fold(0usize, |value, digit| {
+                        let digit = char::from(digit).to_digit(number.base)? as usize;
+                        value.checked_mul(number.base as usize)?.checked_add(digit)
+                    })
+                    .filter(|&index| index < elements.len())
+            }
+        } else {
+            None
+        };
+        let Some(component) = component else {
+            self.finding(module, selector, ScalarFindingKind::InvalidTupleIndex)?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        };
+        path = self.project_path(path.as_ref(), PathProjection::TupleElement(component))?;
+        let (ty, refinement) = self.refined(path.as_ref(), elements[component].clone(), context)?;
+        self.elab.reserve(2)?;
+        inference.data.insert(
+            node,
+            PreparedData {
+                ty: ty.clone(),
+                flow: None,
+                inputs: vec![base],
+                contexts: Vec::new(),
+                fact: DataExpression::TupleIndex {
+                    base,
+                    selector,
+                    component,
+                },
+            },
+        );
+        let slot = inference.slots.get_mut(&node).unwrap();
+        slot.place = place;
+        slot.access = access;
+        slot.path = path;
+        slot.refinement = refinement;
+        slot.read_only_projection = restricted || place == Place::ReadOnly;
+        self.establish(inference, node, ty, false)
+    }
+
     pub(super) fn field_projection(
         &mut self,
         inference: &mut Inference<'g>,
@@ -593,8 +713,20 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let mut key = &module.key;
         let mut bindings = Vec::new();
-        let mut target = None;
+        let mut target = self
+            .elab
+            .lexical_declaration(
+                module,
+                name,
+                Namespace::TypeModule,
+                std::str::from_utf8(first).unwrap(),
+            )?
+            .filter(|_| path.children.len() == 1)
+            .map(|d| &d.id);
         for (index, &segment) in path.children.iter().enumerate() {
+            if target.is_some() {
+                break;
+            }
             let spelling = std::str::from_utf8(module.syntax.nodes[segment].span.bytes()).unwrap();
             let Some(binding) = self.elab.binding(key, spelling)? else {
                 break;

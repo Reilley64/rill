@@ -5,6 +5,7 @@ use super::*;
 pub enum PathProjection<'g> {
     Dereference,
     Field(&'g DeclarationId),
+    TupleElement(usize),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlacePath<'g> {

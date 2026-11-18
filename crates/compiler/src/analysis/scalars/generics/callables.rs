@@ -123,10 +123,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
         }
-        let signature = family.map_or_else(
-            || &self.input.facts.declarations[&declaration.id],
-            |f| &f.header,
-        );
+        let Some(signature) = family
+            .map(|f| &f.header)
+            .or_else(|| self.input.facts.declarations.get(&declaration.id))
+        else {
+            self.deferred_declaration(
+                module,
+                node,
+                ScalarUnsupported::DeclarationPrerequisite,
+                declaration,
+                bindings,
+            )?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        };
         let args = Self::written_call_arguments(module, node);
         if let Some(substitution) =
             self.explicit_callable_substitution(module, node, args, signature, context)?
@@ -585,6 +595,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut inner = Context {
             signature: context.signature,
             scopes: context.scopes.clone(),
+            inherited_scopes: context.inherited_scopes,
             loops: Vec::new(),
             startup: context.startup,
             arrow_return: None,

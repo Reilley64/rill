@@ -389,6 +389,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(Some((&body.header, source.body_node)))
     }
 
+    pub(in crate::analysis::scalars) fn nested_body(
+        &mut self,
+        module: &'g Module,
+        typed: &'r DeclarationFacts<'g>,
+        context: &Context<'r, 'g>,
+        depth: usize,
+    ) -> Work<()> {
+        let assumptions = std::mem::take(&mut self.evidence.assumptions);
+        let result = self.check_named_body(module, typed, false, Some((context, depth)));
+        self.evidence.assumptions = assumptions;
+        result
+    }
+
     pub(in crate::analysis::scalars) fn clear_body_assumptions(&mut self) {
         self.evidence.assumptions.clear();
     }

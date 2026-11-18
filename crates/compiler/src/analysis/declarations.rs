@@ -45,6 +45,8 @@ const COMPLETION: CheckCompletion = CheckCompletion {
         Stage::Inference,
         Stage::Coverage,
         Stage::Evidence,
+        Stage::CoreAdmission,
+        Stage::ResultUse,
         Stage::Ownership,
         Stage::Execution,
     ],

@@ -45,6 +45,7 @@ pub struct GenericReport<'g> {
     evidence: Evidence<'g>,
     statistics: Statistics,
     completion: ScalarFailureKind,
+    integrated: bool,
     ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryCall<'g>>,
     ordinary_values: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryValue<'g>>,
     conditional_findings: Vec<ConditionalFinding<'g>>,
@@ -95,7 +96,7 @@ impl<'g> GenericReport<'g> {
         if let BodyOwner::Declaration(id) = owner
             && !module.declarations.iter().any(|d| {
                 d.id == *id
-                    && d.scope.is_none()
+                    && (self.integrated || d.scope.is_none())
                     && matches!(
                         d.id.kind,
                         DeclarationKind::Function
@@ -170,11 +171,18 @@ impl<'g> GenericReport<'g> {
             BodyCompletion::Incomplete
         };
         let not_performed = if completion == BodyCompletion::Checked {
-            &[Stage::Ownership, Stage::Execution][..]
+            &[
+                Stage::CoreAdmission,
+                Stage::ResultUse,
+                Stage::Ownership,
+                Stage::Execution,
+            ][..]
         } else {
             &[
                 Stage::Inference,
                 Stage::Evidence,
+                Stage::CoreAdmission,
+                Stage::ResultUse,
                 Stage::Ownership,
                 Stage::Execution,
             ][..]
@@ -285,6 +293,54 @@ impl<'g> GenericReport<'g> {
     }
 }
 
+// The shared expression checker can block bad call signatures locally. Invalid nominal
+// representations still block this body pass: its field and pattern rules need them.
+fn body_prerequisites(
+    elab: &mut Analyzer<'_>,
+    input: &OrdinaryAnalysis<'_>,
+    integrated: bool,
+) -> Work<bool> {
+    let types = input.type_facts();
+    let sites = types.findings().map(|f| f.span).chain(
+        types
+            .obligations()
+            .filter(|o| {
+                !matches!(
+                    o.reason,
+                    Unsupported::GenericDefault | Unsupported::Requirements
+                )
+            })
+            .map(|o| o.span),
+    );
+    'sites: for site in sites {
+        if !integrated {
+            return Ok(false);
+        }
+        for module in input.graph().modules() {
+            elab.step(1)?;
+            if module.snapshot.id() != site.snapshot().id() {
+                continue;
+            }
+            for declaration in &module.declarations {
+                elab.step(1)?;
+                if declaration.id.kind != DeclarationKind::Function
+                    || declaration.scope.is_some()
+                    || types.declarations.contains_key(&declaration.id)
+                {
+                    continue;
+                }
+                let header = module.syntax.nodes[declaration.node].children[0];
+                let span = &module.syntax.nodes[header].span;
+                if span.start() <= site.start() && site.end() <= span.end() {
+                    continue 'sites;
+                }
+            }
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 /// Check supported written bodies without treating a pending ordinary role as admission.
 pub fn analyze_generics<'g>(
     input: &OrdinaryAnalysis<'g>,
@@ -298,12 +354,36 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
     conversions: Option<&ConversionReport<'_, 'g>>,
     limits: AnalysisLimits,
 ) -> GenericReport<'g> {
+    analyze_bodies(input, conversions, limits, false)
+}
+
+pub(in crate::analysis) fn analyze_integrated_bodies<'g>(
+    input: &OrdinaryAnalysis<'g>,
+    limits: AnalysisLimits,
+) -> GenericReport<'g> {
+    analyze_bodies(input, None, limits, true)
+}
+
+fn analyze_bodies<'g>(
+    input: &OrdinaryAnalysis<'g>,
+    conversions: Option<&ConversionReport<'_, 'g>>,
+    limits: AnalysisLimits,
+    integrated: bool,
+) -> GenericReport<'g> {
     let graph = input.graph();
     let mut budget = declarations::Budget {
         limits,
-        statistics: Statistics::default(),
+        statistics: if integrated {
+            input.statistics()
+        } else {
+            Statistics::default()
+        },
     };
-    let extension = ordinary::extend_nominal_types(input, &mut budget);
+    let extension = if integrated {
+        Ok(None)
+    } else {
+        ordinary::extend_nominal_types(input, &mut budget)
+    };
     let preflight_exhausted = extension.is_err();
     let extended = extension.ok().flatten();
     let input = extended.as_ref().unwrap_or(input);
@@ -323,6 +403,8 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
         } else {
             budget.statistics
         };
+    checker.integrated = integrated;
+    checker.elab.lexical = input.lexical().cloned();
     checker.conversions = conversions.map(|r| &r.families);
     let mut declaration_issues = Vec::new();
     let exhausted = (|| -> Work<()> {
@@ -367,14 +449,8 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
                 .reserve(1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len())?;
             checker.elab.facts.uses.insert(*key, use_.clone());
         }
-        if types.findings().next().is_none()
-            && !types.obligations().any(|o| {
-                !matches!(
-                    o.reason,
-                    Unsupported::GenericDefault | Unsupported::Requirements
-                )
-            })
-            && input.declaration_issues().is_empty()
+        if input.declaration_issues().is_empty()
+            && body_prerequisites(&mut checker.elab, input, integrated)?
         {
             checker.run()?;
         }
@@ -384,6 +460,7 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
     checker.facts.annotations = checker.elab.facts;
     GenericReport {
         graph,
+        integrated,
         facts: checker.facts,
         evidence: checker.evidence,
         statistics: checker.elab.statistics,

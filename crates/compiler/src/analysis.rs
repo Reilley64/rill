@@ -12,6 +12,7 @@ pub mod conversions;
 pub mod declarations;
 pub mod ordinary;
 pub mod scalars;
+pub mod typed;
 pub use scalars::{data, generics};
 
 #[derive(Clone, Copy, Debug)]
@@ -144,6 +145,8 @@ pub enum Stage {
     Inference,
     Coverage,
     Evidence,
+    CoreAdmission,
+    ResultUse,
     Ownership,
     Execution,
 }
@@ -165,6 +168,8 @@ const COMPLETION: Completion = Completion {
         Stage::Inference,
         Stage::Coverage,
         Stage::Evidence,
+        Stage::CoreAdmission,
+        Stage::ResultUse,
         Stage::Ownership,
         Stage::Execution,
     ],
@@ -181,6 +186,7 @@ pub enum FindingKind {
     AmbiguousVariant,
     NonTrailingDefault,
     InvalidDefaultDependency,
+    DuplicateLocalDeclaration,
 }
 #[derive(Clone, Debug)]
 pub struct Finding<'g> {
@@ -311,12 +317,15 @@ enum NameTarget<'g> {
     Declaration(&'g Declaration),
 }
 mod defaults;
+mod lexical;
 use defaults::ActiveDefault;
+use lexical::Lexical;
 
 struct Analyzer<'g> {
     graph: &'g Graph,
     complete_defaults: bool,
     active_defaults: Vec<ActiveDefault<'g>>,
+    lexical: Option<Arc<Lexical<'g>>>,
     limits: AnalysisLimits,
     statistics: Statistics,
     facts: PartialFacts<'g>,
@@ -329,6 +338,7 @@ impl<'g> Analyzer<'g> {
             limits,
             complete_defaults,
             active_defaults: Vec::new(),
+            lexical: None,
             statistics: Statistics::default(),
             facts: PartialFacts::default(),
             declarations: BTreeMap::new(),
@@ -635,6 +645,16 @@ impl<'g> Analyzer<'g> {
                 break;
             }
         }
+        if target.is_none()
+            && let Some(local) =
+                self.lexical_declaration(module, node, Namespace::TypeModule, name)?
+        {
+            if path.children.len() != 1 {
+                self.finding(module, node, FindingKind::NotAType)?;
+                return Ok(None);
+            }
+            target = Some(NameTarget::Declaration(local));
+        }
         if target.is_none() {
             let mut binding = self.binding(&module.key, name)?;
             for position in 0..path.children.len() {
@@ -929,7 +949,39 @@ impl<'g> Analyzer<'g> {
         }
         Ok(valid.then_some(members))
     }
-    fn analyze(&mut self, mut metadata: Option<&mut ordinary::metadata::Headers<'g>>) -> Work<()> {
+    fn nominal_binders(
+        &mut self,
+        module: &'g Module,
+        declaration: &'g Declaration,
+        metadata: Option<&mut ordinary::metadata::Headers<'g>>,
+    ) -> Work<Vec<Binder<'g>>> {
+        let binders = self.binders(module, declaration.node)?;
+        self.validate_nominal_defaults(module, &binders)?;
+        if let Some(metadata) = metadata {
+            ordinary::metadata::capture(
+                metadata,
+                self,
+                module,
+                declaration,
+                declaration.node,
+                &binders,
+            )?;
+        }
+        Ok(binders)
+    }
+
+    fn analyze(&mut self, metadata: Option<&mut ordinary::metadata::Headers<'g>>) -> Work<()> {
+        self.analyze_inventory(metadata, false)
+    }
+
+    fn analyze_inventory(
+        &mut self,
+        mut metadata: Option<&mut ordinary::metadata::Headers<'g>>,
+        integrated: bool,
+    ) -> Work<()> {
+        if integrated {
+            self.index_lexical()?;
+        }
         for module in self.graph.modules() {
             self.step(1)?;
             for declaration in &module.declarations {
@@ -941,7 +993,7 @@ impl<'g> Analyzer<'g> {
         for module in self.graph.modules() {
             for declaration in &module.declarations {
                 self.step(1)?;
-                if declaration.scope.is_some() {
+                if declaration.scope.is_some() && !integrated {
                     continue;
                 }
                 if declaration.id.kind == DeclarationKind::Implementation && metadata.is_none() {
@@ -949,8 +1001,12 @@ impl<'g> Analyzer<'g> {
                     continue;
                 }
                 if declaration.id.kind == DeclarationKind::Record {
-                    let binders = self.binders(module, declaration.node)?;
-                    self.validate_nominal_defaults(module, &binders)?;
+                    let headers = if integrated {
+                        metadata.as_deref_mut()
+                    } else {
+                        None
+                    };
+                    let binders = self.nominal_binders(module, declaration, headers)?;
                     let shape = *module.syntax.nodes[declaration.node]
                         .children
                         .last()
@@ -969,8 +1025,12 @@ impl<'g> Analyzer<'g> {
                     continue;
                 }
                 if declaration.id.kind == DeclarationKind::Enum {
-                    let binders = self.binders(module, declaration.node)?;
-                    self.validate_nominal_defaults(module, &binders)?;
+                    let headers = if integrated {
+                        metadata.as_deref_mut()
+                    } else {
+                        None
+                    };
+                    let binders = self.nominal_binders(module, declaration, headers)?;
                     let mut variants = Vec::new();
                     let mut valid = true;
                     for &child in &module.syntax.nodes[declaration.node].children {

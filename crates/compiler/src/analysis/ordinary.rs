@@ -120,6 +120,7 @@ pub struct LayoutStep<'g> {
 #[derive(Debug)]
 pub struct OrdinaryAnalysis<'g> {
     graph: &'g Graph,
+    lexical: Option<Arc<Lexical<'g>>>,
     families: BTreeMap<&'g DeclarationId, FamilyFacts<'g>>,
     types: PartialFacts<'g>,
     declaration_issues: Vec<DeclarationIssue<'g>>,
@@ -131,6 +132,10 @@ pub struct OrdinaryAnalysis<'g> {
 impl<'g> OrdinaryAnalysis<'g> {
     pub(super) fn graph(&self) -> &'g Graph {
         self.graph
+    }
+
+    pub(super) fn lexical(&self) -> Option<&Arc<Lexical<'g>>> {
+        self.lexical.as_ref()
     }
 
     pub(super) fn headers(&self) -> &metadata::Headers<'g> {
@@ -589,7 +594,14 @@ impl<'g> OrdinaryAnalysis<'g> {
 /// Analyze an actual M3 capture. M3 does not carry core role/protection admission.
 /// Results remain partial, never a checked ordinary collection or source call.
 pub fn analyze_ordinary(graph: &Graph, limits: AnalysisLimits) -> OrdinaryAnalysis<'_> {
-    analyze_ordinary_types(graph, limits, Statistics::default(), false)
+    analyze_ordinary_types(graph, limits, Statistics::default(), false, false)
+}
+
+pub(super) fn analyze_typed_inventory(
+    graph: &Graph,
+    limits: AnalysisLimits,
+) -> OrdinaryAnalysis<'_> {
+    analyze_ordinary_types(graph, limits, Statistics::default(), true, true)
 }
 
 // Complete M4.6 nominal type uses on the same immutable graph. This
@@ -607,8 +619,13 @@ pub(super) fn extend_nominal_types<'g>(
             obligation.reason,
             Unsupported::GenericDefault | Unsupported::NeedsTypeArguments
         ) {
-            let extended =
-                analyze_ordinary_types(input.graph(), budget.limits, budget.statistics, true);
+            let extended = analyze_ordinary_types(
+                input.graph(),
+                budget.limits,
+                budget.statistics,
+                true,
+                false,
+            );
             budget.statistics = extended.statistics();
             return Ok(Some(extended));
         }
@@ -621,14 +638,18 @@ fn analyze_ordinary_types(
     limits: AnalysisLimits,
     statistics: Statistics,
     complete_defaults: bool,
+    integrated: bool,
 ) -> OrdinaryAnalysis<'_> {
     let mut analyzer = Analyzer::new(graph, limits, complete_defaults);
     analyzer.statistics = statistics;
     let mut headers = BTreeMap::new();
-    let elaborated = analyzer.analyze(Some(&mut headers)).is_ok();
+    let elaborated = analyzer
+        .analyze_inventory(Some(&mut headers), integrated)
+        .is_ok();
     let mut report = OrdinaryAnalysis {
         graph,
         families: BTreeMap::new(),
+        lexical: analyzer.lexical,
         types: analyzer.facts,
         declaration_issues: Vec::new(),
         headers,

@@ -1,0 +1,472 @@
+//! Bounded M4.8 checks over real M3 captures. Prelude selectors do not admit core providers.
+use compiler::analysis::data::{DataExpression, PathProjection};
+use compiler::analysis::scalars::{
+    BodyOwner, NodeFactKind, ScalarFailureKind, ScalarFindingKind, ScalarUnsupported,
+};
+use compiler::analysis::typed::{CoreBlocker, PublicInterfaceKind, analyze_typed};
+use compiler::analysis::{AnalysisLimits, InvocationMode, QueryError, Stage, TypeTerm};
+use compiler::loader::{DeclarationKind, Graph, Limits, Prelude, Request, Selector, load};
+use compiler::parser::NodeKind;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[test]
+fn public_payload_defaults_and_requirements_use_origin_visibility() {
+    let fixture = Fixture::new(
+        "type Hidden = { value: bool };\n\
+         export enum Bad { Tag([Hidden,bool]) }\n\
+         export type Box<T = Hidden> = { value: T };\n\
+         function privateFamily<T>(x: T): bool;\n\
+         export function bad<T>(x: T): bool where privateFamily(T), noBorrow(T);\n\
+         export function opaque(x: Hidden): Hidden { return x; }",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let findings = report.public_interface_findings();
+    assert_eq!(findings.len(), 3);
+    for kind in [
+        PublicInterfaceKind::Payload,
+        PublicInterfaceKind::Default,
+        PublicInterfaceKind::Requirement,
+    ] {
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.kind == kind && f.code() == "R0401")
+                .count(),
+            1
+        );
+    }
+    let hidden = findings
+        .iter()
+        .find(|f| f.kind == PublicInterfaceKind::Payload)
+        .unwrap();
+    assert_eq!(hidden.target.name.as_deref(), Some("Hidden"));
+    assert_eq!(hidden.site.span.bytes(), b"[Hidden,bool]");
+}
+
+#[test]
+fn missing_core_does_not_hide_independent_errors_inside_or_after_operations() {
+    let fixture = Fixture::new(
+        "type Result = { value: bool };\n\
+         function probe(r: Result): void {\n\
+           guard r else { return; }\n\
+           guard let [x,y] = r else (failure) { let seen = failure; let a: bool = 1i32; return; }\n\
+           let seen = x;\n\
+           for (let item of r) { let seen = item; let b: bool = 2i32; continue; }\n\
+           let text = `value ${unknown}`;\n\
+           let c: bool = 3i32;\n\
+         }\n\
+         expect (false?);",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let kinds: Vec<_> = report.bodies().findings().iter().map(|f| f.kind).collect();
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|&&kind| kind == ScalarFindingKind::TypeMismatch)
+            .count(),
+        3
+    );
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|&&kind| kind == ScalarFindingKind::MissingValue)
+            .count(),
+        1
+    );
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|&&kind| kind == ScalarFindingKind::InvalidTarget)
+            .count(),
+        1
+    );
+    assert!(!kinds.contains(&ScalarFindingKind::InsufficientContext));
+    let core: Vec<_> = report
+        .bodies()
+        .obligations()
+        .iter()
+        .filter(|o| o.reason == ScalarUnsupported::CoreAdmission)
+        .map(|o| o.syntax)
+        .collect();
+    assert_eq!(core, [NodeKind::Guard, NodeKind::Guard, NodeKind::For]);
+}
+
+#[test]
+fn nested_declarations_keep_lexical_identity_without_runtime_capture() {
+    let fixture = Fixture::new(
+        "type Item = { outer: bool };\n\
+         function root(): bool {\n\
+           let value = true;\n\
+           if (false) { function unused(): bool { return value; } }\n\
+           type Item = { inner: bool };\n\
+           function local(x: Item): bool { return x.inner; }\n\
+           return local(Item { inner: true });\n\
+         }\n\
+         function outside(): bool { return local(); }",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let local = module
+        .declarations
+        .iter()
+        .find(|d| d.name.as_deref() == Some("local"))
+        .unwrap();
+    let local_facts = report
+        .bodies()
+        .body(module, BodyOwner::Declaration(&local.id))
+        .unwrap()
+        .unwrap();
+    assert!(local_facts.flow.returns);
+    let findings = report.bodies().findings();
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|f| f.kind == ScalarFindingKind::StartupCapture)
+            .count(),
+        1
+    );
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|f| f.kind == ScalarFindingKind::MissingValue)
+            .count(),
+        1
+    );
+    assert_eq!(findings.len(), 2);
+}
+
+#[test]
+fn integrated_limits_include_visibility_and_reject_foreign_nodes() {
+    let fixture =
+        Fixture::new("type Hidden = { x: bool }; export enum E { Tag(Hidden) } expect true;");
+    let graph = fixture.load(false);
+    let complete_work = analyze_typed(&graph, AnalysisLimits::default()).statistics();
+    let limits = AnalysisLimits {
+        max_work: complete_work.work,
+        max_entries: complete_work.entries,
+        max_depth: complete_work.max_depth,
+    };
+    let report = analyze_typed(&graph, limits);
+    assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+    assert_eq!(report.statistics(), complete_work);
+    assert!(report.not_performed().contains(&Stage::ResultUse));
+    assert_eq!(report.public_interface_findings().len(), 1);
+    for short in [
+        AnalysisLimits {
+            max_work: limits.max_work - 1,
+            ..limits
+        },
+        AnalysisLimits {
+            max_entries: limits.max_entries - 1,
+            ..limits
+        },
+    ] {
+        let limited = analyze_typed(&graph, short);
+        assert_eq!(limited.completion(), ScalarFailureKind::ResourceLimit);
+        assert!(limited.statistics().work <= short.max_work);
+        assert!(limited.statistics().entries <= short.max_entries);
+    }
+    let foreign = fixture.load(false);
+    assert_eq!(
+        report.bodies().node(&foreign.modules()[0], 0).unwrap_err(),
+        QueryError::InvalidRequest
+    );
+}
+
+#[test]
+fn rejected_header_blocks_uses_but_not_an_independent_body() {
+    let fixture = Fixture::new(
+        "function broken(x: Missing): bool { return true; }\n\
+         function usesBroken(): bool { return broken(true); }\n\
+         function other(): bool { return 2i32; }",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    assert!(report.bodies().annotations().findings().next().is_some());
+    let mismatch = report
+        .bodies()
+        .findings()
+        .iter()
+        .find(|f| f.kind == ScalarFindingKind::TypeMismatch)
+        .unwrap();
+    assert_eq!(mismatch.site.span.bytes(), b"2i32");
+    assert_eq!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .filter(|o| o.reason == ScalarUnsupported::DeclarationPrerequisite)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn pipe_insertion_types_the_original_input_and_preserves_evaluation_order() {
+    let fixture = Fixture::new(
+        "function pad(on: bool, width: i32): i32 { return width; } let a = 1 |> pad(true, _); let b = true |> pad(2);",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    for (node, syntax) in module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind == NodeKind::Pipe)
+    {
+        let NodeFactKind::Expression(expression) =
+            &report.bodies().node(module, node).unwrap().unwrap().kind
+        else {
+            panic!("pipe expression")
+        };
+        let call = expression.call.as_ref().unwrap();
+        let input = syntax.children[0];
+        let written =
+            module.syntax.nodes[module.syntax.nodes[syntax.children[1]].children[1]].children[0];
+        assert_eq!(
+            call.argument_evaluation_order().collect::<Vec<_>>(),
+            [input, written]
+        );
+        let second = if module.syntax.nodes[input].span.bytes() == b"1" {
+            input
+        } else {
+            written
+        };
+        assert_eq!(call.arguments[1], second);
+        assert!(
+            matches!(report.bodies().node(module, second).unwrap().map(|n| &n.kind), Some(NodeFactKind::Expression(e)) if matches!(e.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+        );
+    }
+    assert!(report.bodies().findings().is_empty());
+}
+
+#[test]
+fn aggregate_noncopying_field_can_settle_borrowed_binder_and_capture_demand() {
+    let fixture = Fixture::new(
+        "function known(value: &[[string]]): &[string] { let [part] = value; return part; }\n\
+         function pending(value: &[[i32]]): &[i32] { let [part] = value; return part; }\n\
+         let owned: [string] = [\"text\"]; let callable = () => owned;",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let known = module
+        .declarations
+        .iter()
+        .find(|d| d.name.as_deref() == Some("known"))
+        .unwrap();
+    assert!(
+        report
+            .bodies()
+            .body(module, BodyOwner::Declaration(&known.id))
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::ImplicitCopy)
+    );
+    let arrow = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Arrow)
+        .unwrap();
+    assert_eq!(
+        report.bodies().arrow(module, arrow).unwrap().unwrap().mode,
+        Some(InvocationMode::Once)
+    );
+}
+
+static NEXT: AtomicU64 = AtomicU64::new(0);
+struct Fixture(PathBuf);
+impl Fixture {
+    fn new(source: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "rill-m4-8-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&path).unwrap();
+        let fixture = Self(path);
+        for dir in ["app", "std"] {
+            fs::create_dir(fixture.0.join(dir)).unwrap();
+        }
+        fixture.write("app/main.rill", source);
+        fixture.write(
+            "std/core.rill",
+            "export function copy<T>(value: &T): T; export function dispose<T>(value: T): void;",
+        );
+        fixture
+    }
+    fn write(&self, name: &str, body: &str) {
+        fs::write(self.0.join(name), body).unwrap();
+    }
+    fn load(&self, test_mode: bool) -> Graph {
+        let select = |name: &str| Selector {
+            module: "core.rill".into(),
+            name: name.into(),
+        };
+        load(Request {
+            entry: self.0.join("app/main.rill"),
+            standard_root: self.0.join("std"),
+            prelude: Prelude {
+                copy: select("copy"),
+                dispose: select("dispose"),
+            },
+            target: "typed-test".into(),
+            options: BTreeMap::new(),
+            test_mode,
+            limits: Limits::default(),
+        })
+        .unwrap()
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.0).unwrap();
+    }
+}
+
+#[test]
+fn both_modes_keep_independent_bodies_and_findings_without_core_admission() {
+    let fixture = Fixture::new(
+        "import helper::{ok};\nexpect 1i32;\nfunction unused(): bool { return 1i32; }",
+    );
+    fixture.write(
+        "app/helper.rill",
+        "export function ok(): bool { return true; }\nlet wrong: bool = 0i32;",
+    );
+    for mode in [false, true] {
+        let graph = fixture.load(mode);
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+        assert_eq!(
+            report.core_blockers(),
+            [
+                CoreBlocker::Roles,
+                CoreBlocker::Providers,
+                CoreBlocker::Protection,
+                CoreBlocker::Representation
+            ]
+        );
+        let helper = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.path == "helper.rill")
+            .unwrap();
+        let good = helper
+            .declarations
+            .iter()
+            .find(|d| d.id.kind == DeclarationKind::Function)
+            .unwrap();
+        assert!(
+            report
+                .bodies()
+                .body(helper, BodyOwner::Declaration(&good.id))
+                .unwrap()
+                .is_some()
+        );
+        let findings = report.bodies().findings();
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.site.module == &helper.key && f.kind == ScalarFindingKind::TypeMismatch)
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.kind == ScalarFindingKind::ExpectationBoolean)
+        );
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.kind == ScalarFindingKind::TypeMismatch)
+                .count(),
+            2
+        );
+    }
+}
+
+#[test]
+fn tuple_selectors_preserve_the_actual_component_and_borrow_path() {
+    let fixture = Fixture::new(
+        "function second(pair: &mut [bool,i32]): &mut i32 { return &mut pair[0x1]; }\n\
+         function bad(pair: [bool,i32], i: u64): void { pair[i]; pair[2]; pair[1u64]; }\n\
+         type List = { value: i32 }; function fake(x: List): void { x[0]; }",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let nodes: Vec<_> = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind == NodeKind::Index)
+        .collect();
+    let (index, syntax) = nodes[0];
+    let NodeFactKind::Expression(fact) =
+        &report.bodies().node(module, index).unwrap().unwrap().kind
+    else {
+        panic!("index expression")
+    };
+    assert!(matches!(fact.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"));
+    assert!(
+        matches!(fact.data.as_ref(), Some(DataExpression::TupleIndex { base, selector, component: 1 }) if [*base,*selector] == syntax.children.as_slice())
+    );
+    assert_eq!(
+        fact.path.as_ref().unwrap().projections,
+        [PathProjection::Dereference, PathProjection::TupleElement(1)]
+    );
+    assert_eq!(
+        report
+            .bodies()
+            .findings()
+            .iter()
+            .filter(|f| f.kind == ScalarFindingKind::InvalidTupleIndex)
+            .count(),
+        3
+    );
+    assert!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::CoreAdmission && o.site.node == nodes[4].0)
+    );
+    assert!(
+        !report
+            .bodies()
+            .findings()
+            .iter()
+            .any(|f| f.kind == ScalarFindingKind::NumericContext)
+    );
+}

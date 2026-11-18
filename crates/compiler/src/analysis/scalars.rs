@@ -4,6 +4,7 @@ use crate::lexer::{LiteralMode, NumberForm, Token, TokenKind};
 use declarations::DeclarationReceipt;
 use std::collections::{BTreeSet, VecDeque};
 
+mod core;
 pub mod data;
 pub mod generics;
 
@@ -113,6 +114,18 @@ pub struct CallFacts<'g> {
     pub substitution: Vec<Substitution<'g>>,
     pub arguments: Vec<NodeId>,
     pub defaults: Vec<DefaultArgumentUse<'g>>,
+    pub pipe_input: Option<NodeId>,
+}
+impl CallFacts<'_> {
+    /// Argument evaluation order. A pipe evaluates its input before the written arguments.
+    pub fn argument_evaluation_order(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.pipe_input.into_iter().chain(
+            self.arguments
+                .iter()
+                .copied()
+                .filter(|&node| self.pipe_input != Some(node)),
+        )
+    }
 }
 pub use super::DefaultArgumentUse;
 #[derive(Debug)]
@@ -182,6 +195,7 @@ pub enum ScalarFindingKind {
     NonExhaustive,
     RefutableBinding,
     TagChange,
+    InvalidTupleIndex,
 }
 impl ScalarFindingKind {
     pub fn code(self) -> Option<&'static str> {
@@ -220,6 +234,7 @@ pub enum ScalarUnsupported {
     Requirements,
     CoreAdmission,
     ConversionAdmission,
+    DeclarationPrerequisite,
     ImplicitCopy,
 }
 #[derive(Debug)]
@@ -277,6 +292,8 @@ impl<'g> ScalarReceipt<'_, 'g> {
             Stage::Expectations,
             Stage::Coverage,
             Stage::Evidence,
+            Stage::CoreAdmission,
+            Stage::ResultUse,
             Stage::Ownership,
             Stage::Execution,
         ]
@@ -379,6 +396,7 @@ struct Local<'g> {
 struct Context<'r, 'g> {
     signature: Option<&'r DeclarationFacts<'g>>,
     scopes: Vec<BTreeMap<&'g str, Local<'g>>>,
+    inherited_scopes: usize,
     loops: Vec<NodeId>,
     startup: bool,
     arrow_return: Option<ArrowReturn<'g>>,
@@ -425,6 +443,7 @@ struct Checker<'r, 'g> {
     elab: Analyzer<'g>,
     facts: ScalarFacts<'g>,
     data: bool,
+    integrated: bool,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
@@ -449,6 +468,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             input,
             facts: ScalarFacts::default(),
             data,
+            integrated: false,
             data_depth: 0,
             evidence: generics::Evidence::default(),
             conversions: None,
@@ -1196,12 +1216,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.conditional_findings.len(),
         )
     }
-    fn local(&mut self, context: &Context<'r, 'g>, name: &str) -> Work<Option<Local<'g>>> {
-        for scope in context.scopes.iter().rev() {
+    fn local(&mut self, context: &Context<'r, 'g>, name: &str) -> Work<Option<(usize, Local<'g>)>> {
+        for (depth, scope) in context.scopes.iter().enumerate().rev() {
             self.elab
                 .step(scope.len().checked_ilog2().unwrap_or(0) as usize + 1)?;
             if let Some(local) = scope.get(name) {
-                return Ok(Some(local.clone()));
+                return Ok(Some((depth, local.clone())));
             }
         }
         Ok(None)
@@ -1234,10 +1254,25 @@ impl<'r, 'g> Checker<'r, 'g> {
             &module.syntax.nodes[n.children[0]].children[..]
         };
         let first = std::str::from_utf8(module.syntax.nodes[path[0]].span.bytes()).unwrap();
-        if path.len() == 1
-            && let Some(local) = self.local(context, first)?
-        {
-            return Ok(Some(Value::Local(local)));
+        if path.len() == 1 {
+            let lexical =
+                self.elab
+                    .lexical_declaration(module, node, Namespace::ValueFunction, first)?;
+            if let Some((depth, local)) = self.local(context, first)? {
+                if let Some(declaration) = lexical
+                    && declaration.scope > self.elab.target_declaration(local.declaration)?.scope
+                {
+                    return Ok(Some(Value::Declaration(declaration, Vec::new())));
+                }
+                if depth < context.inherited_scopes {
+                    self.finding(module, node, ScalarFindingKind::StartupCapture)?;
+                    return Ok(None);
+                }
+                return Ok(Some(Value::Local(local)));
+            }
+            if let Some(declaration) = lexical {
+                return Ok(Some(Value::Declaration(declaration, Vec::new())));
+            }
         }
         let mut key = &module.key;
         let mut bindings = Vec::new();
@@ -1390,7 +1425,17 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(Some(call));
         }
         let n = &module.syntax.nodes[node];
-        let mut callee = n.children[0];
+        self.prepare_named_call(module, node, n.children[0], &n.children[1..], context)
+    }
+
+    fn prepare_named_call(
+        &mut self,
+        module: &'g Module,
+        node: NodeId,
+        mut callee: NodeId,
+        arguments: &[NodeId],
+        context: &Context<'r, 'g>,
+    ) -> Work<Option<PreparedCall<'g>>> {
         while module.syntax.nodes[callee].kind == NodeKind::Group {
             self.elab.step(1)?;
             callee = module.syntax.nodes[callee].children[0];
@@ -1435,8 +1480,17 @@ impl<'r, 'g> Checker<'r, 'g> {
                 return Ok(None);
             };
             &facts.header
+        } else if let Some(signature) = self.input.facts.declarations.get(&declaration.id) {
+            signature
         } else {
-            &self.input.facts.declarations[&declaration.id]
+            self.deferred_declaration(
+                module,
+                node,
+                ScalarUnsupported::DeclarationPrerequisite,
+                declaration,
+                bindings,
+            )?;
+            return Ok(None);
         };
         let argument_nodes = Self::written_call_arguments(module, callee);
         let requires_evidence = self.input.ordinary.is_some_and(|ordinary| {
@@ -1478,7 +1532,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let DeclarationShape::Function { parameters, result } = &signature.shape else {
             unreachable!()
         };
-        if parameters.len() != n.children.len() - 1 {
+        if parameters.len() != arguments.len() {
             if family {
                 self.deferred_declaration(
                     module,
@@ -1504,8 +1558,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .collect::<Work<Vec<_>>>()?;
             (parameters, self.substitute(result, &substitution, 1)?)
         };
-        self.elab.reserve(n.children.len())?;
-        let arguments = n.children[1..].to_vec();
+        self.elab.reserve(1 + arguments.len())?;
+        let arguments = arguments.to_vec();
         if !infer {
             self.record_callee(module, callee, &declaration.id)?;
         }
@@ -1517,6 +1571,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 substitution,
                 arguments,
                 defaults: Vec::new(),
+                pipe_input: None,
             },
             parameters,
             result,
@@ -1565,6 +1620,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(Context {
             signature,
             scopes: vec![scope],
+            inherited_scopes: 0,
             views: Vec::new(),
             loops: Vec::new(),
             startup: signature.is_none(),
@@ -1573,6 +1629,12 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
     fn runtime_children(&mut self, inference: &Inference<'g>, node: NodeId) -> Work<Vec<NodeId>> {
         let n = &inference.module.syntax.nodes[node];
+        if n.kind == NodeKind::Pipe
+            && let Some(call) = inference.calls.get(&node)
+        {
+            self.elab.reserve(call.fact.arguments.len())?;
+            return Ok(call.fact.argument_evaluation_order().collect());
+        }
         let children = if let Some(prepared) = inference.data.get(&node) {
             &prepared.inputs[..]
         } else if n.kind == NodeKind::Field && self.data {
@@ -1681,6 +1743,17 @@ impl<'r, 'g> Checker<'r, 'g> {
                         stack.push(child);
                     }
                 }
+                NodeKind::Index if self.integrated => {
+                    let [base, selector] = [syntax.children[0], syntax.children[1]];
+                    self.elab.reserve(2)?;
+                    inference.parents.insert(base, node);
+                    stack.push(base);
+                    if !self.untyped_index_literal(module, selector)? {
+                        self.elab.reserve(2)?;
+                        inference.parents.insert(selector, node);
+                        stack.push(selector);
+                    }
+                }
                 NodeKind::Index if self.data => {
                     self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
                     inference.slots.get_mut(&node).unwrap().blocked = true;
@@ -1690,6 +1763,19 @@ impl<'r, 'g> Checker<'r, 'g> {
                     self.register_arrow(&mut inference, node, context)?;
                 }
                 NodeKind::Literal => (),
+                NodeKind::Propagate | NodeKind::Wrap if self.integrated => {
+                    if context.signature.is_none() && context.arrow_return.is_none() {
+                        self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+                    } else {
+                        self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                    }
+                    inference.slots.get_mut(&node).unwrap().blocked = true;
+                    for &child in &syntax.children {
+                        self.elab.reserve(2)?;
+                        inference.parents.insert(child, node);
+                        stack.push(child);
+                    }
+                }
                 NodeKind::Template => {
                     self.elab.step(syntax.children.len())?;
                     if syntax
@@ -1699,6 +1785,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                     {
                         self.defer(module, node, ScalarUnsupported::Formatting)?;
                         inference.slots.get_mut(&node).unwrap().blocked = true;
+                        if self.integrated {
+                            for &child in &syntax.children {
+                                if module.syntax.nodes[child].kind == NodeKind::TemplateHole {
+                                    let expression = module.syntax.nodes[child].children[0];
+                                    self.elab.reserve(2)?;
+                                    inference.parents.insert(expression, node);
+                                    stack.push(expression);
+                                }
+                            }
+                        }
                     } else {
                         let ty = self.primitive("string")?;
                         let slot = inference.slots.get_mut(&node).unwrap();
@@ -1768,6 +1864,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         };
                         slot.boolean = if local.mutable { None } else { local.boolean };
                     }
+                }
+                NodeKind::Pipe if self.integrated => {
+                    self.prepare_pipe(&mut inference, node, context, &mut stack)?;
                 }
                 NodeKind::Call => {
                     let callee = &module.syntax.nodes[syntax.children[0]];
@@ -1852,6 +1951,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                             self.field_projection(&mut inference, node, context)?;
                         }
                     }
+                    NodeKind::Index if self.integrated => {
+                        self.tuple_index(&mut inference, node, context)?;
+                    }
                     NodeKind::Construction if self.data => {
                         self.construction_step(&mut inference, node, context)?
                     }
@@ -1874,7 +1976,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                             self.establish(&mut inference, node, ty, false)?;
                         }
                     }
-                    NodeKind::Call => {
+                    NodeKind::Call | NodeKind::Pipe => {
                         if inference.data_nodes.contains(&node) {
                             self.variant_step(&mut inference, node, context)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.family) {
@@ -2002,6 +2104,18 @@ impl<'r, 'g> Checker<'r, 'g> {
         if self.data {
             self.defer_pending_constructions(&mut inference)?;
         }
+        let mut blocked_inputs = BTreeSet::new();
+        if self.integrated {
+            for (&node, slot) in &inference.slots {
+                self.elab.step(1)?;
+                if (slot.blocked || blocked_inputs.contains(&node))
+                    && let Some(&parent) = inference.parents.get(&node)
+                {
+                    self.elab.reserve(1)?;
+                    blocked_inputs.insert(parent);
+                }
+            }
+        }
         // M2 allocates children before parents. No host-stack recursion along expression chains.
         let mut negations = BTreeMap::new();
         for (&node, slot) in &inference.slots {
@@ -2056,7 +2170,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                 }
             } else {
-                if !unavailable.contains(&node) {
+                if !unavailable.contains(&node) && !blocked_inputs.contains(&node) {
                     if module.syntax.nodes[node].kind == NodeKind::Literal {
                         self.finding(module, node, ScalarFindingKind::NumericContext)?;
                     } else {
@@ -2348,6 +2462,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 && module.syntax.nodes[syntax.children[0]].kind != NodeKind::Wildcard)
     }
     fn source_scope_ready(&mut self, module: &'g Module, root: NodeId) -> Work<bool> {
+        if self.integrated {
+            return Ok(true);
+        }
         self.elab.reserve(1)?;
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
@@ -2400,6 +2517,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 context.scopes.pop();
             }
+            NodeKind::Function if self.integrated => {
+                let declaration = self.elab.declaration_at(module, node)?;
+                let typed = &self.input.facts.declarations[&declaration.id];
+                self.nested_body(module, typed, context, depth + 1)?;
+            }
+            NodeKind::Record | NodeKind::Enum if self.integrated => (),
             NodeKind::Binding { mutable } => {
                 let pattern = n.children[0];
                 let named = simple_name(module, pattern);
@@ -2521,6 +2644,15 @@ impl<'r, 'g> Checker<'r, 'g> {
                 };
                 flow = self.sequence(prefix, &right.map_or_else(Flow::normal, |e| e.flow))?;
             }
+            NodeKind::For if self.integrated => {
+                flow = self.pending_iteration(module, node, depth, context)?;
+            }
+            NodeKind::Guard
+                if self.integrated
+                    && module.syntax.nodes[n.children[0]].kind == NodeKind::GuardBinding =>
+            {
+                flow = self.pending_guard_binding(module, node, depth, context)?;
+            }
             NodeKind::IfStatement | NodeKind::While | NodeKind::Guard => {
                 if self.data
                     && n.kind == NodeKind::Guard
@@ -2559,8 +2691,33 @@ impl<'r, 'g> Checker<'r, 'g> {
                         context.loops.push(node);
                     }
                     let boolean = self.primitive("bool")?;
-                    let condition =
-                        self.expression(module, n.children[0], Some(boolean), context)?;
+                    let direct_guard = self.integrated && n.kind == NodeKind::Guard;
+                    let condition = self.expression(
+                        module,
+                        n.children[0],
+                        (!direct_guard).then_some(boolean.clone()),
+                        context,
+                    )?;
+                    if direct_guard
+                        && let Some(value) = &condition
+                        && primitive_name(&value.ty) != Some("never")
+                        && !self.same(&value.ty, &boolean)?
+                    {
+                        let ty = match value.ty.as_ref() {
+                            TypeTerm::Reference { referent, .. } => referent.as_ref(),
+                            ty => ty,
+                        };
+                        if matches!(
+                            ty,
+                            TypeTerm::Nominal { .. }
+                                | TypeTerm::Variant { .. }
+                                | TypeTerm::Parameter { .. }
+                        ) {
+                            self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                        } else {
+                            self.mismatch(module, n.children[0], &value.ty, &boolean)?;
+                        }
+                    }
                     let truth = condition.as_ref().map_or(BooleanSet::BOTH, |e| {
                         if e.normal {
                             e.boolean.unwrap_or(BooleanSet::BOTH)
@@ -2700,6 +2857,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         module: &'g Module,
         typed: &'r DeclarationFacts<'g>,
         pending_role: bool,
+        enclosing: Option<(&Context<'r, 'g>, usize)>,
     ) -> Work<()> {
         let declaration = typed.declaration;
         let DeclarationShape::Function { result, .. } = &typed.shape else {
@@ -2724,7 +2882,22 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
         }
         let mut context = self.context(Some(typed))?;
-        let flow = self.statement(module, node, 1, &mut context)?;
+        let depth = if let Some((enclosing, depth)) = enclosing {
+            let mut count = enclosing.scopes.len();
+            for scope in &enclosing.scopes {
+                self.elab.step(1)?;
+                count = count.checked_add(scope.len()).ok_or(())?;
+            }
+            self.elab.reserve(count)?;
+            let mut scopes = enclosing.scopes.clone();
+            context.inherited_scopes = scopes.len();
+            scopes.append(&mut context.scopes);
+            context.scopes = scopes;
+            depth
+        } else {
+            1
+        };
+        let flow = self.statement(module, node, depth, &mut context)?;
         self.clear_body_assumptions();
         if before == self.marks() {
             if flow.normal && primitive_name(result) != Some("void") {
@@ -2759,13 +2932,20 @@ impl<'r, 'g> Checker<'r, 'g> {
                     continue;
                 }
                 if declaration.id.kind == DeclarationKind::Function {
-                    let typed = &self.input.facts.declarations[&declaration.id];
-                    self.check_named_body(module, typed, false)?;
+                    if let Some(typed) = self.input.facts.declarations.get(&declaration.id) {
+                        self.check_named_body(module, typed, false, None)?;
+                    } else {
+                        self.defer(
+                            module,
+                            declaration.node,
+                            ScalarUnsupported::DeclarationPrerequisite,
+                        )?;
+                    }
                 } else if declaration.id.kind == DeclarationKind::Implementation
                     && self.input.ordinary.is_some()
                 {
                     if let Some((typed, _)) = self.implementation_contract(module, declaration)? {
-                        self.check_named_body(module, typed, true)?;
+                        self.check_named_body(module, typed, true, None)?;
                         self.clear_body_assumptions();
                     } else {
                         self.defer(module, declaration.node, ScalarUnsupported::FamilySelection)?;
@@ -2866,6 +3046,36 @@ fn simple_name(module: &Module, node: NodeId) -> Option<NodeId> {
     let qualified = &module.syntax.nodes[path.children[0]];
     (qualified.children.len() == 1).then_some(qualified.children[0])
 }
+fn implicit_copy(
+    elab: &mut Analyzer<'_>,
+    ty: &Type<'_>,
+    integrated: bool,
+    depth: usize,
+) -> Work<Option<bool>> {
+    let leaf = implicit_copy_leaf(ty);
+    if !integrated {
+        return Ok(leaf);
+    }
+    elab.step(1)?;
+    if depth > elab.limits.max_depth.min(64) {
+        return Err(());
+    }
+    elab.statistics.max_depth = elab.statistics.max_depth.max(depth);
+    if leaf.is_some() {
+        return Ok(leaf);
+    }
+    // One established non-copying component suffices to disprove copying.
+    // An otherwise eligible aggregate still needs the actual action inventory.
+    if let TypeTerm::Tuple(elements) = ty.as_ref() {
+        for element in elements {
+            if implicit_copy(elab, element, integrated, depth + 1)? == Some(false) {
+                return Ok(Some(false));
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn implicit_copy_leaf(ty: &Type<'_>) -> Option<bool> {
     match ty.as_ref() {
         TypeTerm::Primitive(p) => Some(p.name() != "string"),

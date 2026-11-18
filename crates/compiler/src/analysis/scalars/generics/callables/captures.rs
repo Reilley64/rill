@@ -94,9 +94,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 CaptureForm::ExplicitBorrow { mutable: false } => {
                                     Some(InvocationMode::ReadOnly)
                                 }
-                                _ => {
-                                    Self::capture_demand(Demand::Value, &capture.ty, capture.access)
-                                }
+                                _ => Self::capture_demand(
+                                    &mut self.elab,
+                                    self.integrated,
+                                    Demand::Value,
+                                    &capture.ty,
+                                    capture.access,
+                                )?,
                             };
                             self.elab.reserve(1 + capture.path.projections.len())?;
                             captures.push(CaptureFact {
@@ -139,16 +143,21 @@ impl<'r, 'g> Checker<'r, 'g> {
                     } else {
                         CaptureForm::Value
                     };
-                    let demand = explicit.map_or_else(
-                        || Self::capture_demand(use_, &place.ty, place.access),
-                        |mutable| {
-                            Some(if mutable {
-                                InvocationMode::Mutable
-                            } else {
-                                InvocationMode::ReadOnly
-                            })
-                        },
-                    );
+                    let demand = if let Some(mutable) = explicit {
+                        Some(if mutable {
+                            InvocationMode::Mutable
+                        } else {
+                            InvocationMode::ReadOnly
+                        })
+                    } else {
+                        Self::capture_demand(
+                            &mut self.elab,
+                            self.integrated,
+                            use_,
+                            &place.ty,
+                            place.access,
+                        )?
+                    };
                     let ty = expression(node).unwrap_or(place).ty.clone();
                     let storage = if matches!(form, CaptureForm::CarriedReference { .. }) {
                         let mut base = node;
@@ -163,7 +172,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                             let syntax = &module.syntax.nodes[base];
                             if matches!(
                                 syntax.kind,
-                                NodeKind::Field | NodeKind::Group | NodeKind::Prefix("*")
+                                NodeKind::Field
+                                    | NodeKind::Index
+                                    | NodeKind::Group
+                                    | NodeKind::Prefix("*")
                             ) {
                                 base = syntax.children[0];
                             } else {
@@ -277,6 +289,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                         active &= normal(argument);
                     }
                 }
+                NodeKind::Pipe if self.integrated => {
+                    if let Some(call) = expression(node).and_then(|e| e.call.as_ref()) {
+                        self.elab.reserve(call.arguments.len())?;
+                        let mut active = reachable;
+                        for argument in call.argument_evaluation_order() {
+                            stack.push((argument, Demand::Value, active));
+                            active &= normal(argument);
+                        }
+                    }
+                }
                 NodeKind::Match => {
                     let Some(data::DataExpression::Match(matched)) =
                         expression(node).and_then(|e| e.data.as_ref())
@@ -325,17 +347,23 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok((mode, captures))
     }
 
-    fn capture_demand(use_: Demand, ty: &Type<'g>, access: data::Access) -> Option<InvocationMode> {
-        match use_ {
+    fn capture_demand(
+        elab: &mut Analyzer<'g>,
+        integrated: bool,
+        use_: Demand,
+        ty: &Type<'g>,
+        access: data::Access,
+    ) -> Work<Option<InvocationMode>> {
+        Ok(match use_ {
             Demand::Read => Some(InvocationMode::ReadOnly),
             Demand::Mutate => Some(InvocationMode::Mutable),
             Demand::Invoke(mode) => Some(mode),
             Demand::Pending => None,
-            Demand::Value => match implicit_copy_leaf(ty) {
+            Demand::Value => match implicit_copy(elab, ty, integrated, 1)? {
                 Some(true) => Some(InvocationMode::ReadOnly),
                 Some(false) if access == data::Access::Owned => Some(InvocationMode::Once),
                 _ => None,
             },
-        }
+        })
     }
 }

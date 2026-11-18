@@ -308,7 +308,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let declaration = self.elab.declaration_at(module, name)?;
         let mut bound = ty.clone();
         if access != Access::Owned {
-            let Some(copy) = implicit_copy_leaf(ty) else {
+            let Some(copy) = implicit_copy(&mut self.elab, ty, self.integrated, 1)? else {
                 self.defer(module, name, ScalarUnsupported::ImplicitCopy)?;
                 return Ok(false);
             };
