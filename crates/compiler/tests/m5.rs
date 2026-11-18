@@ -18,6 +18,8 @@ use std::{
 mod disposers;
 #[path = "m5/field_routes.rs"]
 mod field_routes;
+#[path = "m5/patterns.rs"]
+mod patterns;
 #[path = "m5/records.rs"]
 mod records;
 mod support;
