@@ -128,6 +128,14 @@ pub struct OrdinaryAnalysis<'g> {
 }
 
 impl<'g> OrdinaryAnalysis<'g> {
+    pub(super) fn graph(&self) -> &'g Graph {
+        self.graph
+    }
+
+    pub(super) fn headers(&self) -> &metadata::Headers<'g> {
+        &self.headers
+    }
+
     pub fn completion(&self) -> Completion {
         self.completion
     }
@@ -181,7 +189,7 @@ impl<'g> OrdinaryAnalysis<'g> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Constructor<'g> {
+pub(super) enum Constructor<'g> {
     Primitive(&'g Intrinsic),
     Parameter(&'g DeclarationId, usize),
     Reference(bool),
@@ -191,7 +199,7 @@ enum Constructor<'g> {
     Callable(InvocationMode, usize),
 }
 
-fn shape<'a, 'g>(
+pub(super) fn shape<'a, 'g>(
     ty: &'a TypeTerm<'g>,
 ) -> (
     Constructor<'g>,

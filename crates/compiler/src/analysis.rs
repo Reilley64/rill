@@ -11,7 +11,7 @@ use std::sync::Arc;
 pub mod declarations;
 pub mod ordinary;
 pub mod scalars;
-pub use scalars::data;
+pub use scalars::{data, generics};
 
 #[derive(Clone, Copy, Debug)]
 pub struct AnalysisLimits {

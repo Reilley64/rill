@@ -178,7 +178,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         && self.enum_base(module, callee.children[0], context)?
                     {
                         self.constructor_type(module, n.children[0], context, None, None)?
-                    } else if let Some(call) = self.prepare_call(module, node, context)? {
+                    } else if let Some(call) = self.prepare_call(module, node, context)?
+                        && !call.infer
+                    {
                         let ty = call.result.clone();
                         self.elab.reserve(1)?;
                         self.prepared_calls.insert((&module.key, node), call);

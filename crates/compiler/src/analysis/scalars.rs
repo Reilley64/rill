@@ -5,6 +5,7 @@ use declarations::DeclarationReceipt;
 use std::collections::{BTreeSet, VecDeque};
 
 pub mod data;
+pub mod generics;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BodyOwner<'g> {
@@ -105,6 +106,13 @@ pub struct CallFacts<'g> {
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
     pub arguments: Vec<NodeId>,
+    pub defaults: Vec<DefaultArgumentUse<'g>>,
+}
+#[derive(Debug)]
+pub struct DefaultArgumentUse<'g> {
+    pub binder: &'g DeclarationId,
+    pub node: NodeId,
+    pub span: &'g Span,
 }
 #[derive(Debug)]
 pub struct BindingFacts<'g> {
@@ -364,9 +372,11 @@ enum Value<'g> {
     Declaration(&'g Declaration, Vec<&'g Binding>),
 }
 struct PreparedCall<'g> {
+    callee_node: NodeId,
     fact: CallFacts<'g>,
     parameters: Vec<Type<'g>>,
     result: Type<'g>,
+    infer: bool,
 }
 struct Inference<'g> {
     module: &'g Module,
@@ -377,8 +387,13 @@ struct Inference<'g> {
     data: BTreeMap<NodeId, data::PreparedData<'g>>,
     data_nodes: BTreeSet<NodeId>,
 }
+struct BodyInput<'r, 'g> {
+    graph: &'g Graph,
+    facts: &'r PartialFacts<'g>,
+    ordinary: Option<&'r ordinary::OrdinaryAnalysis<'g>>,
+}
 struct Checker<'r, 'g> {
-    input: &'r Receipt<'g>,
+    input: BodyInput<'r, 'g>,
     elab: Analyzer<'g>,
     facts: ScalarFacts<'g>,
     data: bool,
@@ -389,6 +404,26 @@ struct Checker<'r, 'g> {
     match_blocks: BTreeMap<(&'g ModuleKey, NodeId), Flow>,
 }
 impl<'r, 'g> Checker<'r, 'g> {
+    fn new(input: BodyInput<'r, 'g>, limits: AnalysisLimits, data: bool) -> Self {
+        Self {
+            elab: Analyzer {
+                graph: input.graph,
+                limits,
+                statistics: Statistics::default(),
+                facts: PartialFacts::default(),
+                declarations: BTreeMap::new(),
+            },
+            input,
+            facts: ScalarFacts::default(),
+            data,
+            data_depth: 0,
+            prepared_calls: BTreeMap::new(),
+            match_inputs: BTreeMap::new(),
+            match_hints: BTreeMap::new(),
+            match_blocks: BTreeMap::new(),
+        }
+    }
+
     fn site(module: &'g Module, node: NodeId) -> Site<'g> {
         Site {
             module: &module.key,
@@ -1270,7 +1305,23 @@ impl<'r, 'g> Checker<'r, 'g> {
             .get(1)
             .map(|&id| &module.syntax.nodes[id].children[..])
             .unwrap_or(&[]);
-        if argument_nodes.len() < signature.binders.len() {
+        if self.input.ordinary.is_some_and(|ordinary| {
+            ordinary
+                .headers()
+                .get(&declaration.id)
+                .is_some_and(|header| !header.requirements.is_empty())
+        }) {
+            self.deferred_declaration(
+                module,
+                node,
+                ScalarUnsupported::Requirements,
+                declaration,
+                bindings,
+            )?;
+            return Ok(None);
+        }
+        let infer = argument_nodes.len() < signature.binders.len();
+        if infer && self.input.ordinary.is_none() {
             self.deferred_declaration(
                 module,
                 node,
@@ -1309,30 +1360,50 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.finding(module, node, ScalarFindingKind::Arity)?;
         }
         self.elab.reserve(parameters.len())?;
-        let parameters = parameters
-            .iter()
-            .map(|p| self.substitute(&p.ty, &substitution, 1))
-            .collect::<Work<Vec<_>>>()?;
-        let result = self.substitute(result, &substitution, 1)?;
+        let (parameters, result) = if infer {
+            (
+                parameters.iter().map(|p| p.ty.clone()).collect(),
+                result.clone(),
+            )
+        } else {
+            let parameters = parameters
+                .iter()
+                .map(|p| self.substitute(&p.ty, &substitution, 1))
+                .collect::<Work<Vec<_>>>()?;
+            (parameters, self.substitute(result, &substitution, 1)?)
+        };
         self.elab.reserve(n.children.len())?;
         let arguments = n.children[1..].to_vec();
-        self.facts.nodes.push(NodeFacts {
-            site: Self::site(module, callee),
-            flow: Flow::normal(),
-            kind: NodeFactKind::Callee {
-                declaration: &declaration.id,
-            },
-        });
+        if !infer {
+            self.record_callee(module, callee, &declaration.id)?;
+        }
         Ok(Some(PreparedCall {
+            callee_node: callee,
             fact: CallFacts {
                 callee: &declaration.id,
                 bindings,
                 substitution,
                 arguments,
+                defaults: Vec::new(),
             },
             parameters,
             result,
+            infer,
         }))
+    }
+    fn record_callee(
+        &mut self,
+        module: &'g Module,
+        node: NodeId,
+        declaration: &'g DeclarationId,
+    ) -> Work<()> {
+        self.elab.reserve(1)?;
+        self.facts.nodes.push(NodeFacts {
+            site: Self::site(module, node),
+            flow: Flow::normal(),
+            kind: NodeFactKind::Callee { declaration },
+        });
+        Ok(())
     }
     fn context(&mut self, signature: Option<&'r DeclarationFacts<'g>>) -> Work<Context<'r, 'g>> {
         self.elab.reserve(1)?;
@@ -1584,6 +1655,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     NodeKind::Call => {
                         if inference.data_nodes.contains(&node) {
                             self.variant_step(&mut inference, node, context)?;
+                        } else if inference.calls.get(&node).is_some_and(|c| c.infer) {
+                            self.infer_standalone_call(&mut inference, node, false)?;
                         } else if let Some(call) = inference.calls.get(&node) {
                             self.elab.reserve(call.parameters.len())?;
                             let contexts: Vec<_> = call
@@ -1627,6 +1700,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                     _ => (),
                 }
+            }
+            if self.input.ordinary.is_some() && self.apply_ready_call_default(&mut inference)? {
+                continue;
             }
             self.elab.reserve(inference.slots.len())?;
             let pending: Vec<_> = inference
@@ -2295,6 +2371,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                         continue;
                     }
                     let before = self.marks();
+                    if let Some(ordinary) = self.input.ordinary
+                        && let Some(metadata) = ordinary.headers().get(&declaration.id)
+                    {
+                        if !metadata.requirements.is_empty() {
+                            self.defer(module, node, ScalarUnsupported::Requirements)?;
+                        }
+                        if metadata.defaults.iter().any(|d| d.ty.is_none()) {
+                            self.defer(module, node, ScalarUnsupported::GenericInference)?;
+                        }
+                    }
                     let mut context = self.context(Some(typed))?;
                     let flow = self.statement(module, node, 1, &mut context)?;
                     if before == self.marks() {
@@ -2359,6 +2445,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                         | NodeKind::Enum
                         | NodeKind::Expect
                 ) {
+                    continue;
+                }
+                if self.input.ordinary.is_some()
+                    && module.syntax.nodes[node].kind == NodeKind::Implementation
+                {
+                    self.defer(module, node, ScalarUnsupported::FamilySelection)?;
                     continue;
                 }
                 if !self.source_scope_ready(module, node)? {
@@ -2431,23 +2523,15 @@ fn check<'r, 'g>(
     limits: AnalysisLimits,
     data: bool,
 ) -> Result<ScalarReceipt<'r, 'g>, ScalarFailure<'g>> {
-    let mut checker = Checker {
-        input: input.types,
-        elab: Analyzer {
+    let mut checker = Checker::new(
+        BodyInput {
             graph: input.types.graph,
-            limits,
-            statistics: Statistics::default(),
-            facts: PartialFacts::default(),
-            declarations: BTreeMap::new(),
+            facts: &input.types.facts,
+            ordinary: None,
         },
-        facts: ScalarFacts::default(),
+        limits,
         data,
-        data_depth: 0,
-        prepared_calls: BTreeMap::new(),
-        match_inputs: BTreeMap::new(),
-        match_hints: BTreeMap::new(),
-        match_blocks: BTreeMap::new(),
-    };
+    );
     let exhausted = checker
         .run()
         .and_then(|_| checker.annotation_nodes())
