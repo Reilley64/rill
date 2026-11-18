@@ -7,7 +7,8 @@ use crate::analysis::scalars::{
     BodyOwner, ExpressionFacts, NodeFactKind, NodeFacts, Propagation, Site,
 };
 use crate::analysis::{
-    Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Type, TypeTerm,
+    Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
+    Type, TypeTerm,
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
@@ -15,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 mod arrows;
+mod callbacks;
 mod calls;
 mod control;
 mod loops;
@@ -23,6 +25,7 @@ mod releases;
 mod shape;
 mod storage;
 mod values;
+use callbacks::{CallbackContract, CallbackEntry, Substitutions};
 use loops::LoopExits;
 #[cfg(test)]
 mod tests;
@@ -162,34 +165,66 @@ pub(super) fn check<'g>(
         &implementation_headers,
         budget,
     )?;
+    let sources = Sources {
+        inventory,
+        nodes: &nodes,
+        checked: &checked,
+        variants: &variants,
+        implementation_headers: &implementation_headers,
+        release_parameters: &release_parameters,
+        core,
+    };
+    let mut contracts = BTreeMap::new();
+    for signature in inventory.type_facts().declarations.values() {
+        budget.step(1)?;
+        if let Some(entry) = CallbackEntry::from_signature(signature, core) {
+            budget.reserve(1)?;
+            contracts.insert(&signature.declaration.id, (entry, None));
+        }
+    }
+    // Collect the symbolic contracts before checking uses, independent of module order.
+    let mut proved = Vec::new();
+    for (id, (entry, _)) in &contracts {
+        budget.step(1)?;
+        budget.step(inventory.graph().modules().len())?;
+        let Some(module) = inventory
+            .graph()
+            .modules()
+            .iter()
+            .find(|m| m.key == id.module)
+        else {
+            continue;
+        };
+        let mut check = Check::new(sources, module, &contracts, budget, report)?;
+        if checked.contains(id) {
+            check.parametric = Some(*entry);
+            check.proving_callable = true;
+            check.function_body(&inventory.type_facts().declarations[id], 1)?;
+            if !check.has_pending {
+                check.budget.reserve(1)?;
+                proved.push((*id, check.invoked_variants));
+            }
+        }
+    }
+    for (id, summary) in proved {
+        contracts.get_mut(id).unwrap().1 = Some(summary);
+    }
     for module in inventory.graph().modules() {
         budget.step(1)?;
-        let mut scopes = BTreeMap::new();
-        for declaration in &module.declarations {
-            budget.reserve(1)?;
-            scopes.insert(&declaration.id, declaration.scope);
-        }
-        let mut check = Check {
-            inventory,
-            nodes: &nodes,
-            checked: &checked,
-            variants: &variants,
-            implementation_headers: &implementation_headers,
-            release_parameters: &release_parameters,
-            module,
-            scopes,
-            core,
-            budget,
-            report,
-            loops: Vec::new(),
-            match_views: Vec::new(),
-            checked_arrows: BTreeSet::new(),
-            dead_depth: 0,
-            dead_start: None,
-        };
-        check.roots()?;
+        Check::new(sources, module, &contracts, budget, report)?.roots()?;
     }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct Sources<'a, 'g> {
+    inventory: &'a OrdinaryAnalysis<'g>,
+    nodes: &'a Nodes<'a, 'g>,
+    checked: &'a BTreeSet<&'g DeclarationId>,
+    variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
+    implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
+    release_parameters: &'a releases::Parameters<'g>,
+    core: Inputs<'a, 'g>,
 }
 
 struct Check<'a, 'g> {
@@ -209,9 +244,55 @@ struct Check<'a, 'g> {
     checked_arrows: BTreeSet<NodeId>,
     dead_depth: usize,
     dead_start: Option<usize>,
+    contracts: &'a CallbackContract<'g>,
+    parametric: Option<CallbackEntry<'g>>,
+    input_variant: Option<bool>,
+    invoked_variants: [bool; 2],
+    substitution: Option<&'a Substitutions<'a, 'g>>,
+    proving_callable: bool,
+    has_pending: bool,
 }
 
 impl<'a, 'g> Check<'a, 'g> {
+    fn new(
+        sources: Sources<'a, 'g>,
+        module: &'g Module,
+        contracts: &'a CallbackContract<'g>,
+        budget: &'a mut Budget,
+        report: &'a mut ResultUseReport<'g>,
+    ) -> Work<Self> {
+        let mut scopes = BTreeMap::new();
+        for declaration in &module.declarations {
+            budget.reserve(1)?;
+            scopes.insert(&declaration.id, declaration.scope);
+        }
+        Ok(Self {
+            inventory: sources.inventory,
+            nodes: sources.nodes,
+            checked: sources.checked,
+            variants: sources.variants,
+            implementation_headers: sources.implementation_headers,
+            release_parameters: sources.release_parameters,
+            core: sources.core,
+            module,
+            scopes,
+            budget,
+            report,
+            loops: Vec::new(),
+            match_views: Vec::new(),
+            checked_arrows: BTreeSet::new(),
+            dead_depth: 0,
+            dead_start: None,
+            contracts,
+            parametric: None,
+            input_variant: None,
+            invoked_variants: [false; 2],
+            substitution: None,
+            proving_callable: false,
+            has_pending: false,
+        })
+    }
+
     fn depth(&mut self, depth: usize) -> Work<()> {
         self.budget.step(1)?;
         if depth > self.budget.limits.max_depth.min(64) {
@@ -235,6 +316,8 @@ impl<'a, 'g> Check<'a, 'g> {
     }
 
     fn pending(&mut self, node: NodeId, blocker: ResultUseBlocker) -> Work<()> {
+        // A repeated witness also blocks this proof, even when the report already has it.
+        self.has_pending = true;
         let site = self.site(node);
         self.budget.step(self.report.pending.len())?;
         if !self
@@ -285,6 +368,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 self.budget.step(1)?;
                 if old.discard.module == discard.module
                     && old.discard.node == node
+                    && old.origin.module == origin.module
                     && old.origin.node == origin.node
                     && old.kind == kind
                     && old.storage == storage
@@ -344,37 +428,19 @@ impl<'a, 'g> Check<'a, 'g> {
             let syntax = &self.module.syntax.nodes[node];
             match declaration.id.kind {
                 DeclarationKind::Function | DeclarationKind::Implementation => {
-                    let Some(&body) = syntax.children.get(1) else {
-                        continue;
-                    };
-                    self.budget.step(1)?;
-                    let mut states = self.singleton(Residence::default())?;
-                    if let Some(signature) = self
-                        .inventory
-                        .type_facts()
-                        .declarations
-                        .get(&declaration.id)
-                        .or_else(|| self.implementation_headers.get(&declaration.id).copied())
-                        && let DeclarationShape::Function { parameters, .. } = &signature.shape
+                    if syntax.children.get(1).is_none()
+                        || self
+                            .contracts
+                            .get(&declaration.id)
+                            .is_some_and(|(_, proof)| proof.is_some())
                     {
-                        for parameter in parameters {
-                            states = self.seed(
-                                states,
-                                Root::Local(&parameter.declaration.id),
-                                parameter.declaration.node,
-                                &parameter.ty,
-                            )?;
-                        }
+                        continue;
+                    }
+                    if let Some(signature) = self.signature(&declaration.id) {
+                        self.function_body(signature, 1)?;
                     } else {
                         self.pending(node, ResultUseBlocker::TypedInput)?;
-                    }
-                    if states.is_empty() {
-                        self.dead_statement(body, Residence::default(), 1)?;
-                    }
-                    for state in states {
-                        for state in self.statement(body, state, 1)? {
-                            self.exit(state, body)?;
-                        }
+                        self.dead_statement(syntax.children[1], Residence::default(), 1)?;
                     }
                 }
                 DeclarationKind::Expectation => {
@@ -658,6 +724,14 @@ impl<'a, 'g> Check<'a, 'g> {
             } else {
                 state.store(root, &[], Content::Alias((from, component)), self.budget)?;
             }
+            return self.singleton(state);
+        }
+        if facts
+            .callable
+            .as_ref()
+            .is_some_and(|f| f.function_value.is_some())
+        {
+            state.store(root, &[], Content::Callable(node), self.budget)?;
             return self.singleton(state);
         }
         if let Some(data) = &value.data {

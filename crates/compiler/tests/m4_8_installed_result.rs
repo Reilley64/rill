@@ -1343,11 +1343,9 @@ fn installed_into_value_acknowledges_cause_but_not_the_returned_payload() {
 }
 
 #[test]
-fn installed_combinators_acknowledge_skipped_callbacks_only() {
-    use compiler::analysis::typed::ResultUseBlocker;
-
+fn installed_combinator_roots_prove_conditional_result_use_without_callers() {
     installed(
-        "installed_combinators_acknowledge_skipped_callbacks_only",
+        "installed_combinator_roots_prove_conditional_result_use_without_callers",
         |request| {
             fs::write(&request.entry, "import std::result::Result;").unwrap();
             for test_mode in [false, true] {
@@ -1376,16 +1374,11 @@ fn installed_combinators_acknowledge_skipped_callbacks_only() {
                             helper.name.as_deref().unwrap()
                         );
                         let span = &module.syntax.nodes[helper.node].span;
-                        let mut pending = uses.pending().iter().filter(|p| {
+                        let pending = uses.pending().iter().find(|p| {
                             p.site.module == &module.key
                                 && (span.start()..span.end()).contains(&p.site.span.start())
                         });
-                        let invocation = pending
-                            .next()
-                            .expect("unchecked invocation remains pending");
-                        assert_eq!(invocation.blocker, ResultUseBlocker::CallBoundary);
-                        assert!(invocation.site.span.bytes().starts_with(b"apply("));
-                        if let Some(other) = pending.next() {
+                        if let Some(other) = pending {
                             panic!(
                                 "unexpected {:?} at {}",
                                 other.blocker,
@@ -1395,6 +1388,191 @@ fn installed_combinators_acknowledge_skipped_callbacks_only() {
                     }
                     assert_eq!(checked, count);
                 }
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_combinator_callback_uses_check_concrete_source_and_skip_erasure() {
+    use compiler::analysis::typed::ResultUseBlocker;
+
+    installed(
+        "installed_combinator_callback_uses_check_concrete_source_and_skip_erasure",
+        |request| {
+            fs::write(&request.entry, r#"
+                import std::option::{Option, map as optionMap, andThen as optionThen};
+                import std::result::{Result, Ok, Err, map as resultMap, andThen as resultThen, mapErr};
+
+                function identity<T>(value: T): T { return value; }
+                function some(value: i32): Option<i32> { return Option.Some(value); }
+                function proven(): void {
+                    let nested: Option<Result<i32, i32>> = Option.Some(Result.Ok(7i32));
+                    let _ = optionMap(nested, identity<Result<i32, i32>>);
+                    let _ = optionThen(Option.Some(7i32), some);
+                    let _ = resultMap(Ok<i32, i32>(7i32), (x: i32) => x);
+                    let _ = resultThen(Ok<i32, i32>(7i32), (x: i32) => Ok<i32, i32>(x));
+                    let _ = mapErr(Err<i32, i32>(7i32), (x: i32) => x);
+                }
+                function erased(callback: once (i32) => i32): void {
+                    let none: Option<i32> = Option.None;
+                    let _ = optionMap(none, callback);
+                    let ok: Result<i32, i32> = Result.Ok(7i32);
+                    let _ = mapErr(ok, callback);
+                    let _ = resultMap(Err<i32, i32>(7i32), callback);
+                }
+                function invoked(callback: once (i32) => i32): void {
+                    let _ = optionMap(Option.Some(7i32), callback);
+                }
+                function maybe(value: Option<i32>, callback: once (i32) => i32): void {
+                    let _ = optionMap(value, callback);
+                }
+            "#).unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(
+                    &graph,
+                    AnalysisLimits {
+                        max_entries: 200_000,
+                        ..AnalysisLimits::default()
+                    },
+                );
+                assert_ne!(
+                    report.completion(),
+                    TypedCompletion::ResourceLimit,
+                    "{:?}",
+                    report.statistics()
+                );
+                assert!(
+                    report.bodies().findings().is_empty(),
+                    "{:?}",
+                    report.bodies().findings()
+                );
+                assert!(
+                    report.bodies().obligations().is_empty(),
+                    "{:?}",
+                    report.bodies().obligations()
+                );
+                let uses = report.result_use().unwrap();
+                let pending: Vec<_> = uses
+                    .pending()
+                    .iter()
+                    .map(|p| (p.site.module.path.as_str(), p.site.span.bytes(), p.blocker))
+                    .collect();
+                assert_eq!(
+                    pending,
+                    [
+                        (
+                            "main.rill",
+                            &b"optionMap(Option.Some(7i32), callback)"[..],
+                            ResultUseBlocker::CallBoundary
+                        ),
+                        (
+                            "main.rill",
+                            &b"optionMap(value, callback)"[..],
+                            ResultUseBlocker::CallBoundary
+                        ),
+                    ]
+                );
+                assert!(uses.discards().is_empty());
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_callback_captures_keep_their_witnesses_and_unchecked_uses() {
+    use compiler::analysis::typed::ResultUseBlocker;
+
+    installed(
+        "installed_callback_captures_keep_their_witnesses_and_unchecked_uses",
+        |request| {
+            fs::write(
+                &request.entry,
+                r#"
+                import std::option::{Option, map};
+                import std::result::{Result, Ok};
+
+                function forwarded(): void {
+                    let kept = Ok<i32, i32>(11i32);
+                    let callback = (value: i32) => kept;
+                    let _ = map(Option.Some(1i32), callback);
+                }
+                function notForwarded(take: bool): void {
+                    let lost: Result<i32, i32> = Result.Ok(22i32);
+                    let callback = (value: i32) => {
+                        if (take) { return lost; }
+                        return Ok<i32, i32>(value);
+                    };
+                    let _ = map(Option.Some(2i32), callback);
+                }
+                function skipped(take: bool): void {
+                    let skipped = Ok<i32, i32>(33i32);
+                    let callback = (value: i32) => {
+                        if (take) { return skipped; }
+                        return Ok<i32, i32>(value);
+                    };
+                    let none: Option<i32> = Option.None;
+                    let _ = map(none, callback);
+                }
+                function unchecked(opaque: once (Result<i32, i32>) => i32): void {
+                    let unknown = Ok<i32, i32>(44i32);
+                    let _ = map(Option.Some(4i32), (value: i32) => opaque(unknown));
+                    let sibling: Result<i32, i32> = Result.Ok(55i32);
+                }
+            "#,
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let uses = report.result_use().unwrap();
+                let discards: Vec<_> = uses
+                    .discards()
+                    .iter()
+                    .map(|w| {
+                        (
+                            w.origin.module.path.as_str(),
+                            w.origin.span.bytes(),
+                            w.storage.is_some(),
+                        )
+                    })
+                    .collect();
+                assert_eq!(
+                    discards,
+                    [
+                        ("main.rill", &b"Result.Ok(22i32)"[..], true),
+                        ("main.rill", &b"Result.Ok(55i32)"[..], true),
+                    ]
+                );
+                let pending: Vec<_> = uses
+                    .pending()
+                    .iter()
+                    .map(|p| (p.site.module.path.as_str(), p.site.span.bytes(), p.blocker))
+                    .collect();
+                assert_eq!(
+                    pending,
+                    [
+                        (
+                            "main.rill",
+                            &b"opaque(unknown)"[..],
+                            ResultUseBlocker::CallBoundary
+                        ),
+                        (
+                            "main.rill",
+                            &b"map(Option.Some(4i32), (value: i32) => opaque(unknown))"[..],
+                            ResultUseBlocker::CallBoundary
+                        ),
+                    ]
+                );
             }
         },
     );

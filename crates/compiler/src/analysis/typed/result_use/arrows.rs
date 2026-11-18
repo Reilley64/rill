@@ -1,5 +1,6 @@
 //! Check typed arrow parameters; unknown capture acquisition is not an empty environment.
 use super::*;
+use crate::analysis::InvocationMode;
 use crate::analysis::scalars::generics::callables::{ArrowFacts, CaptureForm};
 
 impl<'a, 'g> Check<'a, 'g> {
@@ -21,40 +22,79 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         self.budget.reserve(1)?;
         if self.checked_arrows.insert(node) {
-            self.arrow_body(node, arrow, depth + 1)?;
+            self.arrow_body(node, arrow, Residence::default(), depth + 1)?;
         }
         let root = Root::Temporary(node);
+        state.store(root, &[], Content::Callable(node), self.budget)?;
+        let mut acquired = BTreeSet::new();
         for capture in &arrow.captures {
             self.budget.step(1)?;
-            for address in self.place_storage(&state, Some(&capture.path))?.addresses() {
-                if capture.form == CaptureForm::Value {
-                    let affected = state.take(address.0, &address.1, self.budget)?;
-                    self.budget.step(affected.len())?;
-                    if affected.into_iter().any(|value| {
-                        matches!(value.content, Content::Result(_) | Content::Unclassified(_))
-                    }) {
-                        self.pending(node, ResultUseBlocker::Storage)?;
-                        state.store(root, &[], Content::Unclassified(node), self.budget)?;
+            if capture.form == CaptureForm::Value
+                && matches!(capture.ty.as_ref(), TypeTerm::Primitive(_))
+            {
+                continue;
+            }
+            let storage = self.place_storage(&state, Some(&capture.path))?;
+            if capture.form == CaptureForm::Value
+                && capture.demand == Some(InvocationMode::Once)
+                && capture.path.projections.is_empty()
+                && matches!(storage, PlaceStorage::Exact((Root::Local(id), ref component)) if id == capture.path.root && component.is_empty())
+            {
+                self.budget.reserve(1)?;
+                if acquired.insert(capture.path.root) {
+                    // Keep the actual occurrences, not a type-only approximation of the environment.
+                    let source = Root::Local(capture.path.root);
+                    let values = state.take(source, &[], self.budget)?;
+                    if values.is_empty() {
+                        // A missing residence (for example, in a detached lexical
+                        // entry) is not evidence that the environment is empty.
+                        let probe = self.singleton(Residence::default())?;
+                        for shape in self.seed(probe, source, node, &capture.ty)? {
+                            if shape.may_owe_result(self.budget)? {
+                                state.store(root, &[], Content::Unclassified(node), self.budget)?;
+                                break;
+                            }
+                        }
                     }
-                } else {
-                    // Formation does not observe the owner's result. A later
-                    // invocation may, but the layout/body effect is not proved.
-                    let alias = state
-                        .alias(address.0, &address.1, self.budget)?
-                        .unwrap_or(address);
-                    state.store(root, &[], Content::PossibleAlias(alias), self.budget)?;
+                    state.install(
+                        values,
+                        root,
+                        &[ResultComponent::Capture(capture.path.root)],
+                        self.budget,
+                    )?;
+                }
+            } else {
+                // A projection or borrow does not establish an owned environment.
+                // The explicit acknowledgement of an uninvoked callable can still consume it.
+                state.store(root, &[], Content::Unclassified(node), self.budget)?;
+                for address in storage.addresses() {
+                    if capture.form != CaptureForm::Value {
+                        let alias = state
+                            .alias(address.0, &address.1, self.budget)?
+                            .unwrap_or(address);
+                        state.store(root, &[], Content::PossibleAlias(alias), self.budget)?;
+                    } else if capture.demand != Some(InvocationMode::ReadOnly) {
+                        // Do not claim a discard in the original place when acquisition may move it.
+                        self.forget_address(&mut state, &address, node)?;
+                    }
                 }
             }
         }
         self.singleton(state)
     }
 
-    fn arrow_body(&mut self, node: NodeId, arrow: &ArrowFacts<'g>, depth: usize) -> Work<()> {
+    pub(super) fn arrow_body(
+        &mut self,
+        node: NodeId,
+        arrow: &ArrowFacts<'g>,
+        captures: Residence<'g>,
+        depth: usize,
+    ) -> Work<()> {
         let children = &self.module.syntax.nodes[node].children;
         let (head, body) = (children[0], children[1]);
         let parameters =
             &self.module.syntax.nodes[self.module.syntax.nodes[head].children[0]].children;
-        let mut entry = self.singleton(Residence::default())?;
+        let mut entry = self.singleton(captures)?;
         for (&parameter, ty) in parameters.iter().zip(&arrow.parameters) {
             if let Some(declaration) = self.declaration_at(parameter, DeclarationKind::Parameter)? {
                 entry = self.seed(entry, Root::Local(declaration), parameter, ty)?;

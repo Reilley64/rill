@@ -2,10 +2,11 @@
 use super::*;
 use crate::analysis::scalars::data::Constructor;
 
-struct Seed<'g> {
+struct Seed<'a, 'g> {
     root: Root<'g>,
     origin: NodeId,
     path: Vec<ResultComponent<'g>>,
+    substitution: Option<&'a Substitutions<'a, 'g>>,
 }
 
 struct Arguments<'a, 'g> {
@@ -31,6 +32,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 root,
                 origin,
                 path: Vec::new(),
+                substitution: self.substitution,
             },
             1,
         )
@@ -43,7 +45,7 @@ impl<'a, 'g> Check<'a, 'g> {
         states: Alternatives<'g>,
         element: &Type<'g>,
         env: Option<&Arguments<'_, 'g>>,
-        seed: &mut Seed<'g>,
+        seed: &mut Seed<'_, 'g>,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         let probe = self.singleton(Residence::default())?;
@@ -60,7 +62,7 @@ impl<'a, 'g> Check<'a, 'g> {
         mut states: Alternatives<'g>,
         ty: &Type<'g>,
         env: Option<&Arguments<'_, 'g>>,
-        seed: &mut Seed<'g>,
+        seed: &mut Seed<'_, 'g>,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         self.depth(depth)?;
@@ -96,6 +98,21 @@ impl<'a, 'g> Check<'a, 'g> {
                             seed,
                             depth + 1,
                         );
+                    }
+                    frame = arguments.outer;
+                }
+                let mut frame = seed.substitution;
+                while let Some(arguments) = frame {
+                    self.budget.step(1)?;
+                    if let Some(argument) = arguments.arguments.get(*position)
+                        && argument.binder == *declaration
+                        && argument.position == *position
+                    {
+                        let previous = seed.substitution;
+                        seed.substitution = arguments.outer;
+                        let result = self.shape(states, &argument.argument, env, seed, depth + 1);
+                        seed.substitution = previous;
+                        return result;
                     }
                     frame = arguments.outer;
                 }
@@ -237,7 +254,7 @@ impl<'a, 'g> Check<'a, 'g> {
     fn unknown_shape(
         &mut self,
         mut states: Alternatives<'g>,
-        seed: &Seed<'g>,
+        seed: &Seed<'_, 'g>,
     ) -> Work<Alternatives<'g>> {
         for state in &mut states {
             state.store(
@@ -255,7 +272,7 @@ impl<'a, 'g> Check<'a, 'g> {
         mut states: Alternatives<'g>,
         fields: &[MemberType<'g>],
         env: &Arguments<'_, 'g>,
-        seed: &mut Seed<'g>,
+        seed: &mut Seed<'_, 'g>,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         for field in fields {

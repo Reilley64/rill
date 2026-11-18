@@ -15,7 +15,6 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         self.budget.step(1)?;
         let settled = value.ordinary_context.is_none();
-        let checked = settled && self.checked.contains(call.callee);
         let observer = settled && Some(call.callee) == self.core.outcome_observer;
         self.budget.step(self.core.collections.protection.len())?;
         let dispose = settled
@@ -46,6 +45,10 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(states);
         }
         for state in &mut states {
+            let checked = settled && self.ordinary_boundary(call, state, depth + 1)?;
+            if settled && !checked && self.contracts.contains_key(call.callee) {
+                self.pending(node, ResultUseBlocker::CallBoundary)?;
+            }
             self.finish_call(
                 node,
                 value,
@@ -194,19 +197,8 @@ impl<'a, 'g> Check<'a, 'g> {
             return self.unsettled(node, depth);
         };
         let receiver = invocation.receiver;
-        let named = self
-            .facts(receiver)?
-            .and_then(|f| f.callable.as_ref())
-            .and_then(|f| f.function_value.as_ref());
-        let arrow = self
-            .facts(receiver)?
-            .and_then(|f| f.callable.as_ref())
-            .and_then(|f| f.arrow.as_ref());
-        let checked = invocation.assumption.is_none()
-            && (named.is_some_and(|value| self.checked.contains(value.declaration))
-                || arrow.is_some_and(|arrow| arrow.premise.is_none()));
-        // The shared checker has attached the invocation to this receiver. It has
-        // not proved a source contract for an erased callable.
+        // The typed invocation identifies the receiver. Its contract alone does
+        // not prove Result use for an erased callable or for owned captures.
         let syntax = &self.module.syntax.nodes[node];
         let arguments = if syntax.kind == NodeKind::Call {
             &syntax.children[1..]
@@ -254,14 +246,20 @@ impl<'a, 'g> Check<'a, 'g> {
             let address = state
                 .alias(root, &[], self.budget)?
                 .unwrap_or((root, Vec::new()));
+            let checked = if invocation.assumption.is_some() {
+                let receiver = state.contents(address.0, &address.1, self.budget)?;
+                self.symbolic_callback(invocation, &receiver)?
+            } else {
+                self.prove_at(state, &address, invocation.mode, depth + 1)?
+            };
             for referent in state.aliases_under(address.0, &address.1, self.budget)? {
                 self.forget_address(state, &referent, node)?;
             }
             state.take(root, &[], self.budget)?;
             self.finish_call(node, value, state, args(), (checked, false, false))?;
-        }
-        if !checked {
-            self.pending(node, ResultUseBlocker::CallBoundary)?;
+            if !checked {
+                self.pending(node, ResultUseBlocker::CallBoundary)?;
+            }
         }
         self.call_output(node, value, states)
     }

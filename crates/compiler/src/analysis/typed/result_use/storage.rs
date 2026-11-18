@@ -8,6 +8,7 @@ pub enum ResultComponent<'g> {
     TupleElement(usize),
     ListElement(usize),
     Field(&'g DeclarationId),
+    Capture(&'g DeclarationId),
     VariantPayload {
         variant: &'g DeclarationId,
         index: usize,
@@ -34,6 +35,8 @@ pub(super) enum Content<'g> {
     Test(Arc<Constructor<'g>>, bool),
     Alias(Address<'g>),
     PossibleAlias(Address<'g>),
+    /// Typed source origin of the callable stored at this exact residence.
+    Callable(NodeId),
     /// Containment is unresolved at this origin, not known empty.
     Unclassified(NodeId),
 }
@@ -51,7 +54,7 @@ impl Located<'_> {
                 Content::Result(value) => value.component.len(),
                 Content::Test(tag, _) => tag_size(tag),
                 Content::Alias((_, path)) | Content::PossibleAlias((_, path)) => path.len(),
-                Content::Unclassified(_) => 0,
+                Content::Callable(_) | Content::Unclassified(_) => 0,
             }
     }
 }
@@ -237,6 +240,37 @@ impl<'g> Residence<'g> {
             result.push(address.clone());
         }
         Ok(result)
+    }
+
+    pub(super) fn owes_under(&self, root: Root<'g>, budget: &mut Budget) -> Work<bool> {
+        for (candidate, value) in &self.locations {
+            budget.step(1)?;
+            if *candidate == root
+                && matches!(value.content, Content::Result(_) | Content::Unclassified(_))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    pub(super) fn contents(
+        &self,
+        root: Root<'g>,
+        component: &[ResultComponent<'g>],
+        budget: &mut Budget,
+    ) -> Work<Vec<Located<'g>>> {
+        let mut values = Vec::new();
+        for (candidate, value) in &self.locations {
+            budget.step(1 + component.len())?;
+            if *candidate == root && value.component.starts_with(component) {
+                budget.reserve(value.size())?;
+                let mut value = value.clone();
+                value.component.drain(..component.len());
+                values.push(value);
+            }
+        }
+        Ok(values)
     }
 
     pub(super) fn take(
