@@ -781,6 +781,82 @@ Spec hand-checked fresh-tuple separation and occurs-checked correlation. Standar
 
 After correction, documentation validation passed 1676 destinations with zero errors. Added RFC sentences remained within the local length limit; formal vocabulary compliance remains unverified. The checkpoint awaited separate P1 through P4 approval, which the owner later granted at the revision recorded above.
 
+## M4.6 design checkpoint
+
+### Baseline and scope
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) follows M4.5 at `830a651d88bf1703bbfa877873ebd2289e52adcc`. The [M4.5 acceptance record](../crates/compiler/tests/m4-5-acceptance.md) records 17 scoped public tests and 256 passing compiler tests. Its ordinary facts remain hypothetical without canonical core admission. They do not authorize an ordinary call or stand in for evidence.
+
+The owner [chose the context agreement rule](https://github.com/Reilley64/rill/issues/63#issuecomment-6964354024). For loose `pair<A,B>` with `(A,B)` and `(T,T)` implementations, `pair(1i32, 2)` needs an independent width. The viable fallback does not supply the same context as the specialized pattern. A declaration `pair<T>(left: T, right: T)` can supply it from the first argument. This precision does not approve the procedure or the public queries below.
+
+### Owning procedures
+
+- [RFC 0004 inference and evidence](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure) owns local substitution frames, context agreement, callable typing, symbolic calls and bounded proof work.
+- [RFC 0005 applications and bracket category](rfcs/0005-types-records-enums-and-inference.md#proposed-m46-nominal-application-inference) owns nominal field/payload inference, defaulted applications and literal category commitment.
+- [RFC 0007 typed capture and predicates](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m46-capture-and-invocation-facts) owns access demands, actual capture sources and typed predicate proofs.
+- [RFC 0008 exact error evidence](rfcs/0008-errors-propagation-and-caused-by-wrapping.md#proposed-m46-exact-error-evidence) owns the ordinary exact-E witness boundary. M4.7 still owns conversion-selected E.
+- [RFC 0002 requirement metadata](rfcs/0002-modules-and-program-loading.md#proposed-m46-requirement-metadata-boundary) preserves source routes and the separation of caller lookup from proof inputs.
+
+Reuse M4.5's actual inventory and shared M4.1/M4.2 facilities. Extend the M4.3/M4.4 body engine rather than run a new resolver or body checker. The old bounded entries keep their scopes and tests. An earlier entry's failure on unsupported generics is not an M4.6 prerequisite. Applicable declaration checks still precede completed body facts. Preserve missing core, layout and representation prerequisites rather than assuming them complete.
+
+This stage checks supported named and implementation bodies symbolically, including their nested arrows and supported calls in startup and expectations. Check written source independently of the set of concrete instantiations. Callee contracts come from declarations and proof records, never an inspection of an eventual callee body. Checking a fresh arrow's own source is not strengthening a callee contract.
+
+M4.7 owns conversion applicability/determinacy/coherence. M4.8 owns actual core admission, canonical List/index/Option/Result/Err and iterator integration, visibility of public and nested declarations, remaining capture/aggregate typing prerequisites and integrated result-use completion. Keep pending typed obligations inside M4. This stage establishes no ownership, loan, storage, transfer, cleanup, runtime or editor facts. Keep #56 and #63 open and PR #58 draft and unmerged.
+
+### Proposed public interfaces
+
+Names describe behavior, not final Rust spelling. Obtain separate approval before tests or implementation.
+
+```text
+analyze_generics(captured ordinary analysis, analysis limits)
+    -> scoped generic/body report with completion, findings and obligations
+report.body(module, existing body owner)
+report.node(module, original syntax node)
+    -> checked or explicitly partial body and node facts
+report.goal(issued goal identity)
+    -> exact goal, assumption/selection dependencies, source sites and proof state
+```
+
+The analysis uses one actual M3 capture and the applicable declaration and ordinary-comparison facts. It may complete independent standalone bodies even if another body's required ordinary/core premises remain pending. Retain those pending premises in the report. Check every supported written body context. A scoped body completion does not prove its callees' source bodies, complete the loaded graph, or grant runtime permission.
+
+| Interface | Catches | Does not establish |
+| --- | --- | --- |
+| Generic analysis | Header/default completion, independent type anchors, deferred source contexts, local scope and required evidence. | Successful analysis of unrelated unsupported constructs, protected role/provider admission or whole-source validity. |
+| Body and node query | Canonical types, substitutions and their origins, literal/category commitments, arrow signatures, capture demands, admission and actual exit targets. Conditional ordinary facts retain their premise. | Erasure of actual dependencies, permission to move/borrow/copy, or a checked result for a failed call. |
+| Goal query | Canonical ordered terms, explicit assumptions, selected body/equalities, proof dependencies or blocking cycle, and separate proof states. | A public way to inject a trusted assertion, choose a body by evidence, retag unknowns, or assume a pending goal. |
+
+Reject cross-capture modules, owners and goal identities as InvalidRequest. Existing out-of-scope nodes return no checked fact. Give each body explicit completion and unperformed obligations. A report with partial facts cannot be substituted for a successful checked body. Goal queries only inspect goals issued by the checker; callers cannot construct preapproved evidence.
+
+### Decisions requested before model or Rust
+
+| Choice | Proposal and consequence |
+| --- | --- |
+| H1. Exact frames and defaults | Approve rigid body binders, flexible per-use slots, exact equations with bounded occurs checks, and fixed outer admissions as separate facts. Solve actual anchors before ready written defaults and resume inference after each one. Finish nominal construction and type applications without widening existing containers or guessing an unsuffixed width. Bare never does not create a substitution. |
+| H2. Source context and callables | Confirm the recorded fallback agreement and approve its finite implementation. Require a written shape or independently substituted type for each needed projection, even with one survivor. Commit category/arity before checking fresh elements. Use canonical callable clauses for shape only, then type arrows once and run whole-vector selection. Arrow mode and capture origins are separate from static comparison. Output context cannot back-propagate into ordinary selection. |
+| H3. Exact goals and symbolic outputs | Approve explicit checked assumptions, finite uniform-winner proofs and distinct determine/prove judgments. Infer any genuinely free ordinary result position only after selection. Keep pending outputs, explicit input filters, and the caller’s assumptions distinct. Preserve exact selected relationships, including E. Active cycles are unresolved, not success or proof of absence. Selected evidence failure never triggers fallback. Callable and structural property proofs preserve actual origins and never grant access. |
+| H4. Interfaces, completion and validation | Approve the three query boundaries and partial facts. Validate the finite staging and proof procedure in a separate model before vertical public-interface TDD. Reuse real captures without a fake catalogue. Keep missing admission, representations and later typed obligations explicit. Run required local verification and independent final reviews in PR #58. |
+
+### Planned model and compiler acceptance
+
+These are expected contrasts, not observed results. All M4.6 model and compiler cases are NotChecked at this checkpoint.
+
+| Counterexample to prevent | Planned check | Owning rule |
+| --- | --- | --- |
+| A default overrides independent inference or repairs a conflict. | `same<T=i32>(true)` binds bool. In `f<R=i32,A=bool>(cb: (A) => R)`, apply A's `bool` default, then infer R from `x => true` without using R's default. A written trailing default can supply width after inference. Earlier dependencies, same-slot conflicts, cycles and depth exhaustion have distinct results. | [Frames and defaults](rfcs/0004-functions-overloads-and-generic-requirements.md#worklist-and-defaults) |
+| Construction invents a width or chooses another declaration. | Records and enum payloads use one frame and known field contexts. Rebuilds preserve exact applications. Standalone tuples use immediate independent contexts. Unknown List admission retains pending facts. An existing tuple cannot be retyped from a later use. | [Nominal inference](rfcs/0005-types-records-enums-and-inference.md#proposed-m46-nominal-application-inference) |
+| A specialization alone supplies the missing width. | Loose repeated `pair(1i32, 2)` requires context with the viable fallback. The suffixed call selects by established inputs. A repeated declaration slot can supply that width. A previously typed i64 is not converted to i32. | [Context agreement](rfcs/0004-functions-overloads-and-generic-requirements.md#source-call-context-and-ordinary-selection) |
+| Candidate context uses output, tries several types, or guesses from implementation count. | Conflicting List/tuple and callback projections do not materialize the source twice. A fixed 2/3/4-item tuple uses category then source arity. Each `join` callback gets its zero-parameter context while its result slot is open. Borrowed `map` supplies `&T` only from the established applicable pattern. An overloaded bare function value without context cannot use a sole body to complete it. | [Bracket staging](rfcs/0005-types-records-enums-and-inference.md#bracket-category-before-elements) and [callable formation](rfcs/0004-functions-overloads-and-generic-requirements.md#callable-formation-and-invocation) |
+| Mode or erasure grants an environment capability. | Actual read-only/mutable/consuming modes retain parameter/result equality. Shared and mutable descriptors cannot consume the referent. Two same-signature closures do not share a property proof, even in `Holder<F>` fields. Resolve declared predicates and preserve origins through member projections. No fake native admission. | [Typed capture and predicates](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m46-capture-and-invocation-facts) |
+| A generic body specializes itself from concrete callers. | Check with rigid parameters and actual assumptions. A uniform winner needs full coverage and dominance over all intersecting alternatives. A fallback that another instantiation can override gives no static output promise. The same input vector with distinct explicit filters can have distinct witnesses. Exact required outputs must agree after concrete normal selection, including E. | [Symbolic bodies](rfcs/0004-functions-overloads-and-generic-requirements.md#symbolic-bodies-and-evidence-goals) and [exact error evidence](rfcs/0008-errors-propagation-and-caused-by-wrapping.md#proposed-m46-exact-error-evidence) |
+| A requirement supplies its own proof or changes body choice. | Declaration and selected-body requirements are conjunctive. A proved missing requirement does not retry. A selected `where` clause cannot seed a proof of itself. Active cycles, growing chains and unavailable premises stay distinct from settled negatives. An expectation cannot complete a pending output or contradict a determined one. | [Proof work](rfcs/0004-functions-overloads-and-generic-requirements.md#proof-worklist-and-completion) |
+| A partial report becomes success or fabricates a type. | Unresolved context/core roles and exhausted budgets retain causes and known facts, no fresh checked result. Skip no written source, including inactive paths. Validate original syntax, scope, routes and graph identities. Exact limits and one-short cases verify bounded products, worklists and caches. | [Public interfaces](#proposed-public-interfaces) and [proof completion](rfcs/0004-functions-overloads-and-generic-requirements.md#proof-worklist-and-completion) |
+
+The independent model should enumerate bounded input possibilities to challenge projected agreement and symbolic winner proofs. Test equation/default scheduling under worklist permutations. Compare proof outcomes to finite graphs with independent seeds, ungrounded cycles, conflicting outputs and expanding goals. A counterexample to the procedure returns to design before Rust. The model does not admit real core identities or run Rill.
+
+Direct compiler tests must load real M3 source fixtures and query actual inferred declarations, bodies, nodes and goals. Use ordinary proof fixtures conditionally when the real core role is missing. Do not manufacture trusted contracts for unconditional ordinary proof tests. Preserve positive standalone and intrinsic tests where their prerequisites are already known.
+
+Run `mise run test:compiler`, `mise run test`, `mise run check` and `mise run build:scaffold`. Run `check:ci` only if workflows change. Keep documentation checks, review scopes, model execution, compiler assertions and product execution separate. No M4.6 model, compiler or Rill execution has occurred at this checkpoint.
+
 ## Completion record
 
 The following M1 statement belongs to the original planning baseline. M1/M2 later merged as recorded above; M3 evidence is separate.

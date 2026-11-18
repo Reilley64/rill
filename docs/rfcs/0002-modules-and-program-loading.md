@@ -367,6 +367,16 @@ Visibility of supported nested functions and nominal declarations remains an M4.
 
 Ordinary input facts do not prove family-role or protected-action admission. Missing canonical classification cannot turn a conversion family into an ordinary duplicate. Missing protection metadata cannot prove a body safe. Preserve separate completion states and original source findings.
 
+### Proposed M4.6 requirement metadata boundary
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this handoff to [the inference and evidence procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure). Scoped approval remains pending.
+
+Resolve source requirement names in the declaration's captured module. Keep canonical family or compiler-predicate identities, arguments, source sites and actual binding routes. Resolve imported aliases once. Unresolved or inaccessible targets cannot supply assumptions. Apply canonical prelude fallback only in its existing unqualified scope.
+
+Carry requirement targets and default terms across modules as metadata. Do not resolve those names again from the caller. Metadata does not import a name, expose a private representation or grant placement. Keep public requirement/default nameability pending where the M4.8 source-interface checks have not finished.
+
+A successful source name lookup is not evidence or role admission. Protected references and conversion targets retain their own prerequisites. When the role is not available, ordinary derivations retain a conditional premise. Paths, public exports and schema agreement alone cannot establish that role.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

@@ -330,6 +330,42 @@ Names, standard-root paths and private fields confer no authority. An actually e
 
 Actual canonical admission remains an M4.8 prerequisite when missing. Structural input facts can remain useful, but no completed protected collection or checked call follows. No test may fabricate a standard capability definition or weaken the catalogue to obtain success.
 
+### Proposed M4.6 capture and invocation facts
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this typed boundary for [arrow checking](0004-functions-overloads-and-generic-requirements.md#callable-formation-and-invocation). Approval remains pending. Keep access demands and carried sources. Do not acquire loans, move captures, execute copies or prove lifetime safety in this stage.
+
+Resolve each written arrow use in its actual lexical environment. A reference to a runtime outer binding records a capture candidate. Static declarations do not capture runtime storage. Record which inner callable forms or uses a captured path. A named function's noncapture restriction remains unchanged.
+
+A stable local, field or explicit dereference path can supply original capture provenance. An explicit `&place` or `&mut place` records that access, not a captured copy of the place's owner. Capture formation retains the source restriction and original path. Complex computed places or unresolved acquisition needed for a mode/property proof remain incomplete. Do not hoist side-effectful computations from an arrow body.
+
+Determine the typed demand from the arrow's reachable possible uses. Check skipped written source without choosing its runtime outcome. Read-only observation needs read-only invocation. Mutation or repeatable mutable invocation of owned capture storage needs mutable access. A use requiring consumption of a non-implicitly-copyable owned capture needs consuming access.
+
+For a by-value use, consult the existing implicit-copy classification. Do not use an explicit copy overload as implicit-copy evidence. An unresolved classification blocks a mode proof if it affects consumption. Keep explicit copy calls as their own evidence goals. Do not replace consumption of a borrowed referent with a capture move.
+
+Combine the strongest required access with the established capture form. An explicit borrowed capture retains its reference access when used. A borrowed receiver cannot grant consumption of its environment. A mutable descriptor does not change a shared reference's referent access. Track every capture site's demand and retained dependency, not only the combined mode.
+
+An arrow with no outer runtime uses has read-only mode. A capture-free named function value also has read-only mode. Do not use the expected receiver mode to infer a stronger capability. Preserve actual capture evidence through permitted weakening. Erasing to a declared callable interface keeps restrictions but loses unstated guarantees.
+
+Pending projections or mode requirements can coexist with an established parameter/result signature. They cannot supply a checked invocation or verified property. Later ownership checking still validates formation, exclusive access, escape and transfers. In particular the typed mode does not permit moving out of a shared borrow.
+
+#### Property and callable evidence
+
+Use the actual prelude predicate identity. Assumptions and proofs retain the canonical subject and originating value facts. A reference proves noBorrow false for its type; a checked scalar or owned string proves noBorrow. A known reference dependency cannot disappear in a record or closure.
+
+A checked scalar or immutable string proves both `sendable` and `shareable`. A shared reference needs a shareable referent for both. An exclusive reference needs a sendable referent for `sendable`. Its read-only sharing needs a shareable referent and preserves exclusivity. These rules implement the source-type decision in [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md#transfer-sharing-and-scheduling).
+
+For ordinary source tuples and inspectable user nominals, require the property of each contained value type after full substitution. A variant uses its own payload. A parent uses all declared payloads. A phantom parameter supplies no stored value. Apply this rule only to actually established representations. An opaque, native or protected representation needs its own admitted contract, not a shape proof.
+
+Use actual typed capture facts for concrete callable properties. Check every captured source using its actual reference or owned form. Use all relevant paths when a callable value joins from several origins. Erased or unresolved environments supply no positive proof. A callable signature, selected body or lack of fields in a public view does not prove an environment property.
+
+When a structural proof reaches a member, project its value origins along with its substituted type. For `Holder<F>` with a callable field, use the closure origins for that field rather than F's signature. For joined aggregates, use all corresponding field origins. Keep this distinction in proof keys. Missing field origins stay unresolved when the field type alone cannot prove the property.
+
+For a canonical callable predicate, compare the complete argument tuple and result terms by equality. Use the declared receiver type and actual mode. Apply the mode order to an owned callable. A shared reference forwards read-only invocation only if its referent supports it. A mutable reference forwards read-only or repeatable mutable invocation according to its referent's mode. It cannot forward consuming invocation of the referent.
+
+For a reference subject, forwarding can give the descriptor its own callable capability. A once-use of that descriptor still invokes the referent without consuming the environment. A shared descriptor invokes read-only. A mutable descriptor needs the access required by its forwarded mode. Do not insert further implicit dereferences.
+
+Each rule yields proved, disproved or unresolved evidence. Unsupported or cyclic structural obligations are unresolved. Do not derive a missing operation from unavailable core metadata. There is no structural proof of explicit copy, protected guard access or disposal. Preserve every proved property independently. No property implies permission to act on a particular value.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

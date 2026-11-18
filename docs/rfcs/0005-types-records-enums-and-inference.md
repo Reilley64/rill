@@ -600,6 +600,36 @@ Canonical never's no-value admission checks an immediate value expectation witho
 
 Source-call context formation remains M4.6 work. An input-only fact cannot invent a receiving type from implementation counts or erase actual variant evidence. Full call completion still needs the actual type/admission, selected signature and evidence obligations.
 
+### Proposed M4.6 nominal application inference
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this extension of the M4.4 construction procedure. Approval remains pending. Use [RFC 0004's substitution frames and default order](0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure).
+
+Resolve the written annotation or constructor path to one canonical declaration. Select the written variant within that declaration. Check visibility and payload form before using fields as constraints. Do not search for another record by its shape. A private or ambiguous target supplies no receiving type.
+
+Start one frame for the nominal declaration's ordered arguments. Combine explicit leading arguments, an exact rebuild base and the immediate expected application of that same nominal. A same-parent expected variant must agree with the written variant. A parent expectation can supply its arguments without changing the constructed variant's identity.
+
+In value construction, gather independent field and payload types before finalizing fresh ones. Check all named and positional members against the actual declarations. Use established field types to contextualize unresolved literals, nested constructors and callbacks. Use one shared substitution across every member. A missing field or invalid payload does not become a type equation.
+
+For type-only uses, there are no value anchors. Complete explicit terms and apply only available trailing defaults. Reject nontrailing defaults. A default can mention earlier parameters, not itself or a later position. An unavailable earlier argument blocks the default. Do not reinterpret a same-spelled declaration as the binder that is out of scope.
+
+Keep defaults and their resulting arguments distinct in provenance. When a default elaborates a dependent application, use its own bounded frame. Repeating the same active default application stays Incomplete. Charge growing applications without expanding nominal field definitions during type equality. Defaults never select another nominal definition or repair an incompatible anchor.
+
+A completed application preserves canonical identity, full arguments and source sites. A failed field does not erase independent member findings. Later statements and ownership assumptions do not supply missing types. Existing values gain no container covariance from fresh construction context.
+
+#### Bracket category before elements
+
+Use a declared tuple or admitted canonical List context first. Otherwise, apply [ordinary context agreement](0004-functions-overloads-and-generic-requirements.md#source-call-context-and-ordinary-selection). The owner chose agreement over using a specialization alone to fix context.
+
+Require every viable alternative to agree on the bracket category before checking a fresh element. A viable unconstrained category blocks a different fixed candidate's proposed category. Conflicting List/tuple projections require independent context. A missing core identity does not prove category agreement or category absence.
+
+Once the category is fixed as tuple, use the written number of elements. Check it against a declared receiver's arity. For projected receivers, discard wrong-length tuple alternatives by written arity alone. Require the remaining alternatives to agree on needed element types. Never go back to List if no tuple arity fits.
+
+If complete context analysis supplies no required category at all, retain the List default. A proved open slot is different from an unavailable projection. Do not treat unavailable metadata as open.
+
+Use the admitted canonical List definition. Infer its element type from the established element join. An empty literal or unanchored numeric width does not determine an element type. Do not retry tuple after failure.
+
+A fixed tuple can carry different callback input/result contexts at its different positions. Use the [callable procedure](0004-functions-overloads-and-generic-requirements.md#callable-formation-and-invocation). Neither an expected family result nor a failed callback chooses another category. Without real core admission, preserve the List obligation and any established element facts. No invented List contract can complete the type.
+
 ## Valid/invalid examples and diagnostics
 
 T1 through T3 appear in the guide. The following cases are independent unless they name an earlier context. All type and runtime outcomes are expectations, not compiler observations.

@@ -337,6 +337,18 @@ Native operations can report typed resource failures without making Rill allocat
 
 False expectations remain ordinary test failures under Accepted RFC 0001. Compiler diagnostics and trusted expectation previews must not call user display/show or retain live error wrappers. Their bounded observations do not replace normal full cause rendering.
 
+### Proposed M4.6 exact error evidence
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes these equality facts for [RFC 0004's ordinary proof procedure](0004-functions-overloads-and-generic-requirements.md#symbolic-bodies-and-evidence-goals). Approval remains pending. This stage does not implement conversion selection or admit an error wrapper.
+
+An ordinary requirement can name an exact error argument even when its input is symbolic. Preserve the canonical family, input terms and exact output relation. For example, `read(R,E)` retains both R and E. It is not evidence for any unspecified error type.
+
+In a generic body, use the written requirement or an independently justified relation. Do not assume a concrete E from a currently visible fallback. At instantiation, use the normal ordinary winner. Compare its selected output against the full substituted contract. A mismatch fails that requirement without retrying another implementation.
+
+Check an equality of known error terms by canonical identity and full arguments. The same rigid E can establish equality. Distinct rigid terms do not become equal through spelling, parent admission or a shared bound. An unresolved selected term supplies no equality. Keep the two terms and both source sites in the witness.
+
+This equality can be tested independently of a standard-library wrapper. Operations on actual `Result`, `Option`, `Err` and Cause require their admitted identities and contracts. Preserve pending obligations when those inputs are missing. Do not substitute record resemblance for admission. Positive constructor, propagation, cause-retention and result-use integration remain in M4.8. M4.7 owns conversion-selected E and its separate diagnostics.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |
