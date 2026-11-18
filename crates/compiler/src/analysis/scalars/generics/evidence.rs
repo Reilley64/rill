@@ -291,7 +291,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                             .collection_scope(id, inputs)
                             .and_then(|scope| scope.winner())
                             .is_some()
-                        || self.rigid_copy_input(id, inputs) =>
+                        || self.rigid_copy_input(id, inputs)
+                        || matches!(inputs.as_slice(), [input] if self.local_disposer_subject(id, input)) =>
                 {
                     None
                 }
@@ -453,20 +454,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         // The closed installed role inventory also permits checking a canonical
         // disposer in the module that defines its monomorphic record. The
         // typed receipt still requires the separate protection inventory.
-        let local_disposer = self.ordinary_scope.is_some()
-            && self
-                .primitives
-                .and_then(|core| core.dispose)
-                .is_some_and(|role| role.id == source.family)
-            && declaration.id.module.origin == crate::loader::Origin::Application
-            && body.header.binders.is_empty()
-            && matches!(&body.header.shape, DeclarationShape::Function { parameters, .. } if matches!(
-                parameters.as_slice(), [parameter] if matches!(parameter.ty.as_ref(),
-                    TypeTerm::Nominal { declaration: owner, arguments } if arguments.is_empty()
-                        && body.placement == ordinary::Placement::ParameterOwner(owner)
-                        && self.input.facts.declarations.get(owner).is_some_and(|facts| matches!(facts.shape, DeclarationShape::Record { .. }))
-                )
-            ));
+        let local_disposer = self.local_disposer_contract(&source.family, body);
         if body.placement == ordinary::Placement::OutsideOwners
             && self.conversion_family(&source.family).is_none()
         {
@@ -523,6 +511,57 @@ impl<'r, 'g> Checker<'r, 'g> {
                 || local_disposer)
                 && body.compatibility == ordinary::Compatibility::Compatible;
         Ok(Some((&body.header, admitted)))
+    }
+
+    fn local_disposer_contract(
+        &self,
+        family: &DeclarationId,
+        body: &ordinary::ImplementationFacts<'g>,
+    ) -> bool {
+        body.source.declaration.module.origin == crate::loader::Origin::Application
+            && body.header.binders.is_empty()
+            && matches!(&body.header.shape, DeclarationShape::Function { parameters, .. } if matches!(
+                parameters.as_slice(), [parameter] if self.local_disposer_subject(family, &parameter.ty)
+                    && matches!(parameter.ty.as_ref(), TypeTerm::Nominal { declaration: owner, .. }
+                        if body.placement == ordinary::Placement::ParameterOwner(owner))
+            ))
+    }
+
+    pub(super) fn local_disposer_subject(&self, family: &DeclarationId, ty: &TypeTerm<'g>) -> bool {
+        self.ordinary_scope.is_some()
+            && self
+                .primitives
+                .and_then(|core| core.dispose)
+                .is_some_and(|role| role.id == *family)
+            && matches!(ty, TypeTerm::Nominal { declaration, arguments }
+                if arguments.is_empty() && declaration.module.origin == crate::loader::Origin::Application
+                    && self.input.facts.declarations.get(declaration).is_some_and(|facts| matches!(facts.shape, DeclarationShape::Record { .. })))
+    }
+
+    fn local_disposer_selection(
+        &mut self,
+        family: &'r ordinary::FamilyFacts<'g>,
+        inputs: &[Type<'g>],
+        filters: &[Substitution<'g>],
+    ) -> Work<Option<GoalSelection<'g>>> {
+        let id = &family.header.declaration.id;
+        if !matches!(inputs, [input] if self.local_disposer_subject(id, input)) {
+            return Ok(None);
+        }
+        // Compare the complete family, including any competing registration.
+        // A selected contract still needs the ordinary output/evidence proof.
+        let GoalChoice::Selected(selection) =
+            self.select_goal_contract(id, inputs, filters, true)?
+        else {
+            return Ok(None);
+        };
+        self.elab.step(family.implementations.len())?;
+        let admitted = family.implementations.iter().any(|body| {
+            body.source.declaration == *selection.implementation
+                && body.compatibility == ordinary::Compatibility::Compatible
+                && self.local_disposer_contract(id, body)
+        });
+        Ok(admitted.then_some(selection))
     }
 
     pub(in crate::analysis::scalars) fn nested_body(
@@ -1158,6 +1197,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         return Ok(state);
                     }
                     return Ok(GoalState::Unresolved(GoalBlocker::MissingAssumption));
+                }
+                if let Some(selection) = self.local_disposer_selection(family, &inputs, &filters)? {
+                    return self.expand_selected_contract(goal, family, selection);
                 }
                 return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
             };

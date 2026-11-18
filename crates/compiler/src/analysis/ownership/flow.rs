@@ -876,7 +876,7 @@ pub(super) fn run<'g>(
                     }
                 }
                 Action::Dispose(slot) => {
-                    initialized(&state[slot], node)?;
+                    require_initialized(&slots, &state, slot, node, budget)?;
                     forbid_custom_partial(&slots, &state, slot, node)?;
                     forbid_active_escape(&state[slot], node)?;
                     conflict(
@@ -888,11 +888,22 @@ pub(super) fn run<'g>(
                         Access::Exclusive,
                         budget,
                     )?;
-                    state[slot] = State::Moved(node);
+                    let implementation = owed_disposer(slots[slot], &state[slot]);
+                    let storage = slots[slot].storage(slot);
+                    budget.step(storage.len())?;
+                    state[storage].fill(State::Moved(node));
                     retire_loans(&slots, &mut state, &[slot], budget)?;
-                    Operation::Dispose {
-                        callee: dispose.ok_or(Stop::Pending(node))?,
-                        operand: local(slot),
+                    if let Some(implementation) = implementation {
+                        budget.reserve(1)?;
+                        Operation::Cleanup(vec![Cleanup::InvokeDisposer {
+                            operand: local(slot),
+                            implementation,
+                        }])
+                    } else {
+                        Operation::Dispose {
+                            callee: dispose.ok_or(Stop::Pending(node))?,
+                            operand: local(slot),
+                        }
                     }
                 }
                 Action::Displace { target, .. } if slots[target].needs_boundary_cleanup() => {

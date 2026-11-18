@@ -309,6 +309,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.establish(inference, node, result, false)?;
             return Ok(false);
         }
+        let local_disposal = matches!(inputs.as_slice(), [Some(subject)]
+            if self.local_disposer_subject(call.fact.callee, subject));
         let (output, use_premise) = if consistent {
             let prior = self.arrow_premise;
             let scope = match inputs.as_slice() {
@@ -320,6 +322,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             };
             let result = (|| {
                 if self.has_application_ordinary_scope(call.fact.callee)
+                    || local_disposal
                     || scope.and_then(|scope| scope.winner()).is_some()
                 {
                     // Admission of the callee cannot settle premises of its operands.
@@ -333,7 +336,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 let output =
                     self.conditional_output(inference, node, &call, &inputs, &viable, outcome)?;
-                Ok((output, self.ordinary_use_premise(call.fact.callee)))
+                let premise = if local_disposal {
+                    self.arrow_premise
+                } else {
+                    self.ordinary_use_premise(call.fact.callee)
+                };
+                Ok((output, premise))
             })();
             self.arrow_premise = prior;
             result?
@@ -364,7 +372,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     premise = Some(premise.map_or(p, |a| a.combine(p)));
                 }
             }
-            let actual_scope = self.has_application_ordinary_scope(call.fact.callee);
+            let actual_scope =
+                local_disposal || self.has_application_ordinary_scope(call.fact.callee);
             if proof.premise.is_none() && (!actual_scope || premise.is_none()) {
                 match (proof.state, &output.agreement, &output.ty) {
                     (GoalState::Proved, OutputAgreement::Agrees, Some(ty)) => {
@@ -1481,7 +1490,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             .evidence
             .get(call.instantiation.as_ref().or(call.goal.as_ref()).unwrap())
             .unwrap();
-        if self.has_application_ordinary_scope(call.family) {
+        let local_disposer = self
+            .primitives
+            .and_then(|core| core.dispose)
+            .is_some_and(|role| &role.id == call.family)
+            && proof.selection.as_ref().is_some_and(|selected| {
+                selected.implementation.module.origin == crate::loader::Origin::Application
+            });
+        if self.has_application_ordinary_scope(call.family) || local_disposer {
             self.elab.reserve(call.defaults.len())?;
             facts.defaults = call.defaults.clone();
             if let Some(selection) = &proof.selection {

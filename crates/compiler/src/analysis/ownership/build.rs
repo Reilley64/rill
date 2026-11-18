@@ -1190,8 +1190,12 @@ impl<'a, 'g> Build<'a, 'g> {
             let [arg] = call.arguments.as_slice() else {
                 return Err(Stop::Pending(node));
             };
-            // This slice lowers only explicit canonical disposal of primitives.
-            if !matches!(self.value(*arg)?.ty.as_ref(), TypeTerm::Primitive(_)) {
+            let operand = self.place(*arg)?;
+            if !matches!(self.value(*arg)?.ty.as_ref(), TypeTerm::Primitive(_))
+                && !matches!((self.slots[operand].custom_disposer, &call.selection),
+                    (Some(expected), Some(selection))
+                        if selection.implementation == expected && selection.substitution.is_empty())
+            {
                 return Err(Stop::Pending(node));
             }
             let next = if let Some(into) = into {
@@ -1199,7 +1203,6 @@ impl<'a, 'g> Build<'a, 'g> {
             } else {
                 next
             };
-            let operand = self.place(*arg)?;
             return self.emit(node, Action::Dispose(operand), Edges::Next(next));
         }
         if call.callee.kind != DeclarationKind::Function

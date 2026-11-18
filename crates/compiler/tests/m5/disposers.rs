@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn active_disposer_cleans_only_remaining_fields() {
-    probe(
+    probe_with_typed(
         "disposers::active_disposer_cleans_only_remaining_fields",
         r#"
             import std::core::dispose as release;
@@ -12,6 +12,17 @@ fn active_disposer_cleans_only_remaining_fields() {
                 dispose(value.manual);
             }
             function normal(value: Bag, later: string): void { let inner = "inner"; }
+            function explicit(value: Bag, later: string): void { release(value); }
+            function explicitTwice(value: Bag): void { dispose(value); release(value); }
+            function explicitLive(value: Bag): &string {
+                let view = &value.head;
+                release(value);
+                return view;
+            }
+
+            type Recursive = { text: string; }
+            implement release(value: Recursive): void { dispose(value); }
+            function recursiveDisposal(value: Recursive): void { release(value); }
             function replace(old: Bag, incoming: Bag): void {
                 let mut current = old;
                 current = incoming;
@@ -62,7 +73,7 @@ fn active_disposer_cleans_only_remaining_fields() {
             implement release(value: Protected): void { }
             function protectedCleanup(value: Protected): void { }
         "#,
-        |_, module, receipt| {
+        |_, module, receipt, typed| {
             let lower = |name| {
                 let decl = module
                     .declarations
@@ -71,6 +82,63 @@ fn active_disposer_cleans_only_remaining_fields() {
                     .unwrap();
                 lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
             };
+            let explicit = lower("explicit");
+            let mir = explicit
+                .mir()
+                .unwrap_or_else(|| panic!("explicit: {:?}", explicit.completion()));
+            let cleanup = path_drops(mir, mir.entry);
+            let [
+                Obligation::InvokeDisposer {
+                    operand,
+                    implementation,
+                },
+                Obligation::Drop(later),
+            ] = cleanup.as_slice()
+            else {
+                panic!("explicit disposal must run before ordinary scope cleanup");
+            };
+            assert_eq!(operand.root.span.bytes(), b"value: Bag");
+            assert_eq!(later.root.span.bytes(), b"later: string");
+            assert!(mir.disposer(implementation).is_some());
+            let invocation = mir
+                .blocks
+                .iter()
+                .find(|block| block.site.span.bytes() == b"release(value)")
+                .expect("explicit call site");
+            let fact = typed
+                .bodies()
+                .node(module, invocation.site.node)
+                .unwrap()
+                .expect("typed call site");
+            let compiler::analysis::scalars::NodeFactKind::Expression(value) = &fact.kind else {
+                panic!("expected expression fact");
+            };
+            let call = value.call.as_deref().expect("typed explicit call");
+            assert_eq!(
+                call.callee,
+                &typed.dispose_role().expect("canonical dispose").id
+            );
+            assert_eq!(
+                call.selection
+                    .as_ref()
+                    .expect("proved implementation")
+                    .implementation,
+                *implementation
+            );
+            for (name, code) in [
+                ("explicitTwice", "R0200"),
+                ("recursiveDisposal", "R0501"),
+                ("explicitLive", "R0203"),
+            ] {
+                let rejected = lower(name);
+                assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                assert!(rejected.mir().is_none());
+                let [finding] = rejected.findings() else {
+                    panic!("{name}: expected ownership diagnostic")
+                };
+                assert_eq!(finding.code(), code);
+            }
+
             let checked = lower("normal");
             let mir = checked
                 .mir()
