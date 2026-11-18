@@ -55,29 +55,35 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
             let mir = report
                 .mir()
                 .unwrap_or_else(|| panic!("unpack: {:?}", report.completion()));
-            let events: Vec<_> = mir
-                .blocks
-                .iter()
-                .flat_map(|block| match &block.operation {
-                    Operation::Call(_) => vec![(b"call".as_slice(), None)],
+            let mut events = Vec::new();
+            let mut block = mir.entry;
+            for _ in 0..mir.blocks.len() {
+                let step = &mir.blocks[block];
+                match &step.operation {
+                    Operation::Call(_) => events.push((b"call".as_slice(), None)),
                     Operation::Move {
                         from,
                         into: Some(to),
                     } if from.tuple_element().is_some() => {
-                        vec![(to.root.span.bytes(), from.tuple_element())]
+                        events.push((to.root.span.bytes(), from.tuple_element()));
                     }
-                    Operation::Cleanup(cleanups) => cleanups
-                        .iter()
-                        .filter_map(|op| match op {
+                    Operation::Cleanup(cleanups) => {
+                        events.extend(cleanups.iter().filter_map(|op| match op {
                             Obligation::Drop(place) => {
                                 Some((place.root.span.bytes(), place.tuple_element()))
                             }
                             _ => None,
-                        })
-                        .collect(),
-                    _ => Vec::new(),
-                })
-                .collect();
+                        }))
+                    }
+                    _ => {}
+                }
+                match step.terminator {
+                    Terminator::Goto(next) => block = next,
+                    Terminator::Return => break,
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            assert!(matches!(mir.blocks[block].terminator, Terminator::Return));
             assert_eq!(
                 events,
                 [
@@ -91,18 +97,28 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
                 ]
             );
 
-            let limited = lower_body(
-                receipt,
-                module,
-                &declaration("unpack").id,
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            let check =
+                |limits| lower_body(receipt, module, &declaration("unpack").id, limits).unwrap();
+            assert!(check(limits).mir().is_some());
+            for short in [
                 AnalysisLimits {
-                    max_work: report.statistics().work - 1,
-                    ..AnalysisLimits::default()
+                    max_work: limits.max_work - 1,
+                    ..limits
                 },
-            )
-            .unwrap();
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none());
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check(short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
 
             for (name, site, source, code) in [
                 (

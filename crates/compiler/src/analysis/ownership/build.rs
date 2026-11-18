@@ -30,6 +30,12 @@ fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>
     }
 }
 
+enum Binding<'a, 'g> {
+    Discard,
+    Name(&'g DeclarationId, &'a Type<'g>),
+    IrrefutableOwnedTuple(&'a PatternFacts<'g>),
+}
+
 impl<'a, 'g> Build<'a, 'g> {
     fn depth(&mut self, depth: usize) -> ResultOf<()> {
         self.budget.step(1)?;
@@ -320,20 +326,16 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::Binding { .. } => {
                 let value = *children.last().unwrap();
-                let pattern = children[0];
-                match self.module.syntax.nodes[pattern].kind {
-                    NodeKind::Wildcard => return self.discard(node, value, next, depth + 1),
-                    NodeKind::BracketPattern => {
-                        return self.bind_tuple(node, pattern, next, depth + 1);
+                match self.binding(node)? {
+                    Binding::Discard => self.discard(node, value, next, depth + 1),
+                    Binding::Name(declaration, _) => {
+                        let slot = self.locals[declaration];
+                        self.expression(value, Some(slot), next, depth + 1)
                     }
-                    _ => {}
+                    Binding::IrrefutableOwnedTuple(facts) => {
+                        self.bind_tuple(node, facts, next, depth + 1)
+                    }
                 }
-                let Some(NodeFactKind::Binding(binding)) = self.facts.get(&node).map(|f| &f.kind)
-                else {
-                    return Err(Stop::Pending(node));
-                };
-                let slot = self.locals[binding.declaration];
-                self.expression(value, Some(slot), next, depth + 1)
             }
             NodeKind::ExpressionStatement => self.discard(node, children[0], next, depth + 1),
             NodeKind::Assignment("=") => {
@@ -430,29 +432,52 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
-    fn tuple_pattern(&self, pattern: NodeId) -> ResultOf<&'a PatternFacts<'g>> {
-        let Some(NodeFactKind::Pattern(facts)) = self.facts.get(&pattern).map(|f| &f.kind) else {
-            return Err(Stop::Pending(pattern));
-        };
-        if facts.access != Access::Owned
-            || !facts.coverage.exhaustive()
-            || !matches!(facts.ty.as_ref(), TypeTerm::Tuple(_))
-        {
-            return Err(Stop::Pending(pattern));
+    fn binding(&self, node: NodeId) -> ResultOf<Binding<'a, 'g>> {
+        let pattern = self.module.syntax.nodes[node].children[0];
+        match self.module.syntax.nodes[pattern].kind {
+            NodeKind::Wildcard => Ok(Binding::Discard),
+            NodeKind::BracketPattern => {
+                let Some(NodeFactKind::Pattern(facts)) = self.facts.get(&pattern).map(|f| &f.kind)
+                else {
+                    return Err(Stop::Pending(pattern));
+                };
+                if facts.access != Access::Owned
+                    || !facts.coverage.exhaustive()
+                    || !matches!(facts.ty.as_ref(), TypeTerm::Tuple(_))
+                {
+                    return Err(Stop::Pending(pattern));
+                }
+                Ok(Binding::IrrefutableOwnedTuple(facts))
+            }
+            _ => {
+                let Some(NodeFactKind::Binding(binding)) = self.facts.get(&node).map(|f| &f.kind)
+                else {
+                    return Err(Stop::Pending(node));
+                };
+                let ty = binding.ty.as_ref().ok_or(Stop::Pending(node))?;
+                Ok(Binding::Name(binding.declaration, ty))
+            }
         }
-        Ok(facts)
     }
 
     fn declare_binding(&mut self, node: NodeId, locals: &mut Vec<Slot>) -> ResultOf<()> {
         let pattern = self.module.syntax.nodes[node].children[0];
-        let syntax = &self.module.syntax.nodes[pattern];
-        match syntax.kind {
-            NodeKind::Wildcard => Ok(()),
-            NodeKind::BracketPattern => {
-                let facts = self.tuple_pattern(pattern)?;
+        match self.binding(node)? {
+            Binding::Discard => Ok(()),
+            Binding::Name(declaration, ty) => {
+                let local = self.local(declaration, pattern, ty)?;
+                self.budget.reserve(1)?;
+                locals.push(local);
+                Ok(())
+            }
+            Binding::IrrefutableOwnedTuple(facts) => {
                 let mut binders = facts.binders.iter();
                 self.budget.reserve(binders.len())?;
-                for (position, &child) in syntax.children.iter().enumerate() {
+                for (position, &child) in self.module.syntax.nodes[pattern]
+                    .children
+                    .iter()
+                    .enumerate()
+                {
                     self.budget.step(1)?;
                     match self.module.syntax.nodes[child].kind {
                         NodeKind::Wildcard => {}
@@ -473,28 +498,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
                 Ok(())
             }
-            _ => {
-                let Some(NodeFactKind::Binding(binding)) = self.facts.get(&node).map(|f| &f.kind)
-                else {
-                    return Err(Stop::Pending(node));
-                };
-                let ty = binding.ty.as_ref().ok_or(Stop::Pending(node))?;
-                let local = self.local(binding.declaration, pattern, ty)?;
-                self.budget.reserve(1)?;
-                locals.push(local);
-                Ok(())
-            }
         }
     }
 
     fn bind_tuple(
         &mut self,
         node: NodeId,
-        pattern: NodeId,
+        facts: &PatternFacts<'g>,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        let facts = self.tuple_pattern(pattern)?;
         // Evaluate the whole owned initializer once. Bind names from the
         // temporary, then clean its remaining elements at statement exit.
         let source = facts.source.node;
@@ -502,12 +515,12 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut tail = self.cleanup(node, &[scratch], next)?;
         for binder in facts.binders.iter().rev() {
             let [PatternProjection::TupleElement(position)] = binder.projections.as_slice() else {
-                return Err(Stop::Pending(pattern));
+                return Err(Stop::Pending(node));
             };
             let into = *self
                 .locals
                 .get(binder.declaration)
-                .ok_or(Stop::Pending(pattern))?;
+                .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
             let from = self.element(site, scratch, *position)?;
             tail = self.emit(
