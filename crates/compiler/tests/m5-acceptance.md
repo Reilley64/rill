@@ -279,9 +279,22 @@ The `direct_calls_retain_compatible_inputs_not_the_access_loan` probe first stop
 
 At `f569302`, `mise run test:compiler` passed 434 tests and `mise run test` passed 450. `mise run check`, `mise run build:scaffold`, and the whitespace check passed with a fresh short `TMPDIR` on macOS AArch64. The staged M4 replay issued both receipts. All four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44412100022) passed at `dd040e0`. The [native jobs](https://github.com/Reilley64/rill/actions/runs/44412099861) failed at the unavailable `test:runtime` entry point.
 
-Standards reviewed `f569302` against `c13f9d9`. At `50aa8721cd290cbe161324d1c33148af7f732844`, checked target and input lookups and exact address comparisons charge work. The code distinguishes result retention from destination effects. The reversed-formal probe also checks staging order. All four local gates and the whitespace check passed again. Spec review remains open at recording time.
+Standards reviewed `f569302` against `c13f9d9`. At `50aa8721cd290cbe161324d1c33148af7f732844`, checked target and input lookups and exact address comparisons charge work. The code distinguishes result retention from destination effects. The reversed-formal probe also checks staging order. All four local gates and the whitespace check passed again. Spec independently verified the completed cases and found that a reached callee could not yet copy the old reference with `let old = *slot`. The following slice fixes that gap. The review also checked that unrelated Result obligations and unknown Result storage still block.
 
-A separate caller that forwards an existing destination via `relay(slot, input)` has both typed receipts only. Existing descriptor aliases, more general input sets, imported or erased contracts, and cancellation remain outside this slice. No workflow changed. No Rill program ran.
+## Forwarded exclusive destinations and stored references
+
+The [same #69 call contract](https://github.com/Reilley64/rill/issues/69) now admits forwarding an original `&mut &bool` parameter as well as borrowing a named local. `CallRetaining` identifies whether the destination is accessed through a parameter. The call reborrows that access and keeps the caller's contents separate. It retains the existing contents and the compatible input, not the reborrow suspension. The next use of the original descriptor may resume after the call. The callee still checks all reached bodies and their exits.
+
+The installed `forwarding_reborrows_the_descriptor_and_keeps_its_contents` probe first returned `Incomplete` for `let old = *slot` with a typed receipt. At `6d3f674f570d47daf350804b1c15e42ad20d968d`, both installed modes verify:
+
+| Cases | Observed compiler and MIR obligations |
+| --- | --- |
+| `remember`, `readsIncoming`, `savedCopy` | `CopyThrough` copies the stored reference, not the exclusive access descriptor. A caller-backed copy can return. A copied local source still rejects with `R0202` after the original slot has been overwritten. |
+| `relay`, `caller`, `relayRestored` | Reborrow the parameter, call with retained contents, then resume an exact write through the original descriptor. A caller reaches the relay and its callee. An exact write after the relay can retire the previous local source. |
+| `callerExpires`, `expiresBeforeOverwrite`, `preservesOld` | Reject `R0203` when a still-needed source expires after a call. The external contents remain live through a future overwrite. Old backing remains possible across forwarding. |
+| `suspended`, `movedDescriptor`, `escapesThroughRelay`, `rejectedCaller` | Reject use of suspended access (`R0201`), a moved descriptor (`R0200`), or a local reference retained at a callee exit (`R0202`). No caller MIR is published for a rejected reached body. |
+
+At `6d3f674`, `mise run test:compiler` passed 435 tests and `mise run test` passed 451. `mise run check`, `mise run build:scaffold`, and the whitespace check passed on macOS AArch64 with a fresh short `TMPDIR`. The staged M4 baseline and relay fixture issued both receipts. Independent reviews were requested at this code revision. Moving the original descriptor into an alias and forwarding that alias, general nested destinations, broader signatures, and cancellation remain outside this slice. No workflow changed. No Rill program ran.
 
 ## Open acceptance obligations
 
