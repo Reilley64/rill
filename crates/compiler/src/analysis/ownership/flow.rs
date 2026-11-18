@@ -78,7 +78,8 @@ fn liveness(
         let (used, killed) = match instruction.action {
             Action::None | Action::Cleanup(_) => (None, None),
             Action::Init(slot) | Action::End(slot) => (None, Some(slot)),
-            Action::Read { from, into } | Action::Dereference { from, into } => (Some(from), into),
+            Action::Read { from, into } => (Some(slots[from].extraction_sources(from)), into),
+            Action::Dereference { from, into } => (Some(from), into),
             Action::ForbiddenBorrowedMove(slot) => (Some(slot), None),
             Action::Borrow { from, into, .. } => (Some(from), Some(into)),
             Action::Reborrow { parent, into, .. } => (Some(parent), Some(into)),
@@ -125,11 +126,13 @@ fn liveness(
             _ => &[],
         };
         for slot in used.into_iter().chain(args.iter().copied()) {
-            budget.step(1)?;
-            if !live[pc].contains(&slot) {
-                budget.reserve(1)?;
-                live[pc].insert(slot);
-                changed = true;
+            for member in slots[slot].storage(slot) {
+                budget.step(1)?;
+                if !live[pc].contains(&member) {
+                    budget.reserve(1)?;
+                    live[pc].insert(member);
+                    changed = true;
+                }
             }
         }
         if changed {
@@ -174,6 +177,37 @@ fn conflict(
         }
     }
     Ok(())
+}
+
+fn visit_loans(
+    state: &[State],
+    storage: Range<Slot>,
+    budget: &mut Budget,
+    mut visit: impl FnMut(Loan, &mut Budget) -> ResultOf<()>,
+) -> ResultOf<()> {
+    budget.step(storage.len())?;
+    for member in &state[storage] {
+        if let State::Initialized(held) = member {
+            for &loan in held.loans.iter() {
+                budget.step(1)?;
+                visit(loan, budget)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn insert_loan(loans: &mut BTreeSet<Loan>, loan: Loan, budget: &mut Budget) -> ResultOf<()> {
+    if !loans.contains(&loan) {
+        budget.reserve(1)?;
+        loans.insert(loan);
+    }
+    Ok(())
+}
+
+fn loan_set(loans: BTreeSet<Loan>, budget: &mut Budget) -> ResultOf<Arc<[Loan]>> {
+    budget.reserve(loans.len())?;
+    Ok(Arc::from_iter(loans))
 }
 
 fn initialized(state: &State, site: NodeId) -> ResultOf<&Held> {
@@ -251,6 +285,7 @@ fn cleanup_boundary<'g>(
     budget.reserve(3 * scope.len())?;
     let mut indegrees = vec![0usize; scope.len()];
     let mut remaining = 0usize;
+    let mut grouped_dependencies = false;
     let source_rank = |loan: &Loan, state: &[State]| {
         if loan.kind == LoanKind::Suspension {
             return None;
@@ -263,9 +298,9 @@ fn cleanup_boundary<'g>(
     // retire before it. Only initialized storage participates.
     for &slot in scope {
         budget.step(1)?;
-        let State::Initialized(held) = &state[slot] else {
+        if !matches!(state[slot], State::Initialized(_)) {
             continue;
-        };
+        }
         if slots[slot].has_custom_disposer {
             return Err(Stop::Pending(node));
         }
@@ -279,12 +314,13 @@ fn cleanup_boundary<'g>(
             Access::EndScope,
             budget,
         )?;
-        for loan in held.loans.iter() {
-            budget.step(1)?;
-            if let Some(source) = source_rank(loan, state) {
+        visit_loans(state, slots[slot].storage(slot), budget, |loan, _| {
+            if let Some(source) = source_rank(&loan, state) {
                 indegrees[source] += 1;
+                grouped_dependencies |= slots[slot].fields != 0 || slots[scope[source]].fields != 0;
             }
-        }
+            Ok(())
+        })?;
     }
     let mut ready = BTreeSet::new();
     for (i, &slot) in scope.iter().enumerate() {
@@ -298,29 +334,32 @@ fn cleanup_boundary<'g>(
     while let Some(i) = ready.pop_last() {
         budget.step(1)?;
         let slot = scope[i];
-        let State::Initialized(held) = std::mem::replace(&mut state[slot], State::Vacant) else {
-            return Err(Stop::Pending(node));
-        };
-        for loan in held.loans.iter() {
-            budget.step(1)?;
-            if let Some(source) = source_rank(loan, state) {
+        visit_loans(state, slots[slot].storage(slot), budget, |loan, _| {
+            if let Some(source) = source_rank(&loan, state) {
                 indegrees[source] -= 1;
                 if indegrees[source] == 0 {
                     ready.insert(source);
                 }
             }
-        }
+            Ok(())
+        })?;
         scheduled += 1;
-        for field in slots[slot].storage(slot).skip(1).rev() {
+        for member in slots[slot].storage(slot).rev() {
             budget.step(1)?;
-            if let State::Initialized(held) = std::mem::replace(&mut state[field], State::Vacant) {
-                budget.reserve(1)?;
-                actions.push(cleanup_of(module, slots[field], &held));
+            if let State::Initialized(held) = std::mem::replace(&mut state[member], State::Vacant) {
+                if member != slot {
+                    budget.reserve(1)?;
+                }
+                actions.push(cleanup_of(module, slots[member], &held));
             }
         }
-        actions.push(cleanup_of(module, slots[slot], &held));
     }
     if scheduled != remaining {
+        // Grouping by record can make a cycle out of independently
+        // orderable fields. Do not reject without the field cleanup judgment.
+        if grouped_dependencies {
+            return Err(Stop::Pending(node));
+        }
         let slot = scope
             .iter()
             .copied()
@@ -465,15 +504,32 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     {
                         return Err(Stop::Pending(node));
                     }
+                    let carried = if into.is_some() && slots[from].reference_field {
+                        let owner = slots[from].owner;
+                        let mut carried = BTreeSet::new();
+                        visit_loans(
+                            &state,
+                            slots[owner].storage(owner),
+                            budget,
+                            |loan, budget| insert_loan(&mut carried, loan, budget),
+                        )?;
+                        Some(loan_set(carried, budget)?)
+                    } else {
+                        None
+                    };
                     let region = slots[from].storage(from);
                     budget.step(region.len())?;
                     for member in region {
-                        let held = if moves {
+                        let mut held = if moves {
                             std::mem::replace(&mut state[member], State::Moved(node))
                         } else {
                             state[member].clone()
                         };
                         if let Some(into) = into {
+                            if let (Some(loans), State::Initialized(value)) = (&carried, &mut held)
+                            {
+                                value.loans = loans.clone();
+                            }
                             state[into + (member - from)] = held;
                         }
                     }
@@ -506,7 +562,6 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     exclusive,
                 } => {
                     require_initialized(&slots, &state, from, node, budget)?;
-                    let held = initialized(&state[from], node)?;
                     conflict(
                         &slots,
                         &state,
@@ -520,28 +575,33 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                         },
                         budget,
                     )?;
-                    budget.reserve(2 * (held.loans.len() + 1))?;
-                    let mut loans = Vec::with_capacity(held.loans.len() + 1);
-                    loans.push(Loan {
-                        source: from,
-                        site: node,
-                        exclusive,
-                        kind: LoanKind::Backing,
-                    });
-                    // A borrowed descriptor exposes its stored reference. Preserve
-                    // that backing without calling it the address of the descriptor.
-                    loans.extend(held.loans.iter().map(|loan| Loan {
-                        kind: if loan.kind == LoanKind::Suspension {
-                            LoanKind::Suspension
-                        } else {
-                            LoanKind::Contents
+                    let mut loans = BTreeSet::new();
+                    insert_loan(
+                        &mut loans,
+                        Loan {
+                            source: from,
+                            site: node,
+                            exclusive,
+                            kind: LoanKind::Backing,
                         },
-                        ..*loan
-                    }));
-                    loans.sort_unstable();
-                    loans.dedup();
+                        budget,
+                    )?;
+                    visit_loans(&state, slots[from].storage(from), budget, |loan, budget| {
+                        insert_loan(
+                            &mut loans,
+                            Loan {
+                                kind: if loan.kind == LoanKind::Suspension {
+                                    LoanKind::Suspension
+                                } else {
+                                    LoanKind::Contents
+                                },
+                                ..loan
+                            },
+                            budget,
+                        )
+                    })?;
                     state[into] = State::Initialized(Held {
-                        loans: Arc::from(loans),
+                        loans: loan_set(loans, budget)?,
                         capture_drop: None,
                     });
                     Operation::Borrow {
@@ -616,23 +676,19 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     let call = &calls[index];
                     let mut retained = BTreeSet::new();
                     for &arg in &call.args {
-                        budget.step(1)?;
-                        let loans = &initialized(&state[arg], node)?.loans;
+                        require_initialized(&slots, &state, arg, node, budget)?;
+                        let storage = slots[arg].storage(arg);
                         if call.retains && call.into.is_some() {
-                            for loan in loans.iter().copied() {
-                                budget.step(1)?;
-                                if !retained.contains(&loan) {
-                                    budget.reserve(1)?;
-                                    retained.insert(loan);
-                                }
-                            }
+                            visit_loans(&state, storage.clone(), budget, |loan, budget| {
+                                insert_loan(&mut retained, loan, budget)
+                            })?;
                         }
-                        state[arg] = State::Vacant;
+                        budget.step(storage.len())?;
+                        state[storage].fill(State::Vacant);
                     }
                     if let Some(into) = call.into {
-                        budget.reserve(retained.len())?;
                         state[into] = State::Initialized(Held {
-                            loans: Arc::from_iter(retained),
+                            loans: loan_set(retained, budget)?,
                             capture_drop: None,
                         });
                     }
@@ -726,9 +782,16 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 }
                 Action::Export(slot) => {
                     require_initialized(&slots, &state, slot, node, budget)?;
-                    let loans = &initialized(&state[slot], node)?.loans;
-                    budget.step(loans.len())?;
-                    if let Some(loan) = loans.iter().find(|loan| loan.kind == LoanKind::Backing) {
+                    let mut escape: Option<Loan> = None;
+                    visit_loans(&state, slots[slot].storage(slot), budget, |loan, _| {
+                        if loan.kind != LoanKind::Suspension
+                            && escape.is_none_or(|old| loan.kind < old.kind)
+                        {
+                            escape = Some(loan);
+                        }
+                        Ok(())
+                    })?;
+                    if let Some(loan) = escape {
                         return Err(Stop::Rejected {
                             site: node,
                             related: if slots[loan.source].field.is_some() {

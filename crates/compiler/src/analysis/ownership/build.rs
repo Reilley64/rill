@@ -60,13 +60,20 @@ impl<'a, 'g> Build<'a, 'g> {
             owner: slot,
             field: None,
             fields: fields.len(),
+            reference_field: false,
             has_custom_disposer,
             moves,
             drops,
         });
         for field in fields {
             self.budget.step(1)?;
-            if !matches!(field.ty.as_ref(), TypeTerm::Primitive(_)) {
+            let reference_field = !has_custom_disposer
+                && primitive_reference(&field.ty)
+                && matches!(
+                    field.ty.as_ref(),
+                    TypeTerm::Reference { mutable: false, .. }
+                );
+            if !reference_field && !matches!(field.ty.as_ref(), TypeTerm::Primitive(_)) {
                 return Err(Stop::Pending(node));
             }
             let owned = owns_text(&field.ty);
@@ -76,6 +83,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 owner: slot,
                 field: Some(field.declaration),
                 fields: 0,
+                reference_field,
                 has_custom_disposer: false,
                 moves: owned,
                 drops: owned,
@@ -566,7 +574,11 @@ impl<'a, 'g> Build<'a, 'g> {
         for arg in call.argument_evaluation_order() {
             self.budget.step(1)?;
             let ty = self.value(arg)?.ty.clone();
-            if !matches!(ty.as_ref(), TypeTerm::Primitive(_)) && !primitive_reference(&ty) {
+            if !matches!(
+                ty.as_ref(),
+                TypeTerm::Primitive(_) | TypeTerm::Nominal { .. }
+            ) && !primitive_reference(&ty)
+            {
                 return Err(Stop::Pending(arg));
             }
             args.push(self.slot(arg, &ty)?);

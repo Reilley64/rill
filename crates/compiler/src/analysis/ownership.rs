@@ -373,6 +373,7 @@ struct Local<'g> {
     owner: Slot,
     field: Option<&'g Declaration>,
     fields: usize,
+    reference_field: bool,
     has_custom_disposer: bool,
     moves: bool,
     drops: bool,
@@ -381,6 +382,14 @@ struct Local<'g> {
 impl<'g> Local<'g> {
     fn storage(self, slot: Slot) -> Range<Slot> {
         slot..slot + 1 + self.fields
+    }
+
+    fn extraction_sources(self, slot: Slot) -> Slot {
+        if self.reference_field {
+            self.owner
+        } else {
+            slot
+        }
     }
 
     fn place(self, module: &'g Module) -> Place<'g> {

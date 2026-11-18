@@ -92,9 +92,27 @@ At `b35d250` on macOS AArch64, `mise run test:compiler` passed 425 tests, `mise 
 
 No workflow changed, so `check:ci` was not run. The hosted scaffold runs for this revision were pending at recording time. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM and provider ABI acceptance were not run.
 
+## Carried references in owned fields
+
+[#68](https://github.com/Reilley64/rill/issues/68) starts at M5 publication `e62a85da1107bd9ddb0c05c7bdbbd2091ae45523` on the same M4 input. The [approved #15 decision](https://github.com/Reilley64/rill/issues/15#issuecomment-6853088155) permits returning contained references while forbidding escape from body-local storage. The [layered dependency model](../../../docs/rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#layered-dependency-model) explains why `x.value` and `&x.value` have different dependencies. This increment does not accept the full RFC or establish a nested destination contract.
+
+Flat application records with default field cleanup can contain read-only references to primitive values. A descriptor field stores its carried sources separately from the slot holding it. Reading a reference field preserves the record's possible carried sources, not a borrow of the record's slot. Taking the field's address adds that slot as actual backing. A whole-value use keeps its initialized reference fields live. Replacement changes the destination field's stored reference without erasing copies held elsewhere. A call with an owned record argument transfers or copies the argument as usual. A reference result conservatively retains the input's carried sources, not the argument's local record storage. The checker still verifies reached callee bodies before publishing MIR.
+
+The [field-route tests](m5/field_routes.rs) require a typed receipt and exercise the public ownership seam in both installed load modes:
+
+| Case | Checked result |
+| --- | --- |
+| `forward`, `forwardAndClean`, `escapes` | A stored descriptor copies out and returns. MIR retires the local record and drops its owned text, if any, without disposing the caller's backing. Returning the address of a descriptor slot rejects with `R0202` and points at `&x.value`. |
+| `escapeLocal`, `escapeInRecord` | The compiler rejects both projecting a reference to a body-local source and returning the containing record. |
+| `callerForward`, `callerEscapes`, `callerRetains` | The caller hands off the owned text, keeps any reference result's carried sources, and rejects a local-source escape or release while the result still needs it. |
+| `fieldReplacement`, `otherHolder`, `possibleSource`, `futureProjection`, `borrowHolder` | A proved replacement retires the old field's reference, not another holder's copy. Reference extraction retains possible sibling sources. Borrowing the whole owner retains its contents as well as the record slot. |
+| `storageBeforeSource`, `branchRetains`, `loopEscapes`, `loopClears` | Cleanup retires the retaining record before its source despite declaration order. A branch or loop exit does not erase a live source. A backedge after replacement does not revive the old source. |
+
+The checked subset does not include borrowed record projections, exclusive or nested reference fields, reference-bearing custom disposers, record-valued call results, or retained mutable destinations. Record grouping does not establish field orders for internal or mutually dependent record cleanup. An unresolved grouped cycle returns `Incomplete`, not a successful cleanup or a new language rejection.
+
 ## Open acceptance obligations
 
-- Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. These must distinguish transferring a contained reference from borrowing its slot.
+- Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
 - Aggregate initialization, pattern and guard commitment, partial moves, iteration, rebuilding and custom-disposer bodies. Confirm remaining-field cleanup without repeating moved fields or invoking the outer disposer again.
 - Callable invocation, borrowed passing and scoped jobs, multiple or computed captures, and erased/generic evidence. A known single captured value does not prove these modes.
 - Typed propagation/wrapping exits, statement-temporary dependencies, protected actions, cancellation edge obligations, and full graph coverage of bodies, startup and expectations. Pending call and provider contracts cannot produce a program receipt.
