@@ -79,7 +79,7 @@ fn owned_record_projections() {
                 return other.bit;
             }
         "#,
-        |request, module, receipt, _| {
+        |request, module, receipt| {
             let lower = |name| {
                 let id = &module
                     .declarations

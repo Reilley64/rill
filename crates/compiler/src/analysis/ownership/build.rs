@@ -155,6 +155,9 @@ impl<'a, 'g> Build<'a, 'g> {
         ty: &Type<'g>,
         role: OptionRole<'g>,
     ) -> ResultOf<()> {
+        if self.option_no_disposer {
+            return Ok(());
+        }
         let parent = match ty.as_ref() {
             TypeTerm::Variant { parent, .. } => parent,
             _ => ty,
@@ -172,6 +175,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             }
         }
+        self.option_no_disposer = true;
         Ok(())
     }
 
@@ -632,7 +636,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let role = self
             .bool_option_role(&operand.ty)
             .ok_or(Stop::Pending(node))?;
-        let (id, result) = self.returning;
+        let (id, result) = self.return_contract;
         let Some(DataExpression::Propagation(exit)) = &self.value(node)?.data else {
             return Err(Stop::Pending(node));
         };

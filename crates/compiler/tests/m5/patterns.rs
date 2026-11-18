@@ -52,7 +52,7 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
                 return x;
             }
         "#,
-        |_, module, receipt, _| {
+        |_, module, receipt| {
             let declaration = |name| {
                 module
                     .declarations

@@ -138,7 +138,7 @@ fn carried_field_and_slot_borrow_differ() {
                 x.view = &x.owned;
             }
         "#,
-        |_, module, receipt, _| {
+        |_, module, receipt| {
             let lower = |name| {
                 let decl = module
                     .declarations

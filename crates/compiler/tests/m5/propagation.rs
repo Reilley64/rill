@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn option_postfix_returns_through_initialized_cleanup() {
-    probe(
+    probe_with_typed(
         "propagation::option_postfix_returns_through_initialized_cleanup",
         r#"
             function pass(value: Option<bool>): Option<bool> { return value; }
@@ -35,14 +35,15 @@ fn option_postfix_returns_through_initialized_cleanup() {
             }
         "#,
         |_, module, receipt, typed| {
-            let lower = |name| {
+            let check = |name, limits| {
                 let decl = module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap();
-                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+                lower_body(receipt, module, &decl.id, limits).unwrap()
             };
+            let lower = |name| check(name, AnalysisLimits::default());
             let role = typed.option_role().expect("admitted Option role");
             let report = lower("paths");
             let mir = report
@@ -55,44 +56,68 @@ fn option_postfix_returns_through_initialized_cleanup() {
             ] {
                 let mut test = start;
                 let mut calls = 0;
-                let (some, none) = loop {
-                    match (&mir.blocks[test].operation, mir.blocks[test].terminator) {
-                        (
-                            Operation::TestOption { operand, some },
-                            Terminator::Branch { yes, no },
-                        ) => {
-                            assert_eq!(operand.root.span.bytes(), b"pass(input)");
-                            assert_eq!(*some, &role.some.id);
-                            break (yes, no);
+                let (some, none) = (0..mir.blocks.len())
+                    .find_map(|_| {
+                        match (&mir.blocks[test].operation, mir.blocks[test].terminator) {
+                            (
+                                Operation::TestOption { operand, some },
+                                Terminator::Branch { yes, no },
+                            ) => {
+                                assert_eq!(operand.root.span.bytes(), b"pass(input)");
+                                assert_eq!(*some, &role.some.id);
+                                Some((yes, no))
+                            }
+                            (op, Terminator::Goto(next)) => {
+                                calls += usize::from(matches!(op, Operation::Call(_)));
+                                test = next;
+                                None
+                            }
+                            other => panic!("expected option test: {other:?}"),
                         }
-                        (op, Terminator::Goto(next)) => {
-                            calls += usize::from(matches!(op, Operation::Call(_)));
-                            assert!(
-                                !matches!(op, Operation::Drop(place) if place.root.span.bytes() == b"owner")
-                            );
-                            test = next;
-                        }
-                        other => panic!("expected option test: {other:?}"),
-                    }
-                };
+                    })
+                    .expect("path reaches the Option test");
                 assert_eq!(calls, 1);
                 let failure = linear(mir, none);
-                assert!(
-                    matches!(failure.as_slice(), [Operation::ConstructOption { variant, payload: None, .. }, Operation::Export(_), ..]
-                    if *variant == &role.none.id)
-                );
-                assert_eq!(drops(mir, none), expected);
+                assert_return(&failure, &role.none.id, false, expected);
                 assert!(!failure.iter().any(|op| matches!(
                     op,
                     Operation::CopyOptionPayload { .. } | Operation::Dispose { .. }
                 )));
                 let success = linear(mir, some);
+                let transfer: Vec<_> = success
+                    .iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::CopyOptionPayload { .. } | Operation::Dispose { .. }
+                        )
+                    })
+                    .collect();
                 assert!(
-                    matches!(success.as_slice(), [Operation::CopyOptionPayload { into, .. }, Operation::Dispose { operand, .. }, ..]
+                    matches!(transfer.as_slice(), [Operation::CopyOptionPayload { into, .. }, Operation::Dispose { operand, .. }]
                     if into.root.span.bytes() == b"value" && operand.root.span.bytes() == b"owner")
                 );
-                assert!(success.iter().any(|op| matches!(op, Operation::ConstructOption { variant, payload: Some(_), .. } if *variant == &role.some.id)));
-                assert_eq!(drops(mir, some), &expected[1..]);
+                assert_return(&success, &role.some.id, true, &expected[1..]);
+            }
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("paths", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("paths", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
             }
 
             let bad = lower("rejected");
@@ -113,15 +138,14 @@ fn option_postfix_returns_through_initialized_cleanup() {
                     .mir()
                     .unwrap_or_else(|| panic!("{name}: {:?}", certain.completion()));
                 let ops = linear(mir, mir.entry);
-                assert!(ops.iter().any(|op| matches!(op, Operation::ConstructOption { variant: actual, .. } if *actual == variant)));
                 if name == "certainFailure" {
-                    assert_eq!(drops(mir, mir.entry), [b"owner: string".as_slice()]);
+                    assert_return(&ops, variant, false, &[b"owner: string"]);
                     assert!(!ops.iter().any(|op| matches!(
                         op,
                         Operation::Dispose { .. } | Operation::CopyOptionPayload { .. }
                     )));
                 } else {
-                    assert!(drops(mir, mir.entry).is_empty());
+                    assert_return(&ops, variant, true, &[]);
                     assert!(
                         ops.iter()
                             .any(|op| matches!(op, Operation::CopyOptionPayload { .. }))
@@ -140,9 +164,7 @@ fn linear<'a, 'g>(mir: &'a Mir<'g>, mut pc: usize) -> Vec<&'a Operation<'g>> {
     let mut ops = Vec::new();
     for _ in 0..mir.blocks.len() {
         let block = &mir.blocks[pc];
-        if !matches!(block.operation, Operation::None | Operation::Cleanup(_)) {
-            ops.push(&block.operation);
-        }
+        ops.push(&block.operation);
         match block.terminator {
             Terminator::Goto(next) => pc = next,
             Terminator::Return => return ops,
@@ -152,12 +174,43 @@ fn linear<'a, 'g>(mir: &'a Mir<'g>, mut pc: usize) -> Vec<&'a Operation<'g>> {
     panic!("path did not reach a return");
 }
 
-fn drops<'g>(mir: &Mir<'g>, start: usize) -> Vec<&'g [u8]> {
-    path_drops(mir, start)
-        .into_iter()
-        .map(|op| match op {
-            Obligation::Drop(place) => place.root.span.bytes(),
-            other => panic!("unexpected cleanup {other:?}"),
+fn assert_return(
+    ops: &[&Operation<'_>],
+    expected: &loader::DeclarationId,
+    has_payload: bool,
+    expected_drops: &[&[u8]],
+) {
+    let (export, output) = ops
+        .iter()
+        .enumerate()
+        .find_map(|(index, op)| match op {
+            Operation::Export(place) => Some((index, place)),
+            _ => None,
         })
-        .collect()
+        .expect("export the return value");
+    assert!(ops[..export].iter().any(|op| matches!(op, Operation::ConstructOption { variant, payload, into }
+        if *variant == expected && payload.is_some() == has_payload && into.root.node == output.root.node)));
+    let mut drops = Vec::new();
+    for (index, op) in ops.iter().enumerate() {
+        match op {
+            Operation::Drop(place) => {
+                assert!(index > export, "export the value before exit cleanup");
+                drops.push(place.root.span.bytes());
+            }
+            Operation::Cleanup(cleanup) => {
+                for action in cleanup {
+                    match action {
+                        Obligation::Drop(place) => {
+                            assert!(index > export, "export the value before exit cleanup");
+                            drops.push(place.root.span.bytes());
+                        }
+                        Obligation::EndStorage(_) => {}
+                        other => panic!("unexpected cleanup {other:?}"),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(drops, expected_drops);
 }

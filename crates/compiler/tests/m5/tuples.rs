@@ -44,7 +44,7 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
             function pass(value: [string, string, string]): [string, string, string] { return value; }
             function temporary(value: [string, string, string]): string { return pass(value)[1]; }
         "#,
-        |_, module, receipt, _| {
+        |_, module, receipt| {
             let declaration = |name| {
                 module
                     .declarations

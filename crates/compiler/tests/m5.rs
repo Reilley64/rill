@@ -187,7 +187,7 @@ fn ownership_from_installed_source() {
                 return recursive(true);
             }
         "#,
-        |request, module, receipt, _| {
+        |request, module, receipt| {
             let lower = |name| {
                 let id = &module
                     .declarations
@@ -409,6 +409,16 @@ fn ownership_from_installed_source() {
 }
 
 fn probe(
+    test: &str,
+    source: &str,
+    mut verify: impl for<'g> FnMut(&InstalledRequest, &'g loader::Module, &TypedReceipt<'_, 'g>),
+) {
+    probe_with_typed(test, source, |request, module, receipt, _| {
+        verify(request, module, receipt);
+    });
+}
+
+fn probe_with_typed(
     test: &str,
     source: &str,
     mut verify: impl for<'g> FnMut(
