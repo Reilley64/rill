@@ -51,6 +51,7 @@ fn installed_conversions() {
         "result.rill",
         "error.rill",
         "format.rill",
+        "compare.rill",
     ] {
         fs::copy(source.join(file), root.join("lib/rill/std").join(file)).unwrap();
     }
@@ -105,6 +106,10 @@ fn numeric(root: &Path, mode: bool) {
         import std::convert::{tryFrom as narrow, from};
         import std::result::Result;
         import std::number::ConversionError;
+        import std::compare::eq;
+        import std::error::display;
+        function equal(left: &ConversionError, right: &ConversionError): bool { return eq(left, right); }
+        function describe(error: &ConversionError): string { return display(error); }
         function checked(value: f64): Result<u8, ConversionError> { return narrow(value); }
         function mismatch(value: f64): Result<u8, bool> { return narrow<u8>(value); }
         function mismatchWritten(value: f64): Result<u8, ConversionError> { return narrow<u8,f64,bool>(value); }
@@ -138,6 +143,21 @@ fn numeric(root: &Path, mode: bool) {
             .unwrap();
         report.bodies().conversion_use(app, node).unwrap().unwrap()
     };
+    for name in ["equal", "describe"] {
+        let declaration = app
+            .declarations
+            .iter()
+            .find(|d| d.name.as_deref() == Some(name))
+            .unwrap();
+        assert!(
+            report
+                .bodies()
+                .body(app, BodyOwner::Declaration(&declaration.id))
+                .unwrap()
+                .is_some(),
+            "{name}"
+        );
+    }
     let numeric = site(b"narrow(value)");
     let Some(ConversionProvider::NumericTryInto(op)) = numeric.provider else {
         panic!("missing linked operation")

@@ -266,14 +266,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             RequirementTarget::Family(id) if self.ordinary_scalar_role(id).is_some() => None,
             RequirementTarget::Family(id) if self.clear_primitive_goal(id, &judgment) => None,
-            RequirementTarget::Family(id)
-                if self
-                    .result
-                    .and_then(|role| role.display_protection)
-                    .is_some_and(|protection| &protection.family.id == id) =>
-            {
-                None
-            }
+            RequirementTarget::Family(id) if self.is_error_display(id) => None,
             RequirementTarget::Family(id) => match &judgment {
                 GoalJudgment::Determine { inputs, .. }
                     if self.collection_winner(id, inputs).is_some() =>
@@ -461,7 +454,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .all(|issue| issue.declaration != &declaration.id);
         }
         let admitted = conversion
-            || (self.ordinary_scalar_role(&source.family).is_some() || primitive)
+            || (self.ordinary_scalar_role(&source.family).is_some()
+                || self.is_error_display(&source.family)
+                || primitive)
                 && body.compatibility == ordinary::Compatibility::Compatible;
         Ok(Some((&body.header, admitted)))
     }

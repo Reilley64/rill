@@ -178,6 +178,7 @@ fn installed_ownership_requires_the_built_archive() {
         "iter.rill",
         "format.rill",
         "convert.rill",
+        "compare.rill",
         "number.rill",
         "char.rill",
         "bytes.rill",

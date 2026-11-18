@@ -48,6 +48,7 @@ fn installed_formatting_and_conversions() {
         "result.rill",
         "error.rill",
         "option.rill",
+        "compare.rill",
         "number.rill",
         "char.rill",
         "bytes.rill",

@@ -1,6 +1,11 @@
+import std::compare::eq;
 import std::error::display;
 
 export enum ScalarError { InvalidScalar }
+
+implement eq(left: &ScalarError, right: &ScalarError): bool {
+    return true;
+}
 
 implement display(input: &ScalarError): string {
     return "Invalid Unicode scalar value";

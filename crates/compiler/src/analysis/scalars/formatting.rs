@@ -43,12 +43,13 @@ impl<'r, 'g> Checker<'r, 'g> {
 
     pub(super) fn is_canonical_scalar_family(&self, id: &DeclarationId) -> bool {
         self.ordinary_scalar_role(id).is_some()
+            || self.is_error_display(id)
             || self.primitives.is_some_and(|p| p.prelude(id).is_some())
     }
 
     pub(super) fn canonical_scalar_call(&self, inference: &Inference<'g>, node: NodeId) -> bool {
         let call = &inference.calls[&node].fact;
-        if self.ordinary_scalar_role(call.callee).is_some() {
+        if self.ordinary_scalar_role(call.callee).is_some() || self.is_error_display(call.callee) {
             return true;
         }
         let Some(role) = self.primitives.and_then(|p| p.prelude(call.callee)) else {
@@ -70,6 +71,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             _ => primitive_name(ty).is_some(),
         }
+    }
+
+    pub(super) fn is_error_display(&self, id: &DeclarationId) -> bool {
+        self.result
+            .and_then(|role| role.display_protection)
+            .is_some_and(|protection| protection.family.id == *id)
     }
 
     pub(super) fn clear_primitive_goal(&self, id: &DeclarationId, goal: &GoalJudgment<'g>) -> bool {
