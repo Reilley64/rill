@@ -234,7 +234,9 @@ The [#76 Result checkpoint](https://github.com/Reilley64/rill/issues/76#issuecom
 
 Standalone M4 preflights with `Result<bool, i32>` propagating to `Result<bool, i64>` or with `&Result<bool, i32>` as the operand rejected in both modes with `TypeMismatch` and `InvalidTarget`, respectively. These are typed rejections with no receipt, not M5 diagnostics.
 
-All four local gates and `git diff --check` passed at `2b14363` on macOS AArch64 with a short `TMPDIR` (431 compiler tests, 447 workspace tests). The staged M4 replay issued both receipts. Independent Standards and Spec reviews were requested at that revision. New wrapper construction, remaining opaque wrapper disposal, general payload types, infix wrapping, embedded propagation, and cancellation stay outside this slice. No workflow changed; `check:ci` was not run. No Rill program ran.
+All four local gates and `git diff --check` passed at `2b14363` on macOS AArch64 with a short `TMPDIR` (431 compiler tests, 447 workspace tests). The staged M4 replay issued both receipts. Standards found no hard code-standard violations. The correction at `2ac92e780a11838fbc2331889a94d796a556a241` reuses the disposal proof for each exact canonical parent type, chooses the edge actions together, and follows every complete entry-to-return path to check exactly one call to the declared `pass`. All four local gates and the whitespace check passed again. Spec review remains open at recording time.
+
+Separate staged M4 preflights issued both typed receipts for `return Err(7i32);` in a `Result<bool, i32>` function and for `let ok = input ? outer;` with a `Result<bool, i32>` input and a `string` outer payload. The preflights do not establish M5 support for construction or infix wrapping. Those operations, opaque wrapper disposal, general payload types, embedded propagation, and cancellation stay outside this slice. No workflow changed; `check:ci` was not run. No Rill program ran.
 
 ## Open acceptance obligations
 
