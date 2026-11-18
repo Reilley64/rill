@@ -6,6 +6,7 @@ use crate::analysis::typed::{OwnershipCoverage, OwnershipProtection, OwnershipRu
 pub(super) struct Inputs<'r, 'g> {
     inventory: &'r ordinary::OrdinaryAnalysis<'g>,
     native: &'r [OwnershipProtection<'g>],
+    collections: crate::analysis::typed::CollectionCore<'g>,
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
@@ -13,6 +14,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Some(Inputs {
             inventory: self.input.ordinary.filter(|_| self.integrated)?,
             native: self.native_ownership,
+            collections: self.collections,
         })
     }
 }
@@ -73,6 +75,10 @@ fn classify<'g>(
     }
     if let Some(value) = leaf(ty) {
         return Ok(Some(value));
+    }
+    if inputs.collections.representation(ty).is_some() {
+        // The linked List and iterator owners have no implicit-copy contract.
+        return Ok(Some(false));
     }
     let (head, variant) = match ty.as_ref() {
         TypeTerm::Variant {

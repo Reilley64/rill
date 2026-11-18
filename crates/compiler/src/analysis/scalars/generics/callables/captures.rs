@@ -259,6 +259,21 @@ impl<'r, 'g> Checker<'r, 'g> {
                     };
                     stack.push((children[1], Demand::Read, reachable && right));
                 }
+                NodeKind::For if self.integrated => {
+                    let source = children[1];
+                    let checked = node_fact(node)
+                        .is_some_and(|fact| matches!(fact.kind, NodeFactKind::Iteration(_)));
+                    stack.push((
+                        source,
+                        if checked {
+                            Demand::Value
+                        } else {
+                            Demand::Pending
+                        },
+                        reachable,
+                    ));
+                    stack.push((children[2], use_, reachable && normal(source)));
+                }
                 NodeKind::Assignment(_) => {
                     stack.push((children[0], Demand::Mutate, reachable));
                     stack.push((children[1], Demand::Value, reachable && normal(children[0])));

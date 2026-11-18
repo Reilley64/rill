@@ -1,4 +1,5 @@
 //! Scoped M4.3 scalar/control facts. No complete typed-program or ownership receipt.
+use super::typed::CollectionCore;
 use super::*;
 use crate::lexer::{LiteralMode, NumberForm, Token, TokenKind};
 use declarations::DeclarationReceipt;
@@ -2646,6 +2647,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else {
                     inference.data.remove(&node).map(|p| p.fact)
                 };
+                let mut call = inference.calls.remove(&node).map(|c| c.fact);
+                if let Some(call) = &mut call
+                    && let Some(substitution) = self.checked_ordinary_substitution(module, node)?
+                {
+                    call.substitution = substitution;
+                }
                 let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),
@@ -2655,7 +2662,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         expected: slot.expected.clone(),
                         literal: slot.literal,
                         binding: slot.binding,
-                        call: inference.calls.remove(&node).map(|c| c.fact),
+                        call,
                         ordinary_context: premise,
                         place: slot.place,
                         boolean: slot.boolean,
@@ -2984,7 +2991,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 flow = self.sequence(prefix, &right.map_or_else(Flow::normal, |e| e.flow))?;
             }
             NodeKind::For if self.integrated => {
-                flow = self.iteration_statement(module, node, depth, context)?;
+                let (iteration_flow, handoff) =
+                    self.iteration_statement(module, node, depth, context)?;
+                flow = iteration_flow;
+                if let Some(handoff) = handoff {
+                    kind = NodeFactKind::Iteration(handoff);
+                }
             }
             NodeKind::Guard
                 if self.integrated
@@ -3176,7 +3188,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let unchanged = before == self.marks();
         flow.pending |= self.integrated && !combined_flow && !unchanged;
-        if unchanged && !matches!(n.kind, NodeKind::Binding { .. }) {
+        if (unchanged && !matches!(n.kind, NodeKind::Binding { .. }))
+            || matches!(kind, NodeFactKind::Iteration(_))
+        {
             self.elab
                 .reserve(1 + flow.breaks.len() + flow.continues.len())?;
             self.record_node(NodeFacts {
@@ -3318,7 +3332,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                             .iter()
                             .filter_map(|scope| scope.provider.as_ref())
                             .any(|provider| provider.implementation.id == declaration.id);
-                        self.check_named_body(module, typed, !delivered, None)?;
+                        self.check_named_body(
+                            module,
+                            typed,
+                            !delivered && !self.collections.is_wrapper(&declaration.id),
+                            None,
+                        )?;
                         self.clear_body_assumptions();
                     } else {
                         self.defer(module, declaration.node, ScalarUnsupported::FamilySelection)?;
@@ -3421,6 +3440,7 @@ fn simple_name(module: &Module, node: NodeId) -> Option<NodeId> {
     let qualified = &module.syntax.nodes[path.children[0]];
     (qualified.children.len() == 1).then_some(qualified.children[0])
 }
+
 fn integer(ty: &Type<'_>) -> bool {
     matches!(
         primitive_name(ty),

@@ -153,6 +153,40 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(Some(truth))
     }
 
+    pub(in crate::analysis::scalars) fn iteration_pattern(
+        &mut self,
+        module: &'g Module,
+        iteration: &Iteration<'g>,
+        depth: usize,
+        context: &mut Context<'r, 'g>,
+    ) -> Work<()> {
+        let before = self.marks();
+        self.irrefutable_binding(
+            module,
+            (iteration.pattern, iteration.pattern, iteration.source),
+            PatternInput {
+                ty: &iteration.yielded,
+                access: Access::Owned,
+                mutable: false,
+                emit: true,
+            },
+            depth,
+            context,
+            &Flow::normal(),
+        )?;
+        if before != self.marks() {
+            self.block_pattern_names(
+                module,
+                iteration.pattern,
+                iteration.pattern,
+                false,
+                false,
+                context,
+            )?;
+        }
+        Ok(())
+    }
+
     pub(in crate::analysis::scalars) fn pattern_binding(
         &mut self,
         module: &'g Module,
@@ -191,10 +225,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         if let Some(value) = value {
             let ty = annotation.unwrap_or(value.ty);
-            let mut binders = Vec::new();
-            let pattern = self.pattern(
+            self.irrefutable_binding(
                 module,
-                n.children[0],
+                (node, n.children[0], initializer),
                 PatternInput {
                     ty: &ty,
                     access: value.access,
@@ -203,33 +236,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 },
                 depth,
                 context,
-                &mut binders,
+                &flow,
             )?;
-            if let Some(pattern) = pattern
-                && before == self.marks()
-                && let Some(coverage) = self.coverage(module, node, &ty, vec![pattern])?
-            {
-                if !coverage.exhaustive() {
-                    self.finding(module, n.children[0], ScalarFindingKind::RefutableBinding)?;
-                    self.retain_coverage(module, n.children[0], &ty, &coverage)?;
-                }
-                if before == self.marks() {
-                    self.elab
-                        .reserve(1 + binders.len() + flow.breaks.len() + flow.continues.len())?;
-                    self.record_node(NodeFacts {
-                        site: Self::site(module, n.children[0]),
-                        flow: flow.clone(),
-                        callable: None,
-                        kind: NodeFactKind::Pattern(PatternFacts {
-                            source: Self::site(module, initializer),
-                            access: value.access,
-                            ty,
-                            binders,
-                            coverage,
-                        }),
-                    });
-                }
-            }
         }
         if before != self.marks() {
             self.block_pattern_names(
@@ -243,6 +251,45 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         Ok(flow)
     }
+    fn irrefutable_binding(
+        &mut self,
+        module: &'g Module,
+        (site, node, source): (NodeId, NodeId, NodeId),
+        input: PatternInput<'_, 'g>,
+        depth: usize,
+        context: &mut Context<'r, 'g>,
+        flow: &Flow,
+    ) -> Work<()> {
+        let before = self.marks();
+        let (ty, access) = (input.ty, input.access);
+        let mut binders = Vec::new();
+        if let Some(pattern) = self.pattern(module, node, input, depth, context, &mut binders)?
+            && before == self.marks()
+            && let Some(coverage) = self.coverage(module, site, ty, vec![pattern])?
+        {
+            if !coverage.exhaustive() {
+                self.finding(module, node, ScalarFindingKind::RefutableBinding)?;
+                self.retain_coverage(module, node, ty, &coverage)?;
+            } else if before == self.marks() {
+                self.elab
+                    .reserve(1 + binders.len() + flow.breaks.len() + flow.continues.len())?;
+                self.record_node(NodeFacts {
+                    site: Self::site(module, node),
+                    flow: flow.clone(),
+                    callable: None,
+                    kind: NodeFactKind::Pattern(PatternFacts {
+                        source: Self::site(module, source),
+                        access,
+                        ty: ty.clone(),
+                        binders,
+                        coverage,
+                    }),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn retain_coverage(
         &mut self,
         module: &'g Module,

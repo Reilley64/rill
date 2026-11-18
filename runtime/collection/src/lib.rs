@@ -24,6 +24,15 @@ impl<T> List<T> {
         self.0.get_mut(usize::try_from(index).ok()?)
     }
 
+    /// Copy using the element operation supplied by the caller, not a Rust Clone bound.
+    pub fn copy_with(&self, copy: impl FnMut(&T) -> T) -> Self {
+        Self::from_elements(self.0.iter().map(copy))
+    }
+
+    pub fn dispose_with(self, dispose: impl FnMut(T)) {
+        self.into_owned_iter().dispose_with(dispose);
+    }
+
     pub fn into_owned_iter(self) -> OwnedListIter<T> {
         OwnedListIter(self.0.into_iter())
     }
@@ -52,6 +61,13 @@ impl<T> IndexMut<u64> for List<T> {
 }
 
 pub struct OwnedListIter<T>(std::vec::IntoIter<T>);
+
+impl<T> OwnedListIter<T> {
+    /// Dispose only the still-initialized slots, in reverse position order.
+    pub fn dispose_with(self, dispose: impl FnMut(T)) {
+        self.0.rev().for_each(dispose);
+    }
+}
 
 impl<T> Iterator for OwnedListIter<T> {
     type Item = T;

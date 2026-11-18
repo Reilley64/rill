@@ -1,23 +1,72 @@
 //! Capture-bound admission of the linked List operations; no native ABI.
 use super::*;
-use crate::analysis::{Declaration, DeclarationShape, Type, TypeTerm};
-use crate::loader::{Module, Namespace};
+use crate::analysis::ordinary::{Compatibility, FamilyFacts, Placement, patterns};
+use crate::analysis::{Declaration, DeclarationFacts, DeclarationShape, Type, TypeTerm};
+use crate::loader::{DeclarationId, Module, Namespace};
 use rill_collection::{List, ListIter, ListIterMut, OwnedListIter};
 use std::ops::{Index, IndexMut};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(in crate::analysis) struct CollectionCore<'g> {
     pub list: Option<ListRole<'g>>,
-    pub lookup: Option<&'g Declaration>,
     pub iteration: Option<IterationCore<'g>>,
+    iterators: [Option<ListRole<'g>>; 3],
+    pub protection: [Option<CollectionProtection<'g>>; 8],
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(in crate::analysis) struct IterationCore<'g> {
     pub iterate: &'g Declaration,
     pub next: &'g Declaration,
-    bridges: [Option<&'g Declaration>; 6],
 }
+
+// Fixed scopes for the delivered List backing. No closure over other collection families.
+const OPERATIONS: [(CollectionOperation, &str, &str); 8] = {
+    use CollectionOperation::*;
+    use ListTraversal::*;
+    [
+        (
+            Get,
+            "lookupList",
+            "{\n    return lookupList(source, index);\n}",
+        ),
+        (
+            First,
+            "lookupList",
+            "{\n    return lookupList(source, 0u64);\n}",
+        ),
+        (
+            Iterate(Owned),
+            "intoOwned",
+            "{\n    return intoOwned(source);\n}",
+        ),
+        (
+            Next(Owned),
+            "advanceOwned",
+            "{\n    return advanceOwned(iterator);\n}",
+        ),
+        (
+            Iterate(Shared),
+            "intoShared",
+            "{\n    return intoShared(source);\n}",
+        ),
+        (
+            Next(Shared),
+            "advanceShared",
+            "{\n    return advanceShared(iterator);\n}",
+        ),
+        (
+            Iterate(Exclusive),
+            "intoExclusive",
+            "{\n    return intoExclusive(source);\n}",
+        ),
+        (
+            Next(Exclusive),
+            "advanceExclusive",
+            "{\n    return advanceExclusive(iterator);\n}",
+        ),
+    ]
+};
 
 impl<'g> CollectionCore<'g> {
     pub(super) fn check(
@@ -25,18 +74,508 @@ impl<'g> CollectionCore<'g> {
         inventory: &OrdinaryAnalysis<'g>,
         option: Option<OptionRole<'g>>,
         budget: &mut Budget,
+        overlaps: &mut Vec<CollectionOverlap<'g>>,
     ) -> Work<()> {
-        self.list = check_list(inventory, budget)?;
-        self.lookup = check_lookup(inventory, self.list, option, budget)?;
-        self.iteration = check_iteration(inventory, self.list, option, budget)?;
+        use CollectionOperation::*;
+        let graph = inventory.graph();
+        let collection = pinned_module(graph, "collection.rill", budget)?;
+        let iter = pinned_module(graph, "iter.rill", budget)?;
+        if let Some(module) = collection {
+            self.list = opaque_role(inventory, module, "List", budget)?;
+        }
+        if let Some(module) = iter {
+            for (slot, name) in
+                self.iterators
+                    .iter_mut()
+                    .zip(["OwnedListIter", "ListIter", "ListIterMut"])
+            {
+                *slot = opaque_role(inventory, module, name, budget)?;
+            }
+        }
+        let (Some(list), Some(option)) = (self.list, option) else {
+            return Ok(());
+        };
+        for (index, (operation, entry, wrapper)) in OPERATIONS.into_iter().enumerate() {
+            let (module, owner, result_owner) = match operation {
+                Get | First => (collection, Some(list), Some(option.declaration)),
+                Iterate(kind) => (
+                    iter,
+                    Some(list),
+                    self.iterators[kind as usize].map(|role| role.declaration),
+                ),
+                Next(kind) => (
+                    iter,
+                    self.iterators[kind as usize],
+                    Some(option.declaration),
+                ),
+            };
+            let (Some(module), Some(owner), Some(result_owner)) = (module, owner, result_owner)
+            else {
+                continue;
+            };
+            if let Some(family) =
+                check_family(inventory, module, operation, option.declaration, budget)?
+            {
+                let scope = OperationScope {
+                    family,
+                    owner: owner.declaration,
+                    result_owner,
+                    operation,
+                    entry,
+                    wrapper,
+                };
+                self.protection[index] =
+                    Some(check_operation(inventory, module, scope, budget, overlaps)?);
+            }
+        }
+        if let (Some(iterate), Some(next)) = (
+            self.protection
+                .iter()
+                .flatten()
+                .find(|p| matches!(p.operation, Iterate(_))),
+            self.protection
+                .iter()
+                .flatten()
+                .find(|p| matches!(p.operation, Next(_))),
+        ) {
+            self.iteration = Some(IterationCore {
+                iterate: iterate.family,
+                next: next.family,
+            });
+        }
         Ok(())
     }
 
-    pub fn is_bridge(self, id: &crate::loader::DeclarationId) -> bool {
-        self.lookup.is_some_and(|bridge| bridge.id == *id)
-            || self
-                .iteration
-                .is_some_and(|iter| iter.bridges.iter().flatten().any(|bridge| bridge.id == *id))
+    pub fn lookup(&self) -> Option<&'g Declaration> {
+        self.protection.first()?.as_ref()?.bridge
+    }
+
+    pub fn representations(&self) -> impl Iterator<Item = CollectionRepresentation<'g>> {
+        let kinds = [
+            CollectionStorage::Elements,
+            CollectionStorage::UnyieldedElements,
+            CollectionStorage::BorrowedList { mutable: false },
+            CollectionStorage::BorrowedList { mutable: true },
+        ];
+        [
+            self.list,
+            self.iterators[0],
+            self.iterators[1],
+            self.iterators[2],
+        ]
+        .into_iter()
+        .zip(kinds)
+        .filter_map(|(role, storage)| {
+            role.map(|role| CollectionRepresentation {
+                declaration: role.declaration,
+                element: role.element,
+                storage,
+            })
+        })
+    }
+
+    pub fn representation(
+        &self,
+        ty: &Type<'g>,
+    ) -> Option<(CollectionRepresentation<'g>, Type<'g>)> {
+        self.representations()
+            .find_map(|repr| Some((repr, application(ty, repr.declaration)?.clone())))
+    }
+
+    pub fn scope(
+        &self,
+        family: &DeclarationId,
+        inputs: &[Option<&Type<'g>>],
+    ) -> Option<CollectionProtection<'g>> {
+        self.protection.into_iter().flatten().find(|scope| {
+            scope.family.id == *family
+                && match inputs {
+                    [Some(input), Some(index)] if scope.operation == CollectionOperation::Get => {
+                        matches!(index.as_ref(), TypeTerm::Primitive(p) if p.name() == "u64")
+                            && scope.matches(input)
+                    }
+                    [Some(input)] if scope.operation != CollectionOperation::Get => {
+                        scope.matches(input)
+                    }
+                    _ => false,
+                }
+        })
+    }
+
+    pub fn is_wrapper(&self, id: &DeclarationId) -> bool {
+        self.protection.into_iter().flatten().any(|scope| {
+            scope
+                .provider
+                .is_some_and(|provider| provider.implementation.id == *id)
+        })
+    }
+
+    pub fn is_bridge(&self, id: &DeclarationId) -> bool {
+        self.protection
+            .iter()
+            .flatten()
+            .any(|region| region.bridge.is_some_and(|bridge| bridge.id == *id))
+    }
+}
+
+/// Stored shape of the linked backing, not the private source seal or a layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectionStorage {
+    Elements,
+    UnyieldedElements,
+    BorrowedList { mutable: bool },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CollectionRepresentation<'g> {
+    pub declaration: &'g Declaration,
+    /// Substitution mapping for the actual element type (binder position zero).
+    pub element: &'g Declaration,
+    pub storage: CollectionStorage,
+}
+
+impl CollectionStorage {
+    /// Backing type in the compiler's linked collection crate.
+    pub fn rust_item(self) -> &'static str {
+        match self {
+            Self::Elements => "rill_collection::List",
+            Self::UnyieldedElements => "rill_collection::OwnedListIter",
+            Self::BorrowedList { mutable: false } => "rill_collection::ListIter",
+            Self::BorrowedList { mutable: true } => "rill_collection::ListIterMut",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListTraversal {
+    /// `Some` forwards one element. `None` proves no unyielded elements remain.
+    Owned,
+    /// Borrows the source; does not transfer any of its owned elements.
+    Shared,
+    /// Borrows the source and ties the yield to the advance access.
+    Exclusive,
+}
+
+impl ListTraversal {
+    fn access(self) -> Option<bool> {
+        match self {
+            Self::Owned => None,
+            Self::Shared => Some(false),
+            Self::Exclusive => Some(true),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectionOperation {
+    Get,
+    First,
+    Iterate(ListTraversal),
+    Next(ListTraversal),
+}
+
+impl CollectionOperation {
+    fn access(self) -> Option<bool> {
+        match self {
+            Self::Get | Self::First => Some(false),
+            Self::Iterate(kind) => kind.access(),
+            Self::Next(_) => Some(true),
+        }
+    }
+
+    /// Compiler-linked Rust operation, not an ABI symbol.
+    pub fn rust_item(self) -> &'static str {
+        use ListTraversal::*;
+        match self {
+            Self::Get | Self::First => "rill_collection::List::get",
+            Self::Iterate(Owned) => "rill_collection::List::into_owned_iter",
+            Self::Iterate(Shared) => "rill_collection::List::iter",
+            Self::Iterate(Exclusive) => "rill_collection::List::iter_mut",
+            Self::Next(Owned) => "rill_collection::OwnedListIter::next",
+            Self::Next(Shared) => "rill_collection::ListIter::next",
+            Self::Next(Exclusive) => "rill_collection::ListIterMut::advance",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CollectionProvider<'g> {
+    pub implementation: &'g Declaration,
+    pub bridge: &'g Declaration,
+}
+
+/// Only the region identified by the operation and canonical input owner is
+/// closed. No assertion is made about disjoint List-external input regions.
+#[derive(Clone, Copy, Debug)]
+pub struct CollectionProtection<'g> {
+    pub family: &'g Declaration,
+    pub owner: &'g Declaration,
+    pub operation: CollectionOperation,
+    pub provider: Option<CollectionProvider<'g>>,
+    bridge: Option<&'g Declaration>,
+    pub coverage: OwnershipCoverage,
+}
+
+impl<'g> CollectionProtection<'g> {
+    fn matches(self, input: &Type<'g>) -> bool {
+        through_access(input, self.operation.access())
+            .is_some_and(|ty| application(ty, self.owner).is_some())
+    }
+
+    pub(in crate::analysis) fn winner(self) -> Option<&'g DeclarationId> {
+        (self.coverage == OwnershipCoverage::Clear)
+            .then_some(self.provider)
+            .flatten()
+            .map(|provider| &provider.implementation.id)
+    }
+}
+
+#[derive(Debug)]
+pub struct CollectionOverlap<'g> {
+    pub family: &'g DeclarationId,
+    pub operation: CollectionOperation,
+    pub implementation: &'g Declaration,
+    pub intersection: (usize, usize),
+}
+
+impl CollectionOverlap<'_> {
+    pub fn code(&self) -> &'static str {
+        "R0500"
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OperationScope<'g> {
+    family: &'g Declaration,
+    owner: &'g Declaration,
+    operation: CollectionOperation,
+    result_owner: &'g Declaration,
+    entry: &'static str,
+    wrapper: &'static str,
+}
+
+fn check_operation<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    scope: OperationScope<'g>,
+    budget: &mut Budget,
+    overlaps: &mut Vec<CollectionOverlap<'g>>,
+) -> Work<CollectionProtection<'g>> {
+    let mut record = CollectionProtection {
+        family: scope.family,
+        owner: scope.owner,
+        operation: scope.operation,
+        provider: None,
+        coverage: OwnershipCoverage::Pending,
+        bridge: None,
+    };
+    budget.reserve(1)?;
+    let bridge_shape = if scope.operation == CollectionOperation::First {
+        OperationScope {
+            operation: CollectionOperation::Get,
+            ..scope
+        }
+    } else {
+        scope
+    };
+    let Some(bridge) = private_bridge(inventory, module, scope.entry, budget)?
+        .filter(|header| operation_schema(header, &bridge_shape))
+        .map(|header| header.declaration)
+    else {
+        return Ok(record);
+    };
+    record.bridge = Some(bridge);
+    let family = inventory.captured_family(&scope.family.id).unwrap();
+    for body in &family.implementations {
+        budget.step(1)?;
+        if body.source.declaration.module != module.key
+            || body.placement != Placement::FamilyModule
+            || body.compatibility != Compatibility::Compatible
+            || body.alternatives.is_empty()
+            || module.syntax.nodes[body.source.body_node].span.bytes() != scope.wrapper.as_bytes()
+            || !plain_header(inventory, body.header.declaration, budget)?
+            || !operation_schema(&body.header, &scope)
+        {
+            continue;
+        }
+        record.provider = Some(CollectionProvider {
+            implementation: body.header.declaration,
+            bridge,
+        });
+        record.coverage = check_region(
+            inventory,
+            family,
+            &body.alternatives,
+            record,
+            budget,
+            overlaps,
+        )?;
+        break;
+    }
+    Ok(record)
+}
+
+fn check_region<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    family: &FamilyFacts<'g>,
+    region: &[patterns::InputKey<'g>],
+    record: CollectionProtection<'g>,
+    budget: &mut Budget,
+    overlaps: &mut Vec<CollectionOverlap<'g>>,
+) -> Work<OwnershipCoverage> {
+    let admitted = record.provider.unwrap().implementation;
+    let mut captured = 0;
+    for body in inventory.graph().implementations() {
+        budget.step(1)?;
+        captured += usize::from(body.family == record.family.id);
+    }
+    let mut complete = captured == family.implementations.len();
+    let before = overlaps.len();
+    for body in &family.implementations {
+        budget.step(1)?;
+        if body.header.declaration.id == admitted.id {
+            continue;
+        }
+        if body.alternatives.is_empty() {
+            complete = false;
+            continue;
+        }
+        if let Some(intersection) = patterns::intersection(region, &body.alternatives, budget)?
+            && !(patterns::included(region, &body.alternatives, budget)?
+                && !patterns::included(&body.alternatives, region, budget)?)
+        {
+            budget.reserve(1)?;
+            overlaps.push(CollectionOverlap {
+                family: &record.family.id,
+                operation: record.operation,
+                implementation: body.header.declaration,
+                intersection,
+            });
+        }
+    }
+    Ok(if !complete {
+        OwnershipCoverage::Pending
+    } else if overlaps.len() != before {
+        OwnershipCoverage::Overlap
+    } else {
+        OwnershipCoverage::Clear
+    })
+}
+
+fn operation_schema(header: &DeclarationFacts<'_>, scope: &OperationScope<'_>) -> bool {
+    use CollectionOperation::*;
+    let (DeclarationShape::Function { parameters, result }, [binder]) =
+        (&header.shape, header.binders.as_slice())
+    else {
+        return false;
+    };
+    let source = match parameters.as_slice() {
+        [source, key]
+            if scope.operation == Get
+                && matches!(key.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "u64") =>
+        {
+            source
+        }
+        [source] if scope.operation != Get => source,
+        _ => return false,
+    };
+    let result_access = match scope.operation {
+        Get | First => Some(false),
+        Iterate(_) => None,
+        Next(kind) => kind.access(),
+    };
+    through_access(&source.ty, scope.operation.access())
+        .and_then(|ty| application(ty, scope.owner))
+        .is_some_and(|ty| parameter(ty, binder.declaration))
+        && application(result, scope.result_owner)
+            .and_then(|ty| through_access(ty, result_access))
+            .is_some_and(|ty| parameter(ty, binder.declaration))
+}
+
+fn check_family<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    op: CollectionOperation,
+    option: &Declaration,
+    budget: &mut Budget,
+) -> Work<Option<&'g Declaration>> {
+    use CollectionOperation::*;
+    let name = match op {
+        Get => "get",
+        First => "first",
+        Iterate(_) => "iterate",
+        Next(_) => "next",
+    };
+    let Some(declaration) = core::export(
+        inventory.graph(),
+        module,
+        Namespace::ValueFunction,
+        name,
+        budget,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(family) = inventory.captured_family(&declaration.id) else {
+        return Ok(None);
+    };
+    if !plain_header(inventory, declaration, budget)? {
+        return Ok(None);
+    }
+    let DeclarationShape::Function { parameters, result } = &family.header.shape else {
+        return Ok(None);
+    };
+    let binders = &family.header.binders;
+    let (input, output) = match (op, parameters.as_slice(), binders.as_slice()) {
+        (Get, [source, key], [_, q, r]) if binder_at(&key.ty, q.declaration, 1) => {
+            (Some(&source.ty), r)
+        }
+        (Next(_), [source], [_, t]) => (referent(&source.ty, true), t),
+        (First | Iterate(_), [source], [_, r]) => (Some(&source.ty), r),
+        _ => return Ok(None),
+    };
+    let result = if matches!(op, Iterate(_)) {
+        Some(result)
+    } else {
+        application(result, option)
+    };
+    Ok(
+        (input.is_some_and(|ty| parameter(ty, binders[0].declaration))
+            && result.is_some_and(|ty| binder_at(ty, output.declaration, output.position)))
+        .then_some(declaration),
+    )
+}
+
+fn opaque_role<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    name: &str,
+    budget: &mut Budget,
+) -> Work<Option<ListRole<'g>>> {
+    let Some(declaration) = core::export(
+        inventory.graph(),
+        module,
+        Namespace::TypeModule,
+        name,
+        budget,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(element) = opaque_element(inventory, module, declaration, budget)? else {
+        return Ok(None);
+    };
+    budget.reserve(1)?;
+    Ok(Some(ListRole {
+        declaration,
+        element,
+    }))
+}
+
+fn through_access<'a, 'g>(ty: &'a Type<'g>, access: Option<bool>) -> Option<&'a Type<'g>> {
+    match access {
+        Some(mutable) => referent(ty, mutable),
+        None => Some(ty),
     }
 }
 
@@ -71,6 +610,10 @@ const fn bind_list_operations<T>() {
     let _: fn(&List<T>, u64) -> &T = List::index;
     let _: fn(&mut List<T>, u64) -> &mut T = List::index_mut;
     let _: fn(&List<T>, u64) -> Option<&T> = List::get;
+    type CopyElement<T> = fn(&T) -> T;
+    let _: fn(&List<T>, CopyElement<T>) -> List<T> = List::copy_with;
+    let _: fn(List<T>, fn(T)) = List::dispose_with;
+    let _: fn(OwnedListIter<T>, fn(T)) = OwnedListIter::dispose_with;
     let _: fn(List<T>) -> OwnedListIter<T> = List::into_owned_iter;
     let _: fn(&mut OwnedListIter<T>) -> Option<T> = OwnedListIter::next;
     let _: for<'a> fn(&'a List<T>) -> ListIter<'a, T> = List::iter;
@@ -84,177 +627,6 @@ const fn bind_borrowed_advances<'source, T: 'source>() {
         ListIterMut::advance;
 }
 const _: () = bind_list_operations::<()>();
-
-fn check_lookup<'g>(
-    inventory: &OrdinaryAnalysis<'g>,
-    list: Option<ListRole<'g>>,
-    option: Option<OptionRole<'g>>,
-    budget: &mut Budget,
-) -> Work<Option<&'g Declaration>> {
-    let (Some(list), Some(option)) = (list, option) else {
-        return Ok(None);
-    };
-    let Some(module) = pinned_module(inventory.graph(), "collection.rill", budget)? else {
-        return Ok(None);
-    };
-    let Some(header) = private_bridge(inventory, module, "lookupList", budget)? else {
-        return Ok(None);
-    };
-    let (DeclarationShape::Function { parameters, result }, [binder]) =
-        (&header.shape, header.binders.as_slice())
-    else {
-        return Ok(None);
-    };
-    let [source, index] = parameters.as_slice() else {
-        return Ok(None);
-    };
-    let (Some(source), Some(result)) = (
-        shared_referent(&source.ty),
-        application(result, option.declaration),
-    ) else {
-        return Ok(None);
-    };
-    if matches!(index.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "u64")
-        && application(source, list.declaration).is_some_and(|t| parameter(t, binder.declaration))
-        && shared_referent(result).is_some_and(|t| parameter(t, binder.declaration))
-    {
-        budget.reserve(1)?;
-        return Ok(Some(header.declaration));
-    }
-    Ok(None)
-}
-
-fn check_iteration<'g>(
-    inventory: &OrdinaryAnalysis<'g>,
-    list: Option<ListRole<'g>>,
-    option: Option<OptionRole<'g>>,
-    budget: &mut Budget,
-) -> Work<Option<IterationCore<'g>>> {
-    let (Some(list), Some(option)) = (list, option) else {
-        return Ok(None);
-    };
-    let Some(module) = pinned_module(inventory.graph(), "iter.rill", budget)? else {
-        return Ok(None);
-    };
-    let Some(iterate) = iteration_family(inventory, module, "iterate", None, budget)? else {
-        return Ok(None);
-    };
-    let Some(next) = iteration_family(inventory, module, "next", Some(option.declaration), budget)?
-    else {
-        return Ok(None);
-    };
-    let mut bridges = [None; 6];
-    for (position, (name, into, advance, access)) in [
-        ("OwnedListIter", "intoOwned", "advanceOwned", None),
-        ("ListIter", "intoShared", "advanceShared", Some(false)),
-        (
-            "ListIterMut",
-            "intoExclusive",
-            "advanceExclusive",
-            Some(true),
-        ),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let Some(iterator) = core::export(
-            inventory.graph(),
-            module,
-            Namespace::TypeModule,
-            name,
-            budget,
-        )?
-        else {
-            continue;
-        };
-        if opaque_element(inventory, module, iterator, budget)?.is_none() {
-            continue;
-        }
-        if let Some(header) = private_bridge(inventory, module, into, budget)?
-            && let (DeclarationShape::Function { parameters, result }, [binder]) =
-                (&header.shape, header.binders.as_slice())
-            && let [input] = parameters.as_slice()
-            && through_access(&input.ty, access)
-                .and_then(|ty| application(ty, list.declaration))
-                .is_some_and(|arg| parameter(arg, binder.declaration))
-            && application(result, iterator).is_some_and(|arg| parameter(arg, binder.declaration))
-        {
-            budget.reserve(1)?;
-            bridges[position * 2] = Some(header.declaration);
-        }
-        if let Some(header) = private_bridge(inventory, module, advance, budget)?
-            && let (DeclarationShape::Function { parameters, result }, [binder]) =
-                (&header.shape, header.binders.as_slice())
-            && let [input] = parameters.as_slice()
-            && referent(&input.ty, true)
-                .and_then(|ty| application(ty, iterator))
-                .is_some_and(|arg| parameter(arg, binder.declaration))
-            && application(result, option.declaration)
-                .and_then(|arg| through_access(arg, access))
-                .is_some_and(|arg| parameter(arg, binder.declaration))
-        {
-            budget.reserve(1)?;
-            bridges[position * 2 + 1] = Some(header.declaration);
-        }
-    }
-    budget.reserve(1)?;
-    Ok(Some(IterationCore {
-        iterate,
-        next,
-        bridges,
-    }))
-}
-
-fn through_access<'a, 'g>(ty: &'a Type<'g>, access: Option<bool>) -> Option<&'a Type<'g>> {
-    match access {
-        Some(mutable) => referent(ty, mutable),
-        None => Some(ty),
-    }
-}
-
-fn iteration_family<'g>(
-    inventory: &OrdinaryAnalysis<'g>,
-    module: &'g Module,
-    name: &str,
-    option: Option<&Declaration>,
-    budget: &mut Budget,
-) -> Work<Option<&'g Declaration>> {
-    let Some(declaration) = core::export(
-        inventory.graph(),
-        module,
-        Namespace::ValueFunction,
-        name,
-        budget,
-    )?
-    else {
-        return Ok(None);
-    };
-    budget.step(1)?;
-    let Some(family) = inventory.captured_family(&declaration.id) else {
-        return Ok(None);
-    };
-    if !plain_header(inventory, declaration, budget)? {
-        return Ok(None);
-    }
-    let (DeclarationShape::Function { parameters, result }, [input, output]) =
-        (&family.header.shape, family.header.binders.as_slice())
-    else {
-        return Ok(None);
-    };
-    let [source] = parameters.as_slice() else {
-        return Ok(None);
-    };
-    let (source, result) = if let Some(option) = option {
-        (referent(&source.ty, true), application(result, option))
-    } else {
-        (Some(&source.ty), Some(result))
-    };
-    Ok(
-        (source.is_some_and(|ty| binder_at(ty, input.declaration, 0))
-            && result.is_some_and(|ty| binder_at(ty, output.declaration, 1)))
-        .then_some(declaration),
-    )
-}
 
 fn plain_header(
     inventory: &OrdinaryAnalysis<'_>,
@@ -292,10 +664,6 @@ fn private_bridge<'a, 'g>(
         }
     }
     Ok(None)
-}
-
-fn shared_referent<'a, 'g>(ty: &'a Type<'g>) -> Option<&'a Type<'g>> {
-    referent(ty, false)
 }
 
 fn referent<'a, 'g>(ty: &'a Type<'g>, writable: bool) -> Option<&'a Type<'g>> {
@@ -340,28 +708,6 @@ fn pinned_module<'g>(
         }
     }
     Ok(None)
-}
-
-fn check_list<'g>(
-    inventory: &OrdinaryAnalysis<'g>,
-    budget: &mut Budget,
-) -> Work<Option<ListRole<'g>>> {
-    let graph = inventory.graph();
-    let Some(module) = pinned_module(graph, "collection.rill", budget)? else {
-        return Ok(None);
-    };
-    let Some(declaration) = core::export(graph, module, Namespace::TypeModule, "List", budget)?
-    else {
-        return Ok(None);
-    };
-    let Some(element) = opaque_element(inventory, module, declaration, budget)? else {
-        return Ok(None);
-    };
-    budget.reserve(1)?;
-    Ok(Some(ListRole {
-        declaration,
-        element,
-    }))
 }
 
 fn opaque_element<'g>(

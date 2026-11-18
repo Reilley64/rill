@@ -129,70 +129,90 @@ fn installed_list() {
                 report.bodies().obligations()
             );
         }
-        fs::write(&request.entry, "import std::collection::{List as Items, get}; import std::option::Option; function read(xs: &Items<i32>, at: u64): Option<&i32> { return get(xs, at); }").unwrap();
-        let graph = loader::load_installed(request.clone()).unwrap();
-        let report = analyze_typed(&graph, AnalysisLimits::default());
-        assert!(
-            report.bodies().findings().is_empty(),
-            "{:?}",
-            report.bodies().findings()
-        );
-        let app = graph
-            .modules()
-            .iter()
-            .find(|module| module.key.origin == Origin::Application)
+        fs::write(&request.entry, "import std::collection::{List as Items, get}; import std::option::Option; function read(xs: &Items<i32>): Option<&i32> { return get(xs, 0); }").unwrap();
+        for test_mode in [false, true] {
+            let graph = loader::load_installed(InstalledRequest {
+                test_mode,
+                ..request.clone()
+            })
             .unwrap();
-        let call = app
-            .syntax
-            .nodes
-            .iter()
-            .position(|node| node.kind == NodeKind::Call)
-            .unwrap();
-        let call = report
-            .bodies()
-            .ordinary_call(app, call)
-            .unwrap()
-            .expect("canonical get family");
-        assert!(matches!(
-            call.outcome,
-            Some(compiler::analysis::ordinary::HypotheticalOutcome::Winner(_))
-        ));
-        let role = report.option_role().unwrap();
-        let bridge = report.list_lookup_bridge().expect("admitted get bridge");
-        let collection = graph
-            .modules()
-            .iter()
-            .find(|module| module.key == bridge.id.module)
-            .unwrap();
-        let implementation = match call.outcome.unwrap() {
-            compiler::analysis::ordinary::HypotheticalOutcome::Winner(id) => id,
-            other => panic!("unexpected get selection: {other:?}"),
-        };
-        let body = graph
-            .implementations()
-            .iter()
-            .find(|body| &body.declaration == implementation)
-            .unwrap();
-        let return_node = collection.syntax.nodes[body.body_node].children[0];
-        let forwarded = collection.syntax.nodes[return_node].children[0];
-        let NodeFactKind::Expression(forwarded) = &report
-            .bodies()
-            .node(collection, forwarded)
-            .unwrap()
-            .expect("Rill wrapper checks its provider invocation")
-            .kind
-        else {
-            panic!("missing invocation")
-        };
-        assert_eq!(forwarded.call.as_ref().unwrap().callee, &bridge.id);
-        assert!(
-            matches!(call.selected_result.as_deref(), Some(TypeTerm::Nominal { declaration, arguments }) if **declaration == role.declaration.id && matches!(arguments.as_slice(), [element] if matches!(element.as_ref(), TypeTerm::Reference { mutable: false, referent } if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))))
-        );
+            let report = analyze_typed(&graph, AnalysisLimits::default());
+            assert!(
+                report.bodies().findings().is_empty(),
+                "{:?}",
+                report.bodies().findings()
+            );
+            let app = graph
+                .modules()
+                .iter()
+                .find(|module| module.key.origin == Origin::Application)
+                .unwrap();
+            let call = app
+                .syntax
+                .nodes
+                .iter()
+                .position(|node| node.kind == NodeKind::Call)
+                .unwrap();
+            let NodeFactKind::Expression(checked_get) = &report
+                .bodies()
+                .node(app, call)
+                .unwrap()
+                .expect("checked get expression, not just a hypothetical winner")
+                .kind
+            else {
+                panic!("missing checked get expression")
+            };
+            assert!(checked_get.ordinary_context.is_none());
+            let call = report
+                .bodies()
+                .ordinary_call(app, call)
+                .unwrap()
+                .expect("canonical get family");
+            assert!(matches!(
+                call.outcome,
+                Some(compiler::analysis::ordinary::HypotheticalOutcome::Winner(_))
+            ));
+            assert!(call.checked);
+            let goal = report.bodies().goal(call.goal.as_ref().unwrap()).unwrap();
+            assert_eq!(goal.state, compiler::analysis::generics::GoalState::Proved);
+            assert!(goal.premise.is_none());
+            let role = report.option_role().unwrap();
+            let bridge = report.list_lookup_bridge().expect("admitted get bridge");
+            let collection = graph
+                .modules()
+                .iter()
+                .find(|module| module.key == bridge.id.module)
+                .unwrap();
+            let implementation = match call.outcome.unwrap() {
+                compiler::analysis::ordinary::HypotheticalOutcome::Winner(id) => id,
+                other => panic!("unexpected get selection: {other:?}"),
+            };
+            let body = graph
+                .implementations()
+                .iter()
+                .find(|body| &body.declaration == implementation)
+                .unwrap();
+            let return_node = collection.syntax.nodes[body.body_node].children[0];
+            let forwarded = collection.syntax.nodes[return_node].children[0];
+            let NodeFactKind::Expression(forwarded) = &report
+                .bodies()
+                .node(collection, forwarded)
+                .unwrap()
+                .expect("Rill wrapper checks its provider invocation")
+                .kind
+            else {
+                panic!("missing invocation")
+            };
+            assert_eq!(forwarded.call.as_ref().unwrap().callee, &bridge.id);
+            assert!(
+                matches!(call.selected_result.as_deref(), Some(TypeTerm::Nominal { declaration, arguments }) if **declaration == role.declaration.id && matches!(arguments.as_slice(), [element] if matches!(element.as_ref(), TypeTerm::Reference { mutable: false, referent } if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))))
+            );
+        }
         fs::write(&request.entry, "
             import std::collection::List;
-            function traverse(source: List<i32>): void { for (let item of source) { let _ = item; } }
-            function readAll(source: &List<i32>): void { for (let item of source) { let _ = item; } }
-            function editAll(source: &mut List<i32>): void { for (let item of source) { continue; } }
+            function traverse(source: List<i32>): void { for (let item of source) { let _: i32 = item; break; } }
+            function readAll(source: &List<i32>): i32 { for (let item of source) { let value: &i32 = item; return *value; } return 0i32; }
+            function editAll(source: &mut List<i32>): void { for (let item of source) { let value: &mut i32 = item; *value = 1i32; continue; } }
         ").unwrap();
         for test_mode in [false, true] {
             let graph = loader::load_installed(InstalledRequest {
@@ -229,21 +249,55 @@ fn installed_list() {
                 .enumerate()
                 .filter(|(_, n)| n.kind == NodeKind::For)
                 .collect();
-            for ((node, syntax), (name, borrow)) in loops.into_iter().zip([
-                ("OwnedListIter", None),
-                ("ListIter", Some(false)),
-                ("ListIterMut", Some(true)),
+            assert_eq!(loops.len(), 3);
+            let exact = AnalysisLimits {
+                max_work: report.statistics().work,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(
+                analyze_typed(&graph, exact).completion(),
+                report.completion()
+            );
+            let short = AnalysisLimits {
+                max_work: exact.max_work - 1,
+                ..exact
+            };
+            assert_eq!(
+                analyze_typed(&graph, short).completion(),
+                compiler::analysis::scalars::ScalarFailureKind::ResourceLimit
+            );
+            for ((node, syntax), (name, borrow, transfer)) in loops.into_iter().zip([
+                ("OwnedListIter", None, NodeKind::Break),
+                ("ListIter", Some(false), NodeKind::Return),
+                ("ListIterMut", Some(true), NodeKind::Continue),
             ]) {
                 let fact = report
                     .bodies()
                     .node(app, node)
                     .unwrap()
-                    .expect("conditional iteration handoff");
+                    .expect("checked iteration handoff");
                 let NodeFactKind::Iteration(handoff) = &fact.kind else {
                     panic!("missing iteration")
                 };
-                assert!(fact.flow.pending);
+                assert!(!fact.flow.pending && fact.flow.normal);
+                assert_eq!(fact.flow.returns, transfer == NodeKind::Return);
+                assert!(fact.flow.breaks.is_empty() && fact.flow.continues.is_empty());
                 assert_eq!(handoff.source, syntax.children[1]);
+                assert_eq!(handoff.pattern, syntax.children[0]);
+                let option = report.option_role().unwrap();
+                assert_eq!(handoff.some, &option.some.id);
+                assert_eq!(handoff.none, &option.none.id);
+                let NodeFactKind::Pattern(pattern) = &report
+                    .bodies()
+                    .node(app, handoff.pattern)
+                    .unwrap()
+                    .unwrap()
+                    .kind
+                else {
+                    panic!("missing iteration pattern");
+                };
+                assert_eq!(pattern.binders.len(), 1);
+                assert_eq!(pattern.binders[0].declaration.module, app.key);
                 let iterator = iter
                     .declarations
                     .iter()
@@ -251,6 +305,17 @@ fn installed_list() {
                     .unwrap();
                 assert!(
                     matches!(handoff.iterator.as_ref(), TypeTerm::Nominal { declaration, .. } if **declaration == iterator.id)
+                );
+                let representation = report
+                    .collection_representations()
+                    .find(|r| r.declaration.id == iterator.id)
+                    .unwrap();
+                use compiler::analysis::typed::CollectionStorage;
+                assert_eq!(
+                    representation.storage,
+                    borrow.map_or(CollectionStorage::UnyieldedElements, |mutable| {
+                        CollectionStorage::BorrowedList { mutable }
+                    })
                 );
                 let element = match borrow {
                     None => &handoff.yielded,
@@ -268,7 +333,8 @@ fn installed_list() {
                     let selection = facts.selection.as_ref().unwrap();
                     assert_eq!(selection.implementation.module, iter.key);
                     assert_eq!(selection.substitution.len(), 1);
-                    assert!(facts.premise.is_some());
+                    assert!(facts.premise.is_none());
+                    assert_eq!(facts.state, compiler::analysis::generics::GoalState::Proved);
                 }
             }
         }
@@ -283,7 +349,7 @@ fn installed_list() {
             ",
         )
         .unwrap();
-        let graph = loader::load_installed(request).unwrap();
+        let graph = loader::load_installed(request.clone()).unwrap();
         let report = analyze_typed(&graph, AnalysisLimits::default());
         assert!(
             report
@@ -306,6 +372,146 @@ fn installed_list() {
                     .any(|finding| finding.kind == kind && finding.site.span.bytes() == bytes),
                 "{kind:?} at {bytes:?}"
             );
+        }
+        fs::write(
+            &request.entry,
+            "
+            import std::collection::List;
+            import std::iter::{ListIter, ListIterMut, iterate, next as step};
+            import std::option::Option;
+            function advance(cursor: &mut ListIterMut<i32>): Option<&mut i32> { return step(cursor); }
+            function wrongOutput(cursor: &mut ListIterMut<i32>): Option<&i32> { return step(cursor); }
+            function borrow(value: &[List<i32>]): &List<i32> { let [part] = value; return part; }
+            function captured(value: List<i32>): void { let callback = () => value; }
+            function requireIndependent<T>(value: T): void where noBorrow(T) { let _ = value; }
+            function independent(xs: List<i32>): void { requireIndependent(xs); }
+            function generic<T>(xs: List<T>): void where noBorrow(T) { requireIndependent(xs); }
+            function independentIterator(xs: List<i32>): void { requireIndependent(iterate(xs)); }
+            function retainedItems(xs: List<&i32>): void { requireIndependent(xs); }
+            function retainedSource(xs: ListIter<i32>): void { requireIndependent(xs); }
+        ",
+        )
+        .unwrap();
+        for test_mode in [false, true] {
+            let graph = loader::load_installed(InstalledRequest {
+                test_mode,
+                ..request.clone()
+            })
+            .unwrap();
+            let report = analyze_typed(&graph, AnalysisLimits::default());
+            let app = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application)
+                .unwrap();
+            for name in [
+                "borrow",
+                "independent",
+                "generic",
+                "independentIterator",
+                "advance",
+            ] {
+                let declaration = app
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                assert!(
+                    report
+                        .bodies()
+                        .body(app, BodyOwner::Declaration(&declaration.id))
+                        .unwrap()
+                        .is_some(),
+                    "{name}: {:?}; {:?}",
+                    report.bodies().findings(),
+                    report.bodies().obligations()
+                );
+            }
+            let arrow = app
+                .syntax
+                .nodes
+                .iter()
+                .position(|n| n.kind == NodeKind::Arrow)
+                .unwrap();
+            assert_eq!(
+                report.bodies().arrow(app, arrow).unwrap().unwrap().mode,
+                Some(compiler::analysis::InvocationMode::Once)
+            );
+            assert_eq!(
+                report
+                    .bodies()
+                    .findings()
+                    .iter()
+                    .map(|f| (f.kind, f.site.span.bytes()))
+                    .collect::<Vec<_>>(),
+                [
+                    (ScalarFindingKind::TypeMismatch, b"step(cursor)".as_slice()),
+                    (
+                        ScalarFindingKind::MissingRequirement,
+                        b"requireIndependent(xs)".as_slice()
+                    ),
+                    (
+                        ScalarFindingKind::MissingRequirement,
+                        b"requireIndependent(xs)".as_slice()
+                    ),
+                ],
+            );
+        }
+        fs::write(&request.entry, "
+            import std::collection::List;
+            import std::iter::{OwnedListIter, iterate};
+            type Key = { value: i32 };
+            implement iterate<List<Key>, OwnedListIter<Key>>(source: List<Key>): OwnedListIter<Key> { while (true) {} }
+            function blocked(xs: List<Key>): void { for (let item of xs) { let _ = item; } }
+            function unaffected(xs: &List<Key>): void { for (let item of xs) { let _ = item; } }
+        ").unwrap();
+        for test_mode in [false, true] {
+            use compiler::analysis::typed::{
+                CollectionOperation, ListTraversal, OwnershipCoverage,
+            };
+            let graph = loader::load_installed(InstalledRequest {
+                test_mode,
+                ..request.clone()
+            })
+            .unwrap();
+            let app = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application)
+                .unwrap();
+            let report = analyze_typed(&graph, AnalysisLimits::default());
+            let region = report
+                .collection_protection()
+                .find(|p| p.operation == CollectionOperation::Iterate(ListTraversal::Owned))
+                .unwrap();
+            assert!(
+                region.provider.is_some(),
+                "the overlap does not erase delivery"
+            );
+            assert_eq!(region.coverage, OwnershipCoverage::Overlap);
+            let [overlap] = report.collection_overlaps() else {
+                panic!("expected a single protected overlap");
+            };
+            assert_eq!(overlap.code(), "R0500");
+            assert_eq!(overlap.implementation.id.module, app.key);
+            assert_eq!(*overlap.family, region.family.id);
+            let loops: Vec<_> = app
+                .syntax
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| n.kind == NodeKind::For)
+                .map(|(node, _)| node)
+                .collect();
+            assert!(report.bodies().node(app, loops[0]).unwrap().is_none());
+            assert!(matches!(
+                report
+                    .bodies()
+                    .node(app, loops[1])
+                    .unwrap()
+                    .map(|n| &n.kind),
+                Some(NodeFactKind::Iteration(_))
+            ));
         }
         check_authority(&root);
         return;

@@ -45,6 +45,24 @@ fn index_does_not_return_absence() {
 }
 
 #[test]
+fn element_operations_copy_and_dispose_only_initialized_storage() {
+    let list = List::from_elements([Box::new(1), Box::new(2), Box::new(3)]);
+    let copied = list.copy_with(|value| Box::new(**value));
+    assert!(!std::ptr::eq(
+        &**list.get(0).unwrap(),
+        &**copied.get(0).unwrap()
+    ));
+    let mut disposed = Vec::new();
+    copied.dispose_with(|value| disposed.push(*value));
+    assert_eq!(disposed, [3, 2, 1]);
+    let mut iterator = list.into_owned_iter();
+    assert_eq!(*iterator.next().unwrap(), 1);
+    disposed.clear();
+    iterator.dispose_with(|value| disposed.push(*value));
+    assert_eq!(disposed, [3, 2]);
+}
+
+#[test]
 fn owned_iterator_keeps_unyielded_values_until_it_is_dropped() {
     use std::cell::Cell;
     struct CountDrop<'a>(&'a Cell<u32>);

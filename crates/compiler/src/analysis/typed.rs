@@ -14,7 +14,10 @@ mod ownership;
 mod primitive;
 mod result_use;
 pub(in crate::analysis) use collections::CollectionCore;
-pub use collections::ListRole;
+pub use collections::{
+    CollectionOperation, CollectionOverlap, CollectionProtection, CollectionProvider,
+    CollectionRepresentation, CollectionStorage, ListRole, ListTraversal,
+};
 pub(super) use core::IntoAdmission;
 pub use core::{OptionRole, ResultRole};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
@@ -46,6 +49,7 @@ pub struct TypedReport<'g> {
     core: core::InstalledCore<'g>,
     ownership: ownership::Report<'g>,
     collections: CollectionCore<'g>,
+    collection_overlaps: Vec<CollectionOverlap<'g>>,
     completion: ScalarFailureKind,
     statistics: Statistics,
     not_performed: Vec<Stage>,
@@ -138,7 +142,23 @@ impl<'g> TypedReport<'g> {
 
     /// The private `get` implementation bridge, not a selected ordinary winner.
     pub fn list_lookup_bridge(&self) -> Option<&'g super::Declaration> {
-        self.collections.lookup
+        self.collections.lookup()
+    }
+
+    /// Owned element storage and retained source shapes, independent of ordinary call clearance.
+    pub fn collection_representations(
+        &self,
+    ) -> impl Iterator<Item = CollectionRepresentation<'g>> + '_ {
+        self.collections.representations()
+    }
+
+    /// Required-winner coverage and provider evidence for the captured List regions.
+    pub fn collection_protection(&self) -> impl Iterator<Item = CollectionProtection<'g>> + '_ {
+        self.collections.protection.iter().copied().flatten()
+    }
+
+    pub fn collection_overlaps(&self) -> &[CollectionOverlap<'g>] {
+        &self.collection_overlaps
     }
 
     pub fn core_blockers(&self) -> &'static [CoreBlocker] {
@@ -199,9 +219,15 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         || result_roles.is_err()
         || ownership::check(&inventory, &mut budget, &mut ownership).is_err();
     let mut collections = CollectionCore::default();
+    let mut collection_overlaps = Vec::new();
     let authority_exhausted = authority_exhausted
         || collections
-            .check(&inventory, core.option, &mut budget)
+            .check(
+                &inventory,
+                core.option,
+                &mut budget,
+                &mut collection_overlaps,
+            )
             .is_err();
     let bodies = analyze_integrated_bodies(
         &inventory,
@@ -290,6 +316,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         core,
         ownership,
         collections,
+        collection_overlaps,
         completion,
         statistics: budget.statistics,
         not_performed,

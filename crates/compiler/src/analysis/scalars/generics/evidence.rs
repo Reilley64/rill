@@ -238,7 +238,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             RequirementTarget::Family(id) if self.conversion_family(id).is_some() => {
                 Some(InputPremise::HypotheticalConversionRole)
             }
-            RequirementTarget::Family(_) => Some(InputPremise::HypotheticalOrdinaryRole),
+            RequirementTarget::Family(id) => match &judgment {
+                GoalJudgment::Determine { inputs, .. }
+                    if self.collection_winner(id, inputs).is_some() =>
+                {
+                    None
+                }
+                _ => Some(InputPremise::HypotheticalOrdinaryRole),
+            },
             _ => None,
         };
         let premise = match (self.arrow_premise, role) {
@@ -968,6 +975,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(id)
     }
 
+    fn collection_winner(
+        &self,
+        id: &DeclarationId,
+        inputs: &[Type<'g>],
+    ) -> Option<&'g DeclarationId> {
+        let scope = match inputs {
+            [source] => self.collections.scope(id, &[Some(source)]),
+            [source, key] => self.collections.scope(id, &[Some(source), Some(key)]),
+            _ => None,
+        }?;
+        scope.winner()
+    }
+
     fn expand_determination(&mut self, goal: usize) -> Work<GoalState> {
         self.elab
             .reserve(self.evidence.goals[goal].judgment.key_len())?;
@@ -987,7 +1007,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
         }
         let family = self.evidence_family(id)?.unwrap();
-        if let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)? {
+        let required = self.collection_winner(id, &inputs);
+        if required.is_none()
+            && let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)?
+        {
             return Ok(state);
         }
         let selection = if let Some(selection) = self.evidence.goals[goal].selection.take() {
@@ -1001,6 +1024,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 GoalChoice::Selected(selection) => selection,
             }
         };
+        if required.is_some_and(|id| id != selection.implementation) {
+            return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
+        }
         self.expand_selected_contract(goal, family, selection)
     }
 
@@ -1598,6 +1624,38 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             unreachable!("canonical variant parent")
         };
+        if let Some((representation, element)) = self.collections.representation(ty) {
+            use crate::analysis::typed::CollectionStorage;
+            let stored = match representation.storage {
+                CollectionStorage::Elements | CollectionStorage::UnyieldedElements => element,
+                CollectionStorage::BorrowedList { .. }
+                    if Predicate::of(intrinsic) == Predicate::NoBorrow =>
+                {
+                    return Ok(GoalState::Disproved);
+                }
+                CollectionStorage::BorrowedList { mutable } => {
+                    let Some(list) = self.collections.list else {
+                        return Ok(GoalState::Unresolved(GoalBlocker::Representation));
+                    };
+                    self.elab.reserve(3)?;
+                    Arc::new(TypeTerm::Reference {
+                        mutable,
+                        referent: Arc::new(TypeTerm::Nominal {
+                            declaration: &list.declaration.id,
+                            arguments: vec![element],
+                        }),
+                    })
+                }
+            };
+            let module = self.evidence_module(&representation.declaration.id.module)?;
+            self.property_dependency(
+                goal,
+                intrinsic,
+                stored,
+                Self::site(module, representation.element.node),
+            )?;
+            return Ok(GoalState::Proved);
+        }
         if declaration.module.origin != crate::loader::Origin::Application {
             return Ok(GoalState::Unresolved(GoalBlocker::Representation));
         }
