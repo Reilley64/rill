@@ -27,6 +27,8 @@ pub struct Site<'g> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Flow {
     pub normal: bool,
+    /// A reachable prerequisite prevents a complete control-flow judgment.
+    pub pending: bool,
     pub returns: bool,
     pub breaks: BTreeSet<NodeId>,
     pub continues: BTreeSet<NodeId>,
@@ -1772,9 +1774,27 @@ impl<'r, 'g> Checker<'r, 'g> {
         expected: Option<Type<'g>>,
         context: &Context<'r, 'g>,
     ) -> Work<Option<ExpressionResult<'g>>> {
+        self.expression_with_receiving(module, root, expected, context, false)
+    }
+
+    fn expression_with_receiving(
+        &mut self,
+        module: &'g Module,
+        root: NodeId,
+        expected: Option<Type<'g>>,
+        context: &Context<'r, 'g>,
+        receiving_pending: bool,
+    ) -> Work<Option<ExpressionResult<'g>>> {
         let finding_start = self.facts.findings.len();
         let premise = self.arrow_premise;
-        let result = self.expression_work(module, root, expected, context, finding_start);
+        let result = self.expression_work(
+            module,
+            root,
+            expected,
+            context,
+            finding_start,
+            receiving_pending,
+        );
         self.arrow_premise = premise;
         if result.is_err() && self.input.ordinary.is_some() {
             // An interrupted expression has not classified context-dependent findings.
@@ -1806,6 +1826,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         expected: Option<Type<'g>>,
         context: &Context<'r, 'g>,
         finding_start: usize,
+        receiving_pending: bool,
     ) -> Work<Option<ExpressionResult<'g>>> {
         let inherited_conversion =
             self.arrow_depth > 0 && self.arrow_premise.is_some_and(|p| p.has_conversion());
@@ -2307,7 +2328,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                 }
             } else {
-                if !unavailable.contains(&node) && !blocked_inputs.contains(&node) {
+                if !receiving_pending
+                    && !unavailable.contains(&node)
+                    && !blocked_inputs.contains(&node)
+                {
                     if module.syntax.nodes[node].kind == NodeKind::Literal {
                         self.finding(module, node, ScalarFindingKind::NumericContext)?;
                     } else {
@@ -2585,6 +2609,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     fn union(&mut self, mut a: Flow, b: &Flow) -> Work<Flow> {
         self.elab.reserve(b.breaks.len() + b.continues.len())?;
         a.normal |= b.normal;
+        a.pending |= b.pending;
         a.returns |= b.returns;
         a.diverges |= b.diverges;
         a.breaks.extend(&b.breaks);
@@ -2636,8 +2661,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         let before = self.marks();
         let mut flow = Flow::normal();
         let mut kind = NodeFactKind::Statement;
+        let mut combined_flow = false;
         match n.kind {
             NodeKind::Block => {
+                combined_flow = true;
                 self.elab.reserve(1)?;
                 context.scopes.push(BTreeMap::new());
                 for &child in &n.children {
@@ -2656,6 +2683,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 context.scopes.pop();
             }
             NodeKind::Function if self.integrated => {
+                // A nested declaration's body is static work, not an executed branch.
+                combined_flow = true;
                 let declaration = self.elab.declaration_at(module, node)?;
                 if let Some(typed) = self.input.facts.declarations.get(&declaration.id) {
                     self.nested_body(module, typed, context, depth + 1)?;
@@ -2859,6 +2888,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                             self.mismatch(module, n.children[0], &value.ty, &boolean)?;
                         }
                     }
+                    let condition_pending =
+                        self.integrated && (condition.is_none() || before != self.marks());
                     let truth = condition.as_ref().map_or(BooleanSet::BOTH, |e| {
                         if e.normal {
                             e.boolean.unwrap_or(BooleanSet::BOTH)
@@ -2875,7 +2906,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         context.loops.pop();
                     }
                     flow = condition.map_or_else(Flow::normal, |e| e.flow);
+                    flow.pending |= condition_pending;
                     flow.normal = false;
+                    combined_flow = true;
                     match n.kind {
                         NodeKind::IfStatement => {
                             let otherwise = if let Some(&other) = n.children.get(2) {
@@ -2961,7 +2994,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             _ => self.unsupported(module, node)?,
         }
-        if before == self.marks() && !matches!(n.kind, NodeKind::Binding { .. }) {
+        let unchanged = before == self.marks();
+        flow.pending |= self.integrated && !combined_flow && !unchanged;
+        if unchanged && !matches!(n.kind, NodeKind::Binding { .. }) {
             self.elab
                 .reserve(1 + flow.breaks.len() + flow.continues.len())?;
             self.record_node(NodeFacts {

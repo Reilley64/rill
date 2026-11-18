@@ -107,9 +107,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         depth: usize,
         context: &mut Context<'r, 'g>,
     ) -> Work<Flow> {
-        let before = self.marks();
         let flow = self.statement(module, failure, depth, context)?;
-        if flow.normal && (!self.integrated || before == self.marks()) {
+        if flow.normal && !flow.pending {
             self.finding(module, node, ScalarFindingKind::GuardFallthrough)?;
         }
         Ok(flow)

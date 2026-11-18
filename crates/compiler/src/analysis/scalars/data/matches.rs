@@ -359,7 +359,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         Ok(())
     }
-    fn check_arm_source(
+    fn arm_guard(module: &Module, arm: NodeId) -> Option<NodeId> {
+        let children = &module.syntax.nodes[arm].children;
+        (children.len() == 3).then(|| module.syntax.nodes[children[1]].children[0])
+    }
+
+    fn check_arm_without_flow(
         &mut self,
         module: &'g Module,
         arm: NodeId,
@@ -367,8 +372,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         scope: &mut Context<'r, 'g>,
     ) -> Work<()> {
         let children = &module.syntax.nodes[arm].children;
-        if children.len() == 3 {
-            let guard = module.syntax.nodes[children[1]].children[0];
+        if let Some(guard) = Self::arm_guard(module, arm) {
             let boolean = self.primitive("bool")?;
             self.expression(module, guard, Some(boolean), scope)?;
         }
@@ -376,7 +380,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         if module.syntax.nodes[body].kind == NodeKind::Block {
             self.statement(module, body, self.data_depth + 1, scope)?;
         } else {
-            self.expression(module, body, expected, scope)?;
+            let receiving_pending = expected.is_none();
+            self.expression_with_receiving(module, body, expected, scope, receiving_pending)?;
         }
         Ok(())
     }
@@ -407,9 +412,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                         module.syntax.nodes[arm].children[0],
                         scrutinee,
                         false,
+                        true,
                         &mut scope,
                     )?;
-                    self.check_arm_source(module, arm, expected.clone(), &mut scope)?;
+                    self.check_arm_without_flow(module, arm, expected.clone(), &mut scope)?;
                 }
             }
             return Ok(None);
@@ -436,7 +442,19 @@ impl<'r, 'g> Checker<'r, 'g> {
                 &mut scope,
                 &mut binders,
             )?;
-            let Some(pattern) = pattern.filter(|_| start == self.marks()) else {
+            let settled = start == self.marks();
+            let views = if let Some(pattern) = &pattern {
+                self.pattern_views(module, scrutinee, &value, pattern.clone(), &scope)?
+            } else {
+                Vec::new()
+            };
+            for view in &views {
+                if view.path.is_some() {
+                    self.elab.reserve(1)?;
+                    scope.views.push(view.clone());
+                }
+            }
+            let Some(pattern) = pattern.filter(|_| settled) else {
                 patterns_complete = false;
                 if self.integrated {
                     self.block_pattern_names(
@@ -444,25 +462,18 @@ impl<'r, 'g> Checker<'r, 'g> {
                         a.children[0],
                         a.children[0],
                         false,
+                        true,
                         &mut scope,
                     )?;
-                    self.check_arm_source(module, arm, expected.clone(), &mut scope)?;
+                    self.check_arm_without_flow(module, arm, expected.clone(), &mut scope)?;
                 }
                 continue;
             };
-            let views = self.pattern_views(module, scrutinee, &value, pattern.clone(), &scope)?;
-            for view in &views {
-                if view.path.is_some() {
-                    self.elab.reserve(1)?;
-                    scope.views.push(view.clone());
-                }
-            }
-            let guard =
-                (a.children.len() == 3).then(|| module.syntax.nodes[a.children[1]].children[0]);
+            let guard = Self::arm_guard(module, arm);
             let Some(irrefutable) = self.coverage(module, arm, &value.ty, vec![pattern.clone()])?
             else {
                 patterns_complete = false;
-                self.check_arm_source(module, arm, expected.clone(), &mut scope)?;
+                self.check_arm_without_flow(module, arm, expected.clone(), &mut scope)?;
                 continue;
             };
             if guard.is_none() {

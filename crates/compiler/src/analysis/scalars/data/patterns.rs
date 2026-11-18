@@ -119,7 +119,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             } else {
                 initializer
             };
-            self.block_pattern_names(module, n.children[0], cause, mutable, context)?;
+            self.block_pattern_names(module, n.children[0], cause, mutable, false, context)?;
             return Ok(flow);
         }
         if let Some(value) = value {
@@ -165,7 +165,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
         }
         if before != self.marks() {
-            self.block_pattern_names(module, n.children[0], n.children[0], mutable, context)?;
+            self.block_pattern_names(
+                module,
+                n.children[0],
+                n.children[0],
+                mutable,
+                false,
+                context,
+            )?;
         }
         Ok(flow)
     }
@@ -206,6 +213,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         pattern: NodeId,
         cause: NodeId,
         mutable: bool,
+        preserve_existing: bool,
         context: &mut Context<'r, 'g>,
     ) -> Work<()> {
         self.elab.reserve(1)?;
@@ -217,15 +225,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             if let Some(name) = name {
                 let declaration = self.elab.declaration_at(module, name)?;
                 let spelling = declaration.name.as_deref().unwrap();
-                if context
-                    .scopes
-                    .last()
-                    .unwrap()
-                    .get(spelling)
-                    .is_some_and(|l| l.declaration != &declaration.id)
-                {
-                    self.finding(module, name, ScalarFindingKind::DuplicateBinding)?;
-                    continue;
+                if let Some(local) = context.scopes.last().unwrap().get(spelling) {
+                    if local.declaration != &declaration.id {
+                        self.finding(module, name, ScalarFindingKind::DuplicateBinding)?;
+                        continue;
+                    }
+                    if preserve_existing {
+                        continue;
+                    }
                 }
                 self.elab.reserve(1)?;
                 context.scopes.last_mut().unwrap().insert(
@@ -306,20 +313,28 @@ impl<'r, 'g> Checker<'r, 'g> {
             emit,
         } = input;
         let declaration = self.elab.declaration_at(module, name)?;
-        let mut bound = ty.clone();
-        if access != Access::Owned {
-            let Some(copy) = implicit_copy(&mut self.elab, ty, self.integrated, 1)? else {
-                self.defer(module, name, ScalarUnsupported::ImplicitCopy)?;
-                return Ok(false);
-            };
-            if !copy {
-                self.elab.reserve(1)?;
-                bound = Arc::new(TypeTerm::Reference {
-                    mutable: access == Access::Writable,
-                    referent: ty.clone(),
-                });
+        let bound = if access == Access::Owned {
+            Some(ty.clone())
+        } else {
+            match implicit_copy(&mut self.elab, ty, self.integrated, 1)? {
+                Some(true) => Some(ty.clone()),
+                Some(false) => {
+                    self.elab.reserve(1)?;
+                    Some(Arc::new(TypeTerm::Reference {
+                        mutable: access == Access::Writable,
+                        referent: ty.clone(),
+                    }))
+                }
+                None => {
+                    self.defer(module, name, ScalarUnsupported::ImplicitCopy)?;
+                    if !self.integrated {
+                        return Ok(false);
+                    }
+                    // The binder still has an irrefutable shape. Its type is pending.
+                    None
+                }
             }
-        }
+        };
         self.elab.step(binders.len())?;
         let spelling = declaration.name.as_deref().unwrap();
         if context.scopes.last().unwrap().contains_key(spelling) {
@@ -331,18 +346,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             spelling,
             Local {
                 declaration: &declaration.id,
-                ty: Some(bound.clone()),
+                ty: bound.clone(),
                 mutable,
                 boolean: None,
             },
         );
-        binders.push(PatternBinder {
-            declaration: &declaration.id,
-            ty: bound.clone(),
-            source_type: ty.clone(),
-            projections: Vec::new(),
-            mutable,
-        });
+        if let Some(bound) = &bound {
+            binders.push(PatternBinder {
+                declaration: &declaration.id,
+                ty: bound.clone(),
+                source_type: ty.clone(),
+                projections: Vec::new(),
+                mutable,
+            });
+        }
         if emit {
             self.record_node(NodeFacts {
                 site: Self::site(module, name),
@@ -350,9 +367,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 callable: None,
                 kind: NodeFactKind::Binding(BindingFacts {
                     declaration: &declaration.id,
-                    ty: Some(bound),
+                    blocked_by: bound.is_none().then(|| Self::site(module, name)),
+                    ty: bound,
                     mutable,
-                    blocked_by: None,
                 }),
             });
         }

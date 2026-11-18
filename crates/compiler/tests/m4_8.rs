@@ -128,6 +128,77 @@ fn pending_match_input_does_not_hide_independent_arm_checks() {
 }
 
 #[test]
+fn pending_match_result_does_not_diagnose_unsettled_numeric_context() {
+    let fixture = Fixture::new("let x = match ([true]) { _ if false => 1, _ => 2i32 };");
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    assert!(report.bodies().findings().is_empty());
+    assert!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::MatchCoverage)
+    );
+}
+
+#[test]
+fn pending_borrowed_binder_preserves_known_siblings_and_nominal_view() {
+    let fixture = Fixture::new(
+        "type Point = { x: bool }; enum E { A { flag: i32; point: Point; ok: bool }, B } function probe(value: &E): bool { return match (value) { E.A { flag, point } if flag => value.ok, _ => true }; }",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let findings = report.bodies().findings();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].kind, ScalarFindingKind::TypeMismatch);
+    assert_eq!(findings[0].site.span.bytes(), b"flag");
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    for name in ["flag", "point"] {
+        let binder = module
+            .declarations
+            .iter()
+            .find(|d| d.id.kind == DeclarationKind::Binding && d.name.as_deref() == Some(name))
+            .unwrap();
+        let NodeFactKind::Binding(facts) = &report
+            .bodies()
+            .node(module, binder.node)
+            .unwrap()
+            .unwrap()
+            .kind
+        else {
+            panic!("binding facts for {name}")
+        };
+        assert_eq!(facts.declaration, &binder.id);
+        assert_eq!(facts.ty.is_some(), name == "flag");
+        assert_eq!(facts.blocked_by.is_some(), name == "point");
+    }
+    let match_node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Match)
+        .unwrap();
+    assert!(report.bodies().node(module, match_node).unwrap().is_none());
+    let field = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Field && n.span.bytes() == b"value.ok")
+        .unwrap();
+    let NodeFactKind::Expression(field) =
+        &report.bodies().node(module, field).unwrap().unwrap().kind
+    else {
+        panic!("field projection")
+    };
+    assert!(matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"));
+}
+
+#[test]
 fn invalid_payload_does_not_hide_private_siblings_or_unrelated_bodies() {
     let fixture = Fixture::new(
         "type Hidden = { x: bool }; export enum E { A([Hidden,Missing]), B(Hidden), C(Missing) } function bad(): bool { function invalid(e: E): void { } return 1i32; }",
@@ -152,7 +223,7 @@ fn invalid_payload_does_not_hide_private_siblings_or_unrelated_bodies() {
 #[test]
 fn blocked_destructuring_and_guard_do_not_hide_later_errors_or_prove_fallthrough() {
     let fixture = Fixture::new(
-        "function halt<T>(x: T): never; function probe(): void { let [a] = [true]; let knownLater: bool = 1i32; let pending = a; guard true else { halt(1i32); } guard true else { a; } guard true else { let normal = true; } } let [b] = [false]; let alsoWrong: bool = 2i32; let pending = b;",
+        "function halt<T>(x: T): never; function probe(): void { let [a] = [true]; let knownLater: bool = 1i32; let pending = a; guard true else { halt(1i32); } guard true else { a; } guard true else { if (false) { a; } } guard true else { let normal = true; } } let [b] = [false]; let alsoWrong: bool = 2i32; let pending = b;",
     );
     let graph = fixture.load(false);
     let report = analyze_typed(&graph, AnalysisLimits::default());
@@ -161,6 +232,7 @@ fn blocked_destructuring_and_guard_do_not_hide_later_errors_or_prove_fallthrough
         findings.iter().map(|f| f.kind).collect::<Vec<_>>(),
         [
             ScalarFindingKind::TypeMismatch,
+            ScalarFindingKind::GuardFallthrough,
             ScalarFindingKind::GuardFallthrough,
             ScalarFindingKind::TypeMismatch
         ]
