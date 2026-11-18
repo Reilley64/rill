@@ -943,9 +943,10 @@ The owner [approved V1 through V4](https://github.com/Reilley64/rill/issues/64#i
 | New procedure | Owns |
 | --- | --- |
 | [RFC 0002](rfcs/0002-modules-and-program-loading.md#proposed-m48-core-admission-and-interface-checks) | Capture-bound admission, public interface visibility and nested declarations. |
-| [RFC 0003](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m48-result-use-checking) | Result use through named storage and aggregates, pipe calls and iteration. |
-| [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m48-list-index-and-aggregate-handoff) | List, indexing and aggregate prerequisites. |
-| [RFC 0008](rfcs/0008-errors-propagation-and-caused-by-wrapping.md#proposed-m48-option-result-and-err-checking) | Canonical guards, closed Err, propagation and causal wrapping. |
+| [RFC 0003 result use](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m48-result-use-checking) and [guard control](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control) | Result use through named storage and aggregates, pipe calls, iteration and guard checking. |
+| [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m48-list-index-and-aggregate-handoff) | List, indexing and aggregate handoff. |
+| [RFC 0007](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m48-aggregate-classification) | Implicit-copy classification for borrowed binders and capture demands. |
+| [RFC 0008](rfcs/0008-errors-propagation-and-caused-by-wrapping.md#proposed-m48-option-result-and-err-checking) | Canonical Option and Result facts for guards, closed Err, propagation and causal wrapping. |
 
 Pin all unchanged companion sections to [`965e27dee0bc76ee8bdae922b7fea933e7709391`](https://github.com/Reilley64/rill/tree/965e27dee0bc76ee8bdae922b7fea933e7709391). The dependencies are rules for this slice, not changes to those proposals or their status.
 
@@ -956,16 +957,16 @@ Pin all unchanged companion sections to [`965e27dee0bc76ee8bdae922b7fea933e77093
 | [RFC 0006 interpolation](rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-interpolation-and-default-formatting) and [numeric protection](rfcs/0006-numbers-strings-and-primitive-operations.md#protected-numeric-conversions-and-explicit-arithmetic-helpers) | Check each interpolation hole through canonical `show` in order. Preserve required numeric providers and specified gaps. |
 | [RFC 0007 protected overlap](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary) and [capture facts](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m46-capture-and-invocation-facts) | Required winners and prohibited inputs, typed capture and property prerequisites only. |
 | [RFC 0009 conversions](rfcs/0009-user-implementable-conversions.md#proposed-m47-conversion-checking-procedure) | Pair keys, exact capture and error equality, conversion-only applicability and identity gate. |
-| [RFC 0010](rfcs/0010-diagnostics-and-reporting.md) and [diagnostic registry](diagnostic-codes.md) | Original locations, distinct findings and partial outcomes. No renderer or sink work. |
-| [Library catalogue sections 1–4 and 9](standard-library-contracts.md#1-public-paths-and-the-fixed-prelude) | Required core schemas and relationships, not implementation or authority evidence. |
+| RFC 0010 [diagnostic model](rfcs/0010-diagnostics-and-reporting.md#common-diagnostic-model), [source ranges](rfcs/0010-diagnostics-and-reporting.md#source-ranges-and-coordinate-projection) and [driver statuses](rfcs/0010-diagnostics-and-reporting.md#driver-statuses-and-trust-boundaries); [diagnostic registry](diagnostic-codes.md) | Original locations, distinct blocking and advisory findings, and partial outcomes. No renderer or sink work. |
+| Library catalogue [§1](standard-library-contracts.md#1-public-paths-and-the-fixed-prelude), [§2](standard-library-contracts.md#2-callable-and-ownership-evidence), [§3](standard-library-contracts.md#3-collections-equality-and-traversal), [§4](standard-library-contracts.md#4-option-result-origins-and-causes) and [§9](standard-library-contracts.md#9-conversion-numeric-compatibility-parsing-and-formatting) | Required core schemas and relationships, not implementation or authority evidence. |
 
 Take one immutable M3 capture. Validate applicable declaration, public interface, layout and admission prerequisites before using their facts. Collect ordinary and conversion headers with their real roles before evidence can use them. Extend the shared checker and its worklist. Do not chain scoped receipts as if each proved its unperformed stages. A settled ordinary winner still does not fall back after a failed requirement. A conversion can exclude a disproved candidate before pair ranking. Neither family can use a conditional premise as an admitted proof.
 
 Account for every loaded declaration and all checkable body roots. Check supported nested declarations even in unexecuted source. Check every loaded module's startup, every expectation and every body, including unused implementations. Use the same typed obligations in both modes. Keep original module and node identity. Missing prerequisites block only dependent checks. Continue independent checks within limits. Include typed capture, aggregate binding and temporary access consequences without granting ownership permissions. Record each remaining unsupported form as a blocked obligation, not a successful skipped body.
 
-Only issue a typed-stage receipt when all required obligations for that capture complete without findings, pending work or conditional premises. Use `ResourceLimit` before `Incomplete` before `SourceRejected`, after request validation. Preserve independent findings and known facts on failure. Report only stages actually performed. Typed completion is not ownership, loan, move, transfer, lifetime, disposal, MIR, runtime, codegen, LLVM, editor or product acceptance.
+Only issue a typed-stage receipt when all required obligations for that capture complete without blocking findings, pending work or conditional premises. Advisory findings do not change acceptance. Use `ResourceLimit` before `Incomplete` before `SourceRejected`, after request validation. Preserve independent findings and known facts on failure. Report only stages actually performed. Typed completion is not ownership, loan, move, transfer, lifetime, disposal, MIR, runtime, codegen, LLVM, editor or product acceptance.
 
-The source tree has no [standard-library implementation](../stdlib/README.md). There is no actual admitted core bundle at this revision. Approve the shared gate and testable checks now, or supply the actual inputs before positive core testing. The bounded increment can demonstrate failures and independent static facts. It cannot demonstrate admitted List, Result or protected providers with fabricated source or call-site assertions. Leave #65 and #56 open while any required typed gate remains unverified.
+The source tree has no [standard-library implementation](../stdlib/README.md). There is no actual admitted core bundle at this revision. This checkpoint requests approval for the shared gate and testable independent checks. It does not define a trusted bundle format or authenticator. Positive core testing needs actual inputs and a separately reviewed toolchain authority source. The bounded increment can demonstrate failures and independent static facts. It cannot demonstrate admitted List, Result or protected providers with fabricated source or call-site assertions. Leave #65 and #56 open while any required typed gate remains unverified.
 
 ### Proposed public interfaces
 
@@ -988,18 +989,31 @@ Names describe behavior, not Rust spelling. All queries use identities from the 
 
 ### Planned checks
 
-These assertions are not results. The independent model should enumerate finite path histories and compare the result-use worklist to that oracle. Include sibling components, joins, replacements, unreachable source, normal and diverging exits, and loop occurrences. Model result roles are abstract labels, not admitted Rill declarations.
+These assertions are NotChecked. See the owning [result-use cases](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m48-result-use-cases) and [indexing cases](rfcs/0005-types-records-enums-and-inference.md#proposed-m48-indexing-cases) for expected outcomes. The independent model should enumerate finite path histories and compare the result-use worklist to that oracle. Include sibling components, joins, replacements, unreachable source, normal and diverging exits, and loop occurrences. Model result roles are abstract labels, not admitted Rill declarations.
 
 | Counterexample | Public test or model contrast |
 | --- | --- |
 | A standard-root namesake or an asserted descriptor creates trust. | Reject foreign evidence and check exact captured declarations. Test alias routes, incomplete inventories, protected overlaps and prohibited inputs. Distinguish a required but absent provider, a specified gap and a complete empty action set. Positive admission tests require real inputs. |
-| A private type or enclosing variable becomes accessible through metadata. | Compare an opaque signature with a public enum payload, public defaults and requirements, exported aliases and unimported public types. Check nested shadowing and unused nested bodies. Reject startup and named-function runtime capture without rejecting valid arrow context. |
-| A skipped source construct or incomplete predecessor disappears. | In both modes, check imported startup, an unused body, a test-only import and a non-Boolean expectation. Retain an independent finding after a missing core contract. Check exact and one-short limits and foreign query identities. |
+| A private type or enclosing variable becomes accessible through metadata. | Compare an opaque signature with a public enum payload, public defaults and requirements, intrinsic predicates, exported aliases and unimported public types. Check nested shadowing and unused nested bodies. Reject startup and named-function runtime capture without rejecting valid arrow context. |
+| Field shape or a custom `copy` grants implicit copying. | Compare a plain aggregate, an applicable custom disposer, a protected prohibition and a missing inventory. Test both the borrowed binder's type and the invocation demand of a by-value owned capture. |
+| A skipped source construct or incomplete predecessor disappears. | In both modes, check imported startup, an unused body, a test-only import and a non-Boolean expectation. Retain an independent finding after a missing core contract. An advisory alone cannot reject otherwise complete input. Check exact and one-short limits and foreign query identities. |
 | An index or callback guesses a result or proof. | Contrast tuple and List contexts, empty List, wrong-width and out-of-range tuple indices, and same-spelled stand-ins. Check original pipe input order, template holes and canonical `iterate`/`next` contracts, including failed selected evidence and missing yield type. |
-| Guard or wrapping manufactures a value. | Check exact E, differing success types, borrowed propagation rejection, cause requirements, wrong Result/Option target and source site attribution. Check non-fallthrough and irrefutable success patterns. The RHS must be typed without marking it executed. |
-| Renaming, copying a fact or reading a sibling hides a discarded Result. | Compare `let _`, bare expression discard, named storage, destructuring, observation and checked forwarding. Include replacement, early exits, partial projection, nested Results and symbolic or opaque storage. Report R0103 only for an established discard. |
+| Guard or wrapping manufactures a value. | Check exact E, differing success types, borrowed operands, missing outer `display(E)`, cause requirements, wrong Result/Option target and source site attribution. Check non-fallthrough and irrefutable success patterns. Type the RHS without marking it executed. |
+| Renaming, copying a fact or reading a sibling hides a discarded Result. | Compare `let _`, bare expression discard, named storage, destructuring, observation and checked forwarding. Compare a committed wildcard with a guard-false arm followed by discard. Include replacement, partial projection, nested Results and unknown storage. Report R0103 only for an established discard. |
+| Iteration handles all components when only one has been yielded. | Compare owned and borrowed iterators at `Some`, `None`, `break` and `return`. Keep unyielded owned occurrences or a dependent blocker when the contract does not account for them. |
 
 Use real M3 captures for the public tests. Keep tests that need admitted core contracts blocked until actual inputs are available. Run `mise run test:compiler`, `mise run test`, `mise run check` and `mise run build:scaffold`. Run `check:ci` only for workflow changes. Record model, compiler, document and product evidence separately. No M4.8 model or compiler work has started at this checkpoint. Formal ASD-STE100 vocabulary compliance is unverified.
+
+### Independent design reviews
+
+Standards and Spec reviewed `a3adbdbf1f7fc42022ef9ebe3b8e2949cfc07665` against `965e27dee0bc76ee8bdae922b7fea933e7709391`. The five-file diff had SHA-256 `ea22790f6767d9a4f9e946ab2335886165b98c24d16acdfe009c5ca780de82ac`.
+
+| Axis | Disposition |
+| --- | --- |
+| Standards | Keep advisory findings nonblocking. Give guard checking one owner. Pin the exact diagnostic and catalogue sections. Add traceable NotChecked cases. Split long RFC paragraphs and distinguish the tracked location from the source site. |
+| Spec | Keep positive admission blocked until an authority source exists. Commit pattern acknowledgements only on the guard-true edge. Track unyielded iterator components. Check intrinsic predicate identity without a public path. Classify aggregate binder and capture demands with disposal and protection evidence. Require owned input and outer display evidence for infix wrapping. Keep advisories nonblocking. |
+
+The corrections were checked locally, not independently re-reviewed. No model or compiler work has started. Owner approval of the corrected U1–U4 checkpoint is still required.
 
 ## Completion record
 

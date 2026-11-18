@@ -355,13 +355,19 @@ This equality can be tested independently of a standard-library wrapper. Operati
 
 Validate the exact Option and Result variant schemas, Result's canonical default, and the distinct Err type and closed constructor roles. Do not infer those roles from representation. Check raw variant construction with the ordinary named data rules. `Result.Err` consumes a supplied wrapper value under the later ownership rules. It does not create an origin.
 
-Use the existing [closed Err procedure](#proposed-closed-err-construction-and-typing) only for the admitted value declaration. Alias calls retain the written call site. Check `display` with ordinary evidence. Check retained cause properties with compiler predicates and the actual inner payload type. Keep the typed inner wrapper, exact C and cause evidence in the facts. A missing or unsupported proof cannot synthesize cause metadata or replace C. Keep no constructed wrapper fact for an incomplete operation.
+Use the existing [closed Err procedure](#proposed-closed-err-construction-and-typing) only for the admitted value declaration. Alias calls retain the written call site. Check `display` with ordinary evidence. Check retained cause properties with compiler predicates and the actual inner payload type.
 
-For direct guards and `guard let`, use actual canonical variant identities and substitutions. Retain the success payload type and the failure path before introducing pattern bindings. An Option has no error binding. A Result error binding receives `Err<E>` with the actual container access. Require the existing success-pattern coverage and non-fallthrough failure rule. A payload mismatch cannot create a failure wrapper.
+Keep the typed inner wrapper, exact C and cause evidence in the facts. A missing or unsupported proof cannot synthesize cause metadata or replace C. Keep no constructed wrapper fact for an incomplete operation.
 
-For postfix propagation, check the operand once and require an owned Option or Result type. The nearest callable must return the same container kind. For Result, compare E exactly with the enclosing E. Keep the original Err identity and no new origin. Do not require equality between operand and enclosing success types. Propagation that leaves startup or an expectation is invalid. A nested callable keeps its own return context.
+Supply the canonical variant identities and substitutions to [RFC 0003's guard checking](0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control). Retain the success payload type and the failure path before introducing pattern bindings. For a Result error binding, supply `Err<E>` with the actual container access.
 
-For infix wrapping, check the left Result and the outer error expression once each. Use the enclosing Result's E for the immediate outer expression context. Keep the left success type and separate early-return edge. Validate the retained cause evidence on the inner C. Record the question-mark token as the new origin. Type checking the right operand does not assert its evaluation on the success path.
+For postfix propagation, check the operand once and require an owned Option or Result type. The nearest callable must return the same container kind. For Result, compare E exactly with the enclosing E. Keep the original Err identity and no new origin. Do not require equality between operand and enclosing success types.
+
+Propagation that leaves startup or an expectation is invalid. A nested callable keeps its own return context.
+
+For infix wrapping, check the owned left Result and the outer error expression once each. A borrowed left Result does not supply an owned inner wrapper. Use the enclosing Result's E for the immediate outer expression context. Require canonical `display(E)` for the new wrapper and the retained cause evidence on the inner C.
+
+Keep the left success type and separate early-return edge. Record the question-mark token as the new origin. Type checking the right operand does not assert its evaluation on the success path.
 
 The report can retain operand, result, origin, branch and evidence facts. It cannot assert construction of a runtime owner, a valid move, a release order or rendering. Use [RFC 0003](0003-expressions-bindings-and-control-flow.md#proposed-m48-result-use-checking) for the separate use obligation after construction or propagation.
 

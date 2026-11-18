@@ -366,6 +366,22 @@ For a reference subject, forwarding can give the descriptor its own callable cap
 
 Each rule yields proved, disproved or unresolved evidence. Unsupported or cyclic structural obligations are unresolved. Do not derive a missing operation from unavailable core metadata. There is no structural proof of explicit copy, protected guard access or disposal. Preserve every proved property independently. No property implies permission to act on a particular value.
 
+### Proposed M4.8 aggregate classification
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes this typed prerequisite. It requires separate checkpoint approval. The classification chooses a binder type or capture demand. It does not execute an operation.
+
+For an otherwise eligible nominal value, check canonical disposal and protection facts for its actual static type. Use the admitted inventory and shared input selection, with the original premises. An applicable custom disposer or a protected prohibition makes that type non-implicitly-copyable. Ordinary default field cleanup is not a custom disposer. A custom `copy` body does not make the type implicitly copyable.
+
+Check copy/dispose interception separately during collection. A hypothetical winner, unmet evidence or ambiguous action supplies no positive classification.
+
+For eligible source aggregates without those exclusions, require the classification of every stored component after substitution. A known variant uses its own payload. A parent enum needs all payloads. Apply the disposal and protection check to the actual static aggregate type as well as its contained values.
+
+Stop at a reference descriptor and apply its own rule. Never infer the referent's capability from the descriptor. Use admitted facts for a protected or opaque stored value.
+
+An established non-copying classification selects the projected reference for a borrowed binder. It also makes a by-value use of an owned capture demand consuming invocation. Incomplete classification blocks either judgment if it depends on that fact.
+
+Do not substitute a borrow or an expected invocation mode for missing evidence. Keep the classification of an unconstrained rigid parameter under the existing symbolic rule. Preserve its carried sources independently of the binder or invocation choice.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |
