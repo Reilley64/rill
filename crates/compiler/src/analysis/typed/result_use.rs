@@ -662,7 +662,11 @@ impl<'a, 'g> Check<'a, 'g> {
                         depth + 1,
                     );
                 }
-                DataExpression::ErrorConstruction(error) => {
+                DataExpression::ErrorConstruction(error)
+                | DataExpression::ErrorPipe {
+                    construction: error,
+                    ..
+                } => {
                     let failure = ResultComponent::VariantPayload {
                         variant: error.failure,
                         index: 0,
@@ -685,6 +689,15 @@ impl<'a, 'g> Check<'a, 'g> {
                             &retained[..]
                         };
                         alternatives = self.component(alternatives, arg, root, path, depth + 1)?;
+                    }
+                    if let DataExpression::ErrorPipe { propagation, .. } = data {
+                        debug_assert!(propagation.can_return && !propagation.can_continue);
+                        for mut state in alternatives {
+                            // The newly built failure is immediately forwarded.
+                            state.take(root, &[], self.budget)?;
+                            self.exit(state, node)?;
+                        }
+                        return Ok(Vec::new());
                     }
                     for state in &mut alternatives {
                         self.add_source(state, root, node, &[])?;

@@ -185,16 +185,6 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             return Ok(());
         };
-        if Self::propagating_pipe(module, node) {
-            // The pipe handoff cannot yet carry both construction and propagation.
-            self.defer(
-                module,
-                module.syntax.nodes[node].children[1],
-                ScalarUnsupported::Syntax,
-            )?;
-            inference.slots.get_mut(&node).unwrap().blocked = true;
-            return Ok(());
-        }
         let call = inference.calls.get_mut(&node).unwrap();
         let header = &self
             .input
@@ -220,7 +210,15 @@ impl<'r, 'g> Checker<'r, 'g> {
             let never = self.primitive("never")?;
             return self.establish(inference, node, never, false);
         }
-        let result = construction.result.clone();
+        let result = if Self::propagating_pipe(module, node) {
+            self.elab.reserve(1)?;
+            Arc::new(TypeTerm::Variant {
+                parent: construction.result.clone(),
+                declaration: construction.failure,
+            })
+        } else {
+            construction.result.clone()
+        };
         self.elab.reserve(1)?;
         inference.slots.get_mut(&node).unwrap().installed_operation = Some(
             data::DataExpression::ErrorConstruction(Arc::new(construction)),

@@ -2659,9 +2659,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                 };
                 let data = if let Some(propagation) = &slot.propagation {
                     self.elab.reserve(1)?;
-                    Some(data::DataExpression::Propagation(Box::new(
-                        propagation.clone(),
-                    )))
+                    let propagation = Box::new(propagation.clone());
+                    Some(match &slot.installed_operation {
+                        Some(data::DataExpression::ErrorConstruction(construction)) => {
+                            data::DataExpression::ErrorPipe {
+                                construction: construction.clone(),
+                                propagation,
+                            }
+                        }
+                        _ => data::DataExpression::Propagation(propagation),
+                    })
                 } else if let Some(operation) = &slot.installed_operation {
                     Some(operation.clone())
                 } else {

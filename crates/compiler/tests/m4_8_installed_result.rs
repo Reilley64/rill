@@ -504,6 +504,56 @@ fn installed_postfix_forwards_only_exact_e() {
 }
 
 #[test]
+fn installed_pipe_constructs_then_propagates_only_failure() {
+    installed(
+        "installed_pipe_constructs_then_propagates_only_failure",
+        |request| {
+            fs::write(&request.entry, "
+            import std::result::{Result, Err as Make};
+            function propagate(message: string, sibling: Result<bool, string>): Result<bool, string> {
+                let _ = message |> Make<i32, string>?;
+                let _ = sibling;
+                return Result.Ok(true);
+            }
+        ").unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let app = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application)
+                    .unwrap();
+                let pipe = app
+                    .syntax
+                    .nodes
+                    .iter()
+                    .position(|n| n.kind == NodeKind::Pipe)
+                    .unwrap();
+                let fact = report
+                    .bodies()
+                    .node(app, pipe)
+                    .unwrap()
+                    .expect("checked Err pipe");
+                assert!(fact.flow.returns && !fact.flow.normal);
+                assert!(
+                    report.result_use().unwrap().discards().iter().any(|w| w
+                        .origin
+                        .span
+                        .bytes()
+                        .starts_with(b"sibling:")
+                        && w.discard.node == pipe)
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_capture_replays_its_error_storage_input() {
     installed(
         "installed_capture_replays_its_error_storage_input",
