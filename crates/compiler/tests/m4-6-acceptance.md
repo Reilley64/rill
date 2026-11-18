@@ -50,10 +50,42 @@ Code revision [`f4765b82116fc29d45e392f89a3afbce7d7966e9`](https://github.com/Re
 | Independent Python models | 41 passed, including all 16 M4.6 tests. |
 | Formatting, LLVM-free Clippy, dependency tree and diff | Passed. The LLVM-free compiler dependency tree contained only `compiler`. |
 
+## Completion increment
+
+The [previous publication](https://github.com/Reilley64/rill/issues/63#issuecomment-6966488734) left three procedures incomplete. The source checker now:
+
+- Resumes selected output dependencies after source context or a ready default binds a free slot. A separate `Instantiate` goal records the use, its dependencies and defaults. The input-only `Determine` goal and its winner do not change. A pending output still cannot be bound by the source.
+- Commits bracket category and tests arity before projecting needed callback contexts at nested tuple paths. It uses independent anchors from typed siblings and retains disagreement without selecting a winner.
+- Matches symbolic callable assumptions against the argument vector. It supplies only agreed parameter contexts, rejects a settled mismatch, and does not use the expected result to select an assumption.
+
+The new public tests failed first on missing output re-entry, missing nested callback context and unresolved same-arity invocations. They also cover dependent defaults, contextual family values and ambiguity despite an expected result.
+
+Independent Standards and Spec reviews examined `2f5a21264640c23212ec767bedc26730e629895e` against `5a9b07f9b090ad029dae9892bad979c73c1589ef`: eight files, 946 additions and 339 deletions, SHA-256 `ae2d0f2bb7e171ae2bc608b4507e126d7e99859e2a7250eae84cbf31bddf674e`. Both ran 327 compiler tests and public probes. Standards also ran the documentation and scaffold checks, the full model suite and the LLVM-free dependency check. Spec ran the 16 M4.6 model tests.
+
+| Axis | Findings and corrections |
+| --- | --- |
+| Standards | Exhaustion could expose hypothetical arity as an unconditional finding. Read-only invocation could lose the arrow's premise, and child projection could exceed its depth limit before checking it. The checker now emits conditional arity directly, discards unclassified findings on exhaustion, preserves read-only premises and checks depth before child projection. The suggested key-comparison cleanup was not required for correctness. |
+| Spec | A bad nested arity could still produce a hypothetical winner. A compound default could bind just part of its term. A nested anchor was ignored, a settled symbolic mismatch stayed pending, and a cycle blocked unrelated output work. The checker now forms a tuple from its checked elements, applies only complete ready defaults, reads nested declared equations, reports settled invocation mismatches and resumes independent output work without resolving the cycle. |
+
+The reviewers removed their temporary probes. The corrections and their public regressions were verified locally, not independently re-reviewed.
+
+### Completion verification
+
+Code revision `f7f96f71285ebb649da2837506cd48d071ec9967` passed on a clean macOS AArch64 worktree. Its diff from the partial publication has SHA-256 `be7a1dc06893eb75dd6316eab0b98dc628720dbf1bc6b4098f5df4ec8520fc60`.
+
+| Check | Result |
+| --- | --- |
+| `mise run test:compiler` | 335 passed: 79 M4.6 tests (25 inference, 16 nominal, 14 callable, 24 evidence) and 256 earlier tests. |
+| `mise run test` | 343 passed, including the compiler suite. |
+| `mise run check` | Passed; zero errors across 1,716 documentation destinations at the code revision. |
+| `mise run build:scaffold` | Passed. |
+| Independent Python models | 41 passed, including all 16 M4.6 tests. |
+| Formatting, LLVM-free Clippy, dependency tree and diff | Passed. The LLVM-free compiler dependency tree contained only `compiler`. |
+
 ## Completion boundary
 
 `GenericReport` exposes partial arguments, captures, body and node facts, and issued goals. An ordinary result type or proof outcome under a hypothetical role does not supply a checked call. An output that remains open in an independent determination stays open there even if source context can fill a free slot and form separate requirements at that use.
 
-The source checker still leaves some M4.6 paths incomplete. It does not pass a free output filled by source context back into a waiting determination chain that needs it as a new input. Ordinary callback projection covers individual arguments and direct tuple element paths, not arbitrary nested tuple paths. Distinct symbolic callable contracts with the same arity stay pending when they do not agree on one signature. These limits are not errors in the source language and are not evidence of absence. This record is not full M4.6 acceptance.
+This completes the approved M4.6 compiler slice. Unresolved contracts, ambiguous symbolic invocations and active cycles remain pending. Neither this slice nor its tests grant role admission or whole-source acceptance.
 
 M4.7 owns conversion applicability and conversion-selected error types. M4.8 owns actual core and protection admission, integrated List/index/Option/Result/Err and iterator contracts, remaining visibility and aggregate prerequisites, and result use. No Rill program ran. No native runtime, hosted profiles, LLVM backend or product acceptance was verified for this revision. Workflows did not change, so `check:ci` was not run. No ownership, storage, copy execution, loan, cleanup or release gate is claimed.

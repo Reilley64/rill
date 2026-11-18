@@ -229,11 +229,11 @@ M3 supplies no canonical role and protection catalogue. The report keeps those o
 | Query | Facts |
 | --- | --- |
 | `body`, `body_status`, `node` | Scope completion, supported types and callable invocations, and remaining obligations. |
-| `ordinary_call`, `ordinary_value` | Conditional input context, selection and output agreement. They cannot clear an unadmitted role. |
+| `ordinary_call`, `ordinary_value` | Conditional selection and output agreement. Calls also expose projected callback contexts. An optional instantiation goal shows where free output bindings resumed the selected contract without changing the independent determination. |
 | `arrow` | Signature and capture sites, original storage, access demands and any known invocation mode. An unresolved mode can leave a signature without a checked invocation. |
 | `goal`, `goals` | Exact judgments, caller assumptions, dependencies, result witnesses and blockers. `goal` rejects IDs issued by another report. |
 | `annotations`, `declaration_issues` | Captured annotation and default provenance, plus retained declaration and layout issues. |
 
 The checker keeps independent output determination separate from a request to prove a particular result. It does not try another ordinary body when selected evidence fails. A repeated active goal stays unresolved; exhaustion on a growing type is a resource limit. Neither is proof of absence.
 
-The [M4.6 verification record](tests/m4-6-acceptance.md) identifies the reviewed and tested revisions and lists the remaining inference cases. Core role and protection admission still belong to M4.8. These facts grant no ownership or execution permission.
+The [M4.6 verification record](tests/m4-6-acceptance.md) identifies the reviewed and tested revisions and the limits of the slice. Core role and protection admission still belong to M4.8. These facts grant no ownership or execution permission.
