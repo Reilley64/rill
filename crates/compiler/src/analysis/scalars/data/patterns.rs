@@ -86,6 +86,73 @@ struct Matrix<'g> {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
+    pub(in crate::analysis::scalars) fn guard_payload_pattern(
+        &mut self,
+        module: &'g Module,
+        pattern: NodeId,
+        operand: NodeId,
+        option: &super::super::core::OptionOperand<'g>,
+        depth: usize,
+        context: &mut Context<'r, 'g>,
+    ) -> Work<Option<BooleanSet>> {
+        let before = self.marks();
+        let mut binders = Vec::new();
+        let Some(prepared) = self.pattern(
+            module,
+            pattern,
+            PatternInput {
+                ty: &option.payload,
+                access: option.access,
+                mutable: false,
+                emit: true,
+            },
+            depth,
+            context,
+            &mut binders,
+        )?
+        else {
+            self.block_pattern_names(module, pattern, pattern, false, false, context)?;
+            return Ok(None);
+        };
+        let Some(coverage) =
+            self.coverage(module, pattern, &option.payload, vec![prepared.clone()])?
+        else {
+            return Ok(None);
+        };
+        let Some(reachable) =
+            self.coverage_within(module, pattern, &option.payload, &[], prepared)?
+        else {
+            return Ok(None);
+        };
+        if before != self.marks() {
+            return Ok(None);
+        }
+        self.elab.reserve(1 + binders.len())?;
+        let truth = (if reachable.exhaustive() {
+            BooleanSet::EMPTY
+        } else {
+            BooleanSet::TRUE
+        })
+        .union(if coverage.exhaustive() {
+            BooleanSet::EMPTY
+        } else {
+            BooleanSet::FALSE
+        });
+        self.record_node(NodeFacts {
+            site: Self::site(module, pattern),
+            flow: Flow::normal(),
+            callable: None,
+            kind: NodeFactKind::Pattern(PatternFacts {
+                source: Self::site(module, operand),
+                access: option.access,
+                ty: option.payload.clone(),
+                binders,
+                coverage,
+            }),
+        });
+        Ok(Some(truth))
+    }
+
     pub(in crate::analysis::scalars) fn pattern_binding(
         &mut self,
         module: &'g Module,

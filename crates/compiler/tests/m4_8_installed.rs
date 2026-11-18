@@ -27,6 +27,7 @@ fn installed_option_uses_pinned_sources_in_both_modes() {
             limits: Limits::default(),
         };
         installed_option(&request);
+        option_guards(&root, &request);
         reject_propagation(&root, &request);
         propagation_prerequisites(&root, &request);
         untrusted_profiles(&root, &request);
@@ -225,6 +226,49 @@ fn installed_option(profile: &InstalledRequest) {
             analyze_typed(&graph, short).completion(),
             ScalarFailureKind::ResourceLimit
         );
+    }
+}
+
+fn option_guards(root: &Path, profile: &InstalledRequest) {
+    let entry = root.join("app/option-guards.rill");
+    fs::write(&entry, "
+        import std::option::Option as Maybe;
+        function direct(value: &Maybe<bool>): bool { guard value else { return false; } return true; }
+        function payload(value: Maybe<bool>): bool { guard let actual: bool = value else { return false; } return actual; }
+        function borrowed(value: &Maybe<string>, fallback: &string): &string { guard let text = value else { return fallback; } return text; }
+        function refutable(value: Maybe<[bool, i32]>): i32 { guard let [true, n] = value else { return 0i32; } return n; }
+        function onlyFailure(): bool { guard Maybe<bool>.None else { return false; } }
+    ").unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            entry: entry.clone(),
+            test_mode,
+            ..profile.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert!(report.bodies().findings().is_empty());
+        let app = graph
+            .modules()
+            .iter()
+            .find(|module| module.key.origin == Origin::Application)
+            .unwrap();
+        for declaration in app
+            .declarations
+            .iter()
+            .filter(|d| d.id.kind == loader::DeclarationKind::Function)
+        {
+            assert_eq!(
+                report
+                    .bodies()
+                    .body_status(app, BodyOwner::Declaration(&declaration.id))
+                    .unwrap()
+                    .completion,
+                BodyCompletion::Checked,
+                "{:?}",
+                declaration.name
+            );
+        }
     }
 }
 

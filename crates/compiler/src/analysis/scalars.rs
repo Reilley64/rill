@@ -2863,7 +2863,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if self.integrated
                     && module.syntax.nodes[n.children[0]].kind == NodeKind::GuardBinding =>
             {
-                flow = self.pending_guard_binding(module, node, depth, context)?;
+                flow = self.integrated_guard_binding(module, node, depth, context)?;
             }
             NodeKind::IfStatement | NodeKind::While | NodeKind::Guard => {
                 if self.data
@@ -2910,7 +2910,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                         (!direct_guard).then_some(boolean.clone()),
                         context,
                     )?;
+                    let option_truth = if direct_guard {
+                        condition
+                            .as_ref()
+                            .and_then(|e| self.option_guard_operand(e))
+                            .map(|option| option.truth)
+                    } else {
+                        None
+                    };
                     if direct_guard
+                        && option_truth.is_none()
                         && let Some(value) = &condition
                         && primitive_name(&value.ty) != Some("never")
                         && !self.same(&value.ty, &boolean)?
@@ -2932,12 +2941,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                     let condition_pending =
                         self.integrated && (condition.is_none() || before != self.marks());
-                    let truth = condition.as_ref().map_or(BooleanSet::BOTH, |e| {
-                        if e.normal {
-                            e.boolean.unwrap_or(BooleanSet::BOTH)
-                        } else {
-                            BooleanSet::EMPTY
-                        }
+                    let truth = option_truth.unwrap_or_else(|| {
+                        condition.as_ref().map_or(BooleanSet::BOTH, |e| {
+                            if e.normal {
+                                e.boolean.unwrap_or(BooleanSet::BOTH)
+                            } else {
+                                BooleanSet::EMPTY
+                            }
+                        })
                     });
                     let body = if n.kind == NodeKind::Guard {
                         self.guard_failure(module, node, n.children[1], depth + 1, context)?

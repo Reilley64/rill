@@ -16,7 +16,62 @@ pub struct Propagation<'g> {
     pub can_return: bool,
 }
 
+pub(super) struct OptionOperand<'g> {
+    pub(super) payload: Type<'g>,
+    pub(super) access: data::Access,
+    pub(super) truth: BooleanSet,
+}
+
 impl<'r, 'g> Checker<'r, 'g> {
+    pub(super) fn option_guard_operand(
+        &self,
+        value: &ExpressionResult<'g>,
+    ) -> Option<OptionOperand<'g>> {
+        let role = self.option?;
+        let (ty, access) = match value.ty.as_ref() {
+            TypeTerm::Reference { mutable, referent } => (
+                referent.as_ref(),
+                if *mutable && value.access != data::Access::ReadOnly {
+                    data::Access::Writable
+                } else {
+                    data::Access::ReadOnly
+                },
+            ),
+            ty => (ty, value.access),
+        };
+        let (container, variant) = match ty {
+            TypeTerm::Variant {
+                parent,
+                declaration,
+            } => (parent.as_ref(), Some(*declaration)),
+            container => (container, None),
+        };
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = container
+        else {
+            return None;
+        };
+        if *declaration != &role.declaration.id {
+            return None;
+        }
+        let truth = if !value.normal {
+            BooleanSet::EMPTY
+        } else if variant == Some(&role.some.id) {
+            BooleanSet::TRUE
+        } else if variant == Some(&role.none.id) {
+            BooleanSet::FALSE
+        } else {
+            BooleanSet::BOTH
+        };
+        Some(OptionOperand {
+            payload: arguments[0].clone(),
+            access,
+            truth,
+        })
+    }
+
     pub(super) fn propagation_target<'a>(
         &self,
         context: &'a Context<'r, 'g>,
@@ -259,7 +314,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
-    pub(super) fn pending_guard_binding(
+    pub(super) fn integrated_guard_binding(
         &mut self,
         module: &'g Module,
         node: NodeId,
@@ -268,26 +323,58 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<Flow> {
         let children = &module.syntax.nodes[node].children;
         let binder = &module.syntax.nodes[children[0]];
-        if binder.children.len() == 3 {
+        let pattern = binder.children[0];
+        let operand = *binder.children.last().unwrap();
+        let annotation = if binder.children.len() == 3 {
             self.elab.ty(
                 module,
                 binder.children[1],
                 context.signature.map_or(&[], |s| &s.binders),
                 1,
-            )?;
-        }
-        let input = self.expression(module, *binder.children.last().unwrap(), None, context)?;
-        self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+            )?
+        } else {
+            None
+        };
+        let input = self.expression(module, operand, None, context)?;
+        let option = input
+            .as_ref()
+            .and_then(|value| self.option_guard_operand(value));
         self.elab.reserve(1)?;
         context.scopes.push(BTreeMap::new());
         if children.len() == 3 {
             let error = self.elab.declaration_at(module, children[1])?;
+            if option.is_some() {
+                self.finding(module, children[1], ScalarFindingKind::InvalidTarget)?;
+            }
             self.pending_binder(error, context)?;
         }
-        self.guard_failure(module, node, *children.last().unwrap(), depth + 1, context)?;
+        let failure =
+            self.guard_failure(module, node, *children.last().unwrap(), depth + 1, context)?;
         context.scopes.pop();
-        self.pending_pattern(module, binder.children[0], context)?;
-        Ok(input.map_or_else(Flow::normal, |e| e.flow))
+        let mut flow = input.map_or_else(Flow::normal, |e| e.flow);
+        if let Some(option) = option {
+            if let Some(expected) = annotation
+                && !self.same(&option.payload, &expected)?
+            {
+                self.mismatch(module, binder.children[1], &option.payload, &expected)?;
+            }
+            let Some(pattern_truth) =
+                self.guard_payload_pattern(module, pattern, operand, &option, depth + 1, context)?
+            else {
+                flow.pending = true;
+                return Ok(flow);
+            };
+            flow.normal = option.truth.can_be_true() && pattern_truth.can_be_true();
+            if option.truth.can_be_false()
+                || option.truth.can_be_true() && pattern_truth.can_be_false()
+            {
+                flow = self.union(flow, &failure)?;
+            }
+        } else {
+            self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+            self.pending_pattern(module, pattern, context)?;
+        }
+        Ok(flow)
     }
 
     pub(super) fn pending_iteration(
