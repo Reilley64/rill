@@ -18,6 +18,80 @@ impl<'g> PlaceStorage<'g> {
 }
 
 impl<'a, 'g> Check<'a, 'g> {
+    pub(super) fn read_place(
+        &mut self,
+        node: NodeId,
+        value: &ExpressionFacts<'g>,
+        state: &mut Residence<'g>,
+        (from, component): Address<'g>,
+    ) -> Work<()> {
+        let root = Root::Temporary(node);
+        if matches!(value.ty.as_ref(), TypeTerm::Reference { .. }) {
+            if let Some(alias) = state.alias(from, &component, self.budget)? {
+                state.store(root, &[], Content::Alias(alias), self.budget)?;
+            } else {
+                for alias in state.aliases_under(from, &component, self.budget)? {
+                    state.store(root, &[], Content::PossibleAlias(alias), self.budget)?;
+                }
+            }
+        } else if let TypeTerm::Primitive(p) = value.ty.as_ref() {
+            if p.name() == "bool"
+                && let Some(truth) =
+                    state.test(from, &component, &Constructor::Boolean(true), self.budget)?
+            {
+                self.record_boolean(state, root, &[], truth)?;
+            }
+        } else if value.access == Access::Owned {
+            self.move_value(state, from, &component, root, &[])?;
+        } else {
+            state.store(root, &[], Content::Alias((from, component)), self.budget)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn dereference(
+        &mut self,
+        node: NodeId,
+        operand: NodeId,
+        value: &ExpressionFacts<'g>,
+        state: Residence<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        let mut states = self.expression(operand, state, depth)?;
+        let descriptor = Root::Temporary(operand);
+        let scalar = matches!(value.ty.as_ref(), TypeTerm::Primitive(_));
+        for state in &mut states {
+            let aliases = state.aliases_under(descriptor, &[], self.budget)?;
+            if let Some(address) = state.alias(descriptor, &[], self.budget)? {
+                self.read_place(node, value, state, address)?;
+            } else if !scalar {
+                self.pending(node, ResultUseBlocker::Storage)?;
+            }
+            state.take(descriptor, &[], self.budget)?;
+            for (referent, path) in aliases {
+                self.budget.step(1)?;
+                if !scalar {
+                    state.store(
+                        Root::Temporary(node),
+                        &[],
+                        Content::PossibleAlias((referent, path)),
+                        self.budget,
+                    )?;
+                    continue;
+                }
+                // A scalar read cannot carry a reference to an operand-local owner.
+                if let Root::Temporary(origin) = referent {
+                    let span = self.site(operand).span;
+                    if (span.start()..span.end()).contains(&self.site(origin).span.start()) {
+                        let discarded = state.take(referent, &[], self.budget)?;
+                        self.discard(discarded, referent, node, ResultDiscardKind::Expression)?;
+                    }
+                }
+            }
+        }
+        Ok(states)
+    }
+
     pub(super) fn address(
         &mut self,
         state: &Residence<'g>,

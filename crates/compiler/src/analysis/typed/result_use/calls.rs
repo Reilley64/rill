@@ -76,6 +76,7 @@ impl<'a, 'g> Check<'a, 'g> {
         states: Alternatives<'g>,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
+        self.budget.step(1)?;
         let mut next = Vec::new();
         for state in states {
             next.extend(self.expression(argument, state, depth)?);

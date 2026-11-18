@@ -700,30 +700,8 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         let syntax = &self.module.syntax.nodes[node];
         let root = Root::Temporary(node);
-        if let Some((from, component)) = self.address(&state, value.path.as_ref())? {
-            if matches!(value.ty.as_ref(), TypeTerm::Reference { .. }) {
-                if let Some(alias) = state.alias(from, &component, self.budget)? {
-                    state.store(root, &[], Content::Alias(alias), self.budget)?;
-                } else {
-                    for address in state.aliases_under(from, &component, self.budget)? {
-                        state.store(root, &[], Content::PossibleAlias(address), self.budget)?;
-                    }
-                }
-                return self.singleton(state);
-            }
-            if matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool") {
-                if let Some(truth) =
-                    state.test(from, &component, &Constructor::Boolean(true), self.budget)?
-                {
-                    self.record_boolean(&mut state, root, &[], truth)?;
-                }
-                return self.singleton(state);
-            }
-            if value.access == Access::Owned {
-                self.move_value(&mut state, from, &component, root, &[])?;
-            } else {
-                state.store(root, &[], Content::Alias((from, component)), self.budget)?;
-            }
+        if let Some(address) = self.address(&state, value.path.as_ref())? {
+            self.read_place(node, value, &mut state, address)?;
             return self.singleton(state);
         }
         if facts
@@ -910,7 +888,10 @@ impl<'a, 'g> Check<'a, 'g> {
             {
                 self.singleton(state)
             }
-            NodeKind::Literal | NodeKind::ValueReference | NodeKind::Prefix("*") => {
+            NodeKind::Prefix("*") => {
+                self.dereference(node, syntax.children[0], value, state, depth + 1)
+            }
+            NodeKind::Literal | NodeKind::ValueReference => {
                 use crate::analysis::scalars::BooleanSet;
                 if let Some(truth @ (BooleanSet::TRUE | BooleanSet::FALSE)) = value.boolean {
                     self.record_boolean(&mut state, root, &[], truth == BooleanSet::TRUE)?;
@@ -1053,6 +1034,7 @@ impl<'a, 'g> Check<'a, 'g> {
         path: &[ResultComponent<'g>],
         depth: usize,
     ) -> Work<Alternatives<'g>> {
+        self.budget.step(1)?;
         let mut next = Vec::new();
         for state in alternatives {
             let mut evaluated = self.expression(child, state, depth)?;

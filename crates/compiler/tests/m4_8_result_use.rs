@@ -254,8 +254,21 @@ fn opaque_storage_does_not_erase_an_independent_witness() {
 }
 
 #[test]
-fn refined_projection_can_forward_a_payload_without_acknowledging_other_paths() {
+fn a_computed_dereference_checks_the_discard_of_its_operand_temporary() {
     installed(
+        "a_computed_dereference_checks_the_discard_of_its_operand_temporary",
+        "
+        import std::result::Result;
+        function pick(ignored: &Result<bool>.Ok, answer: &bool): &bool { return answer; }
+        function check(answer: &bool): bool { return *pick(&Result.Ok(true), answer); }
+        ",
+        &[("Result.Ok(true)", None)],
+    );
+}
+
+#[test]
+fn refined_projection_can_forward_a_payload_without_acknowledging_other_paths() {
+    installed_with(
         "refined_projection_can_forward_a_payload_without_acknowledging_other_paths",
         "
         import std::result::Result;
@@ -265,6 +278,9 @@ fn refined_projection_can_forward_a_payload_without_acknowledging_other_paths() 
         }
         ",
         &[],
+        |report| {
+            assert!(!report.result_use().unwrap().pending().iter().any(|p| p.site.module.origin == Origin::Application));
+        },
     );
 }
 
