@@ -73,7 +73,7 @@ impl<'a, 'g> Check<'a, 'g> {
 
     pub(super) fn function_body(
         &mut self,
-        signature: &DeclarationFacts<'g>,
+        signature: &'a DeclarationFacts<'g>,
         depth: usize,
     ) -> Work<()> {
         self.depth(depth)?;
@@ -84,6 +84,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let DeclarationShape::Function { parameters, .. } = &signature.shape else {
             return self.pending(node, ResultUseBlocker::TypedInput);
         };
+        let previous = std::mem::replace(&mut self.current_parameters, parameters);
         let mut states = self.singleton(Residence::default())?;
         for parameter in parameters {
             states = self.seed(
@@ -109,6 +110,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 self.exit(state, body)?;
             }
         }
+        self.current_parameters = previous;
         Ok(())
     }
 

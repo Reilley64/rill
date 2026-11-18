@@ -13,7 +13,7 @@ fn caller_owned_descriptor_cannot_retain_body_local_sources() {
                 {
                     let flag = true;
                     *slot = &flag;
-                    *slot = input;
+                    (*slot) = input;
                 }
             }
             function escaped(slot: &mut &bool): void {
@@ -23,6 +23,19 @@ fn caller_owned_descriptor_cannot_retain_body_local_sources() {
             function movedSlot(slot: &mut &bool, input: &bool): void {
                 let moved = slot;
                 *slot = input;
+            }
+            function check(value: &mut bool): bool { return *value; }
+            function beforeOverwrite(slot: &mut &bool, input: &bool): void {
+                let mut flag = true;
+                *slot = &flag;
+                if (check(&mut flag)) { *slot = input; } else { *slot = input; }
+            }
+            function scopeBeforeOverwrite(slot: &mut &bool, input: &bool): void {
+                { let flag = true; *slot = &flag; }
+                *slot = input;
+            }
+            function returned(slot: &mut &bool, flag: bool): void {
+                if (true) { *slot = &flag; return; }
             }
             function split(slot: &mut &bool, input: &bool, pick: bool): void {
                 let flag = true;
@@ -106,8 +119,11 @@ fn caller_owned_descriptor_cannot_retain_body_local_sources() {
             );
 
             for (name, code, source) in [
-                ("escaped", "R0203", b"&flag".as_slice()),
-                ("split", "R0203", b"&flag".as_slice()),
+                ("beforeOverwrite", "R0201", b"&flag".as_slice()),
+                ("scopeBeforeOverwrite", "R0203", b"&flag".as_slice()),
+                ("escaped", "R0202", b"&flag".as_slice()),
+                ("split", "R0202", b"&flag".as_slice()),
+                ("returned", "R0202", b"&flag".as_slice()),
                 ("movedSlot", "R0200", b"slot".as_slice()),
             ] {
                 let rejected = lower(name);
@@ -118,6 +134,41 @@ fn caller_owned_descriptor_cannot_retain_body_local_sources() {
                 };
                 assert_eq!(finding.code(), code, "{name}");
                 assert_eq!(finding.related.span.bytes(), source, "{name}");
+                if code == "R0202" {
+                    assert_eq!(finding.site.span.bytes(), b"*slot = &flag;");
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
+    use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
+
+    probe_report(
+        "retained::retained_write_handoff_does_not_grant_captured_or_result_storage",
+        r#"
+            function captured(slot: &mut &bool, input: &bool): mut () => void {
+                return () => { *slot = input; };
+            }
+            function unknown(slot: &mut Result<bool, i32>, incoming: Result<bool, i32>): void {
+                *slot = incoming;
+            }
+        "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.core_blockers().is_empty());
+            assert!(typed.receipt().is_none());
+            let pending = typed.result_use().expect("Result-use evidence").pending();
+            for store in [b"*slot = input;".as_slice(), b"*slot = incoming;"] {
+                assert!(
+                    pending
+                        .iter()
+                        .any(|p| p.blocker == ResultUseBlocker::Storage
+                            && p.site.span.bytes() == store),
+                    "missing blocker for {store:?}"
+                );
             }
         },
     );

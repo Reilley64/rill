@@ -251,6 +251,7 @@ struct Check<'a, 'g> {
     substitution: Option<&'a Substitutions<'a, 'g>>,
     proving_callable: bool,
     has_pending: bool,
+    current_parameters: &'a [MemberType<'g>],
 }
 
 impl<'a, 'g> Check<'a, 'g> {
@@ -290,6 +291,7 @@ impl<'a, 'g> Check<'a, 'g> {
             substitution: None,
             proving_callable: false,
             has_pending: false,
+            current_parameters: &[],
         })
     }
 
@@ -610,19 +612,22 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             NodeKind::Assignment(_) => {
                 let (left, right) = (children[0], children[1]);
-                let path = self.facts(left)?.and_then(|f| match &f.kind {
-                    NodeFactKind::Expression(e) => e.path.as_ref(),
-                    _ => None,
-                });
+                let target = self.expression_facts(left)?;
+                let path = target.and_then(|expression| expression.path.as_ref());
                 let checked = self.facts(node)?.is_some();
-                let caller_bool_descriptor = checked
+                let mut caller_bool_descriptor = false;
+                if checked
                     && syntax.kind == NodeKind::Assignment("=")
-                    && matches!(path, Some(path) if path.root.kind == DeclarationKind::Parameter
-                        && path.projections.as_slice() == [PathProjection::Dereference])
-                    && self.module.syntax.nodes[left].kind == NodeKind::Prefix("*")
-                    && self
-                        .expression_facts(self.module.syntax.nodes[left].children[0])?
-                        .is_some_and(|value| retained_bool_contents_type(&value.ty).is_some());
+                    && let Some(path) = path
+                    && path.root.kind == DeclarationKind::Parameter
+                    && path.projections.as_slice() == [PathProjection::Dereference]
+                {
+                    self.budget.step(self.current_parameters.len())?;
+                    caller_bool_descriptor = self.current_parameters.iter().any(|parameter| {
+                        &parameter.declaration.id == path.root
+                            && retained_bool_contents_type(&parameter.ty).is_some()
+                    });
+                }
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
                     let incoming = state.take(Root::Temporary(right), &[], self.budget)?;

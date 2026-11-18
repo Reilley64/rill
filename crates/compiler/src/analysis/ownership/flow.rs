@@ -18,6 +18,7 @@ struct Held {
     capture_drop: Option<NodeId>,
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
+    stored_at: Option<NodeId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -61,6 +62,7 @@ fn liveness(
     code: &[Instruction<'_>],
     calls: &[Call<'_>],
     cleanups: &[Vec<Slot>],
+    retained: &BTreeMap<Slot, Slot>,
     budget: &mut Budget,
 ) -> ResultOf<Vec<BTreeSet<Slot>>> {
     budget.reserve(3 * code.len())?;
@@ -79,7 +81,7 @@ fn liveness(
         let instruction = code[pc];
         let use_one = |used, killed| ([used, None], killed);
         let (used, killed) = match instruction.action {
-            Action::None | Action::Cleanup(_) => use_one(None, None),
+            Action::None | Action::Cleanup(_) | Action::CheckRetained => use_one(None, None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
             Action::Read { from, into } | Action::Dereference { from, into } => {
                 use_one(Some(slots[from].carried_loan_root(from)), into)
@@ -100,7 +102,6 @@ fn liveness(
                 contents,
                 incoming,
             } => ([Some(descriptor), Some(incoming)], Some(contents)),
-            Action::CheckRetained(contents) => use_one(Some(contents), None),
             Action::TestVariant { operand, .. } => use_one(Some(operand), None),
             Action::CopyOptionPayload { operand, into } => use_one(Some(operand), Some(into)),
             Action::ConstructVariant { payload, into, .. } => use_one(payload, Some(into)),
@@ -144,7 +145,14 @@ fn liveness(
             Action::Call(index) => calls[index].args.as_slice(),
             _ => &[],
         };
-        for slot in used.into_iter().flatten().chain(args.iter().copied()) {
+        // Caller storage can still expose its installed value until a write
+        // commits, even if normal local liveness would kill that version.
+        for slot in used
+            .into_iter()
+            .flatten()
+            .chain(args.iter().copied())
+            .chain(retained.values().copied())
+        {
             for member in slots[slot].storage(slot) {
                 budget.step(1)?;
                 if !live[pc].contains(&member) {
@@ -520,10 +528,11 @@ pub(super) fn run<'g>(
         calls,
         cleanups,
         dispose,
+        retained,
         budget,
         ..
     } = build;
-    let live = liveness(&slots, &code, &calls, &cleanups, budget)?;
+    let live = liveness(&slots, &code, &calls, &cleanups, &retained, budget)?;
     let empty = Held::default();
     let mut pending = Vec::new();
     let mut known = BTreeMap::<Pc, BTreeMap<Vec<State>, usize>>::new();
@@ -971,7 +980,7 @@ pub(super) fn run<'g>(
                     incoming,
                 } => {
                     initialized(&state[descriptor], node)?;
-                    initialized(&state[incoming], node)?;
+                    let mut value = initialized(&state[incoming], node)?.clone();
                     conflict(
                         &slots,
                         &state,
@@ -982,25 +991,27 @@ pub(super) fn run<'g>(
                         budget,
                     )?;
                     // Overwrite the exact external contents, not the access loan.
-                    state[contents] = std::mem::replace(&mut state[incoming], State::Vacant);
+                    value.stored_at = Some(node);
+                    state[contents] = State::Initialized(value);
+                    state[incoming] = State::Vacant;
                     Operation::InstallThrough {
                         descriptor: local(descriptor),
                         incoming: local(incoming),
                     }
                 }
-                Action::CheckRetained(contents) => {
-                    visit_loans(
-                        &state,
-                        slots[contents].storage(contents),
-                        budget,
-                        |loan, _| {
-                            Err(Stop::Rejected {
-                                site: node,
+                Action::CheckRetained => {
+                    for &contents in retained.values() {
+                        budget.step(1)?;
+                        if let State::Initialized(value) = &state[contents]
+                            && let Some(loan) = value.loans.first()
+                        {
+                            return Err(Stop::Rejected {
+                                site: value.stored_at.unwrap_or(node),
                                 related: loan.site,
                                 kind: Conflict::Escape,
-                            })
-                        },
-                    )?;
+                            });
+                        }
+                    }
                     Operation::None
                 }
                 Action::Export(slot) => {

@@ -430,6 +430,40 @@ fn probe_with_typed(
         &TypedReport<'g>,
     ),
 ) {
+    probe_report(test, source, |request, module, typed| {
+        let receipt = typed.receipt().unwrap_or_else(|| {
+            panic!(
+                "{:?}: {:?}; {:?}; {:?}; pending Result uses {:?}",
+                typed.completion(),
+                typed.core_blockers(),
+                typed
+                    .bodies()
+                    .findings()
+                    .iter()
+                    .map(|f| f.kind)
+                    .collect::<Vec<_>>(),
+                typed
+                    .bodies()
+                    .obligations()
+                    .iter()
+                    .map(|o| o.reason)
+                    .collect::<Vec<_>>(),
+                typed.result_use().map(|r| r
+                    .pending()
+                    .iter()
+                    .map(|p| (p.blocker, p.site.span.bytes().escape_ascii().to_string()))
+                    .collect::<Vec<_>>())
+            )
+        });
+        verify(request, module, &receipt, typed);
+    });
+}
+
+fn probe_report(
+    test: &str,
+    source: &str,
+    mut verify: impl for<'g> FnMut(&InstalledRequest, &'g loader::Module, &TypedReport<'g>),
+) {
     const IMPORTS: &str = r#"
             import std::{List, Result, Err};
             import std::channel::{Receiver, Sender};
@@ -451,37 +485,13 @@ fn probe_with_typed(
             };
             let graph = loader::load_installed(request.clone()).unwrap();
             let typed = analyze_typed(&graph, AnalysisLimits::default());
-            let receipt = typed.receipt().unwrap_or_else(|| {
-                panic!(
-                    "{:?}: {:?}; {:?}; {:?}; pending Result uses {:?}",
-                    typed.completion(),
-                    typed.core_blockers(),
-                    typed
-                        .bodies()
-                        .findings()
-                        .iter()
-                        .map(|f| f.kind)
-                        .collect::<Vec<_>>(),
-                    typed
-                        .bodies()
-                        .obligations()
-                        .iter()
-                        .map(|o| o.reason)
-                        .collect::<Vec<_>>(),
-                    typed.result_use().map(|r| r
-                        .pending()
-                        .iter()
-                        .map(|p| (p.blocker, p.site.span.bytes().escape_ascii().to_string()))
-                        .collect::<Vec<_>>())
-                )
-            });
             let module = graph
                 .modules()
                 .iter()
                 .find(|m| m.key.origin == Origin::Application)
                 .unwrap();
 
-            verify(&request, module, &receipt, &typed);
+            verify(&request, module, &typed);
         }
     });
 }

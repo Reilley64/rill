@@ -94,6 +94,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let (head, body) = (children[0], children[1]);
         let parameters =
             &self.module.syntax.nodes[self.module.syntax.nodes[head].children[0]].children;
+        let previous = std::mem::take(&mut self.current_parameters);
         let mut entry = self.singleton(captures)?;
         for (&parameter, ty) in parameters.iter().zip(&arrow.parameters) {
             if let Some(declaration) = self.declaration_at(parameter, DeclarationKind::Parameter)? {
@@ -116,6 +117,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
             }
         }
+        self.current_parameters = previous;
         Ok(())
     }
 

@@ -405,6 +405,7 @@ fn lower<'g>(
     let mut build = Build {
         typed,
         module,
+        body,
         facts: BTreeMap::new(),
         locals: BTreeMap::new(),
         retained: BTreeMap::new(),
@@ -462,14 +463,7 @@ fn lower<'g>(
         Some(frame) => build.cleanup(body, &[frame.remainder], end)?,
         None => end,
     };
-    let mut epilogue = end;
-    for &parameter in params.iter().rev() {
-        build.budget.step(1)?;
-        if let Some(&contents) = build.retained.get(&parameter) {
-            epilogue = build.emit(body, Action::CheckRetained(contents), Edges::Next(epilogue))?;
-        }
-    }
-    let finish = build.cleanup(body, &params, epilogue)?;
+    let finish = build.cleanup(body, &params, end)?;
     let entry = build.statement(
         body,
         finish,
@@ -625,7 +619,7 @@ enum Action<'g> {
         contents: Slot,
         incoming: Slot,
     },
-    CheckRetained(Slot),
+    CheckRetained,
     End(Slot),
     Cleanup(usize),
     Export(Slot),
@@ -660,6 +654,7 @@ struct Loop {
 struct Build<'a, 'g> {
     typed: &'a TypedReport<'g>,
     module: &'g Module,
+    body: NodeId,
     facts: BTreeMap<NodeId, &'a NodeFacts<'g>>,
     locals: BTreeMap<&'g DeclarationId, Slot>,
     /// Separate contents of checked caller destinations from the access descriptors.

@@ -424,6 +424,14 @@ impl<'a, 'g> Build<'a, 'g> {
         self.emit(node, Action::Cleanup(index), Edges::Next(next))
     }
 
+    fn check_retained(&mut self, node: NodeId, next: Pc) -> ResultOf<Pc> {
+        if self.retained.is_empty() {
+            Ok(next)
+        } else {
+            self.emit(node, Action::CheckRetained, Edges::Next(next))
+        }
+    }
+
     pub(super) fn statement(
         &mut self,
         node: NodeId,
@@ -469,6 +477,9 @@ impl<'a, 'g> Build<'a, 'g> {
                     },
                 };
                 let mut tail = self.cleanup(node, &locals, next)?;
+                if node == self.body {
+                    tail = self.check_retained(node, tail)?;
+                }
                 for &child in children[..prefix].iter().rev() {
                     tail = self.statement(child, tail, exits, depth + 1)?;
                 }
@@ -548,11 +559,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 self.stage_value(value, incoming, displace, temporary, depth + 1)
             }
             NodeKind::Return => {
+                let returning = self.check_retained(node, exits.returning)?;
                 if let Some(&value) = children.first() {
                     let ty = self.value(value)?.ty.clone();
                     let output = self.slot(value, &ty)?;
-                    let export =
-                        self.emit(node, Action::Export(output), Edges::Next(exits.returning))?;
+                    let export = self.emit(node, Action::Export(output), Edges::Next(returning))?;
                     let projected = self.ungroup(value)?;
                     let temporary = self.temporary_projection(projected, true)?;
                     let finish = if let Some(temp) = temporary {
@@ -562,7 +573,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     };
                     self.stage_value(value, output, finish, temporary, depth + 1)
                 } else {
-                    Ok(exits.returning)
+                    Ok(returning)
                 }
             }
             NodeKind::IfStatement => {
@@ -836,7 +847,8 @@ impl<'a, 'g> Build<'a, 'g> {
         let scratch = self.slot(source, &operand.ty)?;
         let return_slot = if exit.can_return {
             let output = self.slot(node, result)?;
-            let export = self.emit(node, Action::Export(output), Edges::Next(return_cleanup))?;
+            let returning = self.check_retained(node, return_cleanup)?;
+            let export = self.emit(node, Action::Export(output), Edges::Next(returning))?;
             Some((output, export))
         } else {
             None
