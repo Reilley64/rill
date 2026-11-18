@@ -865,9 +865,19 @@ Run `mise run test:compiler`, `mise run test`, `mise run check` and `mise run bu
 
 [RFC 0009](rfcs/0009-user-implementable-conversions.md#proposed-m47-conversion-checking-procedure) owns pair collection, endpoint permission, exact destination matching, conversion applicability, selected-error determination and exact equality. It uses the finite pattern and bounded evidence procedures of [RFC 0004](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure). RFC 0005 still owns variant and reference relationships. RFC 0006 owns the numeric domain and core pair catalogue. RFC 0008 owns closed Err, propagation and causal wrapping.
 
+The companion rules are pinned to [`392d8428a81109b1dc4ed0ad8e60fd4738054522`](https://github.com/Reilley64/rill/tree/392d8428a81109b1dc4ed0ad8e60fd4738054522). This review covers the new RFC 0009 procedure and this checkpoint, not amendments to or approval of the dependencies.
+
+| Companion sections at the pinned revision | Role in this checkpoint |
+| --- | --- |
+| RFC 0002, [requirement metadata](rfcs/0002-modules-and-program-loading.md#proposed-m46-requirement-metadata-boundary) | Normative capture and binding boundary. |
+| RFC 0004, [finite comparison](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure), [callable formation](rfcs/0004-functions-overloads-and-generic-requirements.md#callable-formation-and-invocation) and [bounded proof](rfcs/0004-functions-overloads-and-generic-requirements.md#proof-worklist-and-completion) | Normative pattern operations, type equations and proof limits. They do not determine conversion applicability. |
+| RFC 0005, [data construction and patterns](rfcs/0005-types-records-enums-and-inference.md#admission-joins-and-bracket-categories) | Normative canonical types and fixed variant admission. |
+| RFC 0006, [numeric protection](rfcs/0006-numbers-strings-and-primitive-operations.md#protected-numeric-conversions-and-explicit-arithmetic-helpers) | Normative numeric domain. Provider admission is a separate gate. |
+| RFC 0008, [exact error evidence](rfcs/0008-errors-propagation-and-caused-by-wrapping.md#proposed-m46-exact-error-evidence) | Companion equality and propagation boundary. RFC 0009 owns conversion-selected E. |
+
 Extend the shared typed checker. Use loaded M3 bodies, declaration IDs, syntax, spans and routes without resolving imports again. Use M4.1/M4.2 canonical terms and M4.5/M4.6 signature equations, pattern comparison and evidence. Do not treat conditional ordinary keys as conversion keys. Do not let a conversion role hypothesis strengthen the ordinary view. No change to ordinary placement, ranking, requirement checks or no-fallback behavior.
 
-M4.8 still owns actual role, provider and protection admission and integrated core and result-use checks. M4.7 checks the structural protection rules and reports where real admission is needed. No invented std source, trusted provider or catalogue establishes a positive conversion. The procedure grants no access, move, borrow, storage or execution permission.
+M4.8 still owns actual role, provider and protection admission and integrated core and result-use checks. M4.7 checks the structural protection rules and reports where real admission is needed. Do not invent standard source, providers or catalogues to establish a checked conversion. The procedure grants no access, move, borrow, storage or execution permission.
 
 ### Proposed public interfaces
 
@@ -879,6 +889,8 @@ Names describe the interface, not final Rust spelling. A role hypothesis is an e
 | Query an established pair in that report, with optional exact source filter and separate E demand | Whole-pair matching, applicable and unresolved candidates, ordering witnesses, selected signature, required protected identity, and output agreement. Use canonical terms belonging to the same capture. | Literal or endpoint inference, injected proof assumptions, or a checked call from a type-vector comparison. |
 | Query original call and function-value nodes, body status and checker-issued evidence goals | Independent endpoint contexts, actual source and admission, selection or symbolic relation, exact E, provenance and blocked dependencies. | A resolver, an alternate expression checker, a proof of ownership or a runtime adapter. |
 
+An established-pair request can run the same proof worklist over retained inventory, without rechecking source or importing a caller's assumptions. The request has explicit analysis limits and returns a separate scoped report. Charge request validation, matching and proof work to that request. Its own exhaustion returns `ResourceLimit`. It cannot repair an incomplete inventory or borrow conclusions from another report.
+
 Return `InvalidRequest` for foreign identities, structurally invalid queries and cross-report goals. Distinguish no fact from a partial fact. Give resource exhaustion precedence over incomplete and rejected outcomes. Known independent facts may survive exhaustion. Conditional results and findings carry their premise, including when work stops early.
 
 ### Decisions requested before model or Rust
@@ -886,8 +898,8 @@ Return `InvalidRequest` for foreign identities, structurally invalid queries and
 | Choice | Proposal and consequence |
 | --- | --- |
 | V1. Identity, registration and protection | Use actual captured canonical identities. Approve distinct conditional interfaces for unadmitted roles. Require the written target and exact header equations. Normalize both endpoints with one binder numbering. Check unused registration bodies and reject duplicate, unauthorized and protected overlap under their applicable premises. Use actual endpoint equality for protected infallible identity. |
-| V2. Pair matching and context | Approve exact destination and M4.5 fixed-outer source admissions only. A binder fixed by To remains an exact variable at the source. For example, with `Wrapped<E>` as To, `Wrapped<T> <- T` does not admit `E.Tag`; a written fixed `E` source can. Allow explicit From to supply context and filter the declared source term, not retag an already typed source. A `Parent` destination and an actual `Parent.Tag` source do not enter protected identity even with a written `Parent` source filter. The alternative is to allow a destination-bound source variable to gain the admission of its substituted type. That changes the pair sets and needs a different finite comparison procedure. |
-| V3. Applicability and selected E | Approve three-state applicability, registration-time reachability of error terms, frozen evidence inputs and bounded pair-keyed determination. A failed requirement can exclude a conversion candidate; unresolved potentially maximal candidates block success. Caller E, including expected Result E, only checks an independently determined output. Keep a rigid relation separate from a selected body. No fallback after E mismatch. |
+| V2. Pair matching and context | Approve exact destination and M4.5 fixed-outer source admissions only. A binder fixed by To remains an exact variable at the source. For example, with `Wrapped<E>` as To, `Wrapped<T> <- T` does not admit `E.Tag`; a written fixed `E` source can. Allow explicit From to supply context and filter the declared source term, not retag an already typed source. A `Parent` destination and an actual `Parent.Tag` source do not enter protected identity even with a written `Parent` source filter. At equal actual endpoints, an incompatible filter rejects the identity use without fallback. The alternative is to allow a destination-bound source variable to gain the admission of its substituted type. That changes the pair sets and needs a different finite comparison procedure. |
+| V3. Applicability and selected E | Approve three-state applicability, registration-time reachability of error terms, frozen evidence inputs and bounded pair-keyed determination. A failed requirement can exclude a conversion candidate; unresolved potentially maximal candidates block success. An independently determined E can bind a flexible caller slot or check an existing term. Reuse exact symbolic assumptions only when filters preserve each candidate's domain. A uniform body may still have a pending dependent output. Keep a rigid relation separate from a selected body. No fallback after E mismatch. |
 | V4. Seams and validation | Approve the public interfaces and their completion limits. Compare against an independent finite model before public-interface TDD. Use actual loaded captures and label hypothesized roles. Run required mise tasks, get independent final Standards and Spec reviews, and publish exact verification evidence in PR #58. |
 
 ### Planned checks
@@ -897,14 +909,24 @@ These are expected contrasts, not results.
 | Counterexample to prevent | Planned model or public assertion |
 | --- | --- |
 | Aliases or different errors create new registrations; permission leaks through a nested local type. | Compare two true routes to the same declaration and distinct duplicate bodies. Check reference-peeled outer owners, a local wrapper, foreign box with a local argument, and a local error alone. Keep same-spelled application families ordinary. |
-| Matching widens a target, breaks correlation or ranks an expected error. | Compare correlated and crossed pairs to bounded ground enumeration. Cover fixed source variant admission and exact target variant checks. Try the prebound-variable case and an explicit source filter. A wrong expected or explicit E retains the same winner. |
-| A lone candidate chooses To or width, or implicit identity supplies an adapter. | Compare suffixed and unsuffixed sources, immediate and absent target context, a placed explicit source argument, and named function values. Check exact identity versus variant/parent pairs, generic identity intersections, numeric gaps and no universal fallible identity. |
+| Matching widens a target, breaks correlation or ranks an expected error. | Compare correlated and crossed pairs to bounded ground enumeration. Cover fixed source variant admission and exact target variant checks. Try the prebound-variable case and a source filter that removes a variant-specific winner without changing the accepted pairs in union. A wrong expected or explicit E retains the same winner. |
+| A lone candidate chooses To or width, or implicit identity supplies an adapter. | Compare suffixed and unsuffixed sources, immediate and absent target context, a placed explicit source argument, and named function values. Check exact identity versus variant/parent pairs, generic identity intersections, specified numeric gaps versus missing required providers, and no universal fallible identity. |
 | Unknown evidence counts as failure or prevents every winner. | Enumerate small proved/disproved/unresolved frontiers. Cover disproved specific candidates, a pending dominator or tie, a dominated pending candidate and settled ambiguity. Include incomplete inventories and charged exhaustion. |
-| Display or expected E invents output; a cycle proves itself. | Check registration routes with an independent seed, nested selected errors, competing exact routes and unseeded cycles. Query mismatch after normal selection. Reject a caller-chosen schema even when its body never returns. Compare growth limits to repeated-pair cycles. |
+| Display or expected E invents output; a cycle proves itself. | Check registration routes with an independent seed, nested selected errors, competing exact routes and unseeded cycles. Test caller inference from the selected E and prove that uniform body selection alone cannot settle dependent E. Query mismatch after normal selection. Reject a caller-chosen schema even when its body never returns. Compare growth limits to repeated-pair cycles. |
 | A symbolic body normalizes an overridable fallback, or hypothetical facts escape. | Check exact symbolic assumptions and concrete specialization with distinct errors. Preserve missing roles and dependencies in source and issued goals. Reject foreign identities and check that exhaustion cannot publish a checked or unconditional negative outcome. |
 
 Before Rust, model pair relations, frontier selection and output-route closure against independent bounded oracles. Before publication, run `mise run test:compiler`, `mise run test`, `mise run check` and `mise run build:scaffold`. Run `check:ci` only for workflow changes. Preserve earlier evidence and separate document checks, model results, compiler assertions and Rill execution. Full RFC status remains Draft.
 
+### Independent design reviews
+
+Standards and Spec reviewed `e0142f5c9da9bbc5258ed48168675f5b08f7b4e5` against `392d8428a81109b1dc4ed0ad8e60fd4738054522`. The two-file diff had SHA-256 `2fb98c6257ae4d2bdaf7f1628f58fe5b6abc6746b9190f0d2302cc2e4cbe8a79`.
+
+| Axis | Disposition |
+| --- | --- |
+| Standards | Pin the companion revision and review scope. Correct the missing-target diagnostic in C5, split long RFC paragraphs, and give established-pair requests their own analysis limits. |
+| Spec | Distinguish a missing provider from a specified numeric gap. Check filter equivalence per candidate, not over the union. Feed a determined E into the waiting caller and require separate symbolic output evidence. Leave admission at a destination-bound variable as a choice for the owner in V2. |
+
+The corrected checkpoint is checked locally, not independently re-reviewed. Formal ASD-STE100 vocabulary compliance is unverified. No model, compiler check or Rill execution validates this proposed procedure yet.
 
 ## Completion record
 
