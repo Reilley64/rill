@@ -390,13 +390,6 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 remember(access, seed);
                 return *out;
             }
-            type Holder = { value: &bool; }
-            function projected(seed: &bool): bool {
-                let mut holder = Holder { value: seed };
-                remember(&mut holder.value, seed);
-                let saved = holder.value;
-                return *saved;
-            }
             function rejectedCaller(seed: &bool): bool {
                 let mut out = seed;
                 escapesThroughRelay(&mut out, seed);
@@ -537,7 +530,6 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
 
             for name in [
                 "aliased",
-                "projected",
                 "storesIncomingReborrow",
                 "forwardsIncomingReborrow",
             ] {
@@ -563,6 +555,142 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 },
             ] {
                 let limited = check("caller", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn direct_calls_retain_sources_in_named_record_fields() {
+    probe(
+        "retained::direct_calls_retain_sources_in_named_record_fields",
+        r#"
+            type Holder = { value: &bool; sibling: &bool; text: string; }
+            function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function valid(seed: &bool, flag: bool): bool {
+                let mut holder = Holder { value: seed, sibling: seed, text: "tag" };
+                remember(&mut holder.value, &flag);
+                let saved = holder.value;
+                return *saved;
+            }
+            function readSibling(seed: &bool): bool {
+                let mut holder = Holder { value: seed, sibling: seed, text: "tag" };
+                remember(&mut holder.value, holder.sibling);
+                let saved = holder.value;
+                return *saved;
+            }
+            function expires(seed: &bool): bool {
+                let mut holder = Holder { value: seed, sibling: seed, text: "tag" };
+                { let flag = true; remember(&mut holder.value, &flag); }
+                let saved = holder.value;
+                return *saved;
+            }
+            function oldExpires(seed: &bool): bool {
+                let mut holder = Holder { value: seed, sibling: seed, text: "tag" };
+                { let old = true; holder.value = &old; remember(&mut holder.value, seed); }
+                let saved = holder.value;
+                return *saved;
+            }
+            function restored(seed: &bool): bool {
+                let mut holder = Holder { value: seed, sibling: seed, text: "tag" };
+                { let flag = true; remember(&mut holder.value, &flag); holder.value = seed; }
+                let saved = holder.value;
+                return *saved;
+            }
+            function copyExpires(seed: &bool): bool {
+                let mut holder = Holder { value: seed, sibling: seed, text: "tag" };
+                let mut saved = seed;
+                {
+                    let flag = true;
+                    remember(&mut holder.value, &flag);
+                    saved = holder.value;
+                    holder.value = seed;
+                }
+                return *saved;
+            }
+            function blockedByWhole(seed: &bool): bool {
+                let mut holder = Holder { value: seed, sibling: seed, text: "tag" };
+                let whole = &holder;
+                remember(&mut holder.value, seed);
+                let _ = whole;
+                return false;
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let role = &declaration("remember").id;
+            let valid = lower("valid");
+            assert!(valid.mir().is_some(), "valid: {:?}", valid.completion());
+            for name in ["valid", "readSibling", "restored"] {
+                let report = lower(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let ops = linear(mir, mir.entry);
+                let access = ops.iter().position(|op| matches!(op, Operation::Borrow { source, exclusive: true, .. }
+                    if source.root.span.bytes() == b"holder" && source.field().is_some_and(|f| f.name.as_deref() == Some("value"))))
+                    .expect("exclusive field storage borrow");
+                let invoke = ops.iter().position(|op| matches!(op, Operation::CallRetaining {
+                    callee, destination: RetainedPlace::Local(destination), ..
+                } if *callee == role && destination.root.span.bytes() == b"holder" && destination.field().is_some_and(|f| f.name.as_deref() == Some("value"))))
+                    .expect("retention on the same field");
+                assert!(access < invoke);
+                if name == "readSibling" {
+                    assert!(
+                        ops[access + 1..invoke]
+                            .iter()
+                            .any(|op| matches!(op, Operation::Copy { from, .. }
+                        if from.field().is_some_and(|f| f.name.as_deref() == Some("sibling"))))
+                    );
+                }
+                assert!(
+                    matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
+                    if text.field().is_some_and(|f| f.name.as_deref() == Some("text")))
+                );
+            }
+            for (name, code, related) in [
+                ("expires", "R0203", b"&flag".as_slice()),
+                ("oldExpires", "R0203", b"&old".as_slice()),
+                ("copyExpires", "R0203", b"&flag".as_slice()),
+                ("blockedByWhole", "R0201", b"&holder".as_slice()),
+            ] {
+                let rejected = lower(name);
+                assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                assert!(rejected.mir().is_none());
+                let [finding] = rejected.findings() else {
+                    panic!("{name}: expected ownership error")
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.related.span.bytes(), related);
+            }
+            let limits = AnalysisLimits {
+                max_work: valid.statistics().work,
+                max_entries: valid.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("valid", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("valid", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }

@@ -1304,12 +1304,16 @@ impl<'a, 'g> Build<'a, 'g> {
         if facts.access != Access::Owned
             || facts.ty != *contents
             || path.root.kind != DeclarationKind::Binding
-            || !path.projections.is_empty()
         {
             return Err(Stop::Pending(target));
         }
         self.budget.step(1)?;
-        let place = *self.locals.get(path.root).ok_or(Stop::Pending(target))?;
+        let root = *self.locals.get(path.root).ok_or(Stop::Pending(target))?;
+        let place = match path.projections.as_slice() {
+            [] => root,
+            [PathProjection::Field(id)] => self.field(target, root, id)?,
+            _ => return Err(Stop::Pending(target)),
+        };
         Ok(CallDestination {
             storage: CallStorage::Local(place),
             input: args[input],
