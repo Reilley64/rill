@@ -10,6 +10,10 @@ import std::result::{isOk, map as mapResult};
 import std::shared::Shared;
 import checks::ready;
 
+function chooseOne<T>(value: &T): bool;
+implement<T> chooseOne(value: &T): bool { return true; }
+function usesOrdinary(value: i32): bool { return chooseOne(&value); }
+
 function convertAndShow(value: u8): Result<string> {
     let values: List<i32> = [into<i32>(value)];
     return Result.Ok(`${values[0u64]}`);
@@ -50,4 +54,5 @@ let startup = convertAndShow(5u8);
 let _ = isOk(&startup);
 let _ = startup;
 expect ready();
+expect usesOrdinary(1i32);
 expect isOk(&Result.Ok(true));
