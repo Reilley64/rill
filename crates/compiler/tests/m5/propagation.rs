@@ -20,14 +20,25 @@ fn option_postfix_returns_through_initialized_cleanup() {
                 return Option.Some(true);
             }
             function certainFailure(owner: string): Option<bool> {
-                let _ = Option<bool>.None?;
+                let value = Option<bool>.None?;
                 dispose(owner);
-                return Option.Some(true);
+                return Option.Some(!value);
             }
             function certainSuccess(owner: string): Option<bool> {
                 let value = Option.Some(true)?;
                 dispose(owner);
                 return Option.Some(value);
+            }
+            function always(): Option<bool>.Some { return Option<bool>.Some(true); }
+            function groupedName(owner: string): Option<bool> {
+                let ((value)) = always()?;
+                dispose(owner);
+                return Option.Some(value);
+            }
+            function groupedDiscard(owner: string): Option<bool> {
+                let (_) = pass(Option<bool>.Some(true))?;
+                dispose(owner);
+                return Option.Some(true);
             }
             function ownedPayload(input: Option<string>): Option<bool> {
                 let _ = input?;
@@ -132,6 +143,7 @@ fn option_postfix_returns_through_initialized_cleanup() {
             for (name, variant) in [
                 ("certainFailure", &role.none.id),
                 ("certainSuccess", &role.some.id),
+                ("groupedName", &role.some.id),
             ] {
                 let certain = lower(name);
                 let mir = certain
@@ -152,6 +164,31 @@ fn option_postfix_returns_through_initialized_cleanup() {
                     );
                 }
             }
+
+            let discarded = lower("groupedDiscard");
+            let mir = discarded
+                .mir()
+                .unwrap_or_else(|| panic!("groupedDiscard: {:?}", discarded.completion()));
+            assert_eq!(
+                mir.blocks
+                    .iter()
+                    .filter(|b| matches!(b.operation, Operation::Call(_)))
+                    .count(),
+                1
+            );
+            let (some, none) = branch_targets(mir);
+            assert_return(&linear(mir, some), &role.some.id, true, &[]);
+            assert_return(
+                &linear(mir, none),
+                &role.none.id,
+                false,
+                &[b"owner: string"],
+            );
+            assert!(
+                !mir.blocks
+                    .iter()
+                    .any(|b| matches!(b.operation, Operation::CopyOptionPayload { .. }))
+            );
 
             let pending = lower("ownedPayload");
             assert_eq!(pending.completion(), Completion::Incomplete);

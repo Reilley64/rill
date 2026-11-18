@@ -20,13 +20,6 @@ fn primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { referent, .. } if matches!(referent.as_ref(), TypeTerm::Primitive(_)))
 }
 
-fn direct_call_type(ty: &TypeTerm<'_>) -> bool {
-    matches!(
-        ty,
-        TypeTerm::Primitive(_) | TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
-    ) || primitive_reference(ty)
-}
-
 fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>)> {
     match &facts.data {
         Some(DataExpression::Projection(field)) => {
@@ -41,7 +34,11 @@ fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>
 
 enum Binding<'a, 'g> {
     Discard,
-    Name(&'g DeclarationId, &'a Type<'g>),
+    Name {
+        declaration: &'g DeclarationId,
+        ty: &'a Type<'g>,
+        site: NodeId,
+    },
     IrrefutableOwnedTuple {
         shape: NodeId,
         facts: &'a PatternFacts<'g>,
@@ -131,6 +128,14 @@ impl<'a, 'g> Build<'a, 'g> {
             drops,
         });
         Ok(slot)
+    }
+
+    fn direct_call_type(&self, ty: &TypeTerm<'g>) -> bool {
+        matches!(
+            ty,
+            TypeTerm::Primitive(_) | TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
+        ) || primitive_reference(ty)
+            || self.bool_option_role(ty).is_some()
     }
 
     fn bool_option_role(&self, ty: &TypeTerm<'g>) -> Option<OptionRole<'g>> {
@@ -379,13 +384,24 @@ impl<'a, 'g> Build<'a, 'g> {
         match syntax.kind {
             NodeKind::Block => {
                 let mut locals = Vec::new();
-                for &child in children {
+                let mut prefix = children.len();
+                for (index, &child) in children.iter().enumerate() {
                     self.budget.step(1)?;
-                    if matches!(
-                        self.module.syntax.nodes[child].kind,
-                        NodeKind::Binding { .. }
-                    ) {
+                    let statement = &self.module.syntax.nodes[child];
+                    if matches!(statement.kind, NodeKind::Binding { .. }) {
                         self.declare_binding(child, &mut locals)?;
+                        let initializer = self.ungroup(*statement.children.last().unwrap())?;
+                        // A proved failure has no continuation to lower, even
+                        // when the typed suffix contains unsupported operations.
+                        if self.module.syntax.nodes[initializer].kind == NodeKind::Propagate
+                            && let Some(DataExpression::Propagation(exit)) =
+                                &self.value(initializer)?.data
+                            && !exit.can_continue
+                            && exit.can_return
+                        {
+                            prefix = index + 1;
+                            break;
+                        }
                     }
                 }
                 let exits = Exits {
@@ -399,7 +415,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     },
                 };
                 let mut tail = self.cleanup(node, &locals, next)?;
-                for &child in children.iter().rev() {
+                for &child in children[..prefix].iter().rev() {
                     tail = self.statement(child, tail, exits, depth + 1)?;
                 }
                 Ok(tail)
@@ -411,7 +427,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if self.module.syntax.nodes[initializer].kind == NodeKind::Propagate {
                     let into = match binding {
                         Binding::Discard => None,
-                        Binding::Name(declaration, _) => Some(self.locals[declaration]),
+                        Binding::Name { declaration, .. } => Some(self.locals[declaration]),
                         _ => return Err(Stop::Pending(node)),
                     };
                     return self.propagate_option(
@@ -424,7 +440,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
-                    Binding::Name(declaration, _) => {
+                    Binding::Name { declaration, .. } => {
                         let into = self.locals[declaration];
                         let temporary = self.temporary_projection(initializer, false)?;
                         let tail = if let Some(temp) = temporary {
@@ -579,7 +595,27 @@ impl<'a, 'g> Build<'a, 'g> {
         let pattern = self.module.syntax.nodes[node].children[0];
         let shape = self.ungroup(pattern)?;
         match self.module.syntax.nodes[shape].kind {
-            NodeKind::Wildcard if shape == pattern => Ok(Binding::Discard),
+            NodeKind::Wildcard => Ok(Binding::Discard),
+            NodeKind::NamePattern if shape != pattern => {
+                let Some(NodeFactKind::Pattern(facts)) = self.facts.get(&pattern).map(|f| &f.kind)
+                else {
+                    return Err(Stop::Pending(pattern));
+                };
+                let [binder] = facts.binders.as_slice() else {
+                    return Err(Stop::Pending(pattern));
+                };
+                if facts.access != Access::Owned
+                    || !facts.coverage.exhaustive()
+                    || !binder.projections.is_empty()
+                {
+                    return Err(Stop::Pending(pattern));
+                }
+                Ok(Binding::Name {
+                    declaration: binder.declaration,
+                    ty: &binder.ty,
+                    site: shape,
+                })
+            }
             NodeKind::BracketPattern => {
                 let Some(NodeFactKind::Pattern(facts)) = self.facts.get(&pattern).map(|f| &f.kind)
                 else {
@@ -599,7 +635,11 @@ impl<'a, 'g> Build<'a, 'g> {
                     return Err(Stop::Pending(node));
                 };
                 let ty = binding.ty.as_ref().ok_or(Stop::Pending(node))?;
-                Ok(Binding::Name(binding.declaration, ty))
+                Ok(Binding::Name {
+                    declaration: binding.declaration,
+                    ty,
+                    site: pattern,
+                })
             }
         }
     }
@@ -608,8 +648,12 @@ impl<'a, 'g> Build<'a, 'g> {
         let pattern = self.module.syntax.nodes[node].children[0];
         match self.binding(node)? {
             Binding::Discard => Ok(()),
-            Binding::Name(declaration, ty) => {
-                let local = self.local(declaration, pattern, ty)?;
+            Binding::Name {
+                declaration,
+                ty,
+                site,
+            } => {
+                let local = self.local(declaration, site, ty)?;
                 self.budget.reserve(1)?;
                 locals.push(local);
                 Ok(())
@@ -1056,7 +1100,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if call.callee.kind != DeclarationKind::Function
             || call.callee.module.origin != Origin::Application
             || !call.substitution.is_empty()
-            || !direct_call_type(&facts.ty)
+            || !self.direct_call_type(&facts.ty)
         {
             return Err(Stop::Pending(node));
         }
@@ -1083,7 +1127,7 @@ impl<'a, 'g> Build<'a, 'g> {
         for arg in call.argument_evaluation_order() {
             self.budget.step(1)?;
             let ty = self.value(arg)?.ty.clone();
-            if !direct_call_type(&ty) {
+            if !self.direct_call_type(&ty) {
                 return Err(Stop::Pending(arg));
             }
             args.push(self.slot(arg, &ty)?);
