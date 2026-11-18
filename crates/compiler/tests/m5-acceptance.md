@@ -294,7 +294,11 @@ The installed `forwarding_reborrows_the_descriptor_and_keeps_its_contents` probe
 | `callerExpires`, `expiresBeforeOverwrite`, `preservesOld` | Reject `R0203` when a still-needed source expires after a call. The external contents remain live through a future overwrite. Old backing remains possible across forwarding. |
 | `suspended`, `movedDescriptor`, `escapesThroughRelay`, `rejectedCaller` | Reject use of suspended access (`R0201`), a moved descriptor (`R0200`), or a local reference retained at a callee exit (`R0202`). No caller MIR is published for a rejected reached body. |
 
-At `6d3f674`, `mise run test:compiler` passed 435 tests and `mise run test` passed 451. `mise run check`, `mise run build:scaffold`, and the whitespace check passed on macOS AArch64 with a fresh short `TMPDIR`. The staged M4 baseline and relay fixture issued both receipts. Independent reviews were requested at this code revision. Moving the original descriptor into an alias and forwarding that alias, general nested destinations, broader signatures, and cancellation remain outside this slice. No workflow changed. No Rill program ran.
+At `6d3f674`, `mise run test:compiler` passed 435 tests and `mise run test` passed 451. `mise run check`, `mise run build:scaffold`, and the whitespace check passed on macOS AArch64 with a fresh short `TMPDIR`. The staged M4 baseline and relay fixture issued both receipts. All four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44415096915) passed at `401d14c`. The [native jobs](https://github.com/Reilley64/rill/actions/runs/44415096914) reached the unavailable `test:runtime` entry point.
+
+Standards reviewed `6d3f674` against `25fc871`. The correction at `fcd8ac4ec21ad5b552a1a1bd9533c06bb475c651` reuses the metered parameter slot for staging, distinguishes local and through-parameter destinations in the MIR types, and avoids a duplicate liveness step. Aliased and projected destinations get typed receipts but no MIR in the added probes. All four local gates passed again. Spec review remains open at recording time.
+
+General nested destinations, broader signatures, and cancellation remain outside this slice. No workflow changed. No Rill program ran.
 
 ## Open acceptance obligations
 
