@@ -337,6 +337,40 @@ Native operations can report typed resource failures without making Rill allocat
 
 False expectations remain ordinary test failures under Accepted RFC 0001. Compiler diagnostics and trusted expectation previews must not call user display/show or retain live error wrappers. Their bounded observations do not replace normal full cause rendering.
 
+### Proposed M4.6 exact error evidence
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes these equality facts for [RFC 0004's ordinary proof procedure](0004-functions-overloads-and-generic-requirements.md#symbolic-bodies-and-evidence-goals). Approval remains pending. This stage does not implement conversion selection or admit an error wrapper.
+
+An ordinary requirement can name an exact error argument even when its input is symbolic. Preserve the canonical family, input terms and exact output relation. For example, `read(R,E)` retains both R and E. It is not evidence for any unspecified error type.
+
+In a generic body, use the written requirement or an independently justified relation. Do not assume a concrete E from a currently visible fallback. At instantiation, use the normal ordinary winner. Compare its selected output against the full substituted contract. A mismatch fails that requirement without retrying another implementation.
+
+Check an equality of known error terms by canonical identity and full arguments. The same rigid E can establish equality. Distinct rigid terms do not become equal through spelling, parent admission or a shared bound. An unresolved selected term supplies no equality. Keep the two terms and both source sites in the witness.
+
+This equality can be tested independently of a standard-library wrapper. Operations on actual `Result`, `Option`, `Err` and Cause require their admitted identities and contracts. Preserve pending obligations when those inputs are missing. Do not substitute record resemblance for admission. Positive constructor, propagation, cause-retention and result-use integration remain in M4.8. M4.7 owns conversion-selected E and its separate diagnostics.
+
+### Proposed M4.8 Option, Result and Err checking
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes this handoff to the shared typed checker. It requires separate checkpoint approval. These judgments need the admitted roles and applicable contracts from [RFC 0002](0002-modules-and-program-loading.md#proposed-m48-core-admission-and-interface-checks).
+
+Validate the exact Option and Result variant schemas, Result's canonical default, and the distinct Err type and closed constructor roles. Do not infer those roles from representation. Check raw variant construction with the ordinary named data rules. `Result.Err` consumes a supplied wrapper value under the later ownership rules. It does not create an origin.
+
+Use the existing [closed Err procedure](#proposed-closed-err-construction-and-typing) only for the admitted value declaration. Alias calls retain the written call site. Check `display` with ordinary evidence. Check retained cause properties with compiler predicates and the actual inner payload type.
+
+Keep the typed inner wrapper, exact C and cause evidence in the facts. A missing or unsupported proof cannot synthesize cause metadata or replace C. Keep no constructed wrapper fact for an incomplete operation.
+
+Supply the canonical variant identities and substitutions to [RFC 0003's guard checking](0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control). Retain the success payload type and the failure path before introducing pattern bindings. For a Result error binding, supply `Err<E>` with the actual container access.
+
+For postfix propagation, check the operand once and require an owned Option or Result type. The nearest callable must return the same container kind. For Result, compare E exactly with the enclosing E. Keep the original Err identity and no new origin. Do not require equality between operand and enclosing success types.
+
+Propagation that leaves startup or an expectation is invalid. A nested callable keeps its own return context.
+
+For infix wrapping, check the owned left Result and the outer error expression once each. A borrowed left Result does not supply an owned inner wrapper. Use the enclosing Result's E for the immediate outer expression context. Require canonical `display(E)` for the new wrapper and the retained cause evidence on the inner C.
+
+Keep the left success type and separate early-return edge. Record the question-mark token as the new origin. Type checking the right operand does not assert its evaluation on the success path.
+
+The report can retain operand, result, origin, branch and evidence facts. It cannot assert construction of a runtime owner, a valid move, a release order or rendering. Use [RFC 0003](0003-expressions-bindings-and-control-flow.md#proposed-m48-result-use-checking) for the separate use obligation after construction or propagation.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

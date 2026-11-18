@@ -1,0 +1,39 @@
+// Fixed prelude and primitive implementations.
+export function copy<T>(value: &T): T;
+export function dispose<T>(value: T): void;
+
+function copyText(value: &string): string;
+function disposeText(value: string): void;
+
+implement copy(value: &bool): bool { return *value; }
+implement copy(value: &char): char { return *value; }
+implement copy(value: &i8): i8 { return *value; }
+implement copy(value: &i16): i16 { return *value; }
+implement copy(value: &i32): i32 { return *value; }
+implement copy(value: &i64): i64 { return *value; }
+implement copy(value: &i128): i128 { return *value; }
+implement copy(value: &u8): u8 { return *value; }
+implement copy(value: &u16): u16 { return *value; }
+implement copy(value: &u32): u32 { return *value; }
+implement copy(value: &u64): u64 { return *value; }
+implement copy(value: &u128): u128 { return *value; }
+implement copy(value: &f32): f32 { return *value; }
+implement copy(value: &f64): f64 { return *value; }
+implement copy(value: &string): string { return copyText(value); }
+
+// These scalar values have no resource to release.
+implement dispose(value: bool): void {}
+implement dispose(value: char): void {}
+implement dispose(value: i8): void {}
+implement dispose(value: i16): void {}
+implement dispose(value: i32): void {}
+implement dispose(value: i64): void {}
+implement dispose(value: i128): void {}
+implement dispose(value: u8): void {}
+implement dispose(value: u16): void {}
+implement dispose(value: u32): void {}
+implement dispose(value: u64): void {}
+implement dispose(value: u128): void {}
+implement dispose(value: f32): void {}
+implement dispose(value: f64): void {}
+implement dispose(value: string): void { disposeText(value); }

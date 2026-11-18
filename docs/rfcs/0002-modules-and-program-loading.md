@@ -6,7 +6,7 @@
 | Status | Draft |
 | Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
 | Source inputs | [Confirmed module decision #17](https://github.com/Reilley64/rill/issues/17#issuecomment-6866705217). [Source reconciliation](#source-reconciliation) lists later refinements. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The [confirmed policy decisions](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073) supplement those inputs. |
-| RFC dependencies | [RFC 0001](0001-top-level-expectations.md) owns expectation behavior. Its [accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) has SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. Other required companions appear [below](#required-companion-rules). |
+| RFC dependencies | [RFC 0001](0001-top-level-expectations.md) owns expectation behavior. Its [accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) has SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. Other required companions appear [below](#required-companion-rules). The [M4.8 review set](../implementation-plan.md#m48-completion-checkpoint-first-party-core-authority) pins the dependencies for the first-party authority proposal. |
 | Replaces / superseded by | None. This draft does not replace or amend RFC 0001. |
 | Decision | Not yet decided |
 | Reviewed revision | Not yet reviewed |
@@ -355,11 +355,111 @@ Required guard release, owner-count maintenance and native-borrow retention rema
 
 Private fields alone do not prevent interception. Later #23 cleanup rules also preserve remaining initialized owned fields after custom disposal. Their full checking and runtime rules need companion RFCs. This document does not claim to prove them.
 
+### Proposed M4.5 collection handoff
+
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes the next bounded collection handoff. Full RFC status remains unchanged. The owner approved the [exact-wildcard precision](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) and then [the scoped P1–P4 checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018).
+
+Pass the actual loaded implementation inventory and installed routes to [RFC 0004's proposed ordinary procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure). Do not discover bodies from imports, filenames or calls again. Preserve canonical defining modules through aliases and repeated routes.
+
+The confirmed grammar admits implementations only at module level. M2 rejects nested implementations before an M3 graph exists. Collection cannot invent scoped candidates or retry parsing.
+
+Visibility of supported nested functions and nominal declarations remains an M4.8 integration obligation. That separate work does not admit nested implementation syntax.
+
+Ordinary input facts do not prove family-role or protected-action admission. Missing canonical classification cannot turn a conversion family into an ordinary duplicate. Missing protection metadata cannot prove a body safe. Preserve separate completion states and original source findings.
+
+### Proposed M4.6 requirement metadata boundary
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this handoff to [the inference and evidence procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure). Scoped approval remains pending.
+
+Resolve source requirement names in the declaration's captured module. Keep canonical family or compiler-predicate identities, arguments, source sites and actual binding routes. Resolve imported aliases once. Unresolved or inaccessible targets cannot supply assumptions. Apply canonical prelude fallback only in its existing unqualified scope.
+
+Carry requirement targets and default terms across modules as metadata. Do not resolve those names again from the caller. Metadata does not import a name, expose a private representation or grant placement. Keep public requirement/default nameability pending where the M4.8 source-interface checks have not finished.
+
+A successful source name lookup is not evidence or role admission. Protected references and conversion targets retain their own prerequisites. When the role is not available, ordinary derivations retain a conditional premise. Paths, public exports and schema agreement alone cannot establish that role.
+
+### Proposed M4.8 core admission and interface checks
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes this procedure. It requires separate checkpoint approval. It does not admit a provider.
+
+Start with one resolved graph. Use the original canonical declarations, binding routes, syntax and snapshots. Do not load missing modules during typing. A compiler-required metadata dependency must already be present in the capture. A metadata edge does not install a source binding.
+
+Separate a role designation from admission. A role designates the declaration that owns a specified rule. Validate the designation against its captured identity and exact schema, including binder relationships, visibility and variant identities. Validate actual provider and representation evidence separately. A name, path, standard origin, private field or matching signature does not supply this evidence.
+
+Use only compiler-owned facts or evidence admitted by the selected toolchain. An internal handoff takes evidence already accepted by that toolchain, not unverified data from the analysis request. Bind it to the capture, source revision, target and options it describes. Retain its authority and provenance.
+
+A required provider must resolve to a particular captured implementation and the applicable contract. An indirect representation needs evidence for its stored and forwarded type arguments. Neither a role nor an indirect representation proves a release action or a property.
+
+This increment defines the validation and missing-evidence boundary. It does not define a format or authenticator for an installed toolchain bundle. Require a separately reviewed authority source before enabling positive admission from that bundle. Do not accept a public selector, manifest or test-only switch as a substitute.
+
+Classify families from the validated role inventory before comparing implementations. A complete role inventory can exclude a family from the special roles. A partial inventory cannot do so by omission.
+
+Use [RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary) for required winners and prohibited inputs. Use [RFC 0009](0009-user-implementable-conversions.md#proposed-m47-conversion-checking-procedure) for pair keys and the identity gate. Numeric gaps come from the specified catalogue. A missing required provider is not a gap. Check all loaded implementations, including unused bodies.
+
+If evidence is absent, record the missing role, provider, protection inventory or representation at its dependent obligation. Report contradictory or foreign admission as an invalid request. Do not promote a hypothetical fact after a shape check. Re-evaluate its dependent judgment with the validated inputs. The repository does not yet supply an installed core implementation or provider evidence. Source fixtures cannot fill this gap.
+
+#### Public interfaces and nested declarations
+
+Check exported enum payloads and exported header defaults and requirements through their canonical terms and routes. Follow type arguments and both callable parameter and result terms. Require public origin paths for publicly exposed nominal payload types, nominal types in public defaults or requirements, and public requirement families. Validate compiler primitives and intrinsic predicates by their canonical identities instead. An imported alias does not make an inaccessible target public. The canonical Result default does not require a caller binding.
+
+Do not walk into a private record representation to check an opaque signature. A private nominal may remain opaque in an exported operation's signature. A public type need not be imported locally for a client to use its visible representation.
+
+Use the captured lexical scopes for nested functions and nominal declarations. Identity and visibility do not extend outside the defining scope. Reuse the captured declaration and parameter identities across shadowing. The presence of an inventoried binding does not hoist a runtime `let`.
+
+A named function cannot capture enclosing runtime values. An expectation cannot capture startup values. Report such a capture as R0502 even if the value can be folded. An arrow keeps its own return context and its actual typed capture evidence.
+
+### Proposed first-party core authority for M4.8 completion
+
+The [A1 through A3 checkpoint](../implementation-plan.md#m48-completion-checkpoint-first-party-core-authority) defines the review set and pins the unchanged companions. The proposal supplies the authority left open by the initial M4.8 checkpoint. It preserves public paths, the fixed prelude, source syntax and the layout in [ADR 0026](../adr/0026-toolchain-repository-and-mise.md). It adds no third-party provider format and does not accept this RFC.
+
+#### First-party pins and capture
+
+The first profile is `aarch64-apple-darwin` with an empty option map. Both load modes use the same profile. The compiler build pins the production source bytes and relative module keys from `stdlib/`. It pins the four inventories and any provider artifact identities separately. Installed files are verification inputs, not authority.
+
+The installed capture entry point derives the prefix from the running toolchain executable's canonical path under `<prefix>/bin/`. It uses `<prefix>/lib/rill/std/`, the pinned prelude selectors in `core.rill`, and the built-in primitive and predicate identities. `toolchain.json` may report release metadata but cannot select the root, roles, files, target profile or providers. The existing source-only loader cannot attach authority, even when it loads identical bytes. Neither entry point enables a product command.
+
+Use only explicit imports, fixed prelude roots and declared metadata edges. The pinned edges name their triggers and module dependencies. List syntax, bracket selection, iteration, interpolation, and question-mark syntax request only their corresponding metadata groups. These syntactic requests do not decide the type or make a failed List become a tuple. The canonical conversion import activates its [declared registration closure](0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface); an unrelated source import does not. Follow pinned edges to closure without scanning the installation.
+
+Metadata-only modules must have no startup or expectations. Their registrations must belong to the families named by their active metadata edges. Reject an authority configuration that would silently add unrelated implementations or expectation roots. Explicit source imports still use the existing graph, collection and expectation rules. Metadata does not install a source binding.
+
+Load required files through the existing M1 snapshots, M2 parser and M3 resolver. Charge this work to load limits. Compare the retained bytes, not a second read. Attach private evidence only to that graph, pinned source revision, and exact target and options. The checker consumes the capture without reloading files. Preserve independent facts when only a slice of the relevant authority is available.
+
+#### Actual providers and closed inventories
+
+After pin validation, validate canonical declaration identities, schemas and routes under the [original core procedure](#proposed-m48-core-admission-and-interface-checks). Use a pinned Rill implementation body or a specific implemented compiler operation for static provider evidence. A placeholder body, bodyless declaration, name, or planned intrinsic cannot supply a provider. For a native contract, require the matching delivered provider artifact and its pinned operation binding. Do not infer native execution or ABI compatibility from static admission.
+
+| Core source group | Required implementation and evidence owner |
+| --- | --- |
+| `std.rill`, `core.rill`, `collection.rill`, `iter.rill` | The facade and prelude declare the source identities. The List and iterator implementations supply construction, projection, `get`, `iterate`, `next` and copy/dispose contracts. Only delivered compiler/runtime operations can back opaque storage. |
+| `option.rill`, `result.rill`, `error.rill`, `format.rill`, `compare.rill` | Canonical variants/defaults and written Rill helpers live in `stdlib/`. Compiler-owned closed operations implement Err construction and propagation. Formatting, equality, and wrapper state need their actual implementations. `Err`, `Cause` and `SourceLocation` still need owned representation evidence. |
+| `convert.rill`, `number.rill`, `bytes.rill`, `string.rill`, `char.rill` and declared provider dependencies | The pinned declarations and registrations bind each published pair to its specific provider. Numeric operations follow the [protected matrix](0006-numbers-strings-and-primitive-operations.md#protected-numeric-conversions-and-explicit-arithmetic-helpers). The parsing, UTF-8, code-point and byte/List pairs follow the [core conversion matrix](0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface). |
+| `shared.rill`, `mutex.rill`, `channel.rill` and captured native owners with protected contracts | The delivered runtime supplies the closed count, guard release, endpoint and native retention actions where required. The [ownership rules](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary) still define protected overlaps. A registration without the required artifact leaves a blocker. |
+
+Each provider entry names its role, canonical declaration route, implementation identity, and either a pinned source body or an implemented operation and exact artifact identity. A protection entry covers a precise input region and records either a required winner or an explicit prohibition. Check coverage of the relevant region against the owning rules. An independently admitted provider remains a provider when protection coverage is pending; the checker cannot yet prove the winner.
+
+Close a role, provider or representation inventory only over its pinned and validated scope. A validated empty protected action set requires a pinned complete scope and no actions in the owning rules for that scope. A specified numeric gap comes from the matrix, not a missing registration. Missing required providers remain pending. A partial inventory cannot prove exclusions by omission.
+
+For each opaque or indirect representation, pin the registered representation implementation and map its actual stored and forwarded type arguments. For example, owned List storage retains the element type, and an owned iterator retains any unyielded owned elements. Check that evidence independently of the role, provider and protection. A signature, finite layout or copyable payload is not representation evidence.
+
+#### Planned checks
+
+Build and stage the production executable, source files and provider artifacts in the layout above. Use the packaging inputs for the first-party distribution. Stage a Rust integration runner beside `bin/rill`. The runner uses the installed capture entry point linked from the same compiler build and calls `analyze_typed`. It uses no root override, trust flag or substituted core declaration. Run both modes and record them separately from the scaffold tasks.
+
+| Case | Owning rule and expected outcome |
+| --- | --- |
+| Installed core alias versus identical bytes under the source-only loader. | [Pins and capture](#first-party-pins-and-capture), NotChecked. The installed alias preserves the admitted identity. Source-only loading never attaches authority. |
+| Stable captured pin mismatch versus bytes changing during normal capture replay. | [Pins and capture](#first-party-pins-and-capture), NotChecked. The first rejects authority as `InvalidRequest`; the second keeps the loader's `SourceChanged` outcome. |
+| Missing metadata-only file, missing provider, or unsupported target/options. | [Closed inventories](#actual-providers-and-closed-inventories), NotChecked. Report the corresponding typed prerequisite as `Incomplete` when the source graph can resolve. A required explicit source import still uses the loader's existing failure rules. |
+| Evidence from a different capture or one-short capture and analysis limits. | [Pins and capture](#first-party-pins-and-capture), NotChecked. Reject foreign evidence as `InvalidRequest`. Report exhausted work as `ResourceLimit`. No receipt follows. |
+| Installed List index and `get`; installed Result propagation and a sibling Result discarded at exit. | [Indexing](0005-types-records-enums-and-inference.md#proposed-m48-list-index-and-aggregate-handoff), [propagation](0008-errors-propagation-and-caused-by-wrapping.md#proposed-m48-option-result-and-err-checking) and [Result use](0003-expressions-bindings-and-control-flow.md#proposed-m48-result-use-checking), NotChecked. A `u64` List index projects T, while `get` returns Option. Exact-E propagation can pass; unequal E rejects. Discarding the unhandled sibling rejects with its R0103 witness. |
+| Installed formatting and iteration; attempted replacement of a protected action. | [Interpolation](0006-numbers-strings-and-primitive-operations.md#canonical-interpolation-and-default-formatting), [iteration](0003-expressions-bindings-and-control-flow.md#pipe-and-iteration-handoff) and [protection](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary), NotChecked. Valid calls keep exact provider and representation facts. A missing provider blocks the dependent check; an overlapping replacement rejects. |
+| Complete installed capture in each mode, including unused bodies and imported startup and expectations. | [Completion gate](../implementation-plan.md#m48-design-checkpoint), NotChecked. Require a positive typed receipt after all required obligations finish. Check separate failing cases for unused bodies and imported expectations. No execution follows from either result. |
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |
 | --- | --- | --- |
 | [RFC 0001](0001-top-level-expectations.md) | Expectation declarations, Boolean outcomes, test execution and trusted observations. | Accepted at the snapshot identified in metadata. This RFC does not amend it. |
+| [M4.8 completion review set](../implementation-plan.md#m48-completion-checkpoint-first-party-core-authority) | Exact dependencies for first-party authority, core protection, and typed-stage completion. | A1 through A3 are proposed. Installed-core and native provider evidence remain unverified. |
 | Expressions and declarations | Identifier grammar, lexical scopes, expression checking and non-capturing declarations. | [Draft RFC 0003](0003-expressions-bindings-and-control-flow.md) proposes bindings and control flow. Its lexical identifier/token policy is confirmed. The shared syntax annex records confirmed declaration/parser policies. Full resolver and checking procedures remain incomplete. |
 | [Draft RFC 0005](0005-types-records-enums-and-inference.md) | Nominal declaration identity, public-interface exposure and finite layout checking. | Proposed, not accepted. Concrete type-syntax policies are confirmed. Formal layout checking remains incomplete. |
 | [Draft RFC 0004](0004-functions-overloads-and-generic-requirements.md) | Canonical patterns, family evidence, duplicates, placement and call ranking. | Proposed. Its full text is not accepted. This RFC owns loading and visibility, not ranking. |

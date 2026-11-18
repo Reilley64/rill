@@ -1,0 +1,41 @@
+export enum Option<T> { Some(T), None }
+
+export function isSome<T>(value: &Option<T>): bool {
+    return match (value) { Option.Some(_) => true, Option.None => false };
+}
+
+export function asRef<T>(value: &Option<T>): Option<&T> {
+    return match (value) {
+        Option.Some(element) => Option.Some(element),
+        Option.None => Option.None,
+    };
+}
+
+export function asMut<T>(value: &mut Option<T>): Option<&mut T> {
+    return match (value) {
+        Option.Some(element) => Option.Some(element),
+        Option.None => Option.None,
+    };
+}
+
+export function map<T, U, F>(value: Option<T>, apply: F): Option<U>
+where callableOnce(F, [T], U) {
+    match (value) {
+        Option.Some(element) => { return Option.Some(apply(element)); },
+        Option.None => {
+            let _ = apply;
+            return Option.None;
+        },
+    };
+}
+
+export function andThen<T, U, F>(value: Option<T>, apply: F): Option<U>
+where callableOnce(F, [T], Option<U>) {
+    match (value) {
+        Option.Some(element) => { return apply(element); },
+        Option.None => {
+            let _ = apply;
+            return Option.None;
+        },
+    };
+}

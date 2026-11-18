@@ -1,0 +1,8 @@
+import std::option::{Option};
+import std::error::{display};
+
+export type Utf8Error = { validUpTo: u64; errorLength: Option<u64>; };
+
+implement display(input: &Utf8Error): string {
+    return "Invalid UTF-8";
+}

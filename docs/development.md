@@ -50,7 +50,7 @@ These are task groups, not alternate Rust compiler profiles. Invoke each task as
 | Task | Current scope |
 | --- | --- |
 | `setup` | Default developer setup, without LLVM or heavy experiment tools. |
-| `test` | Implemented Rust unit, integration and documentation tests for compiler, IDE, LSP and CLI crates, without LLVM. Not complete Rill product acceptance. |
+| `test` | Rust unit, integration and documentation tests for the compiler, IDE, LSP, CLI, and the collection and error-storage runtime crates. No LLVM or Rill execution. |
 | `test:compiler` | Focused compiler unit, integration and documentation tests, without LLVM. |
 | `check` | Rust tests, formatting, lint, documentation, fixture and tool checks. Not complete language, stdlib, runtime or client acceptance. |
 | `check:rust` | Rust formatting and LLVM-free clippy. Tests run through `test`. |
@@ -147,6 +147,18 @@ The approved future layout is:
     toolchain.json
 ```
 
-The selected toolchain identifies compatible standard-library source, target-runtime inputs and toolchain metadata. Installed standard-library lookup must not depend on the process's working directory. Rill end users will not need Rust to use the distributed toolchain. The first scaffold does not implement this installer, metadata format or source lookup.
+The selected toolchain identifies compatible standard-library source and target-runtime inputs. The installed loader derives its source root from the executable path, not the working directory. Toolchain metadata does not grant authority. The scaffold does not implement a release installer or metadata format.
+
+For the M4.8 static check on macOS AArch64, stage the current distribution inputs and run the separate Rust acceptance runner:
+
+```sh
+repo=$PWD
+work=$(mktemp -d)
+mise exec -- python tools/stage_typed_installation.py "$work/prefix"
+(cd "$work" && ./prefix/bin/rill --version && \
+  ./prefix/bin/m4_8_installed "$repo/tests/installed/typed/main.rill")
+```
+
+The staging script takes the executable, runner and ownership archive from one locked Cargo build. It copies the listed first-party sources and runtime inputs into a new prefix. The runner loads and analyzes the entry in both modes. It exits 0 only when both modes issue a typed receipt. The [M4.8 verification record](../crates/compiler/tests/m4-8-acceptance.md) records the installed outcomes separately from the scaffold checks. Neither check runs Rill or validates an ABI.
 
 For language and library rules, use the [contract index](README.md#contracts) rather than this guide. Production/formal backend acceptance remains [#28](https://github.com/Reilley64/rill/issues/28); complete OpenIDEA client delivery remains [#42](https://github.com/Reilley64/rill/issues/42). The scaffold neither closes those gates nor changes the existing Rill source examples or recorded evidence.

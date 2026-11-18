@@ -1,0 +1,12 @@
+// The private fields deny source construction; they are not native layout evidence.
+enum NativeStorage {}
+export type Sender<T> = { private storage: NativeStorage; }
+export type Receiver<T> = { private storage: NativeStorage; }
+
+function retainSender<T>(value: &Sender<T>): Sender<T>;
+function releaseSender<T>(value: Sender<T>): void;
+function releaseReceiver<T>(value: Receiver<T>): void;
+
+implement<T> copy(value: &Sender<T>): Sender<T> { return retainSender(value); }
+implement<T> dispose(value: Sender<T>): void { releaseSender(value); }
+implement<T> dispose(value: Receiver<T>): void { releaseReceiver(value); }

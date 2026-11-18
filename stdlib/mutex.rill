@@ -1,0 +1,7 @@
+// The private field denies source construction; it is not native layout evidence.
+enum NativeStorage {}
+export type LockGuard<T> = { private storage: NativeStorage; }
+
+function releaseGuard<T>(value: LockGuard<T>): void;
+
+implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); }

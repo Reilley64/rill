@@ -1,0 +1,45 @@
+import std::compare::eq;
+import std::error::display;
+
+export enum ConversionError { OutOfRange, NotFinite }
+export enum ParseError { InvalidSyntax, OutOfRange }
+
+implement eq(left: &ConversionError, right: &ConversionError): bool {
+    return match (left) {
+        ConversionError.OutOfRange => match (right) {
+            ConversionError.OutOfRange => true,
+            ConversionError.NotFinite => false,
+        },
+        ConversionError.NotFinite => match (right) {
+            ConversionError.OutOfRange => false,
+            ConversionError.NotFinite => true,
+        },
+    };
+}
+
+implement eq(left: &ParseError, right: &ParseError): bool {
+    return match (left) {
+        ParseError.InvalidSyntax => match (right) {
+            ParseError.InvalidSyntax => true,
+            ParseError.OutOfRange => false,
+        },
+        ParseError.OutOfRange => match (right) {
+            ParseError.InvalidSyntax => false,
+            ParseError.OutOfRange => true,
+        },
+    };
+}
+
+implement display(input: &ConversionError): string {
+    return match (input) {
+        ConversionError.OutOfRange => "Numeric conversion is out of range",
+        ConversionError.NotFinite => "Numeric conversion requires a finite value",
+    };
+}
+
+implement display(input: &ParseError): string {
+    return match (input) {
+        ParseError.InvalidSyntax => "Invalid decimal syntax",
+        ParseError.OutOfRange => "Parsed number is out of range",
+    };
+}

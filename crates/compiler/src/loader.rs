@@ -8,8 +8,11 @@ use std::sync::Arc;
 
 mod collect;
 mod filesystem;
+mod installed;
 mod resolve;
 use filesystem::Host;
+use installed::InstalledProfile;
+pub use installed::{CollectionArtifact, InstalledRequest, load_installed};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Origin {
@@ -324,9 +327,42 @@ pub struct Graph {
     imports: Vec<ImportOutcome>,
     implementations: Vec<Implementation>,
     host: Host,
+    installed: Option<InstalledProfile>,
+    error_storage: Option<(PathBuf, Vec<u8>)>,
+    ownership_archive: Option<PathBuf>,
+    collection_links: Option<installed::CollectionLinks>,
 }
 
 impl Graph {
+    pub(crate) fn collection_artifacts(
+        &self,
+    ) -> Option<(CollectionArtifact<'_>, CollectionArtifact<'_>)> {
+        Some(self.collection_links.as_ref()?.artifacts(&self.id))
+    }
+
+    pub(crate) fn ownership_archive(&self) -> Option<&std::path::Path> {
+        self.ownership_archive.as_deref()
+    }
+
+    /// This does not admit roles, implementations or representations.
+    pub(crate) fn is_pinned_standard_source(&self, module: &Module) -> bool {
+        module.context == self.id
+            && module.key.origin == Origin::Standard
+            && self
+                .installed
+                .and_then(|p| p.source(&module.key.path))
+                .is_some()
+    }
+
+    /// The source keys in the selected installed profile, not a discovery request.
+    pub(crate) fn installed_source_keys(&self) -> Option<impl Iterator<Item = &'static str>> {
+        Some(self.installed?.sources().iter().map(|&(key, _)| key))
+    }
+
+    pub(crate) fn error_storage_source(&self) -> Option<&std::path::Path> {
+        self.error_storage.as_ref().map(|(path, _)| path.as_path())
+    }
+
     pub fn id(&self) -> GraphId {
         self.id.clone()
     }
@@ -406,7 +442,7 @@ impl Graph {
 /// Load through M1 snapshots and M2 syntax. Success resolves only M3 bindings;
 /// types, bodies, ownership, protected operations and execution remain unchecked.
 pub fn load(request: Request) -> Result<Graph> {
-    resolve::load(request)
+    resolve::load(request, None, None)
 }
 
 /// Recheck a retained capture without changing its snapshots or graph identity.
@@ -417,7 +453,14 @@ pub fn validate_inputs(graph: &Graph, limits: Limits) -> Result<()> {
         graph
             .modules
             .iter()
-            .map(|m| (m.path.as_path(), m.snapshot.bytes())),
+            .map(|m| (m.path.as_path(), m.snapshot.bytes()))
+            .chain(
+                graph
+                    .error_storage
+                    .iter()
+                    .map(|(path, bytes)| (path.as_path(), bytes.as_slice())),
+            )
+            .chain(graph.ownership_archive().zip(installed::OWNERSHIP_ARCHIVE)),
         false,
     )
 }

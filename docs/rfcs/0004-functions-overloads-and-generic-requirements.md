@@ -120,6 +120,205 @@ There are no ordinary optional, default-valued, named or variadic value paramete
 
 Arrow expressions may infer parameter and result types from immediate context. Callable type modes are [defined below](#callable-modes-and-requirements). The shared syntax annex records confirmed typed-arrow and generic-argument parsing policies.
 
+### Proposed M4.1 explicit header elaboration
+
+The owner [approved this first-stage procedure](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. [M4.1 slice #57](https://github.com/Reilley64/rill/issues/57) remains part of open M4 umbrella #56. Full RFC status and earlier policy approvals remain unchanged.
+
+Use [RFC 0005's canonical declaration-type procedure](0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure) for named-function and body-less family annotations. Preserve parameter order, binder identities and the explicit result term. Preserve the canonical family identity independently of its source alias.
+
+This stage elaborates types; it does not check function bodies or implementation compatibility. A callable annotation records its written invocation mode. It supplies no capture evidence or invocation permission.
+
+A where clause is an unsupported obligation in this slice. Return Incomplete rather than a completed declaration-type receipt. Do not treat a requirement as proved, disproved or missing evidence. Recursive and type-growing requirements receive the same incomplete classification without starting proof search.
+
+Generic defaults and implementation headers also remain incomplete. Their later procedures must preserve inference before defaults and whole-signature substitution. Exact type equality does not replace alpha-normalized family patterns or whole-vector specificity.
+
+The canonical copy/dispose declarations remain those selected by M3's explicit prelude request. Their annotation terms can be elaborated like other family headers. This does not validate their required library signatures or authorize trusted operations.
+
+No operation gains compiler privileges through its spelling or standard-root location. This stage uses no semantic standard-library definitions or trusted-operation registry. Later operation checks need actual canonical declarations and explicit supplied contracts.
+
+### Proposed M4.2 header validity and prelude signatures
+
+The owner [approved these M4.2 checks](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) after M4.1 elaboration at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. [Ticket #59](https://github.com/Reilley64/rill/issues/59) records the slice. Full RFC status and previous approvals remain unchanged.
+
+Check every module-level named-function and family header in the retained receipt. Reject repeated value-parameter names within one header. Exclude `_`, which binds no usable name. Preserve each conflicting declaration identity and source span. Type parameters and value parameters remain separate namespaces.
+
+This procedure does not check bodies or implementation-family compatibility. Defaults, requirements and implementation headers remain incomplete under M4.1. Public generic requirements, selection, symbolic evidence and function-value compatibility retain their later procedures.
+
+The request explicitly supplies the canonical copy/dispose identities and the following required signature contracts:
+
+```text
+copy:    <P0>(&P0) -> P0
+dispose: <P0>(P0)  -> canonical-void
+```
+
+Each schema has exactly one type binder and one value parameter. P0 denotes that declaration's own binder at position zero. The copy parameter has one fixed read-only reference layer. Dispose consumes its parameter type without adding a reference layer.
+
+Use the actual M3 prelude declaration identities. Reject absent, foreign-capture or substituted contract identities as InvalidRequest. The supplied schemas must equal the two contracts above. Caller data cannot weaken those required shapes.
+
+Compare actual signatures after binder renaming by ordered position. Preserve tuple, nominal, reference and callable constructors during comparison. Parameter names do not affect signature compatibility. Primitive void uses its actual compiler identity, not a same-spelled user declaration.
+
+A structurally admitted prelude declaration with the wrong signature rejects this stage. Retain the declaration span and the mismatched parameter/result type facts. No new stable diagnostic code is assigned by this proposal.
+
+The [library catalogue](../standard-library-contracts.md#2-callable-and-ownership-evidence) supplies the existing contract provenance. These checks do not admit implementations, protected actions or native providers. A signature match proves neither copyability nor correct disposal behavior. It grants no runtime trust.
+
+### Proposed M4.3 explicit standalone calls
+
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this bounded call procedure. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Full RFC status and earlier approvals remain unchanged.
+
+Resolve a direct standalone callee through the caller's lexical/module context. Preserve its canonical function identity. Qualification uses installed exports, without filesystem probes or child autoload.
+
+A nongeneric standalone callee supplies its declared parameter and result types. A generic call in this slice must supply every type argument explicitly. Elaborate those arguments in the caller's type environment. Use one ordered substitution across the complete signature and argument vector.
+
+Check value arity and every argument against the substituted parameter type. Declared parameter context can establish literal widths. A desired result only checks the resulting signature; it cannot select another function or retry another body.
+
+Check every standalone body symbolically once against its own declaration. A call uses the declared signature rather than inspecting the callee's body. Runtime recursion is not recursive evidence search. Concrete callers do not repair an unconstrained generic body's primitive operations.
+
+A body-less family is not a standalone fallback. Ordinary family selection, function values, callable invocation, callbacks, requirements, defaults and omitted generic inference remain incomplete until their owning later procedures exist. Do not infer a callable signature from implementation counts.
+
+These call facts retain actual type arguments, the shared substitution and original callee/argument/result source sites. They establish no move, implicit copy, access loan, capture property or trusted implementation permission.
+
+### Proposed M4.5 ordinary input procedure
+
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) follows M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. The owner [approved P1 through P4](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) at checkpoint `3392baaac8f2ee50e86167700349273a76ce61c4`. This approval is for scoped implementation. Full RFC status and earlier approvals remain unchanged.
+
+The owner [confirmed exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287). Repeated implementation variables bind identical established static terms. They do not choose a shared admissible parent to repair unequal occurrences.
+
+Thus `(T,T)` does not match `(E.Left,E.Right)`. Fixed `(E,E)` can admit both variants. Parent-typed `(E,E)` arguments still match `(T,T)`.
+
+Fixed `(E,E)` and repeated `(T,T)` can overlap without dominance. The former admits mixed variants; the latter admits equal types outside E. A matching call remains ambiguous without another dominating pattern. This consequence belongs to the confirmed precision, not a new per-parameter score.
+
+#### Captured inputs and header compatibility
+
+Use the actual loaded M3 graph before dead-code elimination. Preserve family, implementation, binder, nominal and module identities. Retain original syntax, spans and installed import routes. Do not reopen files or autoload names.
+
+The original M4.1 entry deliberately leaves implementation headers incomplete. Propose a separate ordinary-header entry over the shared type elaborator. Do not require that unsupported source to first obtain the original M4.1 receipt. Preserve existing entry behavior and earlier tests.
+
+Reuse the validated M3 declaration inventory and shared M4.1 canonical type machinery. Run applicable M4.2 checks on that extended header view. These include member uniqueness, canonical prelude schemas, existing type positions and source-nominal inline containment.
+
+Check record/payload fields, variants and named parameters even without calls. Extend parameter uniqueness to implementation headers. Retain each prerequisite's completion and findings. An unresolved or rejected prerequisite prevents a completed collection artifact.
+
+Elaborate module-level family and implementation parameter/result types in their own binder environments. Retain written defaults and requirement references separately. Type elaboration does not prove a requirement or apply a default.
+
+A family header introduces flexible substitution positions for compatibility checking. Implementation-owned binders remain rigid during that check. Explicit written family arguments establish the corresponding leading positions.
+
+Solve the remaining family positions from the complete written parameter/result signature. Use one substitution across that signature. Preserve every fixed constructor, reference layer, invocation mode and repeated family occurrence. Do not use value admission, body contents or requirements to repair signature disagreement.
+
+Use bounded first-order equations with an occurs check. Nominal definitions never expand. A family position can contain a finite term using implementation-owned binders. A rigid implementation binder cannot become a concrete type merely to repair an incompatible header.
+
+Reject inconsistent signature equations. Report unresolved family positions as Incomplete. Do not supply unused/result-only positions from guessed arguments or premature defaults. M4.6 owns default application and general call inference.
+
+Keep requirement targets, arguments and source positions when they can be resolved canonically. Unresolved requirement metadata cannot prove evidence or absence. Requirement truth and body checking remain unperformed here. Public-interface visibility obligations retain their existing owners.
+
+#### Canonical keys and admitted static shapes
+
+Build an ordered input vector from each implementation's written parameter types. Replace its input-occurring binders by indices assigned at first occurrence across the entire vector. Preserve repeated indices across positions and nested terms.
+
+Canonical keys retain primitive identities, nominal applications, variant identities, tuple arities, reference mutability and callable signatures/modes. Imported aliases retain their defining identities. Parameter names, results, requirements and unused binders add no ordinary key component.
+
+A pattern variable captures one exact static term at its occurrence. Later occurrences require that same term. A fixed constructor instead checks its own permitted input relation. Do not widen a variable's captured term to satisfy another occurrence.
+
+For comparison, expand only fixed outer input admissions into finite alternatives. An owned parent-enum pattern includes its exact parent type and each declared variant application. A read-only reference to that parent includes the corresponding read-only variant references.
+
+Preserve the parent arguments in every alternative. Mutable references remain invariant. Tuples and generic arguments gain no covariance. Do not expand nominal field definitions or solve inhabitation.
+
+At a fixed outer callable type, enumerate only permitted invocation-mode weakening. A read-only expected mode accepts only read-only actual mode. A mutable expected mode accepts read-only or mutable actual mode. A consuming expected mode accepts all three actual modes.
+
+Preserve callable parameter/result types exactly. A callable inside a reference, tuple or nominal argument gains no additional variance. These type comparisons prove no capture or invocation-access property.
+
+Take the finite cross-product across the whole input vector. Keep each variable index shared in every alternative. Deduplicate identical alternatives. Source order remains diagnostic provenance, never selection priority.
+
+Canonical never remains an ordinary exact type term in type-position comparison. Its no-value admission is a separate expression rule, not wildcard binding or an added type-pattern alternative. A bare canonical never result supplies no inferred input shape by itself. Independently typed intermediates retain their declared types despite lost continuation. Thus an i32-result call still supplies i32 after a never argument.
+
+An input query must distinguish established type contracts from unresolved or bare-never expression positions. A never contract must come from an independently supplied receiving contract. Merely declaring a source binding or callee result as never supplies no missing shape. Bare never cannot establish omitted generic arguments, widths or receiving shapes.
+
+#### Finite inclusion, intersection and witnesses
+
+An alternative is a finite constructor vector with correlated variables. Use separate variable namespaces for each implementation and comparison. Internal pattern variables are not Error/Unknown value types.
+
+To test inclusion of alternative A in alternative B, match B against A's symbolic vector. Treat A's variables as distinct rigid symbols. One consistent substitution for B must explain every position. Do not solve A's symbols or forget equality between repeated occurrences.
+
+For finite alternative sets, require each A alternative to be covered by a B alternative. This proposal relies on the unrestricted static type-term domain. A finite collection of proper constructor restrictions cannot exhaust an unconstrained variable.
+
+Use fresh structural tuple arities to justify that boundary when needed. Choose arities absent from the compared finite patterns. Give distinct rigid variables distinct fresh shapes. These are symbolic type witnesses, not invented nominal declarations, core definitions or runtime values.
+
+The separate model must challenge this finite-union rule before Rust implementation. Include correlated and nested cases, callable modes and all fixed enum admissions. A counterexample returns this procedure to design review. It does not authorize a weaker approximation.
+
+A is strictly more specific when inclusion holds only from A to B. Equal matching sets do not establish strict priority. Crossed vectors remain incomparable. Equivalent sets with different canonical keys do not become ordered by traversal order.
+
+For intersection, rename both variable namespaces apart. Unify the complete alternatives with one occurs-checked substitution. Constructor or equality conflicts disprove that alternative pair. One finite successful pair supplies an intersection witness. Residual variables can use valid type terms such as canonical bool for this witness. That choice is not source generic inference or a numeric default.
+
+Report disjointness only after every pair is proved not to intersect. Missing admission information, unknown metadata and exhausted limits remain unresolved. Keep the responsible source identities and any already proved witnesses.
+
+These witnesses concern static type patterns. They prove neither inhabited values nor executed calls. Do not use recursive storage emptiness to eliminate an input pattern.
+
+#### Collection, placement and protected overlap
+
+Collect each actual implementation identity once through all loaded routes. Resolve its target to one canonical family. A standalone function is not an implicit family. Preserve each route without duplicating the body.
+
+Reject distinct ordinary bodies with the same canonical input key, even without calls. Returns, requirements and binder spelling cannot rescue duplicates. Reject this condition before call evidence checking, with R0304.
+
+Check ordinary placement using canonical defining modules. The family module grants permission. Otherwise, a parameter must contain a nominal identity defined by the implementation module. Traverse nested arguments, references, tuples and callable types without expanding nominal definitions.
+
+A variant's defining enum supplies its owner. A bare binder grants no ownership. Return-only and requirement-only nominal identities grant no placement permission. Imports and re-exports do not transfer ownership.
+
+Require established family-role classification before authoritative ordinary collection or source diagnostics. Canonical conversions retain their separate pair rules. Missing role admission cannot justify treating a possible conversion family as ordinary. A same-spelled ordinary family gains no conversion exception.
+
+Conditional ordinary views may compute hypothetical keys and comparisons while role classification is pending. Attach the ordinary-role premise to every derived fact. Do not label those facts as conclusive collection, source rejection or checked calls.
+
+Use the [protected-overlap contract](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary) for actual canonical protected actions. Ordinary placement alone grants no replacement permission. Check unused implementations too.
+
+RFC 0007 owns required-provider and forbidden-input protection records. It defines their validation and the decision from intersection/dominance results. This section supplies comparison witnesses, not a second protected-overlap rule.
+
+A missing or partial protected catalogue keeps clearance Incomplete. Do not replace it with an empty caller whitelist. Known ordinary duplicate/placement findings remain available, but no completed protected collection artifact follows.
+
+#### Input selection and completion boundaries
+
+Compute selection only after the relevant headers, keys, candidate inventory and ordinary placement checks complete. Distinguish conditional ordinary views from conclusive input facts. An input winner is not an executable or evidence-complete call.
+
+A pending role permits only a hypothetical ordinary outcome with that premise attached. It cannot produce a conclusive ordinary winner, absence, ambiguity or source diagnostic. Known ordinary role permits input facts while protection/evidence clearance remains separately pending.
+
+Validate every requested identity against the same graph capture. Validate complete type applications and vector arity. Reject foreign identities and malformed requests separately from source rejection.
+
+Ground established input contracts use the finite alternatives above. Missing shapes, unresolved contextual literals/callbacks and symbolic specialization-dependent arguments return Incomplete in this slice. They cannot prove no matching implementation. M4.6 must discharge these call obligations inside M4.
+
+These are type-vector queries, not a second source-call typer. They cannot infer receiving contracts from implementation counts or retag source values. M4.6 must establish source-call contracts while preserving actual types and explicit admissions separately.
+
+Determine input-relevant family positions from the declaration's complete parameter terms. This includes callable result terms nested inside a parameter type. Apply explicit input arguments through each candidate's retained family-header substitution.
+
+Use the resulting implementation-binder equations only to filter that candidate's input match. Preserve exact variable capture while checking those equations. Do not substitute the constrained vector into the specificity table.
+
+Always rank the original normalized patterns and their original admission alternatives. At `f<E>`, constraining generic `(T)` to E cannot make it outrank fixed `(E)`. Filtering does not redefine either candidate's matching set for priority.
+
+An argument absent from the declaration's input terms is output-only. Retain it as a selected-signature agreement obligation. It cannot filter candidates or resolve ambiguity. A desired result is not a selection input.
+
+Preserve variable markers when applying explicit input constraints. A preconstrained variable still requires exact capture; it does not become a fixed parent-admission node.
+
+Match each candidate with one correlated substitution across the entire vector. Exclude only proved mismatches. An unresolved potentially relevant candidate prevents a conclusive winner or absence result.
+
+A sole matching candidate supplies a winner fact only after all other candidates are proved mismatches. Otherwise, require one candidate strictly more specific than every other settled match. Record every comparison used by that proof.
+
+Prove absence only after every candidate's match has been disproved. Prove ambiguity only after all candidate matches and all possible winner comparisons have settled. An unresolved candidate might dominate existing matches; two incomparable matches alone do not settle ambiguity.
+
+Any required unfinished header, match or comparison keeps that outcome Incomplete. Resource exhaustion yields ResourceLimit. Hypothetical outcomes retain their role premise and cannot emit source diagnostics.
+
+With an established ordinary role, proved absence has meaning R0300. Settled matches without a dominating winner have meaning R0303. Protection and evidence obligations still prevent completed collection/call artifacts.
+
+Do not check requirement truth to rank candidates. Retain declaration-wide and selected-body requirements after selection. Missing selected evidence cannot trigger fallback. Actual requirement satisfaction, output equality and source-call integration remain M4.6 obligations.
+
+Keep analysis completion separate from useful partial input facts. Missing core/protected admission forbids a completed global collection receipt. Analysis and selection reports retain this overall incomplete state. Their partial facts distinguish hypothetical outcomes from conclusive input relations with separate pending clearance. Consumers cannot treat it as a checked call or full typed artifact.
+
+#### Bounded implementation and validation
+
+Use explicit worklists for equations, alternatives, comparisons and candidate visits. Charge temporary substitutions, paths, products, witnesses and caches before growth. Key caches by graph, comparison mode, binder namespaces and complete input terms. Admission-dependent entries also retain the exact catalogue identity.
+
+Bound work, retained entries and depth independently. Check arithmetic before increasing counters. Keep the existing absolute depth ceiling. ResourceLimit precedes Incomplete, then SourceRejected; retained secondary findings are not exhaustive.
+
+The proposed public seams are ordinary analysis, canonical family-fact queries and input-vector selection. The implementation plan defines their scope and expected failure distinctions. They expose original source routes and proof witnesses without creating source bindings.
+
+Before Rust, validate normalization, inclusion, intersection and selection with a separate finite model. Compare bounded ground enumerations against symbolic comparisons. Include fresh-arity separation and adversarial correlations. Model execution is not a universal proof or Rill execution.
+
+See the [M4.5 acceptance record](../../crates/compiler/tests/m4-5-acceptance.md) for the reference model, compiler assertions and unrun acceptance gates. Neither the model nor these compiler assertions execute Rill.
+
 ### Bodies, state and invocation
 
 Named functions receive runtime state through parameters. They cannot capture module startup lets or enclosing runtime lets. Arrows can capture state under the ownership rules. Static function and type names are not captured runtime lets.
@@ -289,6 +488,162 @@ Callable requirements are compiler predicates, not user-implementable families. 
 Invocation mode does not establish purity, copyability, borrow-freedom or concurrent sharing. Capture evidence remains separate. Generic F preserves that evidence; an erased arrow interface cannot invent omitted environment guarantees.
 
 Moving or storing a callable preserves its actual borrowed dependencies. An annotation cannot duplicate exclusive captures. Exact capture formation, copying, erasure and callee-exit rules need the ownership companion.
+
+### Proposed M4.6 inference and evidence procedure
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) follows M4.5 implementation `830a651d88bf1703bbfa877873ebd2289e52adcc`. This procedure and its public interfaces need scoped approval. The full RFC remains Draft.
+
+The owner [confirmed the fallback context rule](https://github.com/Reilley64/rill/issues/63#issuecomment-6964354024). An unconstrained viable input pattern does not supply the same receiving context as a constrained one. A specialized pattern alone cannot resolve that disagreement.
+
+#### Captured headers and local equations
+
+Reuse the loaded graph and declaration facts. Check applicable M4.2 prerequisites on the extended header inventory. Do not require the earlier bounded entries to accept generic or implementation-bearing source.
+
+Complete the declarations needed for the body, including default syntax and requirement metadata. Follow [RFC 0002's metadata boundary](0002-modules-and-program-loading.md#proposed-m46-requirement-metadata-boundary). Use the [type-application procedure](0005-types-records-enums-and-inference.md#proposed-m46-nominal-application-inference) for annotations and nominal construction. Continue M4.5 header equations from their known positions. Defaults may fill unused family positions after all written signature equations settle. They cannot repair a header conflict.
+
+Use a new substitution frame for each use. Retain source sites for written arguments, expected types, independent inputs, defaults and selected equations. A frame owns flexible slots for its declaration's omitted positions. All enclosing body parameters are rigid. Never equate distinct rigid parameters by widening either one.
+
+Solve one set of first-order equations across the complete type terms. Decompose equal fixed constructors. Preserve reference layers, invocation mode, arity, nominal identity and correlations. Check for a cycle before binding a slot to a term. A cyclic or incompatible equation rejects; a slot awaiting information is not a value type.
+
+Apply explicit leading arguments first. Use the immediate fixed contract and independently established inputs. For a standalone callable, its declared result and immediate expected result may supply equations. Do not pass a desired ordinary-family result into its input frame before selection.
+
+A free receiving slot captures the exact established type. A fixed outer receiving shape may use an existing admission. Solve its inner arguments by equality. For example, compare an admitted variant's parent arguments against the fixed parent pattern. Never invent an admission inside a tuple element of an already typed tuple.
+
+Two independent anchors for one otherwise free slot must agree. Do not pick a first anchor and widen the second. An explicitly fixed receiver can use ordinary admission without changing an argument's actual type. Keep that admission as a separate fact.
+
+Do not bind a slot or choose an input from bare never. If a receiving type already exists, use it for the input contract of the noncontinuing argument. Retain never as that argument's actual type. Independently typed intermediate expressions retain their declared types despite noncontinuation.
+
+#### Worklist and defaults
+
+Register each fresh argument, field, literal and arrow once. Record its waiting prerequisites. Collect fully known source types and written nested annotations before finalizing dependent expressions. An existing typed argument is never retyped from a receiving contract.
+
+Advance ready constraints until no slot or waiting expression can advance without new context. Use the resolved portions of fixed parameter, field or callable types. An explicit arrow parameter annotation can constrain a known structural receiver before the arrow body is ready. Do not inspect a callee or implementation body to supply a hint.
+
+For each deferred constraint, record the slots it must read before it can advance and the slots it may solve. Include aliases and dependent equations. Drain the ready work before testing defaults. An unavailable premise is not a completed inference pass; keep its possible writes pending.
+
+A default is ready if its slot is still free, its written earlier dependencies are established, and every remaining producer for that slot must first read that same slot. Count indirect reads through other waiting constraints. A producer with an unavailable prerequisite or an unknown dependency does not satisfy this test. A producer blocked only on another slot can still infer this one, so it blocks this default.
+
+Apply the first ready default in binder order, then drain ready work again. Skip blocked defaults, without changing the order of their written dependencies. Never override a solution or use a default to repair a conflict. With no ready work or default, retain the blocked dependencies and report missing context only if the relevant premises have settled.
+
+For example, `f<R=i32,A=bool>(cb: (A) => R)` called with `x => true` has a deferred arrow that needs A and can infer R. Default A to bool first. The arrow then binds R to bool, so the i32 default is not used. If A's default depended on the unresolved R, this path would need independent context.
+
+A receiving default can supply literal context after this process. It is a written generic default, not a numeric-width rule. Distinguish a declared default from a type inferred from an already typed argument.
+
+Check the chosen fresh expression with its established context once. Keep the established facts and mark that expression finalized. Failure never restarts the search with a different width, category, callable signature or implementation. Missing required local context with settled premises has R0301 meaning. A valid number without width in an otherwise established scalar context retains R0003 meaning.
+
+#### Source-call context and ordinary selection
+
+Resolve the callee from the actual lexical bindings, then installed source routes. A local callable shadows a static function name. Written type arguments do not bypass that shadow. Do not reinterpret a conversion or special constructor as an ordinary family while its role is unresolved.
+
+First establish contexts from the declaration and explicit input arguments. Use independent argument types to solve shared declared slots. Do not use a candidate's distinct result pattern or non-callable requirements. Apply ordinary projection only for a needed context that the declaration still leaves open. Only a declaration default for an input-relevant slot can supply context before selection, and only under the readiness rule above.
+
+Obtain all original M4.5 alternatives for the family. For each alternative, match the fully established input positions with one shared substitution. Also impose explicit input-relevant family equations through its retained header substitution. Use exact equations for that filter. Leave deferred input positions unbound.
+
+For established symbolic inputs, use the finite coverage and intersection procedure below on the known positions, with the same correlations and filters. A concrete pattern is not disproved just because a caller term is rigid. Use a substituted receiving projection only if it is fixed across the surviving matches. Otherwise keep that candidate as a blocker for the affected projection.
+
+An alternative leaves the context set only when this limited check disproves it or when [RFC 0005's bracket procedure](0005-types-records-enums-and-inference.md#bracket-category-before-elements) excludes its tuple arity. Keep unresolved alternatives as blockers, including those whose metadata is incomplete. Do not use requirements, a fresh expression's trial type, or desired results to remove an alternative. Do not rank partially known vectors.
+
+Project the original receiving terms under the substitution from each surviving alternative. The expanded alternatives describe actual admitted inputs, not receiving contexts. For example, all variant admissions of one fixed parent parameter still propose that parent.
+
+An open slot, unsupported shape or missing projection cannot supply a context. For brackets, use RFC 0005 to settle category and arity before testing element contexts. For other projections, require agreement on each needed shape and canonical type term. Unrelated unknown slots do not block an already fixed projection.
+
+Require every remaining alternative to supply the same projection for each context the source needs. A specialized flexible slot can contribute a type only from an independent anchor. A fixed written parameter or canonical callable clause can itself describe a receiving shape. Require this term witness even for a sole surviving body. The count alone supplies no type or specialization.
+
+For example, a written fixed i32 parameter can supply an agreed width. An unconstrained T in a lone implementation cannot. A bare never expression is not an anchor for either inference or pattern elimination.
+
+For example, in `pair<A,B>` with `(A,B)` and `(T,T)` patterns, `pair(1i32, 2)` lacks the second width. The first pattern is still viable. `pair(1i32, 2i32)` supplies an independent width. A declaration `pair<T>(left: T, right: T)` can itself supply that receiving context from the first argument.
+
+When an argument finishes, add its established type to the vector. Repeat limited matching only on newly established constraints. Do not discard a finalized expression or reuse its output to replace its committed context. All-alternative agreement can only become more precise as independent facts settle.
+
+Apply [M4.5 whole-vector selection](#input-selection-and-completion-boundaries) after every input needed for selection is established. Rank the original patterns. A conditional ordinary context carries its role premise through checking and selection. Missing role or required protection clearance prevents checked ordinary call completion.
+
+After selection, solve the remaining selected signature positions. First use the declared header and independently established callback or goal outputs. Canonical callable clauses can now equate a result slot to the checked callable result. This is an exact equation, not a requirement-based ranking rule.
+
+After selection and ready inference, an explicit output-only argument or immediate expected result can constrain a free ordinary position. A slot is free for this purpose only if no remaining signature, source or evidence inference can determine it. A waiting determination that could solve the slot makes it pending, not free, even if that determination is cyclic or needs another unknown input.
+
+An expected result can fill a free slot used only as an input to a later proof. It cannot supply the proof or solve an output position of that proof on its behalf. Compare expectations with independently determined outputs by equality. Apply remaining ready defaults last. An expected outer result cannot type a deferred callback in a way that would choose an ordinary winner.
+
+Use one complete substitution for the selected body and declaration. Keep declaration and selected-body requirements. No other body's requirements can become alternatives. A missing operation, output mismatch or pending proof never triggers fallback.
+
+#### Callable formation and invocation
+
+A callable receiver's known parameter types can supply arrow context. A canonical `callable`, `callableMut` or `callableOnce` clause can describe the same relationship for a flexible callable slot. Use the actual predicate identity. A same-spelled family or general requirement is not a contextual clause.
+
+For a callable clause, find its receiver by exact identity at the argument position or fixed tuple path. Apply the current substitution to its argument tuple and result. Merge applicable declared callable contexts at that path by equality of the terms they supply. Conflicting contexts block the affected projection; they do not remove the candidate. A required mode is a later demand, not proof of the arrow's mode.
+
+Test agreement across all viable alternatives for each needed parameter projection. An open callable type F does not block a parameter projection fixed by a clause on F. An open result R does not block known inputs; the arrow can infer that result. Use a contextual result only if the declaration fixes it or every viable alternative supplies the same fixed term. A missing clause and no structural receiving type cannot supply context.
+
+In the [borrowed `map` schema](../standard-library-contracts.md#3-collections-equality-and-traversal), a known `&List<T>` can leave only the borrowed pattern. Its `callableMut(F,[&T],R)` supplies `&T` even before F and R are known. For [scoped `join`](../standard-library-contracts.md#6-background-and-scoped-work), commit tuple category and written arity first. Then use `callableOnce(Fi,[],Ri)` at each matching tuple path to supply zero parameters independently of other paths and outputs.
+
+These are context examples, not core admission. Without the actual identities and contracts, the facts remain conditional or pending. A callable clause contributes a written relation, not proof, candidate priority or a variadic rule.
+
+A binding or partially applied type expression does not make a polymorphic function value. For a named standalone or overloaded function value, instantiate its declaration from explicit arguments and its immediate callable context. Establish a named value's complete declared callable type without inspecting implementation results.
+
+For a family, establish the input portion from written arguments and caller input context first. Then select from that parameter vector. Check the result and evidence afterward. Do not let the expected callable result establish a missing dispatch input. In `let f = label`, one loaded `label` implementation cannot supply a missing input type.
+
+An arrow's written annotations and established receiving form must agree. Infer missing parameter types from the agreed contract. Create a new lexical scope with actual parameter identities. Check the arrow body only after its parameter types are known. Use an agreed callback result type if already fixed. Otherwise infer expression results or join written return contributions by the existing type and control rules.
+
+For a block arrow, a continuing path supplies void and a return target belongs to that arrow. Do not let an inner loop transfer or nested arrow return establish its result. If no return or normal fallthrough supplies a result, proven divergence supplies never only without a fixed result contract. An independently typed return expression retains its static type despite noncontinuation. Check all written source even when some paths cannot execute.
+
+Record the arrow's actual callable signature and its separate capture facts. Use [RFC 0007's typed capture boundary](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m46-capture-and-invocation-facts) for the invocation demand. Callable mode weakening preserves exact parameter and result terms. It preserves dependency restrictions. An unknown capture demand prevents a proved mode conversion.
+
+Keep the callable type used in ordinary comparison separate from its value evidence. Two arrows with the same signature can have different environments. Keep concrete origins when binding F. If one F is fed by several values, a property proof must cover every contributing origin. Do not let one empty environment certify another. An erased callable type supplies no hidden environment facts.
+
+For a call through a value, use its established callable type or a matching declared callable goal for symbolic F. Match the complete argument list. For shared receiver access, require read-only mode. For mutable reference receiver access, permit repeatable mutable or read-only mode. Do not consume an owned environment through a reference. These checks retain access demands, not proof of ownership or loans.
+
+#### Symbolic bodies and evidence goals
+
+Check generic functions and implementations in their own rigid binder environments. Use a declared signature, not observed callers, to type parameters and returns. Check each body before instantiation. A regular call to a declared function never rechecks its source body to strengthen the call contract.
+
+Validate each written requirement's canonical identity, argument count and term kinds. Keep a checked assumption for each valid declaration-wide requirement. For an implementation, substitute the family header in declaration-wide assumptions first. Then add its written requirements. Record their distinct origins. An unresolved requirement declaration is not an assumption.
+
+An explicit assumption proves exactly its goal under that environment. It does not clear an unresolved family role or protected admission. A callable assumption can also prove a weaker mode demand with the same receiver, parameters and result. A whole result equation must agree by exact equality. Do not infer a type equality from an unproved property or choose between conflicting assumption outputs by source order.
+
+A matching ordinary assumption can supply a symbolic call contract. Elaborate its input vector and its input-position filters from the written goal. Match the canonical family and established input vector by exact equality, including correlations. Match the call's explicit filters by equality too. If the filters differ, require a finite proof that they admit the same actual input alternatives per candidate over this vector.
+
+For example, with generic `(T)` and fixed `(E)` where `E.V` is a variant, `f<E.V>(E.V)` and `f<E>(E.V)` can choose different bodies. The first filter excludes the fixed parent body; the second excludes exact capture of the variant by T. One assumption cannot serve both calls merely because they have the same actual input type.
+
+Use matching assumptions' exact output arguments, with no preferred output selection. If applicable assumptions disagree on a needed output, the relationship is not established. Callers must discharge the same full goal by normal ordinary selection at concrete instantiation.
+
+If no assumption supplies the relationship, permit a uniform ordinary winner proof. Form a symbolic input vector from the actual input types. Use one variable per rigid caller parameter for this comparison only. Do not mutate the rigid body type environment.
+
+For each candidate alternative, append its header terms for the explicit input-relevant positions used by the call. Append the corresponding actual terms to the symbolic input vector. This encodes explicit filtering without changing the original ordering. Use the M4.5 procedure on these augmented vectors for coverage and intersection.
+
+A candidate supplies a uniform winner only if its filtered alternatives include the full symbolic vector. Its original pattern must dominate every other candidate whose filtered alternatives intersect that vector. Unknown comparisons block this proof. Retain the matched alternative and exact substitution of every originally captured variable. Do not assert that a concrete fallback wins merely because a rigid term failed a concrete match.
+
+If incompatible specializations remain possible, preserve a pending selected-output relationship. Do not use it as a known type in an exact equality. Source that needs that relationship must state an exact requirement. A fully admitted, settled environment without the needed assumption has R0302 meaning. This is lack of a generic contract, not a claim about every instantiation. Missing role, unfinished contexts or exhausted checks cannot establish that negative.
+
+Separate output determination from a request to prove one full family goal. A determination request contains the canonical family and established inputs. Include explicit input-position bindings, origins and the assumption environment. Do not include a preferred output.
+
+For a full family goal, substitute its type arguments into the declared input positions and retain the resulting explicit input filters. Run ordinary selection on that vector with those filters. Determine the selected output without using the requested output to set a free position. Compare the complete result and output positions by equality. In an inference frame, an open caller output may instead use the independently determined term.
+
+To determine a required output, use the selected header and exact relations with established inputs. A canonical callable clause uses its established callable signature. An ordinary family clause can request determination only after all its input positions are established. Propagate its independently determined output as an equation. An already justified full assumption may supply the same relation.
+
+Revisit waiting equations when those dependencies finish. Use defaults only after available determining equations settle. Do not issue proof until the selected signature and all requirements settle.
+
+For an ordinary call or goal, require both declaration and selected implementation requirements. Compare selected type arguments and outputs by exact equality, not value admission. Distinguish a fixed declared call result from an output that varies with specialization. Retain the selected header, its substitution and the origin of each required equality.
+
+#### Proof worklist and completion
+
+Key proof work by capture, admitted role, canonical target, judgment kind and assumption environment. Determination keys retain ordered input terms and the explicit bindings that filter input positions. Two calls with the same vector but different explicit filters must not share a determination. Full proof keys retain all requested terms.
+
+Include any value origins needed for callable properties. A name alone does not identify a goal. Evidence from another environment is not a proof in this one.
+
+Freeze the caller's checked assumption environment when starting the judgment. All dependency edges use that environment. The selected contract's requirements become goals, not assumptions. The same requirements are assumptions only when checking that implementation's own written body.
+
+First check explicit assumptions. Then check justified intrinsic rules or the one selected ordinary contract. Produce finite dependency edges to required goals. Record a successful derivation only after all required dependencies and equalities complete. Record a disproved goal only from a completed negative check, such as a settled mismatch. Preserve the source sites for both.
+
+Visit goals with an explicit worklist. Mark a goal active while its dependencies are unfinished. A repeated active goal stays unresolved unless an independent assumption or completed derivation already proves it. Retain the cycle path. Do not use a cycle as a proof or negative evidence. Finite recursion of function bodies is separate from evidence recursion.
+
+A growing sequence of distinct goals may exhaust the work, entry or depth limit without repeating an active key. Report ResourceLimit, not an active cycle or a missing implementation. Retain the first unfinished goal and proved facts that fit the budget. Cache completed derivations only under their full keys. Reusing an unresolved attempt never changes it into a completed proof.
+
+For compiler predicates, use [the typed evidence rules](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m46-capture-and-invocation-facts). Use [RFC 0008's exact error relationship](0008-errors-propagation-and-caused-by-wrapping.md#proposed-m46-exact-error-evidence). Canonical conversion applicability, selected E determination and conversion evidence remain M4.7. Do not use ordinary absence or fallback rules for conversions.
+
+Keep a call's typed arguments, contexts, applicable role, selected substitution, goal proofs and exact agreement together. A failed or unresolved call does not have a checked result term. A known declared signature may remain as separate partial metadata. A failed outer call cannot supply an inferred type to another expression.
+
+Bound work, retained entries and depth independently. Charge equations, deferred nodes, comparison products, goal edges, witnesses and caches before growth. Order visits deterministically by source capture and term positions. Preserve ResourceLimit before Incomplete, then SourceRejected. Do not infer negative facts from a report with unresolved premises.
+
+The [M4.6 checkpoint](../implementation-plan.md#m46-design-checkpoint) defines the public queries and planned acceptance. Apply model-first checks to inference scheduling, partial context agreement and evidence cycles. Model execution would not establish Rill execution. No M4.6 model or compiler implementation has run at this checkpoint.
 
 ### Protected operations and conversion boundaries
 

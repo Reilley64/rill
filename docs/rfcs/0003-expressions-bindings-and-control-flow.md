@@ -438,6 +438,172 @@ Other discarded values still execute their expressions and required disposal. An
 
 Check unexecuted source as well as executed paths. Invalid literals and type errors do not become valid through short-circuiting or dead-code elimination. A well-typed trapping arithmetic expression panics only when evaluated. Warnings cannot change acceptance or move that trap into an unexecuted path.
 
+### Proposed M4.3 scalar and static-control procedure
+
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this bounded stage. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Earlier confirmed scope, sequencing and expectation rules remain unchanged. This procedure does not accept the full RFC.
+
+#### Inputs, scope and source identities
+
+Require a completed M4.2 receipt over one retained M3 graph. Reuse the original M1/M2 facts and canonical declaration/type identities. Do not parse again. Do not read live sources. Do not combine captures.
+
+Check supported standalone function bodies, every loaded module's startup statements and each expectation in both execution modes. Ordinary versus test mode changes no static checking rule. Imported startup checking does not imply imported startup execution.
+
+Supported statements are simple named/wildcard bindings, assignment, blocks, statement if, while, Boolean guard, return, break, continue and expression statements. Supported expressions are literals, names/qualification, grouping, primitive operations, references/dereference, conditional expressions and explicit standalone calls.
+
+Named construction/rebuilding, field/index operations, brackets, patterns, match, guard-let, for-of, pipes, arrows, interpolation and error operators retain their later procedures. Nested function/type declarations also remain incomplete until local declaration visibility and checking are specified. Function values and value-callable invocation remain with the callable owner.
+
+An unsupported body/subtree must not receive a completed body fact. Preserve a source obligation and explicitly incomplete secondary diagnostics. Continue independent supported bodies where resources permit. Known unsupported constructs cannot become successfully checked through unreachable-source elimination.
+
+#### Lexical environments and bindings
+
+Keep the type/module and value/function namespaces separate. Named function type binders remain canonical symbolic types. Elaborate body annotations in that binder/module environment using M4.1's type rules. Store additional original-node type uses without mutating earlier receipts.
+
+Resolve local value uses from innermost active scope outward, then through installed module bindings and the explicit prelude. Module qualification traverses installed exports only. It never probes filesystem children or grants private access.
+
+Only already introduced runtime bindings participate in startup's active lexical environment. M3's complete binder inventory is not a runtime-let hoisting rule. A new binding enters scope after checking its initializer; its initializer can read an outer same-spelled binding. Reject duplicate names in one scope, including after an earlier failed initializer. `_` introduces no usable name.
+
+Functions and expectations cannot capture ordinary startup bindings, even when those bindings hold literals. Retain R0502's meaning. Parameters and permitted local values retain their original M3 declaration identities. Static declarations remain available without capturing runtime values.
+
+Keep missing type facts outside the canonical type enum. A failed initializer can retain its binder identity and the original error/obligation that blocked its type. Dependent uses must not invent a type or falsely report an absent binder. An earlier source error does not itself become an unsupported-analysis obligation.
+
+A binding annotation supplies immediate initializer context and fixes its resulting static type. Without one, finish that initializer's inference before later statements. Do not use later assignments or uses to repair missing context. Lexical/type availability is not initialized ownership storage or move validity.
+
+#### Scalar constraints and calls
+
+Use [RFC 0006's proposed literal/primitive procedure](0006-numbers-strings-and-primitive-operations.md#proposed-m43-literal-and-primitive-checking). First collect explicit contexts, fixed operand types and the supported operation's finite relationships. Propagate them before finalizing unresolved literal widths.
+
+Private inference slots are not valid source types. Keep equality/constructor constraints and their source sites separate from published terms. Check structural equations for conflicts and cyclic private inference terms. A completed expression fact contains only fully established canonical types.
+
+When the finite implemented procedure has no permitted anchor, require an annotation. A numeric literal still has no default width. Unsupported generic inference, admissible-but-unimplemented variant/callable relationships and later family/evidence procedures remain incomplete instead of becoming guessed types or fabricated mismatches.
+
+[Explicit standalone calls](0004-functions-overloads-and-generic-requirements.md#proposed-m43-explicit-standalone-calls) use declared signatures and one whole-signature substitution. Expected results do not rank or retry ordinary bodies. Do not inspect a callee's body to strengthen its declared result or control contract.
+
+The proposed [never admission](0005-types-records-enums-and-inference.md#proposed-m43-never-admission) keeps static types separate from normal continuation. It supplies no literal width or missing generic argument. Differing non-never branch types still need their permitted join, even when a condition is known.
+
+For scalar conditional joins, an established branch result can supply shared immediate context to an unresolved sibling literal. It cannot convert an already typed sibling. Two otherwise unanchored numeric branches still need an annotation. Do not use known condition truth to bypass a written branch's type agreement.
+
+#### Places, assignment and access requirements
+
+Retain a distinction between values and places, including read-only versus mutable referent access. Name/place facts identify original binding and expression nodes. They do not establish ownership, backing addresses, access loans or valid source lifetimes.
+
+A read-only borrow wraps its established referent type. Immediate reference context can supply that type for a fresh borrow. Retain the operand's actual type and permitted admission separately. Existing references gain no covariance through this rule.
+
+Borrowing an existing reference's descriptor is not borrowing its referent. Explicit dereference preserves that distinction. Dereference requires an independently established reference constructor and retains its access mode. Never alone cannot guess read-only versus mutable reference access. Do not infer an owner from a logical string view.
+
+A mutable borrow requires a statically writable binding or mutable-reference referent in this slice. Preserve that place's exact referent type. Do not widen a mutable variant borrow to its parent. Reject a proved read-only place. Mutable acquisition from an unclassified temporary remains incomplete, not an invented permission or language prohibition. Later M4 integration must supply its remaining policy.
+
+Assignment requires a statically writable destination and compatible right-hand type. Its destination type supplies immediate context. Compound assignment uses the corresponding primitive matrix and stores that result type. These statements produce no expression value. Record destination/operand source order without executing or duplicating either expression.
+
+Static mutability does not prove loan compatibility, safe replacement, initialized storage or cleanup. Those remain unperformed. No move, implicit copy, disposal or cancellation transition belongs to this procedure.
+
+#### Proposed finite Boolean and exit analysis
+
+Track possible normal Boolean results as the finite sets empty, true, false or both. Boolean literals provide singleton sets without becoming singleton source types. Grouping preserves them and logical negation complements them.
+
+For AND, each false left result contributes false; each true left result contributes the right set. For OR, each true left result contributes true; each false left result contributes the right set. Check both operands' types even when one is skipped.
+
+Immutable Boolean bindings can retain their initializer's set. Parameters, mutable reads and other Boolean-producing operations use both unless they have no normal continuation. Do not evaluate arithmetic/comparisons, inspect callees or infer cross-statement path correlations to refine these sets.
+
+Track normal continuation, returns, loop-targeted breaks/continues and divergence separately. Each target uses its actual source identity. Calls declared with canonical primitive never have no normal continuation. Arithmetic traps do not become statically proved divergence.
+
+A return targets only its current callable. A bare return requires canonical void. Otherwise check the returned expression against the declared result using the permitted type rules. Reject normal returns from never functions. Returns/propagation cannot exit an expectation; unsupported error operators still do not create an implicit callable there.
+
+A break or continue targets the nearest enclosing loop without crossing a callable boundary. A statement if combines selected branch exits under the Boolean sets; a missing else contributes normal continuation when false is possible. Type-check every written branch regardless of its flow contribution.
+
+A while loop evaluates its condition before each iteration. False contributes normal loop exit. True contributes body returns/divergence and breaks targeting this loop. Body normal continuation and this loop's continues lead back to the condition. Consume those local transfers; do not confuse breaks from nested loops with exits from this loop.
+
+A Boolean guard's else block must have no normal continuation, independent of the guard's known truth. Only transfers that leave that else block count. A break from a loop contained wholly inside it does not establish that property.
+
+Check sequential statements even after flow loses normal continuation. Their type/name/target errors remain source errors. They cannot restore a normal path to an already noncontinuing prefix.
+
+A void body can fall through. A non-void body must have no normal fallthrough under this finite analysis. A never body must also have no normal return. Failure of this static proof rejects as insufficient return coverage; it does not claim a witnessed runtime execution.
+
+This proposed precision rule deliberately omits cross-branch correlations. Two separate tests of b and !b do not prove exhaustive return coverage merely because b is unchanged. Use explicit else structure or another supported proof. This owner decision is not an implementation resource limit or an optimizer-dependent rule.
+
+#### Checking outcomes and evidence
+
+Every completed body/node fact retains its canonical type where applicable, source snapshot/span, binding/callee identity, substitutions, expected contexts and static control targets. Statement facts have no expression value; that is not an error placeholder type.
+
+A scalar-stage receipt requires every requested supported context to complete without errors or unresolved obligations. It records data/pattern coverage, family selection, generic/callable evidence, result-use analysis, ownership, cleanup, runtime and editor behavior as unperformed. It is not a checked program or complete typed-stage success.
+
+Unsupported constructs produce Incomplete. Exhausted checked work/storage/depth limits produce ResourceLimit. Known source findings remain in explicitly partial results. Incomplete secondary diagnostics cannot be advertised as exhaustive. Never use unresolved facts or exhausted resources as missing-evidence proofs or successful fallbacks.
+
+Charge source/scope visits, digits, constraints, substitutions, queue operations, Boolean/exit facts and provenance before growth. Use bounded term traversal and iterative processing for flat expression/statement chains. Do not recursively grow the host stack along arbitrarily long binary chains. No source validity, wall-clock or OOM guarantee follows from implementation budgets.
+
+### Proposed M4.4 match and guard control
+
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) owns these data/control refinements. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) before model/compiler code. Earlier approvals and the full RFC status remain unchanged.
+
+Match evaluates its original scrutinee position once. Pattern guards and bodies retain source order. Check every written pattern, guard and body without executing them. Coverage uses RFC 0005's static constructor procedure rather than known runtime values.
+
+Create an arm scope for its canonical pattern binders and explicit variant view. Check the guard there with Boolean context. A failed guard restores the preceding scope before the next arm. The original scrutinee is not reevaluated.
+
+Expression arms use the established immediate context and permitted joins. A block arm supplies void only when it can continue normally. Its final expression never supplies a value.
+
+The proposed control precision also permits a block arm that has no normal continuation to supply no ordinary join value. Valid returns, outward loop transfers and recognized divergence can establish that property. This extends the earlier draft's return/never-call wording; it requires scoped approval.
+
+Retain each return, break and continue target separately from divergence. A break consumed by a loop inside the arm does not leave the arm. A transfer to an actual enclosing loop does. A noncontinuing block is not an invented ordinary value.
+
+Expression composition must carry these exit alternatives through calls, operators, conditional branches and short-circuiting. A skipped arm or operand contributes no executed transfer. Its static errors still reject. No normal-continuation path can reappear after a noncontinuing prefix.
+
+Ordinary pattern bindings introduce names only after their initializer and require proved irrefutability. Guard success bindings introduce names only after their failure block. They cannot enter the failure scope. A named error binding belongs only to that failure scope.
+
+Guard-let requires admitted canonical Option/Result contracts. A same-spelled enum or matching payload shape is insufficient. Missing core admission remains incomplete for later M4 integration, not a fabricated library definition or negative requirement proof.
+
+The proposed refutable-payload policy permits a pattern mismatch to enter an unnamed failure block. For Result, that block can therefore handle Err or an Ok payload mismatch. It receives no invented Err wrapper on the latter path.
+
+A Result failure block with an error-name requires a proved irrefutable success-payload pattern. Only a real Err branch can supply that error wrapper. Option still cannot bind an error-name. Refutable or unresolved patterns cannot manufacture an envelope to satisfy this syntax.
+
+Check failure-block noncontinuation with the actual enclosing callable/loop context. Resource or unresolved coverage cannot prove fallthrough or irrefutability. No ownership transfer, payload destruction, cloning or loan commitment occurs during these checks.
+
+No direct Option/Result guard can complete until actual canonical core admission exists. The bounded M4.4 implementation must retain this prerequisite explicitly. It can still check ordinary user-enum matches and irrefutable patterns without assuming core identities.
+
+### Proposed M4.8 result-use checking
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes a rule for discarded results in named storage and aggregates. It requires separate checkpoint approval. It uses admitted Result identity, not enum spelling. A proved `Ok` still belongs to Result. References do not own the referenced Result.
+
+#### Which operations count as use
+
+Track each owned Result occurrence, including an occurrence inside a record, tuple, variant payload, list or capture. Use exact substitutions and real stored members, not all written type arguments. Track private parts without making them visible to source. Unused type arguments and uninhabited alternatives introduce no occurrences. Use only admitted containment facts for opaque core storage. A containing Result also has its own obligation, distinct from any nested Result.
+
+Follow the obligation through local bindings, aggregate construction, capture, rebuild and projection. A new local name does not satisfy it.
+
+Observe a Result through its discriminant or an operation that checks its outcome. Such an observation handles only that occurrence. Borrow creation, printing, and reading an unrelated member do not count. Inspection that merely returns a descriptor also does not count. Use canonical contracts to distinguish observers from other calls.
+
+An explicit `let _ = value;` acknowledges every contained occurrence in that value. A written wildcard in a destructuring pattern acknowledges the component it matches when the pattern commits. In a guarded arm, commit only on the guard-true edge. A guard-false edge carries the unacknowledged component to the next arm. An implicit omission, scope exit or explicit `dispose` is not acknowledgement.
+
+A pattern that tests a variant observes its discriminant when the test executes. That test does not acknowledge any payload. Payload bindings carry their own obligations. A direct guard handles the guarded discriminant, but does not acknowledge an unbound nested Result in a discarded payload.
+
+Forwarding an owned value across a checked return or by-value call boundary is a use at that boundary. Check known contained obligations at a source callee's parameter entry. Check returned values at their receiving expression. A call through an interface without checked result-use semantics cannot substitute for a checked boundary. These rules check typed source and contracts. They do not prove that ownership transfer or disposal is legal.
+
+#### Where to check
+
+Use the typed control edges and place identities from the shared checker. Seed each occurrence at its source or entry site. Keep its canonical component path and current storage location. A forwarding event inside a body changes the tracked location, not the source site. Project only the selected components.
+
+On replacement, check the displaced value before installing the new one. On a normal scope exit, check each obligation whose location leaves scope. A return only forwards the returned components. A `break` or `continue` leaves the scopes of its actual target.
+
+Check each alternative with its own variant and residence facts. At a join keep all feasible alternatives. One handled branch cannot clear a pending branch. Do not require result acknowledgement on fatal or diverging exits.
+
+Check simple discarded expressions and typed local flow in unexecuted source. For an unreachable region start at its lexical entry with the bindings visible there. Do not merge those paths into reachable normal-flow facts. Do not require evaluating user code or folding general expressions to decide feasibility.
+
+For loops, merge iteration and normal exit alternatives at their actual control targets. Use finite states for a fixed set of sites and component paths. Include a separate occurrence partition when values from different iterations can coexist. Do not conflate those values at their common source site.
+
+If dynamic storage, aliasing or recursive containment needs a summary, preserve which obligations it can prove. Without a sound summary, keep the dependent judgment incomplete. Use the same rule for unknown closure environments. Keep open generic components as predicates on substituted storage shapes. Discharge such predicates only by a parametric proof or an applicable specialization. An unresolved predicate is not proof of absence.
+
+At a proved implicit discard, report R0103 at the discard or exit site. Retain the source and component path as related evidence. Do not report a discard based solely on a missing type, admission or unresolved path. Bound the traversal, state comparisons, retained witnesses and worklist by the analysis limits. Resource exhaustion is not a completed result-use check.
+
+#### Pipe and iteration handoff
+
+For pipes, use the parsed insertion position, including the written placeholder when present. Type the input once, using the established first or placeholder argument context. Use the same call rules and record the input before the written arguments. A postfix question mark on the step applies to the call result. Do not introduce implicit Result handling.
+
+For `for ... of`, use the admitted canonical `iterate` and `next` families without installing source bindings. Apply normal ordinary selection and evidence, including no fallback after selecting a body with failed evidence. Establish iterator type `I` from `iterate` on the actual source. Check `next` with the required mutable access to `I` and require exact `Option<T>` with admitted Option. Use `T` for the iteration pattern under the existing binding rules.
+
+Keep the source node, selected operations, substitutions, pattern and loop targets. A hypothetical iterator or missing `next` output supplies no yield type. These facts grant no loan or permission to advance with live exclusive access.
+
+Track unyielded owned occurrences in the iterator according to the checked iterator contract. On `Some`, follow the yielded components into the iteration pattern and retain the remaining components. On `None`, require evidence for any assertion that no owed components remain. Check `break` and `return` for pending occurrences that leave scope in the iterator. A borrowed iterator leaves the source's owned occurrences with the source.
+
+If a contract does not distinguish yielded and retained components, keep dependent exit checks incomplete. Do not equate iteration with acknowledgement of every element.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Dependency state |
@@ -538,6 +704,16 @@ The Option form has no error binding. This is independent of the enclosing calla
 | E15 | A function call is final-looking but retains caller storage or cleanup. | Keep an ordinary call unless proper-tail eligibility actually holds. | [Cleanup and tail calls](#cleanup-and-tail-calls). | Supporting backend boundary. No generated-code evidence. |
 
 The drafting agent compared these examples with the listed rules on 2026-11-16. Where the source does not fix a diagnostic code, this draft gives only its intended meaning. Hand checking is not parsing, typing, execution or a readiness review.
+
+### Proposed M4.8 result-use cases
+
+Assume the canonical Result role is admitted and all other type checks complete. These cases do not supply actual admission evidence.
+
+| Case and context | Expected outcome | Rule | Evidence |
+| --- | --- | --- | --- |
+| U2a. A local record holds two owned Results. The body matches the first discriminant and reads no other field before returning `void`. | Report R0103 for the second field at its normal exit. Do not report the first field. | [Result-use checking](#proposed-m48-result-use-checking). | NotChecked. |
+| U2b. A match arm has a nested wildcard over an owned Result and a guard that is false. The next arm binds that component and leaves it unused. | Do not acknowledge the wildcard on the guard-false edge. Report R0103 for the unused component on the later exit. | [Pattern commitment](#which-operations-count-as-use). | NotChecked. |
+| U2c. An owned iterator is known to retain a second Result when the loop acknowledges the first yield and breaks. | Report R0103 for the retained component. If the retained shape cannot be proved, leave the dependent judgment incomplete. | [Iteration handoff](#pipe-and-iteration-handoff). | NotChecked. |
 
 ## Feature interactions
 

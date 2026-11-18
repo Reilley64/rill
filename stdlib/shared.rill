@@ -1,0 +1,10 @@
+// The private field denies source construction; it is not native layout evidence.
+enum NativeStorage {}
+export type Shared<T> = { private storage: NativeStorage; }
+
+// These private entries are bound only by the installed ownership inventory.
+function retainShared<T>(value: &Shared<T>): Shared<T>;
+function releaseShared<T>(value: Shared<T>): void;
+
+implement<T> copy(value: &Shared<T>): Shared<T> { return retainShared(value); }
+implement<T> dispose(value: Shared<T>): void { releaseShared(value); }

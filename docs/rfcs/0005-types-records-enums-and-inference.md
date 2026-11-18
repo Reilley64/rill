@@ -126,6 +126,66 @@ Unconstrained generic parameters denote distinct symbolic types. They do not pro
 
 This RFC introduces no type-alias declaration feature. Import aliases remain module bindings. Named record declarations are not structural aliases.
 
+### Proposed M4.1 canonical declaration-type procedure
+
+The owner [approved this scoped M4.1 procedure](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. [Slice #57](https://github.com/Reilley64/rill/issues/57) implements explicit declaration types under M4 umbrella #56. Approval does not complete inference, signature validity, layout or this Draft RFC.
+
+The input is one successful M3 Graph and explicit analysis limits. Use that graph's retained M1 snapshots and M2 nodes. Do not read live files. Do not parse again. Do not combine captures.
+
+The stage elaborates module-level record fields, enum payloads and explicit named-function or family parameter/result annotations. It also inventories their type binders. Bodies, startup statements, expectations and declarations inside bodies remain NotPerformed. Their presence does not establish their validity.
+
+#### Environments and source lookup
+
+Collect module-level nominal declarations and ordered binder identities before elaborating annotations. Use the original M3 DeclarationId for each declaration and binder. Reject duplicate binder names within one declaration. Preserve distinct binders from different declarations, even when their names match.
+
+Resolve an unqualified type name through the declaration's binders, then its module's installed type/module bindings, then M3's primitive prelude identities. The scoped checkpoint approval covers this precedence. A source binding can shadow a primitive spelling. Compiler-required primitive references still use their actual prelude identities.
+
+Resolve qualified module segments through installed bindings and exported qualification. Never probe filesystem children. A module target cannot finish a type annotation. A value/function target cannot supply a type.
+
+A parent-applied variant type resolves the enum first. Collect every same-spelled variant in that enum, deduplicated only by DeclarationId. One candidate supplies the variant identity. No candidate rejects as a missing variant. Multiple candidates reject as an ambiguous annotation. Retain each candidate's identity and declaration span. Never select by traversal order.
+
+Preserve the parent application and selected variant DeclarationId. Reject variant selection on a record. Aliases preserve the canonical declaration and defining module. Unused duplicate variant declarations remain outside this slice's declaration-validity checks.
+
+Compiler access to a private signature's metadata creates no source binding. Source-written annotations still need accessible names. An exported operation can mention its own private nominal types under RFC 0002. This stage does not decide representation access or exported-payload admissibility.
+
+#### Canonical type terms
+
+Elaborate the following finite terms without expanding nominal fields:
+
+| Form | Canonical information |
+| --- | --- |
+| Primitive | Actual primitive identity from this graph's prelude. |
+| Parameter | Its original binder DeclarationId and ordered position. |
+| Nominal application | Record/enum DeclarationId and ordered argument terms. |
+| Variant | Parent enum application and original variant DeclarationId. |
+| Tuple | Ordered element terms, including zero and one elements. |
+| Reference | Read-only or mutable constructor and referent term. |
+| Callable | Written invocation mode, ordered parameter terms and result term. |
+
+Grouping changes no type identity. Equal nominal applications require equal declaration identities and equal argument terms. Tuple equality preserves order and arity. References preserve their access constructor. Callable equality preserves mode, parameter order and result. This exact equality procedure performs no widening, mode weakening, inference or overload comparison.
+
+Require full written arguments for generic applications in this stage. Excess arguments reject as malformed application. Missing arguments produce Incomplete with a needs-inference reason, not a guessed application or new language prohibition.
+
+Generic defaults and where clauses produce Incomplete in this slice. Implementation headers also produce Incomplete until their signature-substitution procedure exists. Retain their original nodes and spans as unsupported obligations. Do not classify these valid syntax forms as type errors.
+
+Void and never remain distinct primitive terms. Elaborating them does not approve their use as stored fields, parameters or inhabited values. Those position-validity judgments remain NotPerformed. Callable terms likewise prove no capture or invocation permission.
+
+For each application, retain the ordered substitution from the declaration's binders to argument terms. Keep written-use provenance separate from canonical type identity. Two written aliases can denote one term while retaining different use spans and import routes.
+
+#### Recursion, completion and provenance
+
+A nominal reference is a finite term, not a request to expand its definition. Direct, mutual and type-growing field references therefore do not start recursive type expansion. This stage neither proves nor rejects finite layout. The existing layout policy retains that responsibility.
+
+Every elaborated use retains its module, syntax-node identity, original Span and canonical target or primitive identity. Retain declaration and binder spans too. Keep M3 import-route provenance available through the originating binding. No fabricated type or internal error placeholder can appear as a valid term.
+
+Return a declaration-type receipt only when every in-scope annotation is elaborated without findings or unsupported obligations. The receipt identifies this stage and graph capture. It records signature compatibility, layout, bodies, inference, coverage, evidence, ownership and execution as NotPerformed.
+
+A receipt is not a checked program or callable implementation. Failed attempts can expose explicitly partial facts, but no completed receipt. Distinguish source type errors, unsupported/inference obligations and resource exhaustion. Preserve known findings when later work becomes incomplete.
+
+Order facts and findings by canonical module order, declaration position and written-use position. Fresh capture identities remain unequal. Determinism compares semantic records, not opaque allocation identities.
+
+Charge annotation visits, lookup steps, type terms, substitution entries and retained provenance before allocation or enqueueing. Bound traversal depth and retained terms as well as total work. Check counters for overflow. Exhaustion returns ResourceLimit, never a missing-name proof or source rejection. Limits do not guarantee wall-clock time or host allocation success.
+
 ### Record declarations and construction
 
 A record declaration fixes its field names and types. Fields are public unless marked private. Binding mutability controls permitted mutation; there are no per-field mutable declarations.
@@ -270,6 +330,277 @@ This is a confirmed representation-validity policy, not a target ABI. It needs f
 
 A finite layout can still exceed a target's representation limits. Such target checks must remain distinct from a recursive-layout error. Finite layout does not prove that a value can be constructed or safely borrowed.
 
+### Proposed M4.2 declaration validity and inline containment
+
+The owner [approved this M4.2 procedure and D1 through D4](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. [Ticket #59](https://github.com/Reilley64/rill/issues/59) records implementation and acceptance. Earlier approvals remain confirmed. This scoped decision does not accept the full RFC.
+
+The input is a completed M4.1 receipt, explicit canonical prelude signature contracts and checking limits. Reuse its graph, declaration identities, canonical terms, substitutions and original spans. Do not accept a failed M4.1 attempt as a completed receipt. Do not read live files.
+
+#### Declaration checks and type positions
+
+Check every module-level record and enum in the receipt, including unused declarations. Reject repeated field names within one record or record-payload variant. Reject repeated variant names within one enum. Keep distinct records, variants and parameter lists as separate member scopes.
+
+Retain all conflicting member identities and declaration spans. A private field still participates in its record's uniqueness check. Apply [RFC 0004's header and prelude checks](0004-functions-overloads-and-generic-requirements.md#proposed-m42-header-validity-and-prelude-signatures) to function and family headers.
+
+The proposed position policy permits void and never wherever an existing type production admits a type. Void has its implicit value; never remains uninhabited. This policy supplies no initializer, constructor or normal continuation. The scoped checkpoint approval covers it.
+
+Do not remove stored fields from containment merely because another field is uninhabited. A by-value cycle still rejects. Empty enums and never do not excuse such a cycle.
+
+Public-interface visibility, constructor field sets, implementation signatures and body validity remain separate checks. This stage does not mark them complete. Existing source-name access checks remain with M4.1.
+
+#### Layout inputs and unsupported storage
+
+Analyze the written fields and every enum payload. Module-level function parameter/result annotations are not stored fields of a nominal declaration. Reference referents do not occupy the reference's inline storage.
+
+Use actual canonical primitive identities as finite leaves. This classification fixes no target size, alignment, tag or ABI. Generic parameters remain symbolic storage dependencies on their ordered binder positions.
+
+This slice accepts no supplied nominal indirection exemptions. Inspect the actual source fields of every record and enum, including standard-origin declarations. No spelling, private field or public metadata flag can make List, Shared or another nominal declaration indirect.
+
+Later genuine opaque/native containers require a separately approved admission procedure and actual implementation metadata. Their omission here is not evidence that a same-spelled source wrapper has their representation.
+
+A callable's parameter/result signature is not its capture layout. A directly stored callable without an established capture-representation contract makes layout incomplete. Do not treat that unknown storage as an empty summary or finite leaf. Stop at references before inspecting their referents.
+
+A callable term inside an unused nominal argument does not occupy storage merely because the argument is written. Inspect only arguments selected by the nominal summary. Actual capture layout and trusted representation admission remain later obligations.
+
+#### Inline-parameter summaries
+
+For each record or enum D, create a summary S[D] over D's ordered binder indices. Start with empty known sets. Also track whether storage analysis is complete. Every enum contributes all of its variant payloads.
+
+For a stored term t in D's fields, compute these contributions:
+
+```text
+primitive                 contributes no binder index
+parameter D.i             contributes i
+reference                 stops traversal
+structural tuple          unions its element contributions
+nominal N<a0, ..., an>     unions contributions of ai for each i in S[N]
+variant E<args>.V          uses the proposed parent-enum rule below
+stored callable           marks analysis incomplete; its signature contributes no capture facts
+```
+
+The variant notation above describes a canonical term, not new source syntax. For a nominal application, inspect argument subterms without expanding N's field definitions. Preserve D as the originating binder environment.
+
+Scan declarations in canonical order until no known set or completeness state changes. Union known indices monotonically. Propagate incomplete storage through every stored nominal application whose declaration has incomplete storage. Do not propagate it through a stopped reference or unused argument.
+
+Every binder fact needs a finite derivation from written storage or an earlier justified summary fact. A cyclic pending fact cannot justify itself. Empty initial sets implement the least fixed point, not assumed recursive evidence.
+
+There are finitely many declarations and binder indices. A complete analysis can add at most their total binder-index count. Incompleteness can propagate to each declaration once. Limits still bound all scans and retained facts.
+
+#### Proposed stored-variant rule
+
+The approved rule treats a stored variant type as its parent enum application for inline representation. Use the parent's complete inline-parameter summary and containment dependencies. Variant identity remains distinct for typing and overload selection.
+
+This is a new representation-validity choice approved at the M4.2 checkpoint. The earlier parent-enum approval did not itself decide variant-type storage. A selected-payload representation was an alternative, not an equivalent implementation.
+
+For example, consider this independent declaration excerpt:
+
+```rill
+enum Choice<T> { Empty, Value(T) }
+type Node = { tag: Choice<Node>.Empty };
+```
+
+The approved rule rejects Node's inline cycle, R0406. A selected-payload representation could instead make this Empty field finite. This case was NotChecked at checkpoint creation. The [M4.2 acceptance record](../../crates/compiler/tests/m4-2-acceptance.md) records later checking.
+
+#### Containment graph and cycle witnesses
+
+After summary closure, create one vertex per canonical record/enum declaration. Traverse each declaration's stored terms with that declaration as origin O:
+
+```text
+primitive or parameter    adds no nominal edge
+reference                 stops traversal
+structural tuple          visits each stored element
+nominal N<args>            adds O -> N, then visits arguments selected by S[N]
+variant E<args>.V          follows the approved stored-variant rule
+stored callable           preserves an incomplete layout obligation
+```
+
+Keep O unchanged when traversing forwarded arguments. Do not change the origin to the wrapper declaration. Repeated visits to Box in finite Box<Box<i32>> therefore create no artificial Box self-cycle.
+
+Deduplicate edges by canonical origin and target. Keep the least witness by storage-member identity, type-use position and forwarding binder-index sequence. Retain its relevant substitutions. Original snapshots and declaration/member spans remain attached. Do not enumerate unbounded cyclic route histories.
+
+Find strongly connected components with an iterative algorithm. A self-edge or component with several vertices proves an inline cycle. Report each cyclic component once, ordered by its least canonical declaration identity. Use R0406.
+
+Within a cyclic component, traverse from its least vertex with an explicit depth-first stack and canonically ordered edges. Retain the first back-edge cycle as its witness. Do not wait for identical closed type arguments to recur.
+
+Retain known cycle findings when other work becomes incomplete. No incomplete summary, unresolved storage obligation or exhausted budget can justify a completed finite-layout result. A finite graph result is not a target size, constructibility or ownership proof.
+
+#### Outcomes, limits and procedure validation
+
+A completed result covers member/header uniqueness, the supplied required prelude signatures, approved type-position policy and source-nominal inline containment. It does not certify full declaration validity, general signature compatibility, capture layouts, public interfaces or bodies.
+
+Reject definite declaration/signature errors and proved cycles. Return Incomplete for unsupported storage. Return InvalidRequest for inconsistent contract inputs or cross-capture identities. Return ResourceLimit when a checked budget prevents completion. Preserve known findings in explicitly partial results.
+
+Validate request identities and contracts first. After that validation, ResourceLimit takes priority over Incomplete, which takes priority over source rejection. This matches M4.1's failure boundary. A known rejection finding remains visible when incomplete work prevents the rest of the requested checks.
+
+Charge member comparisons, term visits, fixed-point scans, summary facts, completeness propagation, edges, substitutions and witnesses before growth. Charge iterative graph work too. Counters must not wrap. Work, retained-entry and traversal limits are implementation budgets, not valid-program restrictions.
+
+Before compiler implementation, validate a separate finite reference model against independently stated expected summaries and containment graphs. Include T13 through T16, mutual cycles, forwarding, unused arguments and type growth. Include the approved stored-variant case and callable/reference boundaries. Record actual outcomes and limitations. Model execution is not compiler or Rill execution.
+
+### Proposed M4.3 never admission
+
+[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this precision rule. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Earlier policies and full RFC status remain unchanged.
+
+An expression whose canonical static type is primitive never can satisfy an immediate expected value type without conversion. It produces no normal value. Preserve never as its static type rather than inventing a value of the expected type.
+
+This rule does not establish a numeric width or infer a generic argument from never alone. Unrelated unknown operand types still need context. Apply the existing join rule by omitting never branches from ordinary value joins. Two never branches retain never.
+
+Keep static type and normal-continuation facts separate. A call or operator retains its declared result type even when an earlier operand cannot return. Do not retag that result as never to repair another type mismatch.
+
+For example, assume f(i32):i32 and g(bool):void. The expression g(f(stop())) still has an i32-to-bool mismatch when stop():never. Normal execution cannot reach g, but the declared intermediate type does not change. This is a proposed checking case, NotChecked.
+
+This proposal adds no general container variance or implicit width conversion. Existing variant admission retains its owning rules. An unimplemented permitted relationship must remain incomplete, not become a fabricated mismatch or successful check.
+
+### Proposed M4.4 data and pattern procedure
+
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) owns this bounded procedure. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler code. Earlier approvals and the full RFC status remain unchanged.
+
+#### Inputs, namespaces and nominal construction
+
+Use the completed M4.2 declaration receipt and the existing M4.3 expression/control engine. Do not require a scalar-only success receipt for data-bearing source. Do not create a second parser or scalar checker.
+
+Named brace construction resolves its constructor through the type/module namespace. Preserve the actual declaration, application, variant and field identities. Expected types constrain that application; they never select another record by matching fields.
+
+The proposed qualification precision gives a syntactic name's enum binding priority before dot-variant selection. A grouped or computed base uses ordinary value-field lookup. Thus `(name).field` forces value lookup when an enum shares that spelling. A failed chosen lookup never retries another namespace or parser interpretation.
+
+The namespace decision uses the canonical binding kind, not whether a field happens to exist. Preserve installed import routes and private barriers. Qualification never autoloads filesystem children.
+
+Check record fields against one ordered substitution. Require every field once unless a leading rebuild base supplies it. Reject unknown or repeated explicit fields. A declared field supplies immediate literal context without widening an already typed number.
+
+Support complete written type arguments and complete applications established by immediate expected context or the exact rebuild base. Require agreement among those sources. General inference from payload/field constraints and trailing defaults remains with M4.6. Missing completion is incomplete, not an arbitrary argument or width choice.
+
+Unit variants produce their distinct variant type through bare qualification. Tuple payloads use calls; record payloads use named braces. Require the declared payload shape and arity. Unit values are not zero-argument tuple constructors.
+
+Parent arguments precede the variant name. Do not invent another variant argument list or ordinary family fallback.
+
+A rebuild base must have the exact record application. Evaluate its source position before explicit replacement positions. Retain both orders as facts without executing, moving or disposing fields.
+
+Any private record field forbids external whole-record construction and rebuilding. Public fields remain readable through a canonical public type even without a local type binding. A genuinely private nominal remains opaque outside its defining module.
+
+Field access requires a known record or statically established record-payload variant. A parent enum has no structural common-field interface. Resolve the actual field identity after substitution. Reject private or absent fields.
+
+A field base can supply owned storage or one reference layer. Preserve its static access mode and original projection. Deeper descriptor references require explicit dereference. The projected place has the field's declared type, not an invented owner or automatically flattened reference.
+
+#### Admission, joins and bracket categories
+
+Implement owned variant-to-parent and read-only variant-reference admission for the exact same parent application. Keep the actual variant identity and explicit admission evidence. A binding with a parent annotation retains the parent afterward.
+
+Mutable variant references remain invariant. Containers and tuples gain no covariance. Callable-mode relationships remain with M4.6. A permitted but unimplemented relationship stays incomplete.
+
+For uncontextualized joins, retain identical types. Join different variants of one application, or a variant with its parent, at that parent. Omit canonical never value alternatives. Reject unrelated nominal applications and numeric widths instead of inventing unions or conversions.
+
+An immediate expected type checks fresh branches/elements before finalizing literals. It does not convert an existing container. Fresh tuple elements can use per-position context; an existing tuple cannot widen its elements afterward.
+
+Fix bracket category before element checking. An immediate structural tuple fixes arity and per-position types. A validated canonical List application fixes one element type. Pending ordinary-family contexts remain incomplete. M4.5 supplies input-pattern/selection facts; M4.6 uses them to establish literal/callback/source-call contexts before checking. This proposed handoff clarification changes no recorded M4.4 result.
+
+Without category context, retain the confirmed List default. Do not reinterpret heterogeneous or empty brackets as tuples to repair inference. Empty elements and unresolved numeric widths still need established context.
+
+The current bounded implementation can complete tuple-context brackets without a library role. List construction requires canonical core admission, not a type named List or a matching field shape. Missing List admission remains incomplete for M4.8. No standard definition is fabricated to make tests succeed.
+
+Index syntax also retains its core/tuple-index contract prerequisite. It cannot guess a bounds/result policy from spelling or representation. These remaining typed obligations stay inside M4 completion.
+
+#### Pattern typing, scopes and explicit narrowing
+
+Start from an established scrutinee application and access category. Patterns inspect that source; they do not construct another nominal type. Resolve qualified variant parents and payload members through canonical identities.
+
+Names bind their matched position. Wildcards introduce no name. Reject repeated names within one pattern. Tuple patterns require exact tuple arity. Record patterns can omit fields but cannot inspect private or opaque representation.
+
+Check literal patterns with the scrutinee's established primitive context. Preserve M1 literal provenance and signed-minimum rules. Primitive literals remain value tests, not singleton types or overload patterns.
+
+A simple name binding keeps its initializer's value type. It does not apply the borrowed-destructuring rule to infer a reference type. The owner [confirmed this distinction](https://github.com/Reilley64/rill/issues/61#issuecomment-6959565199). Thus `let y = r.text` retains string for a string field, even when r borrows its record. This permits no implicit string copy or illegal move. Later ownership checking must reject an invalid transfer. Use `let y = &r.text` to request a borrow.
+
+Owned payload bindings retain their substituted field types. Borrowed binding types require the [pattern-copy classification seam](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification). An unresolved classification cannot silently choose copying or borrowing.
+
+Borrowed projection preserves descriptor layers, access mode and source routes. A read-only reference field can copy its descriptor without erasing dependencies. An exclusive-reference field cannot silently become shared referent access.
+
+Constructor/literal inspection can use one reference layer at that pattern position. Deeper descriptors require explicit scrutinee dereference. A plain name binds its original position without automatic peeling. Inherited read-only projection cannot grant mutable access through a contained exclusive descriptor.
+
+A qualified arm establishes an explicit scoped variant view, as required by ADR 0012. Stable place uses can carry that view within the arm. Preserve their original declaration identity and declared parent type separately.
+
+A refinable place has one named root with canonical field/dereference projections. It contains no call or dynamic index. Match occurrences of that same path, not a repeated textual expression. A computed scrutinee retains only its original match-temporary view.
+
+The proposed mutable-view precision forbids tag-changing replacement of that place or its ancestors while the arm view is active. Payload mutation that preserves the variant remains possible. Mutable variant-to-parent widening remains forbidden.
+
+Retain the view's required tag-stability constraint for later alias/ownership checking. These lexical checks do not prove loan compatibility, alias exclusion or initialized storage.
+
+Restore the declared type outside the arm. Failed guards establish no refinement for later arms. Do not restore a variant from optimizer knowledge or ordinary function return contents.
+
+Pattern bindings scope over their arm's guard and body only. Ordinary let introduces names after its initializer and requires an irrefutable pattern. Determine irrefutability through the complete coverage procedure, not a guessed default.
+
+#### Finite constructor coverage
+
+Use only static types and canonical constructors for coverage. A parent enum includes every declared variant. A known variant includes only its own payloads. Primitive Boolean types include both values despite literal or flow knowledge.
+
+A record or tuple has its declared product shape. Specialize nested fields and payloads rather than counting one refutable row as an entire variant. Omitted accessible fields act as wildcards for coverage, without granting access to omitted private fields.
+
+Bindings and wildcards cover their position. An all-wildcard row covers the remaining columns immediately. Guarded rows do not contribute to the coverage proof, including a syntactic true guard. Their patterns and bodies still require checking.
+
+Prove coverage with a constructor-specialization matrix. For each possible constructor, specialize matching rows and wildcard rows. Replace that column with its ordered payload columns. Continue until all remaining positions are covered or an uncovered declared shape is established.
+
+Check missing outer constructors before payload inhabitation. Never-valued fields do not remove a declared record or enum alternative from this conservative criterion. This procedure does not solve arbitrary recursive inhabitation.
+
+Mark the initial scrutinee column Root. Mark introduced payload, record-field and tuple-element columns Component. These marks are coverage bookkeeping, not source types.
+
+A proved zero-constructor domain means canonical never or an inspectable empty enum. Opaque or unresolved types do not qualify. A zero-constructor Root domain is vacuously covered. A zero-constructor Component becomes one symbolic coverage hole.
+
+Cover a hole only with a wildcard or binding. Consume only that column. Continue checking every remaining column. A nested empty domain must not discard other refutable positions.
+
+Preserve these marks through specialization, column permutations and memoization. Column selection must not change coverage or irrefutability. A symbolic hole is not a never value or an Error/Unknown source type.
+
+The following planned model cases are NotChecked. E has only the shown V variant. Empty denotes an inspectable empty enum. Each witness denotes a declared shape, not an inhabited runtime value.
+
+| Static schema | Pattern rows | Required coverage result |
+| --- | --- | --- |
+| E with V(never, bool) | `E.V(_, true)` | Uncovered `E.V(_, false)`. |
+| E with V(bool, never) | `E.V(true, _)` | Uncovered `E.V(false, _)`. |
+| E with V(never, bool) | `E.V(_, true)`, `E.V(_, false)` | Covered. |
+| E with V(bool, never) | `E.V(true, _)`, `E.V(false, _)` | Covered. |
+| Either payload order above | `E.V(_, _)` | Covered. |
+| Replace never with Empty in either order | The corresponding rows above | Identical results. |
+| Root never or Empty | No rows | Covered by the root-empty rule. |
+
+Boolean and finite integer/character domains can use exact distinct literal coverage. Strings and floating domains require a wildcard/default row for complete coverage. Floating literal rows cannot cover NaN. Normalize literal equality under RFC 0006, without evaluating user code.
+
+For literal columns, compare established distinct values with the finite domain. Find an omitted scalar without enumerating a huge numeric domain. Opaque symbolic/callable positions require a wildcard or binding; they do not reveal structural constructors.
+
+An uncovered witness identifies a declared constructor/literal shape with symbolic holes. It is not a constructed Rill value or witnessed execution. This proposed conservative diagnostic means that the required static coverage proof failed.
+
+Use explicit worklists and bounded canonical substitutions. Reuse normalized matrix states where justified. A pending or repeated unresolved state cannot prove coverage or noncoverage. Exhausted work, entry or depth budgets return ResourceLimit.
+
+Match and irrefutable-binding checks share this procedure. A single row proves an ordinary binding only if it covers its complete static input. Nested refutable payload rows therefore remain refutable even when their outer tag matches.
+
+#### Facts, outcomes and procedure validation
+
+Retain actual constructor/member identities, substitutions, explicit admissions, source evaluation order, pattern binder identities and scoped narrowing evidence. Keep original snapshots, type-use routes and coverage witness sites. No Error/Unknown term can stand for a successful value type.
+
+Combine matches with the [data-control procedure](0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control). Require every written arm to type-check. A coverage proof cannot repair a body mismatch or an unresolved core protocol.
+
+Before Rust implementation, validate finite coverage with a separate reference model. Use independently enumerated finite shape cases and expected nested/refutable cases. Include guarded rows, empty enums, conservative never-payload policy and exact/short budgets. This is reference evidence, not Rill execution or a universal proof.
+
+Direct compiler tests must cross the agreed data entry/body/node seams using real M3/M4 declarations. Missing core contracts, generic completion or copy classification remain explicit incomplete obligations. Full interface admission, evidence, ownership, cleanup and execution remain unperformed.
+
+### Proposed M4.8 List, index and aggregate handoff
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes these checks for the shared typed checker. They require separate checkpoint approval.
+
+Keep the existing bracket category decision. In List context, use the admitted List declaration and its element argument. Without that argument, find an agreed element type from the operands and existing contextual equations. Do not infer a width from List itself.
+
+An empty List with no established element type needs an annotation. Check each element once and retain its admission. No failed List construction becomes a tuple.
+
+Index rules below are proposed static rules. They do not specify layout or execute indexing.
+
+| Established base | Index and selected component |
+| --- | --- |
+| Tuple, or reference to a tuple | Require a single unsuffixed integer literal. Use its decoded nonnegative value as a zero-based component selector. Reject a selector outside the tuple's arity. Do not evaluate expressions to obtain a selector. |
+| Admitted List<T>, or reference to it | Check a `u64` index. Supply that context to an untyped literal. Select component type T using the admitted index contract. Dynamic bounds checks are fatal if executed out of range, not Option construction. |
+
+Keep the access of the base in the projection. A borrow of the projection preserves the source path. A List index does not prove that two places are distinct, even when the indices differ.
+
+The owning or borrowed projection uses the same type and access policy as other aggregate projections. This procedure grants no move out of indexed storage or mutable access to a shared view. A missing index contract is incomplete. This proposal adds no indexing for strings or arbitrary same-shaped types.
+
+Compute aggregate and capture prerequisites from actual storage facts. Use the [inline summaries](#proposed-m42-declaration-validity-and-inline-containment) for representation validity. Use [RFC 0007's aggregate classification](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m48-aggregate-classification) for implicit-copy eligibility and access. Do not infer copyability from finite size or absence of known fields.
+
+Retain the substituted member or capture witness. An erased callable interface gives no hidden storage facts. An indirect representation can stop inline containment without erasing result-use or property obligations.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |
@@ -281,6 +612,46 @@ A finite layout can still exceed a target's representation limits. Such target c
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Borrowed patterns, moves, rebuilding, capture layouts, retained dependencies and disposal. | Proposed, not accepted. Complete pattern/ownership judgments remain incomplete. Finite layout is not an ownership proof. |
 | [Draft RFC 0008](0008-errors-propagation-and-caused-by-wrapping.md), with collection contracts still missing. | Actual Option/Result/Err constructors, causes and canonical container contracts. | Errors are proposed, not accepted. Complete constructor/variant judgments and collection contracts remain incomplete. Local Packet examples do not replace standard types. |
 | [Draft RFC 0010](0010-diagnostics-and-reporting.md), with runtime/backend still missing. | Exact failures, target layout limits, private representation and native/Wasm lowering. | Reporting is proposed, not accepted. Neither complete source/driver procedures, compiler execution nor target support is established. |
+
+### Proposed M4.5 static input boundary
+
+The owner [confirmed exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) for ordinary input patterns. A repeated wildcard cannot merge different actual static terms at their shared enum parent. Fixed parent patterns retain this RFC's permitted owned/read-only admissions.
+
+[RFC 0004's proposed finite procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) owns normalization and whole-vector comparison. Its [scoped M4.5 checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) has implementation approval. It does not add covariance through existing tuples, generic arguments or mutable references.
+
+Canonical never's no-value admission checks an immediate value expectation without retagging its type. The proposed type-vector query does not turn that rule into wildcard inference or an ordinary matching alternative. A bare canonical never result supplies no inferred input shape by itself. Other noncontinuing expressions retain their independently declared static types. Preserve unresolved positions separately from established input contracts.
+
+Source-call context formation remains M4.6 work. An input-only fact cannot invent a receiving type from implementation counts or erase actual variant evidence. Full call completion still needs the actual type/admission, selected signature and evidence obligations.
+
+### Proposed M4.6 nominal application inference
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this extension of the M4.4 construction procedure. Approval remains pending. Use [RFC 0004's substitution frames and default order](0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure).
+
+Resolve the written annotation or constructor path to one canonical declaration. Select the written variant within that declaration. Check visibility and payload form before using fields as constraints. Do not search for another record by its shape. A private or ambiguous target supplies no receiving type.
+
+Start one frame for the nominal declaration's ordered arguments. Combine explicit leading arguments, an exact rebuild base and the immediate expected application of that same nominal. A same-parent expected variant must agree with the written variant. A parent expectation can supply its arguments without changing the constructed variant's identity.
+
+In value construction, gather independent field and payload types before finalizing fresh ones. Check all named and positional members against the actual declarations. Use established field types to contextualize unresolved literals, nested constructors and callbacks. Use one shared substitution across every member. A missing field or invalid payload does not become a type equation.
+
+For type-only uses, there are no value anchors. Complete explicit terms and apply only available trailing defaults. Reject nontrailing defaults. A default can mention earlier parameters, not itself or a later position. An unavailable earlier argument blocks the default. Do not reinterpret a same-spelled declaration as the binder that is out of scope.
+
+Keep defaults and their resulting arguments distinct in provenance. When a default elaborates a dependent application, use its own bounded frame. Repeating the same active default application stays Incomplete. Charge growing applications without expanding nominal field definitions during type equality. Defaults never select another nominal definition or repair an incompatible anchor.
+
+A completed application preserves canonical identity, full arguments and source sites. A failed field does not erase independent member findings. Later statements and ownership assumptions do not supply missing types. Existing values gain no container covariance from fresh construction context.
+
+#### Bracket category before elements
+
+Use a declared tuple or admitted canonical List context first. Otherwise, apply [ordinary context agreement](0004-functions-overloads-and-generic-requirements.md#source-call-context-and-ordinary-selection). The owner chose agreement over using a specialization alone to fix context.
+
+Require every viable alternative to agree on the bracket category before checking a fresh element. A viable unconstrained category blocks a different fixed candidate's proposed category. Conflicting List/tuple projections require independent context. A missing core identity does not prove category agreement or category absence.
+
+Once the category is fixed as tuple, use the written number of elements. Check it against a declared receiver's arity. For projected receivers, discard wrong-length tuple alternatives by written arity alone. Require the remaining alternatives to agree on needed element types. Never go back to List if no tuple arity fits.
+
+If complete context analysis supplies no required category at all, retain the List default. A proved open slot is different from an unavailable projection. Do not treat unavailable metadata as open.
+
+Use the admitted canonical List definition. Infer its element type from the established element join. An empty literal or unanchored numeric width does not determine an element type. Do not retry tuple after failure.
+
+A fixed tuple can carry different callback input/result contexts at its different positions. Use the [callable procedure](0004-functions-overloads-and-generic-requirements.md#callable-formation-and-invocation). Neither an expected family result nor a failed callback chooses another category. Without real core admission, preserve the List obligation and any established element facts. No invented List contract can complete the type.
 
 ## Valid/invalid examples and diagnostics
 
@@ -428,6 +799,14 @@ The old x remains readable while computing the replacement. Checked arithmetic c
 | T19, this draft | Complete scalar rebuilding module. | Read the old field before replacement. Preserve checked overflow behavior. | [Rebuilding](#named-rebuilding). | NotChecked. No Rill execution or full rebuilding checker. |
 
 The [diagnostic registry](../diagnostic-codes.md) fixes the cited code meanings. It does not supply exact messages for these examples. R0406 covers impossible recursive layouts. Field-set and coverage failures still need their diagnostic allocation. All these failures need actual diagnostic implementation.
+
+### Proposed M4.8 indexing cases
+
+| Case and context | Expected outcome | Rule | Evidence |
+| --- | --- | --- | --- |
+| U3a. `pair` has type `[bool,i32]`. Read `pair[1]`. | Select the second component with type `i32`. Do not infer a runtime numeric width for the tuple selector. | [Index rules](#proposed-m48-list-index-and-aggregate-handoff). | NotChecked. |
+| U3b. Use `pair[2]` on that tuple, or use `pair[i]` with `i: u64`. | Reject the out-of-range selector and the nonliteral selector. Do not evaluate `i` to choose a field. | [Index rules](#proposed-m48-list-index-and-aggregate-handoff). | NotChecked. |
+| U3c. `items` has admitted type `List<bool>`. Compare `items[0]` and `items[0i32]`. | Supply `u64` to the first index. Reject the second index's known type. The projection is not Option construction. | [Index rules](#proposed-m48-list-index-and-aggregate-handoff). | NotChecked. |
 
 ## Feature interactions
 

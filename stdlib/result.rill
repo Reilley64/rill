@@ -1,0 +1,105 @@
+import std::error::{Cause, Error, SourceLocation, cause, display, origin};
+import std::format::show;
+import std::option::Option;
+
+export type Err<E> = {
+    private payload: E;
+    private site: SourceLocation;
+    private retained: Option<Cause>;
+};
+
+export enum Result<T, E = Error> { Ok(T), Err(Err<E>) }
+
+export function Ok<T, E = Error>(value: T): Result<T, E> {
+    return Result.Ok(value);
+}
+
+// The compiler binds this closed operation to owned error storage.
+// The second value, when supplied, is an owned Err<C>, not an overload.
+export function Err<T, E>(value: E): Result<T, E>;
+
+function renderError<E>(value: &Err<E>): string where display(E);
+
+export function formatError<E>(value: &Err<E>): string where display(E) {
+    return renderError<E>(value);
+}
+
+implement<E> show(value: &Err<E>): string where display(E) {
+    return formatError<E>(value);
+}
+
+export function value<E>(wrapped: &Err<E>): &E {
+    return &wrapped.payload;
+}
+
+export function intoValue<E>(wrapped: Err<E>): E {
+    let payload = wrapped.payload;
+    let _ = wrapped.retained;
+    return payload;
+}
+
+implement<E> origin(wrapped: &Err<E>): &SourceLocation { return &wrapped.site; }
+
+implement<E> cause(wrapped: &Err<E>): Option<&Cause> {
+    return match (&wrapped.retained) {
+        Option.Some(inner) => Option.Some(inner),
+        Option.None => Option.None,
+    };
+}
+
+export function isOk<T, E>(value: &Result<T, E>): bool {
+    return match (value) { Result.Ok(_) => true, Result.Err(_) => false };
+}
+
+export function ok<T, E>(value: &Result<T, E>): Option<&T> {
+    return match (value) {
+        Result.Ok(element) => Option.Some(element),
+        Result.Err(_) => Option.None,
+    };
+}
+
+export function err<T, E>(value: &Result<T, E>): Option<&Err<E>> {
+    return match (value) {
+        Result.Ok(_) => Option.None,
+        Result.Err(failure) => Option.Some(failure),
+    };
+}
+
+export function map<T, U, E, F>(value: Result<T, E>, apply: F): Result<U, E>
+where callableOnce(F, [T], U) {
+    match (value) {
+        Result.Ok(element) => { return Result.Ok(apply(element)); },
+        Result.Err(failure) => {
+            let _ = apply;
+            return Result.Err(failure);
+        },
+    };
+}
+
+export function mapErr<T, E, D, F>(value: Result<T, E>, apply: F): Result<T, D>
+where callableOnce(F, [E], D), display(D) {
+    match (value) {
+        Result.Ok(element) => {
+            let _ = apply;
+            return Result.Ok(element);
+        },
+        Result.Err(failure) => {
+            return Result.Err(Err {
+                payload: apply(failure.payload),
+                site: failure.site,
+                retained: failure.retained,
+            });
+        },
+    };
+}
+
+export function andThen<T, U, E, F>(value: Result<T, E>, apply: F): Result<U, E>
+where callableOnce(F, [T], Result<U, E>) {
+    match (value) {
+        Result.Ok(element) => { return apply(element); },
+        Result.Err(failure) => {
+            let _ = apply;
+            return Result.Err(failure);
+        },
+    };
+}

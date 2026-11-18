@@ -1,0 +1,17 @@
+export function eq<T>(left: &T, right: &T): bool;
+
+implement eq(left: &bool, right: &bool): bool { return *left == *right; }
+implement eq(left: &char, right: &char): bool { return *left == *right; }
+implement eq(left: &i8, right: &i8): bool { return *left == *right; }
+implement eq(left: &i16, right: &i16): bool { return *left == *right; }
+implement eq(left: &i32, right: &i32): bool { return *left == *right; }
+implement eq(left: &i64, right: &i64): bool { return *left == *right; }
+implement eq(left: &i128, right: &i128): bool { return *left == *right; }
+implement eq(left: &u8, right: &u8): bool { return *left == *right; }
+implement eq(left: &u16, right: &u16): bool { return *left == *right; }
+implement eq(left: &u32, right: &u32): bool { return *left == *right; }
+implement eq(left: &u64, right: &u64): bool { return *left == *right; }
+implement eq(left: &u128, right: &u128): bool { return *left == *right; }
+implement eq(left: &string, right: &string): bool { return left == right; }
+
+implement<T> eq(left: &&T, right: &&T): bool where eq(T) { return eq<T>(*left, *right); }

@@ -120,6 +120,22 @@ An unrelated function named dispose cannot redirect compiler cleanup. Explicitly
 
 Custom copy/dispose overlap and implicit-copy eligibility need complete formal reconciliation. Protected negative capabilities remain mandatory. This draft does not assume that a user body proves safe duplication merely because it has the expected result type.
 
+### Proposed M4.4 pattern binding type classification
+
+[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) owns this typing prerequisite. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) before model/compiler code. This approval does not authorize ownership checking or complete this RFC.
+
+A borrowed pattern binder needs a static choice between the contained value type and a projected reference type. Use the existing implicit-copy classification, not canonical copy(T) evidence. Explicit copying does not authorize silent copying.
+
+Classify established scalar primitives and read-only descriptors under their fixed existing rules. Strings and exclusive references have no implicit-copy exception. An unconstrained symbolic T remains non-implicit-copyable even when an eventual concrete instantiation could copy.
+
+Preserve that symbolic body's classification through monomorphization. Do not retype its pattern binding from later caller values or implementation counts.
+
+Aggregate classification also needs custom-disposer and protected-capability reconciliation. If that classification is unresolved, return an incomplete typed obligation. Do not assume copying from field shape. Do not choose borrowing as a fallback for an unresolved proof.
+
+A positive classification chooses the binder's static value type only. It performs no copy. A non-copying borrowed projection retains its access mode and descriptor/referent layers. Both retain their original source dependencies for later ownership checking.
+
+No classification proves initialized storage, exclusive access, valid partial moves, safe guard commitment or cleanup. Those operations remain outside M4.4.
+
 ### Borrow acquisition, overlap and reborrowing
 
 Read-only `&T` permits observation without ownership. Exclusive `&mut T` permits mutation without ownership. For overlapping storage, permit multiple read-only loans or one exclusive loan.
@@ -287,6 +303,84 @@ Background spawn requires its established noBorrow/sendable callable contract. S
 Standard/default cleanup needs bounded call-stack use, using iterative state when necessary. User callbacks/disposers remain ordinary code. Worklist data can grow, and cleanup can wait indefinitely. Fatal resource failure does not permit unsafe recursive fallback.
 
 Panic, stack overflow and fatal exhaustion retain no-unwind behavior. Normal top-level completion still has no implicit global background join. Proper tail transfer cannot free caller storage or skip pending cleanup to create eligibility.
+
+### Proposed M4.5 protected-overlap boundary
+
+[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes this collection prerequisite. The owner [approved the scoped checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018). This approval admits no provider, ownership operation or runtime mechanism.
+
+A catalogue belongs to one graph capture and one admitted metadata identity. Each family record retains actual role-admission evidence and its provenance. It states whether required-winner and prohibited-input inventories are complete. Missing evidence is not a validated empty inventory.
+
+Use two protection record forms. A required-winner record names its canonical family, input pattern, action and actual admitted provider. A prohibited-input record names its canonical family, forbidden pattern and negative-capability reason. The prohibited form has no provider.
+
+Resolve a required provider to its actual implementation declaration in that graph. Check its target family and normalized input key against the record. Validate its required signature schema through actual core admission. A caller assertion cannot create provider authority.
+
+Admission belongs to the particular family/action record. Admission for another action is not a global whitelist. A prohibited record cannot gain a provider through unrelated admission.
+
+Validate the catalogue before checking source bodies. Reject conflicting required winners as invalid admission. Reject required/prohibited domain conflicts too. Do not choose an action by catalogue order.
+
+Use [RFC 0004's comparison procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) for each applicable family record. Compare original whole-vector patterns, not caller-filtered variants.
+
+For a required-winner record, check every body not admitted for that record. Disjointness is safe. An intersecting body is safe only when the required provider's pattern strictly dominates it. Equal, narrower or incomparable overlapping bodies reject as R0500.
+
+For a prohibited-input record, reject any implementation intersecting the forbidden domain. There is no provider to supply a more-specific escape. A generic adapter's overlap still counts. Requirements and aliases cannot remove the prohibition or manufacture its negative capability.
+
+If unavailable capability information prevents a complete prohibition, retain a pending prohibition obligation. Do not omit it from catalogue completeness. This includes protection whose capture or transitive metadata remains unavailable.
+
+Names, standard-root paths and private fields confer no authority. An actually empty inventory still requires validated per-family admission evidence. User requirements do not affect overlap checking. Retain the action/prohibition, body and comparison witnesses.
+
+Actual canonical admission remains an M4.8 prerequisite when missing. Structural input facts can remain useful, but no completed protected collection or checked call follows. No test may fabricate a standard capability definition or weaken the catalogue to obtain success.
+
+### Proposed M4.6 capture and invocation facts
+
+[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this typed boundary for [arrow checking](0004-functions-overloads-and-generic-requirements.md#callable-formation-and-invocation). Approval remains pending. Keep access demands and carried sources. Do not acquire loans, move captures, execute copies or prove lifetime safety in this stage.
+
+Resolve each written arrow use in its actual lexical environment. A reference to a runtime outer binding records a capture candidate. Static declarations do not capture runtime storage. Record which inner callable forms or uses a captured path. A named function's noncapture restriction remains unchanged.
+
+A stable local, field or explicit dereference path can supply original capture provenance. An explicit `&place` or `&mut place` records that access, not a captured copy of the place's owner. Capture formation retains the source restriction and original path. Complex computed places or unresolved acquisition needed for a mode/property proof remain incomplete. Do not hoist side-effectful computations from an arrow body.
+
+Determine the typed demand from the arrow's reachable possible uses. Check skipped written source without choosing its runtime outcome. Read-only observation needs read-only invocation. Mutation or repeatable mutable invocation of owned capture storage needs mutable access. A use requiring consumption of a non-implicitly-copyable owned capture needs consuming access.
+
+For a by-value use, consult the existing implicit-copy classification. Do not use an explicit copy overload as implicit-copy evidence. An unresolved classification blocks a mode proof if it affects consumption. Keep explicit copy calls as their own evidence goals. Do not replace consumption of a borrowed referent with a capture move.
+
+Combine the strongest required access with the established capture form. An explicit borrowed capture retains its reference access when used. A borrowed receiver cannot grant consumption of its environment. A mutable descriptor does not change a shared reference's referent access. Track every capture site's demand and retained dependency, not only the combined mode.
+
+An arrow with no outer runtime uses has read-only mode. A capture-free named function value also has read-only mode. Do not use the expected receiver mode to infer a stronger capability. Preserve actual capture evidence through permitted weakening. Erasing to a declared callable interface keeps restrictions but loses unstated guarantees.
+
+Pending projections or mode requirements can coexist with an established parameter/result signature. They cannot supply a checked invocation or verified property. Later ownership checking still validates formation, exclusive access, escape and transfers. In particular the typed mode does not permit moving out of a shared borrow.
+
+#### Property and callable evidence
+
+Use the actual prelude predicate identity. Assumptions and proofs retain the canonical subject and originating value facts. A reference proves noBorrow false for its type; a checked scalar or owned string proves noBorrow. A known reference dependency cannot disappear in a record or closure.
+
+A checked scalar or immutable string proves both `sendable` and `shareable`. A shared reference needs a shareable referent for both. An exclusive reference needs a sendable referent for `sendable`. Its read-only sharing needs a shareable referent and preserves exclusivity. These rules implement the source-type decision in [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md#transfer-sharing-and-scheduling).
+
+For ordinary source tuples and inspectable user nominals, require the property of each contained value type after full substitution. A variant uses its own payload. A parent uses all declared payloads. A phantom parameter supplies no stored value. Apply this rule only to actually established representations. An opaque, native or protected representation needs its own admitted contract, not a shape proof.
+
+Use actual typed capture facts for concrete callable properties. Check every captured source using its actual reference or owned form. Use all relevant paths when a callable value joins from several origins. Erased or unresolved environments supply no positive proof. A callable signature, selected body or lack of fields in a public view does not prove an environment property.
+
+When a structural proof reaches a member, project its value origins along with its substituted type. For `Holder<F>` with a callable field, use the closure origins for that field rather than F's signature. For joined aggregates, use all corresponding field origins. Keep this distinction in proof keys. Missing field origins stay unresolved when the field type alone cannot prove the property.
+
+For a canonical callable predicate, compare the complete argument tuple and result terms by equality. Use the declared receiver type and actual mode. Apply the mode order to an owned callable. A shared reference forwards read-only invocation only if its referent supports it. A mutable reference forwards read-only or repeatable mutable invocation according to its referent's mode. It cannot forward consuming invocation of the referent.
+
+For a reference subject, forwarding can give the descriptor its own callable capability. A once-use of that descriptor still invokes the referent without consuming the environment. A shared descriptor invokes read-only. A mutable descriptor needs the access required by its forwarded mode. Do not insert further implicit dereferences.
+
+Each rule yields proved, disproved or unresolved evidence. Unsupported or cyclic structural obligations are unresolved. Do not derive a missing operation from unavailable core metadata. There is no structural proof of explicit copy, protected guard access or disposal. Preserve every proved property independently. No property implies permission to act on a particular value.
+
+### Proposed M4.8 aggregate classification
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes this typed prerequisite. It requires separate checkpoint approval. The classification chooses a binder type or capture demand. It does not execute an operation.
+
+For an otherwise eligible nominal value, check canonical disposal and protection facts for its actual static type. Use the admitted inventory and shared input selection, with the original premises. An applicable custom disposer or a protected prohibition makes that type non-implicitly-copyable. Ordinary default field cleanup is not a custom disposer. A custom `copy` body does not make the type implicitly copyable.
+
+Check copy/dispose interception separately during collection. A hypothetical winner, unmet evidence or ambiguous action supplies no positive classification.
+
+For eligible source aggregates without those exclusions, require the classification of every stored component after substitution. A known variant uses its own payload. A parent enum needs all payloads. Apply the disposal and protection check to the actual static aggregate type as well as its contained values.
+
+Stop at a reference descriptor and apply its own rule. Never infer the referent's capability from the descriptor. Use admitted facts for a protected or opaque stored value.
+
+An established non-copying classification selects the projected reference for a borrowed binder. It also makes a by-value use of an owned capture demand consuming invocation. Incomplete classification blocks either judgment if it depends on that fact.
+
+Do not substitute a borrow or an expected invocation mode for missing evidence. Keep the classification of an unconstrained rigid parameter under the existing symbolic rule. Preserve its carried sources independently of the binder or invocation choice.
 
 ### Required companion rules
 

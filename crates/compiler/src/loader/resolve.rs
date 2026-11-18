@@ -23,9 +23,15 @@ struct Engine {
     outcomes: Vec<ImportOutcome>,
     findings: Vec<Finding>,
     pending: VecDeque<ModuleKey>,
+    installed: Option<InstalledProfile>,
+    error_storage: Option<(PathBuf, Vec<u8>)>,
 }
 
-pub(super) fn load(request: Request) -> Result<Graph> {
+pub(super) fn load(
+    request: Request,
+    installed: Option<InstalledProfile>,
+    executable: Option<PathBuf>,
+) -> Result<Graph> {
     let mut engine = Engine {
         id: GraphId(Arc::new(())),
         host: Host::new(request.limits),
@@ -36,9 +42,19 @@ pub(super) fn load(request: Request) -> Result<Graph> {
         outcomes: Vec::new(),
         findings: Vec::new(),
         pending: VecDeque::new(),
+        installed,
+        error_storage: None,
     };
-    match engine.run() {
-        Ok((bindings, implementations, prelude)) => Ok(Graph {
+    let executable = executable.filter(|_| installed.is_some());
+    if let Some(path) = &executable {
+        engine.host.charge(path.as_os_str().len() + 2)?;
+    }
+    let prefix = executable
+        .as_deref()
+        .and_then(Path::parent)
+        .and_then(Path::parent);
+    match engine.run(prefix) {
+        Ok((bindings, implementations, prelude, ownership_archive)) => Ok(Graph {
             id: engine.id,
             request: engine.request,
             modules: engine.modules.into_values().collect(),
@@ -47,6 +63,10 @@ pub(super) fn load(request: Request) -> Result<Graph> {
             implementations,
             prelude,
             host: engine.host,
+            installed,
+            error_storage: engine.error_storage,
+            ownership_archive,
+            collection_links: executable.map(installed::CollectionLinks::capture),
         }),
         Err(mut error) => {
             error.findings.append(&mut engine.findings);
@@ -70,8 +90,15 @@ pub(super) fn load(request: Request) -> Result<Graph> {
     }
 }
 
+type Resolved = (
+    Vec<Binding>,
+    Vec<Implementation>,
+    PreludeIdentities,
+    Option<PathBuf>,
+);
+
 impl Engine {
-    fn run(&mut self) -> Result<(Vec<Binding>, Vec<Implementation>, PreludeIdentities)> {
+    fn run(&mut self, prefix: Option<&Path>) -> Result<Resolved> {
         let parent = self
             .request
             .entry
@@ -118,9 +145,15 @@ impl Engine {
                     "prelude needs a root-relative .rill module",
                 ));
             }
-            prelude_keys.push(
-                self.require_source(Origin::Standard, self.roots[&Origin::Standard].join(path))?,
-            );
+            let key =
+                self.require_source(Origin::Standard, self.roots[&Origin::Standard].join(path))?;
+            if self.installed.is_some() && key.path != selector.module {
+                return Err(failure(
+                    FailureKind::InvalidRequest,
+                    "installed prelude does not have its pinned module key",
+                ));
+            }
+            prelude_keys.push(key);
         }
         while let Some(key) = self.pending.pop_front() {
             self.host.charge(1)?;
@@ -131,6 +164,7 @@ impl Engine {
             }
             self.imports.extend(imports);
         }
+        let metadata = self.capture_installed_metadata()?;
         self.imports
             .sort_by(|a, b| (&a.module, a.span.start()).cmp(&(&b.module, b.span.start())));
         let (facts, names, public_names) = self.seeds()?;
@@ -347,14 +381,128 @@ impl Engine {
             dispose: select(&prelude_keys[1], &selectors[1])?,
         };
         let implementations = self.attach_implementations(&bindings, &prelude)?;
+        if let Some(profile) = self.installed {
+            for implementation in &implementations {
+                self.host.charge(1)?;
+                let owner = &implementation.declaration.module;
+                if owner.origin != Origin::Standard || !metadata.contains(owner.path.as_str()) {
+                    continue;
+                }
+                let edges = profile.metadata();
+                self.host.charge(edges.len())?;
+                let edge = edges.iter().find(|edge| edge.path == owner.path).unwrap();
+                let slot = &implementation.family.module;
+                self.host.charge(edge.registrations.len())?;
+                let mut allowed = false;
+                if slot.origin == Origin::Standard
+                    && let Some((_, families)) = edge
+                        .registrations
+                        .iter()
+                        .find(|(path, _)| *path == slot.path)
+                {
+                    let declarations = &self.modules[slot].declarations;
+                    self.host.charge(declarations.len() + families.len())?;
+                    allowed = declarations.iter().any(|d| {
+                        d.id == implementation.family
+                            && d.scope.is_none()
+                            && d.name
+                                .as_deref()
+                                .is_some_and(|name| families.contains(&name))
+                    });
+                }
+                if !allowed {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "installed metadata exceeds its declared registration scope",
+                    ));
+                }
+            }
+        }
+        self.capture_error_storage()?;
+        let mut archive = None;
+        if let Some(prefix) = prefix.filter(|_| self.installed.is_some()) {
+            for key in self.modules.keys() {
+                self.host.charge(1)?;
+                if key.origin == Origin::Standard && installed::is_ownership_source(&key.path) {
+                    archive = installed::observe_ownership_archive(&mut self.host, prefix)?;
+                    break;
+                }
+            }
+        }
         self.host.replay(
             self.request.limits,
             self.modules
                 .values()
-                .map(|m| (m.path.as_path(), m.snapshot.bytes())),
+                .map(|m| (m.path.as_path(), m.snapshot.bytes()))
+                .chain(
+                    self.error_storage
+                        .iter()
+                        .map(|(path, bytes)| (path.as_path(), bytes.as_slice())),
+                )
+                .chain(
+                    archive
+                        .as_ref()
+                        .map(|(path, bytes)| (path.as_path(), bytes.as_slice())),
+                ),
             true,
         )?;
-        Ok((bindings, implementations, prelude))
+        if let Some((path, bytes)) = &self.error_storage
+            && Some(bytes.as_slice()) != self.installed.map(|profile| profile.error_storage().1)
+        {
+            let mut error = failure(
+                FailureKind::InvalidRequest,
+                "installed error storage differs from toolchain pin",
+            );
+            error.path = Some(path.clone());
+            return Err(error);
+        }
+        let ownership_archive = if let Some((path, bytes)) = archive {
+            if Some(bytes.as_slice()) != installed::OWNERSHIP_ARCHIVE {
+                let mut error = failure(
+                    FailureKind::InvalidRequest,
+                    "installed ownership archive differs from toolchain pin",
+                );
+                error.path = Some(path);
+                return Err(error);
+            }
+            Some(path)
+        } else {
+            None
+        };
+        Ok((bindings, implementations, prelude, ownership_archive))
+    }
+
+    fn capture_error_storage(&mut self) -> Result<()> {
+        let Some(profile) = self.installed else {
+            return Ok(());
+        };
+        self.host.charge(1)?;
+        if !self.modules.contains_key(&ModuleKey {
+            origin: Origin::Standard,
+            path: "error.rill".into(),
+        }) {
+            return Ok(());
+        }
+        // Installed requests derive this parent from the canonical executable path.
+        let root = self
+            .request
+            .standard_root
+            .parent()
+            .expect("installed lib/rill");
+        let path = root.join(profile.error_storage().0);
+        let Some(probe) = self.host.probe(&path, Some(root))? else {
+            return Ok(());
+        };
+        if probe.kind != Kind::File || probe.path != path {
+            return Err(failure(
+                FailureKind::InvalidRequest,
+                "installed error storage does not have its pinned artifact key",
+            ));
+        }
+        let bytes = self.host.read(&path, true)?;
+        self.host.charge(bytes.len())?;
+        self.error_storage = Some((path, bytes));
+        Ok(())
     }
 
     fn attach_implementations(
@@ -502,6 +650,130 @@ impl Engine {
         Ok(privacy)
     }
 
+    fn capture_installed_metadata(&mut self) -> Result<BTreeSet<&'static str>> {
+        let mut captured = BTreeSet::new();
+        let Some(profile) = self.installed else {
+            return Ok(captured);
+        };
+        let root = self.roots[&Origin::Standard].clone();
+        let edges = profile.metadata();
+        let mut requested = BTreeSet::new();
+        for module in self.modules.values() {
+            for node in &module.syntax.nodes {
+                self.host.charge(edges.len())?;
+                for edge in edges {
+                    if (edge.triggered_by)(node.kind) {
+                        requested.insert(edge.path);
+                    }
+                }
+            }
+        }
+        let conversion = profile.conversion_metadata();
+        for import in &self.imports {
+            self.host
+                .charge(1 + conversion.len() + import.starts.len())?;
+            // Provider modules bind their own registrations with explicit source imports.
+            // Those imports are not an application request for the rest of the closure.
+            if import.module.origin == Origin::Standard
+                && conversion.contains(&import.module.path.as_str())
+            {
+                continue;
+            }
+            if import
+                .starts
+                .iter()
+                .any(|(key, _)| key.origin == Origin::Standard && key.path == "convert.rill")
+            {
+                requested.extend(conversion.iter().copied());
+                break;
+            }
+        }
+        // The table lists dependencies before dependents. Walk it backwards
+        // to request the closure, then forwards to capture it.
+        for edge in edges.iter().rev() {
+            self.host.charge(1 + edge.dependencies.len())?;
+            if requested.contains(edge.path) {
+                requested.extend(edge.dependencies.iter().map(|(_, path)| *path));
+            }
+        }
+        for edge in edges.iter().filter(|edge| requested.contains(edge.path)) {
+            let key = ModuleKey {
+                origin: Origin::Standard,
+                path: edge.path.into(),
+            };
+            self.host.charge(1)?;
+            if self.modules.contains_key(&key) {
+                continue; // An explicit source edge is already in the graph.
+            }
+            self.host.charge(edge.dependencies.len())?;
+            if edge.dependencies.iter().any(|(_, path)| {
+                !self.modules.contains_key(&ModuleKey {
+                    origin: Origin::Standard,
+                    path: (*path).into(),
+                })
+            }) {
+                continue; // Keep unresolved metadata dependencies out of source resolution.
+            }
+            let path = root.join(edge.path);
+            let Some(probe) = self.host.probe(&path, Some(&root))? else {
+                continue;
+            };
+            if probe.kind != Kind::File || probe.path != path {
+                return Err(failure(
+                    FailureKind::InvalidRequest,
+                    "installed metadata does not have its pinned module key",
+                ));
+            }
+            let loaded = self.add_module(Origin::Standard, probe.path)?;
+            captured.insert(edge.path);
+            let pending = self.pending.pop_front();
+            debug_assert_eq!(pending.as_ref(), Some(&loaded));
+            let module = self.modules.get_mut(&loaded).unwrap();
+            let mut imports = collect::collect(module, &mut self.host)?;
+            for declaration in &module.declarations {
+                self.host.charge(1)?;
+                if matches!(
+                    declaration.id.kind,
+                    DeclarationKind::Startup | DeclarationKind::Expectation
+                ) {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "installed metadata exceeds its declared scope",
+                    ));
+                }
+            }
+            for import in &mut imports {
+                self.host.charge(1 + edge.dependencies.len())?;
+                let [root, module] = import.path.as_slice() else {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "undeclared installed metadata import",
+                    ));
+                };
+                let Some((_, path)) = edge
+                    .dependencies
+                    .iter()
+                    .find(|(name, _)| *name == module && root == "std" && !import.public)
+                else {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "undeclared installed metadata import",
+                    ));
+                };
+                import.starts.push((
+                    ModuleKey {
+                        origin: Origin::Standard,
+                        path: (*path).into(),
+                    },
+                    1,
+                ));
+                import.path.remove(0); // Same canonical source route as discovery of std::<module>.
+            }
+            self.imports.extend(imports);
+        }
+        Ok(captured)
+    }
+
     fn require_source(&mut self, origin: Origin, path: PathBuf) -> Result<ModuleKey> {
         let probe = self
             .host
@@ -541,6 +813,28 @@ impl Engine {
         }
         self.host.charge(1)?;
         let bytes = self.host.read(&path, true)?;
+        if origin == Origin::Standard
+            && let Some(pinned) = self.installed.and_then(|profile| profile.source(&key.path))
+        {
+            self.host.charge(bytes.len())?;
+            if bytes != pinned {
+                // Preserve SourceChanged if the mismatch is not a stable observation.
+                self.host.replay(
+                    self.request.limits,
+                    self.modules
+                        .values()
+                        .map(|m| (m.path.as_path(), m.snapshot.bytes()))
+                        .chain(std::iter::once((path.as_path(), bytes.as_slice()))),
+                    true,
+                )?;
+                let mut error = failure(
+                    FailureKind::InvalidRequest,
+                    "installed source differs from toolchain pin",
+                );
+                error.path = Some(path);
+                return Err(error);
+            }
+        }
         let identity = path
             .to_str()
             .ok_or_else(|| filesystem::host_error(&path, "source identity is not UTF-8"))?;
