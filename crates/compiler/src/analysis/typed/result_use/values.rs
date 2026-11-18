@@ -64,27 +64,31 @@ impl<'a, 'g> Check<'a, 'g> {
             let aliases = state.aliases_under(descriptor, &[], self.budget)?;
             if let Some(address) = state.alias(descriptor, &[], self.budget)? {
                 self.read_place(node, value, state, address)?;
-            } else if !scalar {
+            } else if !scalar && !aliases.is_empty() {
+                // A borrowed parameter with no tracked local referent does
+                // not own a local occurrence. Possible local aliases do matter.
                 self.pending(node, ResultUseBlocker::Storage)?;
-            }
-            state.take(descriptor, &[], self.budget)?;
-            for (referent, path) in aliases {
-                self.budget.step(1)?;
-                if !scalar {
+                for address in &aliases {
+                    self.budget.reserve(1 + address.1.len())?;
                     state.store(
                         Root::Temporary(node),
                         &[],
-                        Content::PossibleAlias((referent, path)),
+                        Content::PossibleAlias(address.clone()),
                         self.budget,
                     )?;
-                    continue;
                 }
-                // A scalar read cannot carry a reference to an operand-local owner.
-                if let Root::Temporary(origin) = referent {
-                    let span = self.site(operand).span;
-                    if (span.start()..span.end()).contains(&self.site(origin).span.start()) {
-                        let discarded = state.take(referent, &[], self.budget)?;
-                        self.discard(discarded, referent, node, ResultDiscardKind::Expression)?;
+            }
+            state.take(descriptor, &[], self.budget)?;
+            if scalar {
+                for (referent, _) in aliases {
+                    self.budget.step(1)?;
+                    // A scalar read cannot carry an operand-local source.
+                    if let Root::Temporary(origin) = referent {
+                        let span = self.site(operand).span;
+                        if (span.start()..span.end()).contains(&self.site(origin).span.start()) {
+                            let discarded = state.take(referent, &[], self.budget)?;
+                            self.discard(discarded, referent, node, ResultDiscardKind::Expression)?;
+                        }
                     }
                 }
             }

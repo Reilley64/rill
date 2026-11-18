@@ -1062,18 +1062,26 @@ fn installed_receipts(request: &InstalledRequest) {
         assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
         assert!(short.receipt().is_none());
 
-        fs::write(
-            &request.entry,
-            format!("{MAIN}\nfunction unused(input: Result<bool>.Ok): void {{}}\n"),
-        )
-        .unwrap();
-        let rejected = loader::load_installed(request.clone()).unwrap();
-        let report = analyze_typed(&rejected, AnalysisLimits::default());
-        assert_eq!(report.completion(), TypedCompletion::SourceRejected);
-        assert!(report.result_use().unwrap().discards().iter().any(|w| {
-            w.code() == "R0103" && w.origin.span.bytes() == b"input: Result<bool>.Ok"
-        }));
-        assert!(report.receipt().is_none());
+        for (source, origin) in [
+            (
+                "function unused(input: Result<bool>.Ok): void {}",
+                b"input: Result<bool>.Ok".as_slice(),
+            ),
+            (
+                "function pick(ignored: &Result<bool>.Ok, answer: &bool): &bool { return answer; }
+                 function dereference(answer: &bool): bool { return *pick(&Result.Ok(true), answer); }",
+                b"Result.Ok(true)".as_slice(),
+            ),
+        ] {
+            fs::write(&request.entry, format!("{MAIN}\n{source}\n")).unwrap();
+            let rejected = loader::load_installed(request.clone()).unwrap();
+            let report = analyze_typed(&rejected, AnalysisLimits::default());
+            assert_eq!(report.completion(), TypedCompletion::SourceRejected);
+            assert!(report.result_use().unwrap().discards().iter().any(|w| {
+                w.code() == "R0103" && w.origin.span.bytes() == origin
+            }));
+            assert!(report.receipt().is_none());
+        }
 
         fs::write(&request.entry, MAIN).unwrap();
         fs::write(&checks, format!("{SUPPORT}\nexpect 1i32;\n")).unwrap();
