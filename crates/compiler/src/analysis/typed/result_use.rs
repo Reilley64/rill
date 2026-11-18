@@ -543,7 +543,45 @@ impl<'a, 'g> Check<'a, 'g> {
         if let Some(data) = &value.data {
             match data {
                 DataExpression::Propagation(branch) if syntax.kind == NodeKind::Propagate => {
-                    return self.propagate(node, branch, state, depth + 1);
+                    return self.propagate(node, branch, None, state, depth + 1);
+                }
+                DataExpression::Wrapping(wrap) => {
+                    return self.propagate(
+                        node,
+                        &wrap.branch,
+                        Some(wrap.construction.value),
+                        state,
+                        depth + 1,
+                    );
+                }
+                DataExpression::ErrorConstruction(error) => {
+                    let failure = ResultComponent::VariantPayload {
+                        variant: error.failure,
+                        index: 0,
+                    };
+                    let repr = error.representation;
+                    let payload = [failure, ResultComponent::Field(&repr.payload_field.id)];
+                    let retained = [
+                        failure,
+                        ResultComponent::Field(&repr.retained_field.id),
+                        ResultComponent::VariantPayload {
+                            variant: &repr.retained_some.id,
+                            index: 0,
+                        },
+                    ];
+                    let mut alternatives = self.singleton(state)?;
+                    for arg in value.call.as_ref().unwrap().argument_evaluation_order() {
+                        let path = if arg == error.value {
+                            &payload[..]
+                        } else {
+                            &retained[..]
+                        };
+                        alternatives = self.component(alternatives, arg, root, path, depth + 1)?;
+                    }
+                    for state in &mut alternatives {
+                        self.add_source(state, root, node, &[])?;
+                    }
+                    return Ok(alternatives);
                 }
                 DataExpression::Tuple { elements } => {
                     let mut alternatives = self.singleton(state)?;
@@ -728,6 +766,7 @@ impl<'a, 'g> Check<'a, 'g> {
         &mut self,
         node: NodeId,
         branch: &Propagation<'g>,
+        outer: Option<NodeId>,
         state: Residence<'g>,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
@@ -740,7 +779,14 @@ impl<'a, 'g> Check<'a, 'g> {
                 let mut returned = state.fork(self.budget)?;
                 // The existing failure wrapper is forwarded; unrelated storage leaves scope.
                 returned.take(source, &[], self.budget)?;
-                self.exit(returned, node)?;
+                if let Some(outer) = outer {
+                    for mut completed in self.expression(outer, returned, depth + 1)? {
+                        completed.take(Root::Temporary(outer), &[], self.budget)?;
+                        self.exit(completed, node)?;
+                    }
+                } else {
+                    self.exit(returned, node)?;
+                }
             }
             if branch.can_continue {
                 self.move_value(

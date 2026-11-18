@@ -6,3 +6,4 @@ publish.workspace = true
 
 [dependencies]
 rill-collection = { path = "../../runtime/collection" }
+rill-error-storage = { path = "../../runtime/error" }

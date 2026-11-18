@@ -19,7 +19,9 @@ pub use collections::{
     CollectionRepresentation, CollectionStorage, ListRole, ListTraversal,
 };
 pub(super) use core::IntoAdmission;
-pub use core::{OptionRole, ResultRole};
+pub use core::{
+    DisplayProtection, ErrorOperation, ErrorProviders, ErrorRepresentation, OptionRole, ResultRole,
+};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
 pub use numeric::{InfallibleNumericContract, NumericConversion, NumericConversionError};
 pub use ownership::{
@@ -87,8 +89,17 @@ impl<'g> TypedReport<'g> {
     /// Pinned, delivered Rust storage source for the admitted schema. This is not a
     /// lowered representation, a native provider binding, or a protection inventory.
     pub fn error_storage_source(&self) -> Option<&'g std::path::Path> {
-        self.core.result?;
-        self.inventory.graph().error_storage_source()
+        Some(self.error_representation()?.storage_source)
+    }
+
+    /// Capture-bound storage mapping. This establishes no Rill layout or ABI.
+    pub fn error_representation(&self) -> Option<&ErrorRepresentation<'g>> {
+        self.core.result.as_ref()?.representation.as_ref()
+    }
+
+    /// Bound constructor/retention operations, independent of protection clearance.
+    pub fn error_providers(&self) -> Option<&ErrorProviders<'g>> {
+        self.core.result.as_ref()?.providers.as_ref()
     }
 
     /// The validated canonical formatting family, independent of any provider selection.

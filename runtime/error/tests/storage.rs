@@ -28,6 +28,32 @@ fn formats_owned_heterogeneous_causes_with_original_sites() {
 }
 
 #[test]
+fn wrapping_operation_only_evaluates_outer_on_failure() {
+    use rill_error_storage::wrap_result;
+    use std::cell::Cell;
+
+    let visits = Cell::new(0);
+    let outer = || {
+        visits.set(visits.get() + 1);
+        (String::from("outer"), SourceLocation::new("main.rill", 25))
+    };
+    assert!(matches!(
+        wrap_result::<_, _, u32, _>(Ok(true), outer, u32::to_string),
+        Ok(true)
+    ));
+    assert_eq!(visits.get(), 0);
+    let inner = OwnedErr::new(7u32, SourceLocation::new("read.rill", 2));
+    let failure = wrap_result::<bool, _, _, _>(Err(inner), outer, u32::to_string)
+        .err()
+        .unwrap();
+    assert_eq!(visits.get(), 1);
+    assert_eq!(
+        failure.format(String::clone),
+        "outer (main.rill:byte 25)\ncaused by: 7 (read.rill:byte 2)"
+    );
+}
+
+#[test]
 fn deep_chain_releases_each_owned_payload_without_recursive_drop() {
     struct Payload(usize, Arc<Mutex<Vec<usize>>>);
     impl Drop for Payload {

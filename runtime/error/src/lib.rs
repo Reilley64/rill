@@ -99,6 +99,19 @@ impl<E> OwnedErr<E> {
     }
 }
 
+/// Rust backing for the conditional wrapping operation; the caller supplies the checked
+/// inner formatter and constructs the outer value and origin only on the failure edge.
+pub fn wrap_result<T, E, C: Send + Sync + 'static, F: FnOnce() -> (E, SourceLocation)>(
+    input: Result<T, OwnedErr<C>>,
+    outer: F,
+    display: fn(&C) -> String,
+) -> Result<T, OwnedErr<E>> {
+    input.map_err(|inner| {
+        let (value, origin) = outer();
+        OwnedErr::wrapping(value, origin, inner, display)
+    })
+}
+
 struct CauseChain(Option<Box<CauseNode>>);
 
 struct CauseNode {

@@ -13,7 +13,8 @@ export function Ok<T, E = Error>(value: T): Result<T, E> {
     return Result.Ok(value);
 }
 
-// The pinned value identity marks the closed constructor, not an ordinary body.
+// The compiler binds this closed operation to owned error storage.
+// The second value, when supplied, is an owned Err<C>, not an overload.
 export function Err<T, E>(value: E): Result<T, E>;
 
 export function value<E>(wrapped: &Err<E>): &E {

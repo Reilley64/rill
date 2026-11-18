@@ -224,6 +224,27 @@ struct Frame {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
+    pub(in crate::analysis::scalars) fn prove_error_property(
+        &mut self,
+        site: Site<'g>,
+        intrinsic: &'g Intrinsic,
+        subject: Type<'g>,
+    ) -> Work<GoalId> {
+        self.elab.reserve(1)?;
+        let goal = self.issue_goal(
+            GoalJudgment::Requirement {
+                target: RequirementTarget::Predicate(intrinsic),
+                arguments: vec![subject],
+            },
+            site,
+            site,
+            &[],
+            false,
+        )?;
+        self.solve_goal(&goal)?;
+        Ok(goal)
+    }
+
     pub(super) fn issue_goal(
         &mut self,
         judgment: GoalJudgment<'g>,
@@ -237,6 +258,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         let role = match judgment.target() {
             RequirementTarget::Family(id) if self.conversion_family(id).is_some() => {
                 Some(InputPremise::HypotheticalConversionRole)
+            }
+            RequirementTarget::Family(id)
+                if self
+                    .result
+                    .and_then(|role| role.display_protection)
+                    .is_some_and(|protection| &protection.family.id == id) =>
+            {
+                None
             }
             RequirementTarget::Family(id) => match &judgment {
                 GoalJudgment::Determine { inputs, .. }
@@ -372,6 +401,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             return Ok(None);
         };
+        if self.closed_err(&source.family) {
+            self.finding(
+                module,
+                source.signature_node,
+                ScalarFindingKind::InvalidTarget,
+            )?;
+        }
         let Some(family) = self.evidence_family(&source.family)? else {
             return Ok(None);
         };
@@ -1655,6 +1691,21 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Self::site(module, representation.element.node),
             )?;
             return Ok(GoalState::Proved);
+        }
+        if let Some(repr) = self.result.and_then(|r| r.representation) {
+            if **declaration == repr.cause.id
+                || **declaration == repr.source_location.id
+                || **declaration == repr.message.id
+            {
+                return Ok(GoalState::Proved);
+            }
+            if **declaration == repr.wrapper.id
+                && let [payload] = arguments.as_slice()
+            {
+                let source = self.evidence.goals[goal].source;
+                self.property_dependency(goal, intrinsic, payload.clone(), source)?;
+                return Ok(GoalState::Proved);
+            }
         }
         if declaration.module.origin != crate::loader::Origin::Application {
             return Ok(GoalState::Unresolved(GoalBlocker::Representation));

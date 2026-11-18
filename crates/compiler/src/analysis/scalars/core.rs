@@ -3,6 +3,7 @@ use super::*;
 
 mod errors;
 pub(super) use errors::ClosedErr;
+pub use errors::{ErrorConstruction, RetainedError, Wrapping};
 
 #[derive(Clone, Copy, Debug)]
 pub enum PropagationTarget<'g> {

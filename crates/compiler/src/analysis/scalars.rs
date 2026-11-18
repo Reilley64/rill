@@ -120,7 +120,9 @@ pub struct ExpressionFacts<'g> {
     pub read_only_projection: bool,
     pub access: data::Access,
 }
-pub use core::{Propagation, PropagationError, PropagationTarget};
+pub use core::{
+    ErrorConstruction, Propagation, PropagationError, PropagationTarget, RetainedError, Wrapping,
+};
 pub use formatting::FormattingCall;
 pub use iteration::Iteration;
 
@@ -482,7 +484,7 @@ struct Checker<'r, 'g> {
     result: Option<super::typed::ResultRole<'g>>,
     show: Option<&'g Declaration>,
     installed_into: Option<&'r super::typed::IntoAdmission<'g>>,
-    collections: super::typed::CollectionCore<'g>,
+    collections: CollectionCore<'g>,
     native_ownership: &'r [super::typed::OwnershipProtection<'g>],
     data_depth: usize,
     evidence: generics::Evidence<'g>,
@@ -2224,7 +2226,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                             .get(&node)
                             .is_some_and(|c| c.closed_error.is_some())
                         {
-                            self.closed_err_step(&mut inference, node)?;
+                            self.closed_err_step(&mut inference, node, false)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.family) {
                             let id = inference.calls[&node].fact.callee;
                             if self.is_installed_show(id) {
@@ -2263,7 +2265,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         self.postfix_propagation(&mut inference, node, context)?;
                     }
                     NodeKind::Wrap if self.integrated => {
-                        self.wrapping_prerequisites(&mut inference, node, context)?;
+                        self.wrapping_step(&mut inference, node, context)?;
                     }
                     NodeKind::IfExpression => self.conditional(&mut inference, node)?,
                     NodeKind::Prefix(operator) => {
@@ -2325,7 +2327,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 {
                     continue;
                 }
-                if self.advance_list_defaults(&mut inference)? {
+                if self.advance_list_defaults(&mut inference)?
+                    || self.advance_closed_errors(&mut inference)?
+                {
                     continue;
                 }
                 break;
@@ -2356,14 +2360,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                 } else if !slot.blocked
                     && ((slot.propagation.is_none()
-                        && matches!(
-                            module.syntax.nodes[node].kind,
-                            NodeKind::Propagate | NodeKind::Wrap
-                        ))
-                        || inference
-                            .calls
-                            .get(&node)
-                            .is_some_and(|c| c.closed_error.is_some()))
+                        && module.syntax.nodes[node].kind == NodeKind::Propagate)
+                        || (slot.ty.is_none() && module.syntax.nodes[node].kind == NodeKind::Wrap))
                 {
                     slot.pending_core = true;
                     slot.blocked = true;
@@ -2585,7 +2583,21 @@ impl<'r, 'g> Checker<'r, 'g> {
             };
             let flow = self.expression_flow(&inference, node, &children)?;
             let slot = inference.slots.get_mut(&node).unwrap();
-            let (normal, boolean) = if slot.propagation.is_some() && !flow.normal {
+            let (normal, boolean) = if matches!(
+                slot.installed_operation,
+                Some(data::DataExpression::Wrapping(_))
+            ) {
+                (
+                    flow.normal,
+                    boolean.map(|_| {
+                        if flow.normal {
+                            BooleanSet::BOTH
+                        } else {
+                            BooleanSet::EMPTY
+                        }
+                    }),
+                )
+            } else if slot.propagation.is_some() && !flow.normal {
                 (false, boolean.map(|_| BooleanSet::EMPTY))
             } else {
                 (normal, boolean)
@@ -2734,7 +2746,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
         };
         let mut flow = Flow::normal();
-        if n.kind == NodeKind::IfExpression {
+        if let Some(data::DataExpression::Wrapping(wrapping)) =
+            &inference.slots[&node].installed_operation
+        {
+            let left = &inference.slots[&children[0]].flow;
+            flow = self.union(Flow::default(), left)?;
+            flow.normal = left.normal && wrapping.branch.can_continue;
+            if left.normal && wrapping.branch.can_return {
+                let right = &inference.slots[&children[1]].flow;
+                flow.returns |= right.normal;
+                let can_continue = flow.normal;
+                flow = self.union(flow, right)?;
+                flow.normal = can_continue;
+            }
+        } else if n.kind == NodeKind::IfExpression {
             let condition = &inference.slots[&children[0]].flow;
             flow = self.union(Flow::default(), condition)?;
             flow.normal = false;

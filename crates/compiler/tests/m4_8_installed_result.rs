@@ -432,7 +432,14 @@ fn installed_capture_replays_its_error_storage_input() {
     installed(
         "installed_capture_replays_its_error_storage_input",
         |request| {
-            fs::write(&request.entry, "import std::result::Result;").unwrap();
+            fs::write(
+                &request.entry,
+                r#"
+                import std::result::{Result, Err};
+                function fail(): Result<bool, string> { return Err("message"); }
+            "#,
+            )
+            .unwrap();
             let graph = loader::load_installed(request.clone()).unwrap();
             let evidence = analyze_typed(&graph, AnalysisLimits::default());
             assert!(
@@ -447,6 +454,11 @@ fn installed_capture_replays_its_error_storage_input() {
                 .unwrap()
                 .join("../lib/rill/runtime/aarch64-apple-darwin/error.rs");
             fs::write(&artifact, "// not the pinned implementation\n").unwrap();
+            assert!(
+                analyze_typed(&graph, AnalysisLimits::default())
+                    .error_providers()
+                    .is_some()
+            );
             assert_eq!(
                 loader::validate_inputs(&graph, Limits::default())
                     .unwrap_err()
@@ -462,6 +474,17 @@ fn installed_capture_replays_its_error_storage_input() {
             let report = analyze_typed(&absent, AnalysisLimits::default());
             assert!(report.result_role().is_some());
             assert!(report.error_storage_source().is_none());
+            assert!(report.error_providers().is_none());
+            assert!(
+                report
+                    .bodies()
+                    .obligations()
+                    .iter()
+                    .any(|o| o.site.module.origin == Origin::Application
+                        && o.site.span.bytes() == br#"Err("message")"#
+                        && o.reason
+                            == compiler::analysis::scalars::ScalarUnsupported::CoreAdmission)
+            );
             assert!(
                 report
                     .core_blockers()
@@ -486,14 +509,14 @@ fn installed_closed_error_checks_do_not_invent_wrappers() {
                 let _ = input ? true;
                 return Result.Ok(true);
             }
-            function pendingOuter(input: Result<bool, i32>): Result<bool, i32> {
+            function wrapNumeric(input: Result<bool, i32>): Result<bool, i32> {
                 let _ = input ? 7;
                 return Result.Ok(true);
             }
         ").unwrap();
             let graph = loader::load_installed(request).unwrap();
             let report = analyze_typed(&graph, AnalysisLimits::default());
-            use compiler::analysis::scalars::{ScalarFindingKind, ScalarUnsupported};
+            use compiler::analysis::scalars::ScalarFindingKind;
             let role = report.result_role().unwrap();
             assert!(
                 role.constructor.is_some(),
@@ -526,15 +549,483 @@ fn installed_closed_error_checks_do_not_invent_wrappers() {
                 .iter()
                 .filter(|o| o.site.module == &app.key)
                 .collect();
-            assert_eq!(pending.len(), 2, "{pending:?}");
-            for obligation in pending {
-                assert_eq!(obligation.reason, ScalarUnsupported::CoreAdmission);
+            assert!(pending.is_empty(), "{pending:?}");
+        },
+    );
+}
+
+#[test]
+fn installed_aliased_closed_err_constructs_with_context() {
+    installed(
+        "installed_aliased_closed_err_constructs_with_context",
+        |request| {
+            fs::write(
+                &request.entry,
+                r#"
+            import std::result::{Result as Outcome, Err as Make};
+            import std::error::display;
+            function fail(): Outcome<bool, string> { return Make("failed"); }
+            function numeric(): Outcome<bool, i32> { return Make<bool, i32>(17); }
+            function inferred(): void { let _ = Make<bool>("independent"); }
+            function generic<E>(payload: E): Outcome<bool, E> where display(E) {
+                return Make(payload);
+            }
+        "#,
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let app = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application)
+                    .unwrap();
+                use compiler::analysis::scalars::{data::DataExpression, generics::GoalState};
+                let exact = AnalysisLimits {
+                    max_work: report.statistics().work,
+                    ..AnalysisLimits::default()
+                };
+                assert_eq!(
+                    analyze_typed(&graph, exact).statistics(),
+                    report.statistics()
+                );
+                assert_eq!(
+                    analyze_typed(
+                        &graph,
+                        AnalysisLimits {
+                            max_work: exact.max_work - 1,
+                            ..exact
+                        }
+                    )
+                    .completion(),
+                    ScalarFailureKind::ResourceLimit
+                );
+                let role = report.result_role().unwrap();
+                for (node, syntax) in app
+                    .syntax
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, n)| n.kind == NodeKind::Call)
+                {
+                    let fact = report
+                        .bodies()
+                        .node(app, node)
+                        .unwrap()
+                        .expect("checked closed Err");
+                    let NodeFactKind::Expression(value) = &fact.kind else {
+                        panic!("typed expression");
+                    };
+                    let Some(DataExpression::ErrorConstruction(error)) = &value.data else {
+                        panic!("closed Err fact");
+                    };
+                    assert_eq!(error.origin.start(), syntax.span.start());
+                    assert_eq!(error.origin.snapshot(), &app.snapshot);
+                    assert!(error.retained.is_none());
+                    assert_eq!(
+                        value.call.as_ref().unwrap().callee,
+                        &role.constructor.unwrap().id
+                    );
+                    let display = report.bodies().goal(&error.display).unwrap();
+                    assert_eq!(display.state, GoalState::Proved);
+                    if syntax.span.bytes() == b"Make(payload)" {
+                        assert!(display.selection.is_none());
+                        assert_eq!(display.dependencies.len(), 1, "generic assumption");
+                    } else {
+                        assert_eq!(
+                            display
+                                .selection
+                                .as_ref()
+                                .unwrap()
+                                .implementation
+                                .module
+                                .path,
+                            "error.rill"
+                        );
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_wrap_preserves_actual_cause_exact_e_and_lazy_control() {
+    installed(
+        "installed_wrap_preserves_actual_cause_exact_e_and_lazy_control",
+        |request| {
+            let source = r#"
+            import std::result::{Result, Err as WrapErr};
+            import std::error::{Error, display, error};
+            type Inner = { code: u32; };
+            implement display(problem: &Inner): string { return "inner"; }
+            function wrap(input: Result<bool, Inner>): Result<i32> {
+                let flag = input /* original operator */ ? error("outer");
+                return Result.Ok(if (flag) 1i32 else 0i32);
+            }
+            function stop(): never { return stop(); }
+            function neverOuter(input: Result<bool, Inner>): Result<i32> {
+                let flag = input ? stop();
+                return Result.Ok(if (flag) 1i32 else 0i32);
+            }
+            function two(inner: WrapErr<Inner>): Result<bool, string> {
+                return WrapErr<bool, string, Inner>("outer", inner);
+            }
+            function inject(inner: WrapErr<Inner>): Result<bool, Inner> {
+                return Result.Err(inner);
+            }
+        "#;
+            fs::write(&request.entry, source).unwrap();
+            for test_mode in [false, true] {
+                use compiler::analysis::scalars::{data::DataExpression, generics::GoalState};
+                use compiler::analysis::typed::ErrorOperation;
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                assert!(
+                    report.bodies().findings().is_empty(),
+                    "{:?}",
+                    report
+                        .bodies()
+                        .findings()
+                        .iter()
+                        .map(|f| (f.kind, f.site.span.bytes()))
+                        .collect::<Vec<_>>()
+                );
+                let role = report.result_role().unwrap();
+                let representation = report.error_representation().unwrap();
+                assert_eq!(representation.wrapper.id, role.wrapper.id);
+                assert_eq!(representation.cause.id, role.cause.id);
+                assert_eq!(
+                    role.display_protection.unwrap().family.id,
+                    role.display.unwrap().id
+                );
+                let app = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application)
+                    .unwrap();
+                let inner_display = graph
+                    .implementations()
+                    .iter()
+                    .find(|i| i.declaration.module == app.key)
+                    .unwrap();
+                let mut wrapping = Vec::new();
+                let mut explicit = None;
+                let mut raw = None;
+                for (node, syntax) in app.syntax.nodes.iter().enumerate() {
+                    let Some(facts) = report.bodies().node(app, node).unwrap() else {
+                        continue;
+                    };
+                    let NodeFactKind::Expression(value) = &facts.kind else {
+                        continue;
+                    };
+                    match &value.data {
+                        Some(DataExpression::Wrapping(w)) => wrapping.push((facts, value, w)),
+                        Some(DataExpression::ErrorConstruction(c)) => explicit = Some(c),
+                        Some(DataExpression::Construction(c))
+                            if syntax.span.bytes() == b"Result.Err(inner)" =>
+                        {
+                            raw = Some(c)
+                        }
+                        _ => (),
+                    }
+                }
+                assert_eq!(wrapping.len(), 2, "wrapping facts");
+                for (facts, value, w) in wrapping {
+                    assert!(
+                        matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+                    );
+                    assert!(facts.flow.normal);
+                    assert!(
+                        !report
+                            .result_use()
+                            .unwrap()
+                            .pending()
+                            .iter()
+                            .any(|p| p.site.module == &app.key && p.site.node == facts.site.node)
+                    );
+                    assert_eq!(w.branch.failure, &role.err.id);
+                    assert_eq!(w.construction.operation, ErrorOperation::Wrap);
+                    assert_eq!(w.construction.origin.bytes(), b"?");
+                    assert_eq!(w.construction.origin.snapshot(), &app.snapshot);
+                    assert!(
+                        matches!(w.construction.payload.as_ref(), TypeTerm::Nominal { declaration, .. } if *declaration == &role.default_error.id)
+                    );
+                    let outer = report.bodies().goal(&w.construction.display).unwrap();
+                    assert_eq!(outer.state, GoalState::Proved);
+                    assert_ne!(
+                        outer.selection.as_ref().unwrap().implementation,
+                        &inner_display.declaration
+                    );
+                    let cause = w.construction.retained.as_ref().unwrap();
+                    assert!(
+                        matches!(cause.wrapper.as_ref(), TypeTerm::Nominal { declaration, arguments } if *declaration == &role.wrapper.id && matches!(&arguments[..], [c] if matches!(c.as_ref(), TypeTerm::Nominal { declaration, .. } if declaration.module == app.key)))
+                    );
+                    let selected = report.bodies().goal(&cause.display).unwrap();
+                    assert_eq!(
+                        selected.selection.as_ref().unwrap().implementation,
+                        &inner_display.declaration
+                    );
+                    for goal in [&cause.no_borrow, &cause.sendable, &cause.shareable] {
+                        assert_eq!(report.bodies().goal(goal).unwrap().state, GoalState::Proved);
+                    }
+                    if facts.site.span.bytes().ends_with(b"stop()") {
+                        assert!(facts.flow.diverges && !facts.flow.returns);
+                    } else {
+                        assert!(facts.flow.returns && !facts.flow.diverges);
+                    }
+                }
+                let explicit = explicit.expect("checked two-value Err");
+                assert_eq!(explicit.operation, ErrorOperation::Retain);
+                assert_eq!(
+                    explicit.origin.start(),
+                    source.find("WrapErr<bool, string, Inner>(").unwrap()
+                );
+                assert!(explicit.retained.is_some());
+                assert!(
+                    raw.is_some(),
+                    "raw injection is an ordinary construction without a new origin"
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_closed_error_keeps_independent_rejections() {
+    installed(
+        "installed_closed_error_keeps_independent_rejections",
+        |request| {
+            fs::write(
+                &request.entry,
+                r#"
+            import std::result::{Result, Err as Build};
+            import std::option::Option;
+            import std::error::display;
+            type NoDisplay = {};
+            type Borrowed = { text: &string; };
+            implement display(e: &Borrowed): string { return "borrowed"; }
+            function missingT(): void { let _ = Build("without T"); }
+            function missingWidth(): void { let _ = Build<bool>(471); }
+            function mismatchDefault(): Result<bool> { return Build("not Error"); }
+            function wrongCenvelope(inner: Build<string>): Result<bool, string> {
+                return Build<bool, string, i32>("new", inner);
+            }
+            function borrowedEnvelope(inner: &Build<string>): Result<bool, string> {
+                return Build("new", inner);
+            }
+            function borrowedPayload(inner: Build<Borrowed>): Result<bool, string> {
+                return Build("new", inner);
+            }
+            function noOuterDisplay(input: Result<bool, string>): Result<bool, NoDisplay> {
+                let bit = input ? NoDisplay {};
+                return Result.Ok(bit);
+            }
+            function wrongTarget(input: Result<bool, string>): Option<bool> {
+                let _ = input ? "outer";
+                return Option.None;
+            }
+            function borrowedLeft(input: &Result<bool, string>): Result<bool, string> {
+                let bit = input ? "borrowed result";
+                return Result.Ok(bit);
+            }
+            function optionLeft(input: Option<bool>): Result<bool, string> {
+                let bit = input ? "not a Result";
+                return Result.Ok(bit);
+            }
+        "#,
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                use compiler::analysis::scalars::ScalarFindingKind::*;
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let findings = report
+                    .bodies()
+                    .findings()
+                    .iter()
+                    .filter(|f| f.site.module.origin == Origin::Application)
+                    .map(|f| (f.kind, std::str::from_utf8(f.site.span.bytes()).unwrap()))
+                    .collect::<Vec<_>>();
+                for expected in [
+                    (InsufficientContext, r#"Build("without T")"#),
+                    (NumericContext, "471"),
+                    (TypeMismatch, r#""not Error""#),
+                    (TypeMismatch, "inner"),
+                    (InvalidTarget, "inner"),
+                    (MissingRequirement, "inner"),
+                    (MissingRequirement, "input ? NoDisplay {}"),
+                    (InvalidTarget, r#"input ? "outer""#),
+                    (InvalidTarget, r#"input ? "borrowed result""#),
+                    (InvalidTarget, r#"input ? "not a Result""#),
+                ] {
+                    assert!(
+                        findings.contains(&expected),
+                        "missing {expected:?}; got {findings:?}"
+                    );
+                }
+                let app = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application)
+                    .unwrap();
+                for (node, syntax) in app.syntax.nodes.iter().enumerate() {
+                    if syntax.kind == NodeKind::Wrap
+                        || syntax.kind == NodeKind::Call
+                            && syntax.span.bytes().starts_with(b"Build")
+                    {
+                        assert!(report.bodies().node(app, node).unwrap().is_none());
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_closed_err_does_not_dispatch_a_written_registration() {
+    installed(
+        "installed_closed_err_does_not_dispatch_a_written_registration",
+        |request| {
+            fs::write(
+                &request.entry,
+                r#"
+            import std::result::{Result, Err as Build};
+            import std::error::display;
+            type Local = {};
+            implement display(e: &Local): string { return "local"; }
+            implement<T> Build<T, Local>(e: Local): Result<T, Local> {
+                return Build(e);
+            }
+            function attempt(): Result<bool, Local> { return Build(Local {}); }
+        "#,
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let role = report.result_role().unwrap();
+                assert!(report.error_representation().is_some());
+                assert!(!role.constructor_protected);
+                assert_eq!(
+                    report.error_providers().unwrap().constructor.id,
+                    role.constructor.unwrap().id
+                );
+                let app = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application)
+                    .unwrap();
+                let node = app
+                    .syntax
+                    .nodes
+                    .iter()
+                    .position(|n| n.kind == NodeKind::Call && n.span.bytes() == b"Build(Local {})")
+                    .unwrap();
+                assert!(report.bodies().node(app, node).unwrap().is_none());
                 assert!(
                     report
                         .bodies()
-                        .node(app, obligation.site.node)
-                        .unwrap()
-                        .is_none()
+                        .obligations()
+                        .iter()
+                        .any(|o| o.site.module == &app.key
+                            && o.site.node == node
+                            && o.reason
+                                == compiler::analysis::scalars::ScalarUnsupported::CoreProtection)
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_err_does_not_retry_display_after_failed_winner_requirement() {
+    installed(
+        "installed_err_does_not_retry_display_after_failed_winner_requirement",
+        |request| {
+            fs::write(
+                &request.entry,
+                r#"
+            import std::result::{Result, Err as Build};
+            import std::error::display;
+            type Local<T> = { payload: T; };
+            implement<T> display(e: &Local<T>): string { return "fallback"; }
+            implement display(e: &Local<bool>): string where noBorrow(&string) { return "winner"; }
+            function attempt(e: Local<bool>): Result<bool, Local<bool>> { return Build(e); }
+        "#,
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                use compiler::analysis::scalars::{ScalarFindingKind, generics::GoalState};
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let app = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application)
+                    .unwrap();
+                let node = app
+                    .syntax
+                    .nodes
+                    .iter()
+                    .position(|n| n.kind == NodeKind::Call && n.span.bytes() == b"Build(e)")
+                    .unwrap();
+                let winner = graph
+                    .implementations()
+                    .iter()
+                    .filter(|i| i.declaration.module == app.key)
+                    .find(|i| {
+                        app.syntax.nodes[i.signature_node]
+                            .span
+                            .bytes()
+                            .windows(11)
+                            .any(|part| part == b"Local<bool>")
+                    })
+                    .unwrap();
+                let goal = report
+                    .bodies()
+                    .goals()
+                    .iter()
+                    .find(|g| {
+                        g.site.module == &app.key && g.site.node == node && g.selection.is_some()
+                    })
+                    .expect("selected display");
+                assert_eq!(
+                    goal.selection.as_ref().unwrap().implementation,
+                    &winner.declaration
+                );
+                assert_eq!(goal.state, GoalState::Disproved);
+                assert!(goal.premise.is_none());
+                assert!(report.bodies().node(app, node).unwrap().is_none());
+                assert!(
+                    report
+                        .bodies()
+                        .findings()
+                        .iter()
+                        .any(|f| f.site.module == &app.key
+                            && f.site.node == node
+                            && f.kind == ScalarFindingKind::MissingRequirement)
                 );
             }
         },
@@ -573,6 +1064,7 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
         "option.rill",
         "result.rill",
         "error.rill",
+        "format.rill",
         "collection.rill",
     ] {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();

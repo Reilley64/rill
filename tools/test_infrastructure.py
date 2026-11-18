@@ -91,7 +91,8 @@ class WorkspaceTests(unittest.TestCase):
         metadata = json.loads(subprocess.check_output(
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
             cwd=doctor.ROOT, text=True))
-        allowed = {"rill-collection": set(), "rill-error-storage": set(), "compiler": {"rill-collection"},
+        allowed = {"rill-collection": set(), "rill-error-storage": set(),
+                   "compiler": {"rill-collection", "rill-error-storage"},
                    "ide": {"compiler"}, "lsp": {"ide"},
                    "codegen-llvm": {"compiler"}, "cli": {"compiler", "lsp", "codegen-llvm"}}
         packages = {package["name"]: package for package in metadata["packages"]}

@@ -73,6 +73,8 @@ pub enum DataExpression<'g> {
     },
     Match(Box<Match<'g>>),
     Propagation(Box<Propagation<'g>>),
+    ErrorConstruction(Arc<ErrorConstruction<'g>>),
+    Wrapping(Arc<Wrapping<'g>>),
     /// Canonical show calls in hole evaluation order.
     Interpolation(Arc<[FormattingCall<'g>]>),
     PrimitiveShow(crate::analysis::typed::Primitive),

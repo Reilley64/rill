@@ -1,6 +1,65 @@
 //! Capture-local nominal roles. These checks do not admit opaque storage or actions.
 use super::*;
 use crate::analysis::MemberType;
+use rill_error_storage::{Error, OwnedErr, SourceLocation};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorOperation {
+    Construct,
+    Retain,
+    Wrap,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ErrorProviders<'g> {
+    pub constructor: &'g Declaration,
+    pub storage_source: &'g std::path::Path,
+}
+
+impl ErrorOperation {
+    pub fn rust_binding(self) -> &'static str {
+        match self {
+            Self::Construct => "rill_error_storage::OwnedErr::new",
+            Self::Retain => "rill_error_storage::OwnedErr::wrapping",
+            Self::Wrap => "rill_error_storage::wrap_result",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ErrorRepresentation<'g> {
+    pub storage_source: &'g std::path::Path,
+    pub wrapper: &'g Declaration,
+    pub payload_parameter: &'g Declaration,
+    pub payload_field: &'g Declaration,
+    pub retained_field: &'g Declaration,
+    pub retained_some: &'g Declaration,
+    pub source_location: &'g Declaration,
+    pub cause: &'g Declaration,
+    pub message: &'g Declaration,
+}
+
+// Validate the bindings at their actual Rust signatures, including a primary
+// E with no erasure bounds and a separately bounded retained C.
+const fn bind_error_operations<
+    T,
+    E,
+    C: Send + Sync + 'static,
+    F: FnOnce() -> (E, SourceLocation),
+>() {
+    let _: fn(&str, u64) -> SourceLocation = SourceLocation::new;
+    let _: fn(String) -> Error = Error::new;
+    let _: fn(E, SourceLocation) -> OwnedErr<E> = OwnedErr::new;
+    let _: Retain<E, C> = OwnedErr::wrapping;
+    let _: Wrap<T, E, C, F> = rill_error_storage::wrap_result;
+    assert_sealed::<Error>();
+    assert_sealed::<SourceLocation>();
+    assert_sealed::<OwnedErr<()>>();
+}
+const fn assert_sealed<T: Send + Sync + 'static>() {}
+type Retain<E, C> = fn(E, SourceLocation, OwnedErr<C>, fn(&C) -> String) -> OwnedErr<E>;
+type Wrap<T, E, C, F> = fn(Result<T, OwnedErr<C>>, F, fn(&C) -> String) -> Result<T, OwnedErr<E>>;
+const _: () = bind_error_operations::<(), (), (), fn() -> ((), SourceLocation)>();
 
 #[derive(Clone, Copy, Debug)]
 pub struct ResultRole<'g> {
@@ -14,6 +73,19 @@ pub struct ResultRole<'g> {
     pub cause: &'g Declaration,
     /// Value-namespace role, separate from the wrapper type and all providers.
     pub constructor: Option<&'g Declaration>,
+    pub display: Option<&'g Declaration>,
+    /// Closed constructor accepts no ordinary registrations, for either arity.
+    pub constructor_protected: bool,
+    pub display_protection: Option<DisplayProtection<'g>>,
+    pub providers: Option<ErrorProviders<'g>>,
+    pub representation: Option<ErrorRepresentation<'g>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DisplayProtection<'g> {
+    /// Display is ordinary dispatch. RFC 0008 specifies no protected actions for
+    /// its single borrowed input; this clearance is not inherited by its callees.
+    pub family: &'g Declaration,
 }
 
 fn arguments_of<'a, 'g>(term: &'a Type<'g>, owner: &Declaration) -> Option<&'a [Type<'g>]> {
@@ -137,7 +209,57 @@ pub(in crate::analysis::typed) fn check_result<'g>(
         }
         _ => None,
     };
-    budget.reserve(1)?;
+    let constructor_protected = if let Some(constructor) = constructor {
+        let mut no_registrations = true;
+        for registration in graph.implementations() {
+            budget.step(1)?;
+            no_registrations &= registration.family != constructor.id;
+        }
+        no_registrations
+    } else {
+        false
+    };
+    let display = match export(
+        graph,
+        error_module,
+        Namespace::ValueFunction,
+        "display",
+        budget,
+    )? {
+        Some(candidate) if display_matches(inventory, candidate, budget)? => Some(candidate),
+        _ => None,
+    };
+    let display_protection = match display {
+        Some(family)
+            if crate::analysis::ordinary::source::family(inventory, &family.id, budget)?
+                .is_ok() =>
+        {
+            budget.reserve(1)?;
+            Some(DisplayProtection { family })
+        }
+        _ => None,
+    };
+    let representation = graph
+        .error_storage_source()
+        .map(|storage_source| ErrorRepresentation {
+            storage_source,
+            wrapper,
+            payload_parameter: payload_type.declaration,
+            payload_field: payload.declaration,
+            retained_field: retained.declaration,
+            retained_some: option.some,
+            source_location: site,
+            cause,
+            message: error,
+        });
+    let providers =
+        constructor
+            .zip(graph.error_storage_source())
+            .map(|(constructor, storage_source)| ErrorProviders {
+                constructor,
+                storage_source,
+            });
+    budget.reserve(1 + usize::from(representation.is_some()) + usize::from(providers.is_some()))?;
     Ok(Some(ResultRole {
         declaration: result,
         ok: ok.declaration,
@@ -148,7 +270,41 @@ pub(in crate::analysis::typed) fn check_result<'g>(
         source_location: site,
         cause,
         constructor,
+        constructor_protected,
+        display,
+        display_protection,
+        providers,
+        representation,
     }))
+}
+
+fn display_matches(
+    inventory: &OrdinaryAnalysis<'_>,
+    candidate: &Declaration,
+    budget: &mut Budget,
+) -> Work<bool> {
+    budget.step(3)?;
+    if candidate.id.kind != DeclarationKind::Family
+        || inventory.declaration_unusable(&candidate.id)
+        || !inventory
+            .headers()
+            .get(&candidate.id)
+            .is_some_and(|header| header.defaults.is_empty() && header.requirements.is_empty())
+    {
+        return Ok(false);
+    }
+    let Some(family) = inventory.captured_family(&candidate.id) else {
+        return Ok(false);
+    };
+    let (DeclarationShape::Function { parameters, result }, [e]) =
+        (&family.header.shape, family.header.binders.as_slice())
+    else {
+        return Ok(false);
+    };
+    Ok(
+        matches!(parameters.as_slice(), [payload] if matches!(payload.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if binder_is(referent, e)))
+            && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "string"),
+    )
 }
 
 fn constructor_matches(

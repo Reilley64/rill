@@ -8,8 +8,10 @@ use crate::analysis::{
 use crate::loader::{DeclarationKind, Module, Namespace, Target};
 
 mod result;
-pub use result::ResultRole;
 pub(super) use result::check_result;
+pub use result::{
+    DisplayProtection, ErrorOperation, ErrorProviders, ErrorRepresentation, ResultRole,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct OptionRole<'g> {

@@ -1,3 +1,4 @@
+import std::format::show;
 export import std::result::{value, intoValue};
 
 export type Error = { private message: string };
@@ -15,9 +16,24 @@ export function error(message: string): Error {
 export function display<E>(value: &E): string;
 
 implement display(value: &Error): string {
-    return copy(&value.message);
+    return show(&value.message);
 }
 
 implement display(value: &string): string {
-    return copy(value);
+    return show(value);
 }
+
+implement display(value: &bool): string { return show(value); }
+implement display(value: &char): string { return show(value); }
+implement display(value: &i8): string { return show(value); }
+implement display(value: &i16): string { return show(value); }
+implement display(value: &i32): string { return show(value); }
+implement display(value: &i64): string { return show(value); }
+implement display(value: &i128): string { return show(value); }
+implement display(value: &u8): string { return show(value); }
+implement display(value: &u16): string { return show(value); }
+implement display(value: &u32): string { return show(value); }
+implement display(value: &u64): string { return show(value); }
+implement display(value: &u128): string { return show(value); }
+implement display(value: &f32): string { return show(value); }
+implement display(value: &f64): string { return show(value); }
