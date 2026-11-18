@@ -219,6 +219,23 @@ Standards and Spec independently reviewed `aac4916` against `50a4aa5644d360fe3d2
 
 No workflow changed; `check:ci` was not run. No Rill program ran.
 
+## Scalar `Result` postfix forwarding
+
+The [#76 Result checkpoint](https://github.com/Reilley64/rill/issues/76#issuecomment-6985567187) covers owned canonical `Result<bool, i32>` and `Result<i32, i32>` in whole name or discard `let` initializers. It uses the installed wrapper representation and proves no matching outer disposer for the parent or either variant. The [unchanged-forwarding decision](https://github.com/Reilley64/rill/issues/29) and [RFC 0008 postfix rule](../../../docs/rfcs/0008-errors-propagation-and-caused-by-wrapping.md#postfix-propagation-and-normal-return) preserve the existing wrapper, origin, and retained cause. Only the success type may differ. The later [#23 decision](https://github.com/Reilley64/rill/issues/23#issuecomment-6872129850) keeps retained causes sealed and borrow-free. The checker does not inspect the cause or create a new error.
+
+`propagation::result_postfix_forwards_existing_failure_before_cleanup` first returned `Incomplete` for `paths` after M4 issued a receipt. Both installed modes pass these cases at `2b1436380cd4e57979479b1372757f58cd09d514`:
+
+| Cases | Observed compiler and MIR obligations |
+| --- | --- |
+| `paths` | Evaluate `pass(input)` once. On `Err`, transfer the existing wrapper into the different success type, export it, then clean the local owner and the parameter not already disposed. No constructor or explicit disposal runs on that arm. On `Ok`, transfer the bool and continue to explicit disposal and an `i32` result. |
+| `knownError`, `knownOk` | Follow only the permitted edge and preserve its cleanup obligations. |
+| `rejected`, `needsDrop` | Reusing the consumed result rejects with `R0200`. Discarding a result that may still own an opaque wrapper is incomplete; acknowledgement is not disposal. Neither publishes MIR. |
+| Exact and one-short limits | The exact work and entry budgets pass. Reducing either by one returns no MIR. |
+
+Standalone M4 preflights with `Result<bool, i32>` propagating to `Result<bool, i64>` or with `&Result<bool, i32>` as the operand rejected in both modes with `TypeMismatch` and `InvalidTarget`, respectively. These are typed rejections with no receipt, not M5 diagnostics.
+
+All four local gates and `git diff --check` passed at `2b14363` on macOS AArch64 with a short `TMPDIR` (431 compiler tests, 447 workspace tests). The staged M4 replay issued both receipts. Independent Standards and Spec reviews were requested at that revision. New wrapper construction, remaining opaque wrapper disposal, general payload types, infix wrapping, embedded propagation, and cancellation stay outside this slice. No workflow changed; `check:ci` was not run. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
