@@ -2,6 +2,43 @@
 use super::*;
 
 impl<'r, 'g> Checker<'r, 'g> {
+    pub(super) fn propagating_pipe(module: &Module, node: NodeId) -> bool {
+        let syntax = &module.syntax.nodes[node];
+        syntax.kind == NodeKind::Pipe
+            && module.syntax.nodes[syntax.children[1]].kind
+                == NodeKind::PipeStep { propagate: true }
+    }
+
+    pub(super) fn pending_propagation(
+        &mut self,
+        module: &'g Module,
+        node: NodeId,
+        context: &Context<'r, 'g>,
+    ) -> Work<()> {
+        let result = if let Some(arrow) = &context.arrow_return {
+            arrow.expected.as_ref()
+        } else if let Some(signature) = context.signature {
+            let DeclarationShape::Function { result, .. } = &signature.shape else {
+                unreachable!()
+            };
+            Some(result)
+        } else {
+            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+            return Ok(());
+        };
+        if result.is_some_and(|ty| {
+            !matches!(
+                ty.as_ref(),
+                TypeTerm::Nominal { .. } | TypeTerm::Parameter { .. }
+            )
+        }) {
+            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+        } else {
+            self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn prepare_pipe(
         &mut self,
         inference: &mut Inference<'g>,
@@ -32,16 +69,19 @@ impl<'r, 'g> Checker<'r, 'g> {
             bound.insert(0, input);
         }
         let invocation = self.value_callee(module, callee, context)?;
-        if step.kind == (NodeKind::PipeStep { propagate: true }) {
-            if context.signature.is_none() && context.arrow_return.is_none() {
-                self.finding(module, children[1], ScalarFindingKind::InvalidTarget)?;
-            } else {
-                self.defer(module, children[1], ScalarUnsupported::CoreAdmission)?;
-            }
-            inference.slots.get_mut(&node).unwrap().blocked = true;
-        } else if invocation {
-            self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
-            inference.slots.get_mut(&node).unwrap().blocked = true;
+        if Self::propagating_pipe(module, node) {
+            self.pending_propagation(module, children[1], context)?;
+        }
+        if invocation {
+            self.elab.reserve(2 + bound.len())?;
+            inference.value_calls.insert(node);
+            inference.pipe_invocations.insert(
+                node,
+                PipeInvocation {
+                    receiver: callee,
+                    arguments: Arc::from(bound.as_slice()),
+                },
+            );
         } else if let Some(mut call) =
             self.prepare_named_call(module, node, callee, &bound, context)?
         {

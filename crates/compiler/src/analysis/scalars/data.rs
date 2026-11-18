@@ -582,6 +582,11 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let (refined, _) = self.refined(path.as_ref(), ty, context)?;
         ty = refined;
+        if self.type_unavailable(&ty, 1)? {
+            self.defer(module, node, ScalarUnsupported::DeclarationPrerequisite)?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        }
         let parent = if let TypeTerm::Variant { parent, .. } = ty.as_ref() {
             parent
         } else {

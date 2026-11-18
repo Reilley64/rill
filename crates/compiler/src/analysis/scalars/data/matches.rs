@@ -213,7 +213,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                             &ty
                         };
                         let visible = match parent.as_ref() {
-                            TypeTerm::Nominal { declaration, .. } => {
+                            TypeTerm::Nominal { declaration, .. }
+                                if !self.type_unavailable(&ty, 1)? =>
+                            {
                                 declaration.module == module.key
                                     || self.input.facts.declarations[declaration]
                                         .declaration
@@ -412,9 +414,23 @@ impl<'r, 'g> Checker<'r, 'g> {
                     scope.views.push(view.clone());
                 }
             }
-            let irrefutable = self.coverage(module, &value.ty, vec![pattern.clone()])?;
             let guard =
                 (a.children.len() == 3).then(|| module.syntax.nodes[a.children[1]].children[0]);
+            let Some(irrefutable) = self.coverage(module, arm, &value.ty, vec![pattern.clone()])?
+            else {
+                patterns_complete = false;
+                if let Some(guard) = guard {
+                    let boolean = self.primitive("bool")?;
+                    self.expression(module, guard, Some(boolean), &scope)?;
+                }
+                let body = *a.children.last().unwrap();
+                if module.syntax.nodes[body].kind == NodeKind::Block {
+                    self.statement(module, body, self.data_depth + 1, &mut scope)?;
+                } else {
+                    self.expression(module, body, expected.clone(), &scope)?;
+                }
+                continue;
+            };
             if guard.is_none() {
                 self.elab.reserve(1)?;
                 rows.push(pattern.clone());
@@ -458,7 +474,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             ));
         }
         let coverage = if patterns_complete {
-            Some(self.coverage(module, &value.ty, rows)?)
+            self.coverage(module, node, &value.ty, rows)?
         } else {
             None
         };
@@ -497,8 +513,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             let available = if possible {
                 !self
-                    .coverage_within(module, &value.ty, &handled, restriction)?
-                    .exhaustive()
+                    .coverage_within(module, node, &value.ty, &handled, restriction)?
+                    .is_some_and(|remaining| !remaining.exhaustive())
             } else {
                 false
             };

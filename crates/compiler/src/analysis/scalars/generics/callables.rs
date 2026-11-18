@@ -46,7 +46,7 @@ pub(in crate::analysis::scalars) struct ArrowHead<'g> {
 #[derive(Clone)]
 pub(in crate::analysis::scalars) struct ArrowReturn<'g> {
     pub node: NodeId,
-    expected: Option<Type<'g>>,
+    pub(in crate::analysis::scalars) expected: Option<Type<'g>>,
     contributions: Rc<RefCell<Vec<(NodeId, Type<'g>)>>>,
 }
 
@@ -783,7 +783,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         let path = &module.syntax.nodes[syntax.children[0]].children;
         if let &[name] = path.as_slice() {
             let spelling = std::str::from_utf8(module.syntax.nodes[name].span.bytes()).unwrap();
-            return Ok(self.local(context, spelling)?.is_some());
+            let lexical = self.elab.lexical_declaration(
+                module,
+                callee,
+                Namespace::ValueFunction,
+                spelling,
+            )?;
+            return Ok(self.shadowing_local(context, spelling, lexical)?.is_some());
         }
         Ok(false)
     }
@@ -820,7 +826,18 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<()> {
         let module = inference.module;
         let syntax = &module.syntax.nodes[node];
-        let receiver = syntax.children[0];
+        let pipe_arguments = inference
+            .pipe_invocations
+            .get(&node)
+            .map(|pipe| pipe.arguments.clone());
+        let (receiver, arguments) = if let Some(arguments) = &pipe_arguments {
+            (
+                inference.pipe_invocations[&node].receiver,
+                arguments.as_ref(),
+            )
+        } else {
+            (syntax.children[0], &syntax.children[1..])
+        };
         let slot = &inference.slots[&receiver];
         let Some(ty) = slot.ty.as_ref() else {
             return Ok(());
@@ -831,7 +848,6 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         let mut assumption = None;
         let ty = if matches!(ty.as_ref(), TypeTerm::Parameter { .. }) {
-            let arguments = &syntax.children[1..];
             self.elab.reserve(arguments.len())?;
             let actual: Vec<_> = arguments
                 .iter()
@@ -890,7 +906,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
         }
-        if parameters.len() != syntax.children.len() - 1 {
+        if parameters.len() != arguments.len() {
             self.finding(module, node, ScalarFindingKind::Arity)?;
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
@@ -901,7 +917,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.copy_path(slot.path.as_ref())?
         };
         let mode = *mode;
-        for (&argument, parameter) in syntax.children[1..].iter().zip(parameters) {
+        for (&argument, parameter) in arguments.iter().zip(parameters) {
             self.establish(inference, argument, parameter.clone(), true)?;
         }
         self.elab.reserve(1)?;

@@ -140,8 +140,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             if let Some(pattern) = pattern
                 && before == self.marks()
+                && let Some(coverage) = self.coverage(module, node, &ty, vec![pattern])?
             {
-                let coverage = self.coverage(module, &ty, vec![pattern])?;
                 if !coverage.exhaustive() {
                     self.finding(module, n.children[0], ScalarFindingKind::RefutableBinding)?;
                     self.retain_coverage(module, n.children[0], &ty, &coverage)?;
@@ -379,6 +379,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(depth);
         let n = &module.syntax.nodes[node];
+        if self.type_unavailable(original, 1)? {
+            self.defer(module, node, ScalarUnsupported::DeclarationPrerequisite)?;
+            return Ok(None);
+        }
         if n.kind == NodeKind::Wildcard {
             self.elab.reserve(1)?;
             return Ok(Some(Arc::new(Pattern::Any)));
@@ -1002,19 +1006,21 @@ impl<'r, 'g> Checker<'r, 'g> {
     pub(super) fn coverage(
         &mut self,
         module: &'g Module,
+        node: NodeId,
         ty: &Type<'g>,
         patterns: Vec<Arc<Pattern<'g>>>,
-    ) -> Work<Coverage<'g>> {
+    ) -> Work<Option<Coverage<'g>>> {
         self.elab.reserve(1)?;
-        self.coverage_within(module, ty, &patterns, Arc::new(Pattern::Any))
+        self.coverage_within(module, node, ty, &patterns, Arc::new(Pattern::Any))
     }
     pub(super) fn coverage_within(
         &mut self,
         module: &'g Module,
+        node: NodeId,
         ty: &Type<'g>,
         patterns: &[Arc<Pattern<'g>>],
         restriction: Arc<Pattern<'g>>,
-    ) -> Work<Coverage<'g>> {
+    ) -> Work<Option<Coverage<'g>>> {
         self.elab.reserve(2 + patterns.len() * 2)?;
         let mut stack = vec![Matrix {
             columns: vec![Column {
@@ -1037,11 +1043,15 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             }
             if state.columns.is_empty() {
-                return Ok(Coverage {
+                return Ok(Some(Coverage {
                     witness: Some(state.trail),
-                });
+                }));
             }
             let column = &state.columns[0];
+            if self.type_unavailable(&column.ty, 1)? {
+                self.defer(module, node, ScalarUnsupported::DeclarationPrerequisite)?;
+                return Ok(None);
+            }
             for (constructor, fields) in self.domain(module, column, &state.rows)?.into_iter().rev()
             {
                 self.elab.step(1 + state.rows.len())?;
@@ -1128,9 +1138,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         .iter()
                         .all(|c| matches!(c.restriction.as_ref(), Pattern::Any))
                 {
-                    return Ok(Coverage {
+                    return Ok(Some(Coverage {
                         witness: Some(trail),
-                    });
+                    }));
                 }
                 self.elab.reserve(1)?;
                 stack.push(Matrix {
@@ -1140,6 +1150,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                 });
             }
         }
-        Ok(Coverage { witness: None })
+        Ok(Some(Coverage { witness: None }))
     }
 }

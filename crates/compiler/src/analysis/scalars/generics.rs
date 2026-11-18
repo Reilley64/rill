@@ -298,52 +298,15 @@ impl<'g> GenericReport<'g> {
     }
 }
 
-// The shared expression checker can block bad call signatures locally. Invalid nominal
-// representations still block this body pass: its field and pattern rules need them.
-fn body_prerequisites(
-    elab: &mut Analyzer<'_>,
-    input: &OrdinaryAnalysis<'_>,
-    integrated: bool,
-) -> Work<bool> {
+fn body_prerequisites(input: &OrdinaryAnalysis<'_>) -> bool {
     let types = input.type_facts();
-    let sites = types.findings().map(|f| f.span).chain(
-        types
-            .obligations()
-            .filter(|o| {
-                !matches!(
-                    o.reason,
-                    Unsupported::GenericDefault | Unsupported::Requirements
-                )
-            })
-            .map(|o| o.span),
-    );
-    'sites: for site in sites {
-        if !integrated {
-            return Ok(false);
-        }
-        for module in input.graph().modules() {
-            elab.step(1)?;
-            if module.snapshot.id() != site.snapshot().id() {
-                continue;
-            }
-            for declaration in &module.declarations {
-                elab.step(1)?;
-                if declaration.id.kind != DeclarationKind::Function
-                    || declaration.scope.is_some()
-                    || types.declarations.contains_key(&declaration.id)
-                {
-                    continue;
-                }
-                let header = module.syntax.nodes[declaration.node].children[0];
-                let span = &module.syntax.nodes[header].span;
-                if span.start() <= site.start() && site.end() <= span.end() {
-                    continue 'sites;
-                }
-            }
-        }
-        return Ok(false);
-    }
-    Ok(true)
+    types.findings.is_empty()
+        && !types.obligations().any(|o| {
+            !matches!(
+                o.reason,
+                Unsupported::GenericDefault | Unsupported::Requirements
+            )
+        })
 }
 
 /// Check supported written bodies without treating a pending ordinary role as admission.
@@ -454,9 +417,7 @@ fn analyze_bodies<'g>(
                 .reserve(1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len())?;
             checker.elab.facts.uses.insert(*key, use_.clone());
         }
-        if (integrated || input.declaration_issues().is_empty())
-            && body_prerequisites(&mut checker.elab, input, integrated)?
-        {
+        if integrated || (input.declaration_issues().is_empty() && body_prerequisites(input)) {
             checker.run()?;
         }
         checker.annotation_nodes()

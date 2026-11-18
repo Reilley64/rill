@@ -97,6 +97,139 @@ fn missing_core_does_not_hide_independent_errors_inside_or_after_operations() {
 }
 
 #[test]
+fn invalid_payload_does_not_hide_private_siblings_or_unrelated_bodies() {
+    let fixture = Fixture::new(
+        "type Hidden = { x: bool }; export enum E { A([Hidden,Missing]), B(Hidden), C(Missing) } function bad(): bool { function invalid(e: E): void { } return 1i32; }",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let spans: Vec<_> = report
+        .public_interface_findings()
+        .iter()
+        .map(|f| f.site.span.bytes())
+        .collect();
+    assert_eq!(spans, [b"Hidden", b"Hidden"]);
+    assert!(
+        report
+            .bodies()
+            .findings()
+            .iter()
+            .any(|f| f.kind == ScalarFindingKind::TypeMismatch)
+    );
+}
+
+#[test]
+fn blocked_destructuring_and_guard_do_not_hide_later_errors_or_prove_fallthrough() {
+    let fixture = Fixture::new(
+        "function halt<T>(x: T): never; function probe(): void { let [a] = [true]; let knownLater: bool = 1i32; let pending = a; guard true else { halt(1i32); } guard true else { let normal = true; } } let [b] = [false]; let alsoWrong: bool = 2i32; let pending = b;",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let findings = report.bodies().findings();
+    assert_eq!(
+        findings.iter().map(|f| f.kind).collect::<Vec<_>>(),
+        [
+            ScalarFindingKind::TypeMismatch,
+            ScalarFindingKind::GuardFallthrough,
+            ScalarFindingKind::TypeMismatch
+        ]
+    );
+}
+
+#[test]
+fn pipe_uses_callable_values_and_checks_arguments_before_propagation() {
+    let fixture = Fixture::new(
+        "type Result = { x: i32 }; function sink(x: i32): i32 { return x; } function probe(f: (i32) => i32): i32 { return 1 |> f; } function bad(): void { true |> sink?; false?; } function pending(r: Result): Result { let flag: bool = 3 |> sink?; return r; }",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let pipe = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Pipe)
+        .unwrap();
+    let facts = report.bodies().node(module, pipe).unwrap().unwrap();
+    assert!(facts.callable.as_ref().unwrap().invocation.is_some());
+    let expected = [
+        (ScalarFindingKind::TypeMismatch, &b"true"[..]),
+        (ScalarFindingKind::InvalidTarget, &b"sink?"[..]),
+        (ScalarFindingKind::InvalidTarget, &b"false?"[..]),
+    ];
+    for (kind, span) in expected {
+        assert!(
+            report
+                .bodies()
+                .findings()
+                .iter()
+                .any(|f| f.kind == kind && f.site.span.bytes() == span),
+            "missing {kind:?} at {span:?}"
+        );
+    }
+    assert_eq!(report.bodies().findings().len(), expected.len());
+    assert!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::CoreAdmission
+                && o.syntax == NodeKind::PipeStep { propagate: true })
+    );
+}
+
+#[test]
+fn a_nested_named_function_shadows_an_outer_callable_value() {
+    let fixture = Fixture::new(
+        "function probe(f: (bool) => bool): i32 { { function f<T>(x: T): T { return x; } return f(1i32); } }",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let call = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    let NodeFactKind::Expression(fact) = &report.bodies().node(module, call).unwrap().unwrap().kind
+    else {
+        panic!("call expression")
+    };
+    let nested = module
+        .declarations
+        .iter()
+        .find(|d| d.id.kind == DeclarationKind::Function && d.name.as_deref() == Some("f"))
+        .unwrap();
+    assert_eq!(fact.call.as_ref().unwrap().callee, &nested.id);
+    assert!(report.bodies().findings().is_empty());
+}
+
+#[test]
+fn resource_exhaustion_does_not_erase_independent_lexical_findings() {
+    let fixture = Fixture::new("function probe(): void { let text = `text ${missing}`; }");
+    let graph = fixture.load(false);
+    // This budget permits name lookup but exhausts during expression checking.
+    let limited = analyze_typed(
+        &graph,
+        AnalysisLimits {
+            max_entries: 123,
+            ..AnalysisLimits::default()
+        },
+    );
+    assert_eq!(limited.completion(), ScalarFailureKind::ResourceLimit);
+    assert!(limited.bodies().findings().iter().any(|f| f.kind == ScalarFindingKind::MissingValue && f.site.span.bytes() == b"missing"));
+}
+
+#[test]
 fn nested_declarations_keep_lexical_identity_without_runtime_capture() {
     let fixture = Fixture::new(
         "type Item = { outer: bool };\n\

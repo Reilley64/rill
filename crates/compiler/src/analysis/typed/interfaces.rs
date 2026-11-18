@@ -1,7 +1,7 @@
 use super::*;
 use crate::analysis::ordinary::{RequirementTarget, selection, shape};
 use crate::analysis::scalars::Site;
-use crate::analysis::{Declaration, DeclarationShape, Module, NodeId, Payload, Type, TypeTerm};
+use crate::analysis::{Declaration, Module, NodeId, NodeKind, Type, TypeTerm};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublicInterfaceKind {
@@ -89,6 +89,33 @@ struct Interfaces<'a, 'g> {
     findings: &'a mut Vec<PublicInterfaceFinding<'g>>,
 }
 
+impl<'g> Interfaces<'_, 'g> {
+    fn payload_type(
+        &mut self,
+        owner: &'g Declaration,
+        module: &'g Module,
+        node: NodeId,
+    ) -> Work<()> {
+        let uses = &self.inventory.type_facts().uses;
+        self.budget.reserve(1)?;
+        let mut pending = vec![node];
+        while let Some(node) = pending.pop() {
+            let syntax = &module.syntax.nodes[node];
+            self.budget
+                .step(1 + uses.len().checked_ilog2().unwrap_or(0) as usize)?;
+            if let Some(ty) = uses.get(&(&module.key, syntax.span.start(), node)) {
+                Position::new(owner, module, node, PublicInterfaceKind::Payload)
+                    .check_type(self, &ty.ty)?;
+            } else {
+                // A failed enclosing type expression can still contain resolved type uses.
+                self.budget.reserve(syntax.children.len())?;
+                pending.extend(syntax.children.iter().rev());
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(super) fn check<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     budget: &mut Budget,
@@ -138,39 +165,23 @@ pub(super) fn check<'g>(
                     }
                 }
             }
-            if let Some(facts) = inventory.type_facts().declarations.get(&declaration.id)
-                && let DeclarationShape::Enum { variants } = &facts.shape
-            {
-                for variant in variants {
+            if declaration.id.kind == crate::loader::DeclarationKind::Enum {
+                let nodes = &module.syntax.nodes;
+                for &child in &nodes[declaration.node].children {
                     check.budget.step(1)?;
-                    match &variant.payload {
-                        Payload::Unit => (),
-                        Payload::Tuple(types) => {
-                            let payload = module.syntax.nodes[variant.declaration.node].children[1];
-                            for (&node, ty) in
-                                module.syntax.nodes[payload].children.iter().zip(types)
-                            {
-                                Position::new(
-                                    declaration,
-                                    module,
-                                    node,
-                                    PublicInterfaceKind::Payload,
-                                )
-                                .check_type(&mut check, ty)?;
-                            }
-                        }
-                        Payload::Record(fields) => {
-                            for field in fields {
-                                let node = module.syntax.nodes[field.declaration.node].children[1];
-                                Position::new(
-                                    declaration,
-                                    module,
-                                    node,
-                                    PublicInterfaceKind::Payload,
-                                )
-                                .check_type(&mut check, &field.ty)?;
-                            }
-                        }
+                    if nodes[child].kind != NodeKind::EnumVariant {
+                        continue;
+                    }
+                    let Some(&payload) = nodes[child].children.get(1) else {
+                        continue;
+                    };
+                    for &component in &nodes[payload].children {
+                        let node = if nodes[payload].kind == NodeKind::RecordPayload {
+                            nodes[component].children[1]
+                        } else {
+                            component
+                        };
+                        check.payload_type(declaration, module, node)?;
                     }
                 }
             }

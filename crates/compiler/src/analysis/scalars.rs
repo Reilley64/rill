@@ -414,6 +414,10 @@ struct PreparedCall<'g> {
     infer: bool,
     family: bool,
 }
+struct PipeInvocation {
+    receiver: NodeId,
+    arguments: Arc<[NodeId]>,
+}
 struct Inference<'g> {
     module: &'g Module,
     slots: BTreeMap<NodeId, Slot<'g>>,
@@ -427,6 +431,7 @@ struct Inference<'g> {
     function_values: BTreeMap<NodeId, FunctionValueFacts<'g>>,
     callable_contexts: BTreeMap<NodeId, Arc<CallableContext<'g>>>,
     value_calls: BTreeSet<NodeId>,
+    pipe_invocations: BTreeMap<NodeId, PipeInvocation>,
     pending_invocations: BTreeSet<NodeId>,
     data: BTreeMap<NodeId, data::PreparedData<'g>>,
     data_nodes: BTreeSet<NodeId>,
@@ -570,6 +575,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             .iter()
             .any(|f| f.site.module == &module.key && f.site.node == node && f.kind == kind)
         {
+            // Prepay the recovery scan if an integrated expression runs out of budget.
+            if self.integrated {
+                self.elab.step(1)?;
+            }
             self.elab.reserve(1)?;
             self.facts.findings.push(ScalarFinding {
                 site: Self::site(module, node),
@@ -776,6 +785,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                 ScalarUnsupported::DeclarationPrerequisite,
             )?;
             inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        }
+        if self.integrated && Self::propagating_pipe(inference.module, node) {
+            // The invocation's result is not its unwrapped result. Neither can
+            // supply context to the other before the core role is admitted.
             return Ok(());
         }
         let previous = if expected {
@@ -1297,6 +1311,20 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         Ok(None)
     }
+    fn shadowing_local(
+        &mut self,
+        context: &Context<'r, 'g>,
+        name: &str,
+        lexical: Option<&'g Declaration>,
+    ) -> Work<Option<(usize, Local<'g>)>> {
+        let local = self.local(context, name)?;
+        if let (Some(declaration), Some((_, binding))) = (lexical, &local)
+            && declaration.scope > self.elab.target_declaration(binding.declaration)?.scope
+        {
+            return Ok(None);
+        }
+        Ok(local)
+    }
     fn value_binding(
         &mut self,
         key: &ModuleKey,
@@ -1329,12 +1357,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             let lexical =
                 self.elab
                     .lexical_declaration(module, node, Namespace::ValueFunction, first)?;
-            if let Some((depth, local)) = self.local(context, first)? {
-                if let Some(declaration) = lexical
-                    && declaration.scope > self.elab.target_declaration(local.declaration)?.scope
-                {
-                    return Ok(Some(Value::Declaration(declaration, Vec::new())));
-                }
+            if let Some((depth, local)) = self.shadowing_local(context, first, lexical)? {
                 if depth < context.inherited_scopes {
                     self.finding(module, node, ScalarFindingKind::StartupCapture)?;
                     return Ok(None);
@@ -1710,11 +1733,19 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
     fn runtime_children(&mut self, inference: &Inference<'g>, node: NodeId) -> Work<Vec<NodeId>> {
         let n = &inference.module.syntax.nodes[node];
-        if n.kind == NodeKind::Pipe
-            && let Some(call) = inference.calls.get(&node)
-        {
-            self.elab.reserve(call.fact.arguments.len())?;
-            return Ok(call.fact.argument_evaluation_order().collect());
+        if n.kind == NodeKind::Pipe {
+            if let Some(call) = inference.calls.get(&node) {
+                self.elab.reserve(call.fact.arguments.len())?;
+                return Ok(call.fact.argument_evaluation_order().collect());
+            }
+            if let Some(call) = inference.pipe_invocations.get(&node) {
+                self.elab.reserve(1 + call.arguments.len())?;
+                let input = n.children[0];
+                return Ok(std::iter::once(input)
+                    .chain(std::iter::once(call.receiver))
+                    .chain(call.arguments.iter().copied().filter(|&arg| arg != input))
+                    .collect());
+            }
         }
         let children = if let Some(prepared) = inference.data.get(&node) {
             &prepared.inputs[..]
@@ -1744,8 +1775,24 @@ impl<'r, 'g> Checker<'r, 'g> {
         let result = self.expression_work(module, root, expected, context, finding_start);
         self.arrow_premise = premise;
         if result.is_err() && self.input.ordinary.is_some() {
-            // An interrupted expression has not classified its staged findings by premise.
-            self.facts.findings.truncate(finding_start);
+            // An interrupted expression has not classified context-dependent findings.
+            // Keep diagnostics that do not depend on which type equations settle.
+            let mut end = finding_start;
+            if self.integrated {
+                for read in finding_start..self.facts.findings.len() {
+                    if matches!(
+                        self.facts.findings[read].kind,
+                        ScalarFindingKind::MissingValue
+                            | ScalarFindingKind::PrivateValue
+                            | ScalarFindingKind::StartupCapture
+                            | ScalarFindingKind::InvalidTarget
+                    ) {
+                        self.facts.findings.swap(end, read);
+                        end += 1;
+                    }
+                }
+            }
+            self.facts.findings.truncate(end);
         }
         result
     }
@@ -1774,6 +1821,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             function_values: BTreeMap::new(),
             callable_contexts: BTreeMap::new(),
             value_calls: BTreeSet::new(),
+            pipe_invocations: BTreeMap::new(),
             pending_invocations: BTreeSet::new(),
             data: BTreeMap::new(),
             data_nodes: BTreeSet::new(),
@@ -1845,11 +1893,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 NodeKind::Literal => (),
                 NodeKind::Propagate | NodeKind::Wrap if self.integrated => {
-                    if context.signature.is_none() && context.arrow_return.is_none() {
-                        self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
-                    } else {
-                        self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
-                    }
+                    self.pending_propagation(module, node, context)?;
                     inference.slots.get_mut(&node).unwrap().blocked = true;
                     for &child in &syntax.children {
                         self.elab.reserve(2)?;
@@ -2161,6 +2205,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             if !slot.blocked {
                 self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
                 slot.blocked = true;
+            }
+        }
+        if self.integrated {
+            for (&node, slot) in &mut inference.slots {
+                self.elab.step(1)?;
+                slot.blocked |= Self::propagating_pipe(module, node);
             }
         }
         let mut unavailable = BTreeSet::new();
@@ -2537,10 +2587,11 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
     fn scope_may_be_missing_bindings(&self, module: &Module, node: NodeId) -> bool {
         let syntax = &module.syntax.nodes[node];
-        self.input.ordinary.is_none()
-            || (matches!(syntax.kind, NodeKind::Binding { .. })
-                && simple_name(module, syntax.children[0]).is_none()
-                && module.syntax.nodes[syntax.children[0]].kind != NodeKind::Wildcard)
+        !self.integrated
+            && (self.input.ordinary.is_none()
+                || (matches!(syntax.kind, NodeKind::Binding { .. })
+                    && simple_name(module, syntax.children[0]).is_none()
+                    && module.syntax.nodes[syntax.children[0]].kind != NodeKind::Wildcard))
     }
     fn source_scope_ready(&mut self, module: &'g Module, root: NodeId) -> Work<bool> {
         if self.integrated {
@@ -2600,8 +2651,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             NodeKind::Function if self.integrated => {
                 let declaration = self.elab.declaration_at(module, node)?;
-                let typed = &self.input.facts.declarations[&declaration.id];
-                self.nested_body(module, typed, context, depth + 1)?;
+                if let Some(typed) = self.input.facts.declarations.get(&declaration.id) {
+                    self.nested_body(module, typed, context, depth + 1)?;
+                } else {
+                    self.defer(module, node, ScalarUnsupported::DeclarationPrerequisite)?;
+                }
             }
             NodeKind::Record | NodeKind::Enum if self.integrated => (),
             NodeKind::Binding { mutable } => {
