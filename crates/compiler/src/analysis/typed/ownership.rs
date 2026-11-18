@@ -127,6 +127,26 @@ impl Report<'_> {
     pub(super) fn representations_complete(&self) -> bool {
         self.representations.len() == OWNERS.len()
     }
+
+    pub(super) fn providers_complete(&self, budget: &mut Budget) -> Work<bool> {
+        budget.step(self.protection.len())?;
+        // A validated owner emits two rules; prohibited copy is not a
+        // provider obligation and does not stand in for a required action.
+        Ok(self.protection.len() == 2 * OWNERS.len()
+            && self.protection.iter().all(|scope| match scope.rule {
+                OwnershipRule::Required(_) => scope.provider.is_some(),
+                OwnershipRule::ProhibitedCopy => scope.provider.is_none(),
+            }))
+    }
+
+    pub(super) fn protection_complete(&self, budget: &mut Budget) -> Work<bool> {
+        budget.step(self.protection.len())?;
+        Ok(self.protection.len() == 2 * OWNERS.len()
+            && self
+                .protection
+                .iter()
+                .all(|scope| scope.coverage != OwnershipCoverage::Pending))
+    }
 }
 
 struct Owner(

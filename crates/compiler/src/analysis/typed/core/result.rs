@@ -257,8 +257,10 @@ pub(in crate::analysis::typed) fn check_result<'g>(
     };
     let display_protection = match display {
         Some(family)
-            if crate::analysis::ordinary::source::family(inventory, &family.id, budget)?
-                .is_ok() =>
+            if crate::analysis::ordinary::source::admitted_family(
+                inventory, &family.id, budget,
+            )?
+            .is_ok() =>
         {
             budget.reserve(1)?;
             Some(DisplayProtection { family })

@@ -6,8 +6,10 @@ use crate::analysis::{
 };
 use crate::loader::{DeclarationKind, Module, Namespace, Target};
 
+mod inventories;
 mod result;
 mod scalar;
+pub(super) use inventories::{InventoryCompleteness, check_inventories};
 pub(super) use result::check_result;
 pub use result::{
     DisplayProtection, ErrorBridge, ErrorOperation, ErrorProviders, ErrorRepresentation, ResultRole,
@@ -47,8 +49,7 @@ pub(super) fn roles_complete(
     budget: &mut Budget,
 ) -> Work<bool> {
     let graph = inventory.graph();
-    let (Some(keys), Some(option), Some(result), Some(list), Some(copy), Some(dispose)) = (
-        graph.installed_source_keys(),
+    let (Some(option), Some(result), Some(list), Some(copy), Some(dispose)) = (
         core.option,
         core.result,
         collections.list,
@@ -71,10 +72,8 @@ pub(super) fn roles_complete(
     {
         return Ok(false);
     }
-    for key in keys {
-        if pinned_module(graph, key, budget)?.is_none() {
-            return Ok(false);
-        }
+    if !inventories::pinned_scope(graph, budget)? {
+        return Ok(false);
     }
     let facade = pinned_module(graph, "std.rill", budget)?.unwrap();
     use Namespace::{TypeModule, ValueFunction};

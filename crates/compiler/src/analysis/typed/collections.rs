@@ -88,6 +88,25 @@ const OPERATIONS: [(CollectionOperation, &str, &str); 13] = {
 };
 
 impl<'g> CollectionCore<'g> {
+    pub(super) fn providers_complete(&self, budget: &mut Budget) -> Work<bool> {
+        budget.step(self.protection.len())?;
+        // The validated List role also binds construction and index directly
+        // to the linked storage operations, outside the ordinary families.
+        Ok(self.list.is_some()
+            && self
+                .protection
+                .iter()
+                .all(|scope| scope.is_some_and(|scope| scope.provider.is_some())))
+    }
+
+    pub(super) fn protection_complete(&self, budget: &mut Budget) -> Work<bool> {
+        budget.step(self.protection.len())?;
+        Ok(self
+            .protection
+            .iter()
+            .all(|scope| scope.is_some_and(|scope| scope.coverage != OwnershipCoverage::Pending)))
+    }
+
     pub(super) fn check(
         &mut self,
         inventory: &OrdinaryAnalysis<'g>,

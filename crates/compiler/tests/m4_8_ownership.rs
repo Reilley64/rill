@@ -109,6 +109,7 @@ fn installed_ownership_requires_the_built_archive() {
         partial_collection(&request);
         combined_installed_capture(&request);
         closed_roles_without_native_providers(&root, &request);
+        complete_provider_and_protection_scope(&request);
         installed_receipts(&request);
 
         let facade = root.join("lib/rill/std/std.rill");
@@ -635,6 +636,111 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
             uses.discards()
                 .iter()
                 .all(|w| w.origin.module.origin != Origin::Application)
+        );
+    }
+}
+
+fn complete_provider_and_protection_scope(request: &InstalledRequest) {
+    const IMPORTS: &str = "
+        import std::{List, Result};
+        import std::bytes::Bytes;
+        import std::shared::Shared as Counted;
+        import std::mutex::LockGuard;
+        import std::channel::{Sender, Receiver};
+        import std::iter::iterate;
+        import std::convert::into;
+    ";
+    for test_mode in [false, true] {
+        let request = InstalledRequest {
+            test_mode,
+            ..request.clone()
+        };
+        fs::write(&request.entry, IMPORTS).unwrap();
+        let graph = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        for blocker in [CoreBlocker::Providers, CoreBlocker::Protection] {
+            assert!(!report.core_blockers().contains(&blocker), "{blocker:?}");
+        }
+        let exact = AnalysisLimits {
+            max_work: report.statistics().work,
+            ..AnalysisLimits::default()
+        };
+        assert_eq!(
+            analyze_typed(&graph, exact).core_blockers(),
+            report.core_blockers()
+        );
+        let exhausted = analyze_typed(
+            &graph,
+            AnalysisLimits {
+                max_work: report.bodies().statistics().work,
+                ..AnalysisLimits::default()
+            },
+        );
+        assert_eq!(exhausted.completion(), TypedCompletion::ResourceLimit);
+        assert!(exhausted.core_blockers().contains(&CoreBlocker::Providers));
+        assert!(exhausted.core_blockers().contains(&CoreBlocker::Protection));
+
+        fs::write(
+            &request.entry,
+            format!("{IMPORTS}\nfunction ignores(value: Result<bool>): void {{}}"),
+        )
+        .unwrap();
+        let discards = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&discards, AnalysisLimits::default());
+        assert!(!report.core_blockers().contains(&CoreBlocker::Providers));
+        assert!(!report.core_blockers().contains(&CoreBlocker::Protection));
+        assert!(
+            report
+                .result_use()
+                .unwrap()
+                .discards()
+                .iter()
+                .any(|discard| {
+                    discard.origin.module.origin == Origin::Application && discard.code() == "R0103"
+                })
+        );
+
+        fs::write(
+            &request.entry,
+            format!("{IMPORTS}\nimplement copy(value: &Missing): Missing {{}}"),
+        )
+        .unwrap();
+        let unknown = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&unknown, AnalysisLimits::default());
+        assert!(!report.core_blockers().contains(&CoreBlocker::Providers));
+        assert!(report.core_blockers().contains(&CoreBlocker::Protection));
+        assert!(report.ownership_overlaps().is_empty());
+
+        fs::write(
+            &request.entry,
+            format!(
+                "{IMPORTS}\n            type Payload<T> = {{ item: T; }}
+            implement<T> copy(value: &Counted<Payload<T>>): Counted<Payload<T>> {{}}
+        "
+            ),
+        )
+        .unwrap();
+        let overlap = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&overlap, AnalysisLimits::default());
+        assert!(!report.core_blockers().contains(&CoreBlocker::Providers));
+        assert!(report.receipt().is_none());
+        assert_eq!(report.ownership_overlaps()[0].code(), "R0500");
+
+        fs::write(
+            &request.entry,
+            format!("{IMPORTS}\nimplement into<u8>(value: i32): u8 {{ return 0u8; }}"),
+        )
+        .unwrap();
+        let gap = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&gap, AnalysisLimits::default());
+        assert!(!report.core_blockers().contains(&CoreBlocker::Providers));
+        assert!(report.receipt().is_none());
+        assert!(
+            report
+                .into_registration_issues()
+                .unwrap()
+                .iter()
+                .any(|issue| issue.kind.code() == Some("R0311"))
         );
     }
 }

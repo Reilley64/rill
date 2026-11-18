@@ -62,6 +62,7 @@ pub struct TypedReport<'g> {
     collections: CollectionCore<'g>,
     collection_overlaps: Vec<CollectionOverlap<'g>>,
     completion: TypedCompletion,
+    protected_violation: bool,
     core_blockers: Vec<CoreBlocker>,
     statistics: Statistics,
     not_performed: Vec<Stage>,
@@ -411,6 +412,21 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     } else {
         None
     };
+    let mut core_inventories = core::InventoryCompleteness::default();
+    if completion != ScalarFailureKind::ResourceLimit
+        && core::check_inventories(
+            &inventory,
+            &core,
+            &collections,
+            &ownership,
+            &collection_overlaps,
+            &mut budget,
+            &mut core_inventories,
+        )
+        .is_err()
+    {
+        completion = ScalarFailureKind::ResourceLimit;
+    }
     let roles_complete = if completion == ScalarFailureKind::ResourceLimit {
         false
     } else {
@@ -428,8 +444,8 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         && ownership.representations_complete();
     let core_blockers = [
         (!roles_complete, CoreBlocker::Roles),
-        (true, CoreBlocker::Providers),
-        (true, CoreBlocker::Protection),
+        (!core_inventories.providers, CoreBlocker::Providers),
+        (!core_inventories.protection, CoreBlocker::Protection),
         (!representation_complete, CoreBlocker::Representation),
     ]
     .into_iter()
@@ -474,6 +490,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         collections,
         collection_overlaps,
         completion: TypedCompletion::ResourceLimit,
+        protected_violation: core_inventories.protected_violation,
         core_blockers,
         statistics: budget.statistics,
         not_performed,

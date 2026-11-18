@@ -41,11 +41,10 @@ pub(super) fn finish(report: &TypedReport<'_>, budget: &mut Budget) -> Work<Type
         }
         return Ok(Incomplete);
     }
-    let mut rejected = !bodies.findings().is_empty()
+    let mut rejected = report.protected_violation
+        || !bodies.findings().is_empty()
         || bodies.annotations().findings().next().is_some()
         || !report.public_interface_findings.is_empty()
-        || !report.ownership.overlaps.is_empty()
-        || !report.collection_overlaps.is_empty()
         || !uses.discards().is_empty();
     for issue in report.inventory.declaration_issues() {
         budget.step(1)?;
@@ -63,10 +62,6 @@ pub(super) fn finish(report: &TypedReport<'_>, budget: &mut Budget) -> Work<Type
             }
             rejected = true;
         }
-    }
-    for region in &report.core.primitives.protection {
-        budget.step(1)?;
-        rejected |= !region.overlaps.is_empty();
     }
     if !accounted_for(report.inventory.graph(), bodies, budget)? {
         return Ok(Incomplete);

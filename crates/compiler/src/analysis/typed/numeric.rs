@@ -2,7 +2,7 @@
 use super::collections::private_bridge;
 use super::core::{export, pinned_module, unconditional_declaration};
 use super::*;
-use crate::analysis::conversions::{self, ConversionFamily, RoleHypothesis};
+use crate::analysis::conversions::{self, ConversionFamily, RegistrationIssueKind, RoleHypothesis};
 use crate::analysis::{Binding, Declaration, DeclarationShape, Payload, Type};
 use crate::loader::{DeclarationId, Implementation, Module, Namespace, Target};
 use crate::parser::NodeKind;
@@ -34,6 +34,77 @@ impl<'g> ConversionCore<'g> {
             && self.try_into.is_some()
             && self.numeric_error.is_some()
             && self.bytes.is_some()
+    }
+
+    pub(super) fn providers_complete(&self, budget: &mut Budget) -> Work<bool> {
+        use ConversionProvider::*;
+        if !self.roles_complete() || !check_numeric_matrix(budget)? {
+            return Ok(false);
+        }
+        let expected = numeric_primitives().map(|p| Parse(DecimalParse(p))).chain([
+            CodePoint,
+            UnicodeScalar,
+            TextBytes,
+            DecodeOwned,
+            DecodeView,
+            TakeList,
+            CopyList,
+            TakeBytes,
+            CopyBytes,
+        ]);
+        for operation in expected {
+            budget.step(1 + self.registered.len())?;
+            if self
+                .registered
+                .values()
+                .filter(|entry| entry.operation == operation)
+                .count()
+                != 1
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    pub(super) fn protection_complete(&self, budget: &mut Budget) -> Work<bool> {
+        if !self.roles_complete() || !check_numeric_matrix(budget)? {
+            return Ok(false);
+        }
+        // The identity and numeric gates use the same admission rule as the
+        // selected calls. Check even unused registrations; unknown domains
+        // cannot establish that the protected pairs are untouched.
+        for family in self.families.values() {
+            budget.step(1 + family.registrations.len() + family.issues.len())?;
+            if family
+                .issues
+                .iter()
+                .any(|issue| issue.kind == conversions::RegistrationIssueKind::IncompleteSignature)
+                || family
+                    .registrations
+                    .iter()
+                    .any(|registration| registration.alternatives.is_none())
+            {
+                return Ok(false);
+            }
+        }
+        Ok(self.families.len() == 2)
+    }
+
+    pub(super) fn protected_violation(&self, budget: &mut Budget) -> Work<bool> {
+        for family in self.families.values() {
+            budget.step(1 + family.issues.len())?;
+            if family.issues.iter().any(|issue| {
+                matches!(
+                    issue.kind,
+                    RegistrationIssueKind::ProtectedIdentity
+                        | RegistrationIssueKind::ProtectedNumericPair
+                )
+            }) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub(super) fn check(
@@ -700,6 +771,29 @@ impl NumericConversion {
             Bool | Char | String => unreachable!("numeric operation has a numeric destination"),
         })
     }
+}
+
+// The same implemented operation covers every fallible numeric pair. An
+// infallible gap is closed by the explicit contract, not by lack of an operation.
+fn check_numeric_matrix(budget: &mut Budget) -> Work<bool> {
+    for to in numeric_primitives() {
+        for from in numeric_primitives() {
+            budget.step(1)?;
+            if InfallibleNumericContract::for_pair(to, from).is_none()
+                || NumericConversion::for_pair(to, from).is_none()
+            {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn numeric_primitives() -> impl Iterator<Item = Primitive> {
+    Primitive::ALL
+        .iter()
+        .copied()
+        .filter(|&p| width(p).is_some())
 }
 
 // The rounding of an integer to f32 must not pass through f64 first.

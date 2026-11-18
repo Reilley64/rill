@@ -184,6 +184,40 @@ pub(in crate::analysis::typed) fn check_show<'g>(
 }
 
 impl<'g> PrimitiveCore<'g> {
+    pub(super) fn providers_complete(&self, budget: &mut Budget) -> Work<bool> {
+        for role in [
+            PrimitiveRole::Copy,
+            PrimitiveRole::Dispose,
+            PrimitiveRole::Equality,
+            PrimitiveRole::Show,
+        ] {
+            for &primitive in Primitive::ALL {
+                if !role.requires(primitive) {
+                    continue;
+                }
+                budget.step(1 + self.providers.len())?;
+                if !self
+                    .providers
+                    .iter()
+                    .any(|p| p.role == role && p.primitive == primitive)
+                {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    pub(super) fn protection_complete(&self, budget: &mut Budget) -> Work<bool> {
+        // check_providers visits each exact (role, primitive) region once.
+        budget.step(self.protection.len())?;
+        Ok(self.protection.len() == 2 * Primitive::ALL.len()
+            && self
+                .protection
+                .iter()
+                .all(|scope| scope.coverage != PrimitiveCoverage::Pending))
+    }
+
     pub(in crate::analysis) fn prelude(&self, id: &DeclarationId) -> Option<PrimitiveRole> {
         if self.copy.is_some_and(|d| d.id == *id) {
             Some(PrimitiveRole::Copy)
