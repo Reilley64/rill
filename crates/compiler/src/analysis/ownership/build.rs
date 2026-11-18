@@ -1283,10 +1283,12 @@ impl<'a, 'g> Build<'a, 'g> {
             if !path.projections.is_empty() {
                 return Err(Stop::Pending(argument));
             }
-            let (place, contents) = self.caller_contents(argument, path.root)?;
+            let (descriptor, contents) = self.caller_contents(argument, path.root)?;
             return Ok(CallDestination {
-                place,
-                external_contents: Some(contents),
+                storage: CallStorage::ThroughParameter {
+                    descriptor,
+                    contents,
+                },
                 input: args[input],
             });
         }
@@ -1309,8 +1311,7 @@ impl<'a, 'g> Build<'a, 'g> {
         self.budget.step(1)?;
         let place = *self.locals.get(path.root).ok_or(Stop::Pending(target))?;
         Ok(CallDestination {
-            place,
-            external_contents: None,
+            storage: CallStorage::Local(place),
             input: args[input],
         })
     }
@@ -1400,7 +1401,10 @@ impl<'a, 'g> Build<'a, 'g> {
                 NodeKind::Prefix("&mut")
             );
             next = if existing_exclusive {
-                let parent = self.place(arg)?;
+                let parent = match destination.map(|destination| destination.storage) {
+                    Some(CallStorage::ThroughParameter { descriptor, .. }) => descriptor,
+                    _ => self.place(arg)?,
+                };
                 self.emit(
                     arg,
                     Action::Reborrow {

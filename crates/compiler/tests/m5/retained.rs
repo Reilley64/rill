@@ -1,5 +1,5 @@
 use super::*;
-use compiler::analysis::ownership::Place;
+use compiler::analysis::ownership::{Place, RetainedPlace};
 
 #[test]
 fn caller_owned_descriptor_cannot_retain_body_local_sources() {
@@ -235,9 +235,8 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
                 },
                 Operation::CallRetaining {
                     callee,
-                    destination,
+                    destination: RetainedPlace::Local(destination),
                     input,
-                    through_parameter: false,
                 },
                 Operation::Dereference(read),
             ] = events.as_slice()
@@ -265,7 +264,7 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
             assert!(matches!(reverse_events.as_slice(), [
                 Operation::Borrow { source, holder, exclusive: false },
                 Operation::Borrow { source: target, exclusive: true, .. },
-                Operation::CallRetaining { callee, destination, input, through_parameter: false },
+                Operation::CallRetaining { callee, destination: RetainedPlace::Local(destination), input },
             ] if *callee == &declaration("inReverse").id && source.root.span.bytes() == b"flag: bool"
                 && destination.root.span.bytes() == b"out" && target.root.node == destination.root.node
                 && holder.root.node == input.root.node));
@@ -276,7 +275,7 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
                     .mir()
                     .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
                 assert!(linear(mir, mir.entry).iter().any(|op| matches!(op,
-                    Operation::CallRetaining { callee, destination, .. }
+                    Operation::CallRetaining { callee, destination: RetainedPlace::Local(destination), .. }
                     if *callee == remember && destination.root.span.bytes() == b"out")));
             }
             for (name, code, source) in [
@@ -374,6 +373,19 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 let moved = slot;
                 relay(slot, input);
             }
+            function aliased(seed: &bool): bool {
+                let mut out = seed;
+                let access = &mut out;
+                remember(access, seed);
+                return *out;
+            }
+            type Holder = { value: &bool; }
+            function projected(seed: &bool): bool {
+                let mut holder = Holder { value: seed };
+                remember(&mut holder.value, seed);
+                let saved = holder.value;
+                return *saved;
+            }
             function rejectedCaller(seed: &bool): bool {
                 let mut out = seed;
                 escapesThroughRelay(&mut out, seed);
@@ -450,9 +462,8 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 },
                 Operation::CallRetaining {
                     callee,
-                    destination,
+                    destination: RetainedPlace::ThroughParameter(destination),
                     input,
-                    through_parameter: true,
                 },
                 Operation::InstallThrough { descriptor, .. },
             ] = steps.as_slice()
@@ -471,7 +482,7 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 .expect("both the relay and its reached callee check");
             assert!(
                 linear(mir, mir.entry).iter().any(|op| matches!(op,
-                Operation::CallRetaining { callee, destination, through_parameter: false, .. }
+                Operation::CallRetaining { callee, destination: RetainedPlace::Local(destination), .. }
                 if *callee == &declaration("relay").id && destination.root.span.bytes() == b"out"))
             );
             let restored = lower("relayRestored");
@@ -503,6 +514,12 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                     assert_eq!(finding.site.span.bytes(), b"relay(slot, &flag)");
                 }
             }
+            for name in ["aliased", "projected"] {
+                let pending = lower(name);
+                assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
+                assert!(pending.mir().is_none());
+            }
+
             let limits = AnalysisLimits {
                 max_work: caller.statistics().work,
                 max_entries: caller.statistics().entries,

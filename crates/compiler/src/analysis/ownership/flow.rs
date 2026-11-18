@@ -97,11 +97,10 @@ fn liveness(
             }
             Action::FormClosure { capture, into, .. } => use_one(Some(capture), Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
+            // External contents are already live at every instruction.
             Action::CopyThrough {
-                descriptor,
-                contents,
-                into,
-            } => ([Some(descriptor), Some(contents)], into),
+                descriptor, into, ..
+            } => use_one(Some(descriptor), into),
             Action::InstallThrough {
                 descriptor,
                 contents,
@@ -862,16 +861,34 @@ pub(super) fn run<'g>(
                     let call = &calls[index];
                     let mut retained = BTreeSet::new();
                     let contents = if let Some(destination) = call.destination {
-                        initialized(&state[destination.place], node)?;
+                        let (access, contents, target, stored_at) = match destination.storage {
+                            CallStorage::Local(slot) => {
+                                (slot, slot, RetainedPlace::Local(local(slot)), None)
+                            }
+                            CallStorage::ThroughParameter {
+                                descriptor,
+                                contents,
+                            } => (
+                                descriptor,
+                                contents,
+                                RetainedPlace::ThroughParameter(local(descriptor)),
+                                Some(node),
+                            ),
+                        };
+                        initialized(&state[access], node)?;
                         initialized(&state[destination.input], node)?;
-                        let contents = destination.external_contents.unwrap_or(destination.place);
                         let mut loans = BTreeSet::new();
                         for slot in [contents, destination.input] {
                             include_loans(&mut loans, &state, slots[slot].storage(slot), budget)?;
                         }
                         // The access argument is temporary. It cannot become a
                         // backing source of the very descriptor it gives access to.
-                        Some((destination, contents, loan_set(loans, budget)?))
+                        let held = Held {
+                            loans: loan_set(loans, budget)?,
+                            stored_at,
+                            ..Held::default()
+                        };
+                        Some((target, contents, destination.input, held))
                     } else {
                         None
                     };
@@ -894,17 +911,12 @@ pub(super) fn run<'g>(
                             ..Held::default()
                         });
                     }
-                    if let Some((destination, contents, loans)) = contents {
-                        state[contents] = State::Initialized(Held {
-                            loans,
-                            stored_at: destination.external_contents.map(|_| node),
-                            ..Held::default()
-                        });
+                    if let Some((destination, contents, input, held)) = contents {
+                        state[contents] = State::Initialized(held);
                         Operation::CallRetaining {
                             callee: call.callee,
-                            destination: local(destination.place),
-                            input: local(destination.input),
-                            through_parameter: destination.external_contents.is_some(),
+                            destination,
+                            input: local(input),
                         }
                     } else {
                         Operation::Call(call.callee)

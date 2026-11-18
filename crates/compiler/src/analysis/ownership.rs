@@ -159,10 +159,8 @@ pub enum Operation<'g> {
     /// A direct call may retain the shared input in the destination's contents.
     CallRetaining {
         callee: &'g DeclarationId,
-        destination: Place<'g>,
+        destination: RetainedPlace<'g>,
         input: Place<'g>,
-        /// `destination` is a parameter granting access to caller storage.
-        through_parameter: bool,
     },
     /// Select the success variant of an admitted postfix operand.
     TestVariant {
@@ -215,6 +213,12 @@ pub enum Operation<'g> {
         field: Site<'g>,
     },
     Cleanup(Vec<Cleanup<'g>>),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum RetainedPlace<'g> {
+    Local(Place<'g>),
+    ThroughParameter(Place<'g>),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -699,7 +703,12 @@ struct Call<'g> {
 
 #[derive(Clone, Copy)]
 struct CallDestination {
-    place: Slot,
-    external_contents: Option<Slot>,
+    storage: CallStorage,
     input: Slot,
+}
+
+#[derive(Clone, Copy)]
+enum CallStorage {
+    Local(Slot),
+    ThroughParameter { descriptor: Slot, contents: Slot },
 }
