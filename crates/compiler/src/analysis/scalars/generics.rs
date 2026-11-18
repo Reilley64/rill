@@ -340,16 +340,19 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
     analyze_bodies(input, conversions, budget, None)
 }
 
-pub(in crate::analysis) struct IntegratedInputs<'g> {
+#[derive(Default)]
+pub(in crate::analysis) struct IntegratedInputs<'r, 'g> {
     pub option: Option<crate::analysis::typed::OptionRole<'g>>,
     pub result: Option<crate::analysis::typed::ResultRole<'g>>,
+    pub show: Option<&'g Declaration>,
+    pub into: Option<&'r crate::analysis::typed::IntoAdmission<'g>>,
     pub exhausted: bool,
 }
 
 pub(in crate::analysis) fn analyze_integrated_bodies<'g>(
     input: &OrdinaryAnalysis<'g>,
     budget: declarations::Budget,
-    integration: IntegratedInputs<'g>,
+    integration: IntegratedInputs<'_, 'g>,
 ) -> GenericReport<'g> {
     analyze_bodies(input, None, budget, Some(integration))
 }
@@ -358,7 +361,7 @@ fn analyze_bodies<'g>(
     input: &OrdinaryAnalysis<'g>,
     conversions: Option<&ConversionReport<'_, 'g>>,
     mut budget: declarations::Budget,
-    integration: Option<IntegratedInputs<'g>>,
+    integration: Option<IntegratedInputs<'_, 'g>>,
 ) -> GenericReport<'g> {
     let graph = input.graph();
     let limits = budget.limits;
@@ -388,8 +391,10 @@ fn analyze_bodies<'g>(
             budget.statistics
         };
     checker.integrated = integrated;
-    checker.option = integration.as_ref().and_then(|inputs| inputs.option);
-    checker.result = integration.as_ref().and_then(|inputs| inputs.result);
+    checker.option = integration.as_ref().and_then(|core| core.option);
+    checker.result = integration.as_ref().and_then(|core| core.result);
+    checker.show = integration.as_ref().and_then(|core| core.show);
+    checker.installed_into = integration.as_ref().and_then(|core| core.into);
     checker.elab.lexical = input.lexical().cloned();
     checker.conversions = conversions.map(|r| &r.families);
     let mut declaration_issues = Vec::new();
@@ -405,7 +410,7 @@ fn analyze_bodies<'g>(
             declaration_issues.push(issue.clone());
         }
         if preflight_exhausted
-            || integration.is_some_and(|inputs| inputs.exhausted)
+            || integration.is_some_and(|core| core.exhausted)
             || input.completion() == Completion::ResourceLimit
             || conversions.is_some_and(|r| r.completion() == Completion::ResourceLimit)
         {

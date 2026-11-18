@@ -1,5 +1,6 @@
 //! Admission of delivered contracts from the installed capture.
 use super::*;
+use crate::analysis::conversions::{self, ConversionFamily, RegistrationIssue, RoleHypothesis};
 use crate::analysis::scalars::BodyOwner;
 use crate::analysis::{
     Binder, Declaration, DeclarationFacts, DeclarationShape, Payload, Type, TypeTerm,
@@ -23,6 +24,14 @@ pub(super) struct InstalledCore<'g> {
     pub(super) option_inspection: Option<&'g Declaration>,
     pub(super) result: Option<ResultRole<'g>>,
     pub(super) result_inspection: Option<&'g Declaration>,
+    pub(super) show: Option<&'g Declaration>,
+    pub(super) into: Option<IntoAdmission<'g>>,
+}
+
+#[derive(Debug)]
+pub(in crate::analysis) struct IntoAdmission<'g> {
+    pub(in crate::analysis) declaration: &'g Declaration,
+    pub(in crate::analysis) issues: Vec<RegistrationIssue<'g>>,
 }
 
 fn export<'g>(
@@ -124,6 +133,109 @@ fn pinned_module<'g>(
         budget.step(1)?;
         if module.key.path == path && graph.is_pinned_standard_source(module) {
             return Ok(Some(module));
+        }
+    }
+    Ok(None)
+}
+
+pub(super) fn check_show<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    budget: &mut Budget,
+) -> Work<Option<&'g Declaration>> {
+    for module in inventory.graph().modules() {
+        budget.step(1)?;
+        if module.key.path != "format.rill" || !inventory.graph().is_pinned_standard_source(module)
+        {
+            continue;
+        }
+        let Some(show) = export(
+            inventory.graph(),
+            module,
+            Namespace::ValueFunction,
+            "show",
+            budget,
+        )?
+        else {
+            return Ok(None);
+        };
+        budget.step(3)?;
+        let Some(family) = inventory.captured_family(&show.id) else {
+            return Ok(None);
+        };
+        if inventory.declaration_unusable(&show.id)
+            || !inventory
+                .headers()
+                .get(&show.id)
+                .is_some_and(|h| h.defaults.is_empty() && h.requirements.is_empty())
+        {
+            return Ok(None);
+        }
+        let facts = &family.header;
+        let (DeclarationShape::Function { parameters, result }, [parameter]) =
+            (&facts.shape, facts.binders.as_slice())
+        else {
+            return Ok(None);
+        };
+        if show.id.kind == DeclarationKind::Family
+            && matches!(parameters.as_slice(), [value] if matches!(value.ty.as_ref(),
+                TypeTerm::Reference { mutable: false, referent }
+                    if binder_is(referent, parameter)))
+            && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")
+        {
+            budget.reserve(1)?;
+            return Ok(Some(show));
+        }
+        return Ok(None);
+    }
+    Ok(None)
+}
+
+pub(super) fn check_into<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    budget: &mut Budget,
+) -> Work<Option<IntoAdmission<'g>>> {
+    let graph = inventory.graph();
+    for module in graph.modules() {
+        budget.step(1)?;
+        if module.key.path != "convert.rill" || !graph.is_pinned_standard_source(module) {
+            continue;
+        }
+        let Some(into) = export(graph, module, Namespace::ValueFunction, "into", budget)? else {
+            return Ok(None);
+        };
+        budget.step(3)?;
+        let Some(family) = inventory.captured_family(&into.id) else {
+            return Ok(None);
+        };
+        if inventory.declaration_unusable(&into.id)
+            || !inventory
+                .headers()
+                .get(&into.id)
+                .is_some_and(|h| h.defaults.is_empty() && h.requirements.is_empty())
+            || !conversions::family_signature(&family.header, None)
+        {
+            return Ok(None);
+        }
+        for binding in graph.bindings() {
+            budget.step(1)?;
+            if binding.module == module.key
+                && binding.public
+                && binding.name == "into"
+                && matches!(&binding.target, Target::Declaration(id) if *id == into.id)
+            {
+                budget.reserve(1)?;
+                let mut collected = ConversionFamily {
+                    premise: RoleHypothesis::Infallible(binding),
+                    routes: Vec::new(),
+                    registrations: Vec::new(),
+                    issues: Vec::new(),
+                };
+                conversions::collect(inventory, family, &mut collected, budget)?;
+                return Ok(Some(IntoAdmission {
+                    declaration: into,
+                    issues: collected.issues,
+                }));
+            }
         }
     }
     Ok(None)

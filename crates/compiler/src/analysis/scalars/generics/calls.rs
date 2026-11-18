@@ -14,7 +14,7 @@ pub(in crate::analysis::scalars) struct Producer {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
-    pub(in crate::analysis::scalars) fn apply_ready_call_default(
+    pub(in crate::analysis::scalars) fn advance_call_context(
         &mut self,
         inference: &mut Inference<'g>,
     ) -> Work<bool> {
@@ -25,10 +25,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             .filter_map(|(&node, call)| call.infer.then_some(node))
             .collect();
         for node in waiting {
-            if self
-                .conversion_family(inference.calls[&node].fact.callee)
-                .is_some()
-            {
+            let callee = inference.calls[&node].fact.callee;
+            if self.is_installed_into(callee) {
+                if self.explicit_into_source_context(inference, node)? {
+                    return Ok(true);
+                }
+                continue;
+            }
+            if self.is_installed_show(callee) || self.conversion_family(callee).is_some() {
                 continue;
             }
             let advanced = self.with_node_premise(inference, node, |checker, inference| {

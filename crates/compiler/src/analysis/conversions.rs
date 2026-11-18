@@ -119,7 +119,10 @@ impl<'g> ConversionReport<'_, 'g> {
     }
 }
 
-fn family_signature(header: &DeclarationFacts<'_>, result_role: Option<&DeclarationId>) -> bool {
+pub(super) fn family_signature(
+    header: &DeclarationFacts<'_>,
+    result_role: Option<&DeclarationId>,
+) -> bool {
     let DeclarationShape::Function { parameters, result } = &header.shape else {
         return false;
     };
@@ -150,7 +153,7 @@ fn is_parameter(term: &Type<'_>, binder: &Binder<'_>) -> bool {
         if **declaration == binder.declaration.id && *position == binder.position)
 }
 
-fn collect<'g>(
+pub(super) fn collect<'g>(
     input: &OrdinaryAnalysis<'g>,
     ordinary: &ordinary::FamilyFacts<'g>,
     facts: &mut ConversionFamily<'g>,

@@ -37,10 +37,22 @@ impl InstalledProfile {
         }
     }
 
+    pub(super) fn interpolation_dependencies(self) -> &'static [&'static str] {
+        match self {
+            Self::DarwinArm64 => &["format.rill"],
+        }
+    }
+
     pub(super) fn source(self, path: &str) -> Option<&'static [u8]> {
         match (self, path) {
             (Self::DarwinArm64, "core.rill") => {
                 Some(include_bytes!("../../../../stdlib/core.rill"))
+            }
+            (Self::DarwinArm64, "convert.rill") => {
+                Some(include_bytes!("../../../../stdlib/convert.rill"))
+            }
+            (Self::DarwinArm64, "format.rill") => {
+                Some(include_bytes!("../../../../stdlib/format.rill"))
             }
             (Self::DarwinArm64, "option.rill") => {
                 Some(include_bytes!("../../../../stdlib/option.rill"))

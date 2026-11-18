@@ -143,7 +143,7 @@ impl Engine {
             }
             self.imports.extend(imports);
         }
-        self.capture_question_mark_metadata()?;
+        self.capture_installed_metadata()?;
         self.imports
             .sort_by(|a, b| (&a.module, a.span.start()).cmp(&(&b.module, b.span.start())));
         let (facts, names, public_names) = self.seeds()?;
@@ -564,28 +564,36 @@ impl Engine {
         Ok(privacy)
     }
 
-    fn capture_question_mark_metadata(&mut self) -> Result<()> {
+    fn capture_installed_metadata(&mut self) -> Result<()> {
         let Some(profile) = self.installed else {
             return Ok(());
         };
-        let mut requested = false;
+        let (mut question_mark, mut interpolation) = (false, false);
         'sources: for module in self.modules.values() {
             for node in &module.syntax.nodes {
                 self.host.charge(1)?;
-                if matches!(
+                question_mark |= matches!(
                     node.kind,
                     NodeKind::Propagate | NodeKind::Wrap | NodeKind::PipeStep { propagate: true }
-                ) {
-                    requested = true;
+                );
+                interpolation |= node.kind == NodeKind::TemplateHole;
+                if question_mark && interpolation {
                     break 'sources;
                 }
             }
         }
-        if !requested {
-            return Ok(());
+        if question_mark {
+            self.capture_metadata_sources(profile.question_mark_dependencies())?;
         }
+        if interpolation {
+            self.capture_metadata_sources(profile.interpolation_dependencies())?;
+        }
+        Ok(())
+    }
+
+    fn capture_metadata_sources(&mut self, paths: &[&str]) -> Result<()> {
         let root = self.roots[&Origin::Standard].clone();
-        for path in profile.question_mark_dependencies() {
+        for path in paths {
             let key = ModuleKey {
                 origin: Origin::Standard,
                 path: (*path).into(),
@@ -624,7 +632,7 @@ impl Engine {
             {
                 return Err(failure(
                     FailureKind::InvalidRequest,
-                    "installed question-mark metadata exceeds its declared scope",
+                    "installed metadata exceeds its declared scope",
                 ));
             }
         }

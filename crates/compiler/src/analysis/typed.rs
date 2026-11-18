@@ -8,8 +8,13 @@ use super::{AnalysisLimits, Graph, Stage, Statistics};
 
 mod core;
 mod interfaces;
+mod numeric;
+mod primitive;
+pub(super) use core::IntoAdmission;
 pub use core::{OptionRole, ResultRole};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
+pub use numeric::{InfallibleNumericContract, NumericConversion, NumericConversionError};
+pub use primitive::{Primitive, PrimitiveValue};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CoreBlocker {
@@ -65,6 +70,21 @@ impl<'g> TypedReport<'g> {
         self.inventory.graph().error_storage_source()
     }
 
+    /// The validated canonical formatting family, independent of any provider selection.
+    pub fn show_role(&self) -> Option<&'g super::Declaration> {
+        self.core.show
+    }
+
+    /// The validated canonical infallible conversion family.
+    pub fn into_role(&self) -> Option<&'g super::Declaration> {
+        self.core.into.as_ref().map(|into| into.declaration)
+    }
+
+    /// Checks of the captured pair registrations, independent of selected providers.
+    pub fn into_registration_issues(&self) -> Option<&[super::conversions::RegistrationIssue<'g>]> {
+        self.core.into.as_ref().map(|into| into.issues.as_slice())
+    }
+
     /// The checked delivered inspection implementation, separate from the enum schema.
     pub fn option_inspection(&self) -> Option<&'g super::Declaration> {
         self.core.option_inspection
@@ -106,13 +126,26 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     } else {
         core::check_roles(&inventory, &mut budget)
     };
+    let show = if roles.is_ok() {
+        core::check_show(&inventory, &mut budget)
+    } else {
+        Err(())
+    };
+    let into = if show.is_ok() {
+        core::check_into(&inventory, &mut budget)
+    } else {
+        Err(())
+    };
+    let exhausted = into.is_err();
     let mut core = core::InstalledCore {
         option: roles.unwrap_or_default(),
+        show: show.unwrap_or_default(),
+        into: into.unwrap_or_default(),
         ..Default::default()
     };
     let result_roles = match core.option {
-        Some(option) => core::check_result(&inventory, option, &mut budget),
-        None => Ok(None),
+        Some(option) if !exhausted => core::check_result(&inventory, option, &mut budget),
+        _ => Ok(None),
     };
     core.result = result_roles.unwrap_or_default();
     let bodies = analyze_integrated_bodies(
@@ -121,7 +154,9 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         IntegratedInputs {
             option: core.option,
             result: core.result,
-            exhausted: roles.is_err() || result_roles.is_err(),
+            show: core.show,
+            into: core.into.as_ref(),
+            exhausted: exhausted || result_roles.is_err(),
         },
     );
     let mut budget = Budget {
@@ -141,7 +176,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         completion = ScalarFailureKind::ResourceLimit;
     }
     let mut not_performed = vec![Stage::ResultUse, Stage::Ownership, Stage::Execution];
-    if core.option.is_none() {
+    if core.option.is_none() && core.show.is_none() && core.into.is_none() {
         not_performed.push(Stage::CoreAdmission);
     }
     if inventory.lexical().is_none() {

@@ -6,7 +6,9 @@ use std::collections::{BTreeSet, VecDeque};
 
 mod core;
 pub mod data;
+mod formatting;
 pub mod generics;
+mod numeric_conversion;
 
 use generics::callables::{
     ArrowFacts, ArrowHead, ArrowReturn, CallableContext, CallableNodeFacts, FunctionValueFacts,
@@ -115,6 +117,7 @@ pub struct ExpressionFacts<'g> {
     pub access: data::Access,
 }
 pub use core::{Propagation, PropagationError, PropagationTarget};
+pub use formatting::FormattingCall;
 
 #[derive(Debug)]
 pub struct CallFacts<'g> {
@@ -192,6 +195,8 @@ pub enum ScalarFindingKind {
     InvalidTarget,
     MissingValue,
     MissingRequirement,
+    MissingConversionPair,
+    ProtectedNumericGap,
     PrivateValue,
     StartupCapture,
     DuplicateBinding,
@@ -214,6 +219,7 @@ impl ScalarFindingKind {
             Self::NumericContext => Some("R0003"),
             Self::MissingValue => Some("R0400"),
             Self::MissingRequirement => Some("R0302"),
+            Self::MissingConversionPair | Self::ProtectedNumericGap => Some("R0314"),
             Self::PrivateValue => Some("R0401"),
             Self::StartupCapture => Some("R0502"),
             Self::ExpectationBoolean => Some("R0101"),
@@ -373,6 +379,7 @@ struct Slot<'g> {
     boolean: Option<BooleanSet>,
     propagation: Option<Propagation<'g>>,
     pending_core: bool,
+    installed_operation: Option<data::DataExpression<'g>>,
     admission: Option<data::Admission<'g>>,
     path: Option<data::PlacePath<'g>>,
     refinement: Option<Arc<data::Refinement<'g>>>,
@@ -464,6 +471,8 @@ struct Checker<'r, 'g> {
     integrated: bool,
     option: Option<super::typed::OptionRole<'g>>,
     result: Option<super::typed::ResultRole<'g>>,
+    show: Option<&'g Declaration>,
+    installed_into: Option<&'r super::typed::IntoAdmission<'g>>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
@@ -494,6 +503,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             integrated: false,
             option: None,
             result: None,
+            show: None,
+            installed_into: None,
             data_depth: 0,
             evidence: generics::Evidence::default(),
             conversions: None,
@@ -1774,6 +1785,12 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
     fn runtime_children(&mut self, inference: &Inference<'g>, node: NodeId) -> Work<Vec<NodeId>> {
         let n = &inference.module.syntax.nodes[node];
+        if n.kind == NodeKind::Template && self.integrated {
+            self.elab.reserve(n.children.len())?;
+            return Ok(Self::template_holes(inference.module, node)
+                .map(|(_, value)| value)
+                .collect());
+        }
         if n.kind == NodeKind::Pipe {
             if let Some(call) = inference.calls.get(&node) {
                 self.elab.reserve(call.fact.arguments.len())?;
@@ -1969,16 +1986,15 @@ impl<'r, 'g> Checker<'r, 'g> {
                         .iter()
                         .any(|&child| module.syntax.nodes[child].kind != NodeKind::TemplateText)
                     {
-                        self.defer(module, node, ScalarUnsupported::Formatting)?;
-                        inference.slots.get_mut(&node).unwrap().blocked = true;
+                        if self.show.is_none() {
+                            self.defer(module, node, ScalarUnsupported::Formatting)?;
+                            inference.slots.get_mut(&node).unwrap().blocked = true;
+                        }
                         if self.integrated {
-                            for &child in &syntax.children {
-                                if module.syntax.nodes[child].kind == NodeKind::TemplateHole {
-                                    let expression = module.syntax.nodes[child].children[0];
-                                    self.elab.reserve(2)?;
-                                    inference.parents.insert(expression, node);
-                                    stack.push(expression);
-                                }
+                            for (_, expression) in Self::template_holes(module, node) {
+                                self.elab.reserve(2)?;
+                                inference.parents.insert(expression, node);
+                                stack.push(expression);
                             }
                         }
                     } else {
@@ -2180,7 +2196,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                             self.closed_err_step(&mut inference, node)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.family) {
                             let id = inference.calls[&node].fact.callee;
-                            if self.conversion_family(id).is_some() {
+                            if self.is_installed_show(id) {
+                                self.primitive_show_step(&mut inference, node)?;
+                            } else if self.is_installed_into(id) {
+                                self.numeric_into_step(&mut inference, node)?;
+                            } else if self.conversion_family(id).is_some() {
                                 self.conversion_call_step(&mut inference, node, false)?;
                             } else {
                                 self.ordinary_call_step(&mut inference, node, false)?;
@@ -2204,6 +2224,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 self.establish(&mut inference, argument, ty, true)?;
                             }
                         }
+                    }
+                    NodeKind::Template if self.show.is_some() && slot.ty.is_none() => {
+                        self.check_template(&mut inference, node)?;
                     }
                     NodeKind::Propagate if self.option.is_some() || self.result.is_some() => {
                         self.postfix_propagation(&mut inference, node, context)?;
@@ -2249,7 +2272,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     || self.advance_arrows(&mut inference, context, false)?
                     || self.advance_function_values(&mut inference, true)?
                     || self.apply_ready_nominal_default(&mut inference)?
-                    || self.apply_ready_call_default(&mut inference)?)
+                    || self.advance_call_context(&mut inference)?)
             {
                 continue;
             }
@@ -2323,6 +2346,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
         }
         if self.input.ordinary.is_some() {
+            self.finish_installed_into(&mut inference)?;
             self.finish_conversion_uses(&mut inference)?;
             self.defer_ordinary_calls(&mut inference)?;
         }
@@ -2573,6 +2597,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     Some(data::DataExpression::Propagation(Box::new(
                         propagation.clone(),
                     )))
+                } else if let Some(operation) = &slot.installed_operation {
+                    Some(operation.clone())
                 } else {
                     inference.data.remove(&node).map(|p| p.fact)
                 };

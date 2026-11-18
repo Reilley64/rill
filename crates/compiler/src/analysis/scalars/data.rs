@@ -63,6 +63,10 @@ pub enum DataExpression<'g> {
     },
     Match(Box<Match<'g>>),
     Propagation(Box<Propagation<'g>>),
+    /// Canonical show calls in hole evaluation order.
+    Interpolation(Arc<[FormattingCall<'g>]>),
+    PrimitiveShow(crate::analysis::typed::Primitive),
+    NumericInto(crate::analysis::typed::NumericConversion),
 }
 #[derive(Debug)]
 pub struct DataReceipt<'r, 'g>(ScalarReceipt<'r, 'g>);

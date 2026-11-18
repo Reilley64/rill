@@ -1,0 +1,2 @@
+// Primitive providers are compiler operations bound to this family.
+export function show<T>(value: &T): string;

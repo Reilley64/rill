@@ -1,0 +1,3 @@
+// The compiler supplies the protected numeric pairs. Other providers are separate.
+export function into<To, From>(value: From): To;
+export import convert::{into as from};
