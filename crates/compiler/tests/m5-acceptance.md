@@ -111,6 +111,18 @@ The [field-route tests](m5/field_routes.rs) require a typed receipt and exercise
 
 The checked subset does not include borrowed record projections, exclusive or nested reference fields, reference-bearing custom disposers, record-valued call results, or retained mutable destinations. Record grouping does not establish field orders for internal or mutually dependent record cleanup. `groupedOnly` confirms that an unresolved grouped cycle returns `Incomplete`, not a successful cleanup or a new language rejection. The [#69 preflight](https://github.com/Reilley64/rill/issues/69#issuecomment-6982582460) separately identifies a typed-receipt blocker for writes through `&mut &bool`. Its finite reference checks do not grant an ownership result.
 
+### Carried-field review and verification
+
+Standards and Spec independently reviewed `4f388d7c3dc2f1dccb4552b2e0dbc0e007b01acf` against `e62a85da1107bd9ddb0c05c7bdbbd2091ae45523`. The checked corrections are at `fa3b47744cb0899d60fccf51f27630c89a1b5115`. The binary diff has SHA-256 `b5cb318f1f81373c50558c73190f14ba7a8f809b6319acfb080fbf0ed304d1fe`. The corrections passed local checks and were not independently re-reviewed.
+
+Standards asked for a shared rule selecting the carried-loan root, a test helper that names failing cases, and this verification record. Spec found that direct reborrow missed sibling sources and grouping prevented an otherwise supported reborrow. Public regressions cover the corrected escape, release and grouping outcomes.
+
+At `fa3b477` on macOS AArch64 with `TMPDIR` set to a short, fresh directory under `/tmp`, `mise run test:compiler` passed 426 tests and `mise run test` passed 442. `mise run check` and `mise run build:scaffold` passed. The documentation checker found no errors across 1,859 destinations. Each installed M5 test group checked both load modes. The staged baseline runner still issued typed receipts in both modes. No Rill program ran.
+
+With the default host `TMPDIR`, an earlier `check` failed in the unchanged M3 `long_alias_graphs_terminate_deterministically_and_respect_limits` test at `m3.rs:1065` with `ResourceLimit`. An exact-test comparison reproduced the failure on both `e62a85d` and `fa3b477` with the default path. Both passed with a shorter path. This increment does not change the loader, test limits or fixture. The passing full checks above use the explicit short path.
+
+No workflow changed, so `check:ci` was not run. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM and provider ABI acceptance were not run.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
