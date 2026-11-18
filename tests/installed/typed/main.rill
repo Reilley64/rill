@@ -2,6 +2,7 @@ import std::{List, Result, Err};
 import std::channel::{Receiver, Sender};
 import std::convert::{into, tryInto};
 import std::error::formatError;
+import std::iter::iterate;
 import std::mutex::LockGuard;
 import std::number::ParseError;
 import std::result::isOk;
@@ -15,6 +16,13 @@ function convertAndShow(value: u8): Result<string> {
 
 function visit(values: List<i32>): void {
     for (let _ of values) { continue; }
+}
+
+function listLifecycle(values: List<i32>): void {
+    let copied = copy(&values);
+    let iterator = iterate(values);
+    dispose(iterator);
+    dispose(copied);
 }
 
 function retain(source: &Shared<i32>): Shared<i32> { return copy(source); }
