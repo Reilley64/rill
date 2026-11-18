@@ -45,6 +45,8 @@ pub struct OrdinaryCall<'g> {
     pub blocker: Option<SelectionBlocker>,
     pub outcome: Option<HypotheticalOutcome<'g>>,
     pub goal: Option<GoalId>,
+    /// Selected requirements formed after a genuinely free output was instantiated at this use.
+    pub instantiated_requirements: Vec<GoalId>,
     /// Type from the selected header alone, not a checked result or evidence.
     pub selected_result: Option<Type<'g>>,
     pub output_agreement: OutputAgreement<'g>,
@@ -67,6 +69,8 @@ struct ConditionalOutput<'g> {
     goal: Option<GoalId>,
     ty: Option<Type<'g>>,
     agreement: OutputAgreement<'g>,
+    defaults: Vec<DefaultArgumentUse<'g>>,
+    instantiated_requirements: Vec<GoalId>,
 }
 
 struct Comparison<'r, 'g> {
@@ -257,10 +261,18 @@ impl<'r, 'g> Checker<'r, 'g> {
                 goal: None,
                 ty: None,
                 agreement: OutputAgreement::NotDetermined,
+                defaults: Vec::new(),
+                instantiated_requirements: Vec::new(),
             }
         };
-        self.elab
-            .reserve(1 + call.fact.bindings.len() + call.fact.substitution.len() + viable.len())?;
+        self.elab.reserve(
+            1 + call.fact.bindings.len()
+                + call.fact.substitution.len()
+                + viable.len()
+                + output.defaults.len(),
+        )?;
+        let mut defaults = call.fact.defaults.clone();
+        defaults.extend(output.defaults);
         self.ordinary_calls.insert(
             (&module.key, node),
             OrdinaryCall {
@@ -272,7 +284,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 receiving,
                 callbacks,
                 explicit: written_arguments(&call).to_vec(),
-                defaults: call.fact.defaults.clone(),
+                defaults,
                 candidates: viable
                     .into_iter()
                     .map(|c| OrdinaryCandidate {
@@ -285,6 +297,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 blocker,
                 outcome,
                 goal: output.goal,
+                instantiated_requirements: output.instantiated_requirements,
                 selected_result: output.ty,
                 output_agreement: output.agreement,
             },
@@ -642,6 +655,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             goal: None,
             ty: None,
             agreement: OutputAgreement::NotDetermined,
+            defaults: Vec::new(),
+            instantiated_requirements: Vec::new(),
         };
         self.elab.step(inputs.len())?;
         if inputs.iter().any(Option::is_none) {
@@ -659,10 +674,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         let module = inference.module;
         let mut solved = None;
         if let Some(selected) = chosen {
-            let (slots, has_requirements) =
-                self.infer_callable_outputs(call.fact.callee, selected)?;
+            let slots = self.infer_callable_outputs(call.fact.callee, selected)?;
             let substitution = self.slot_substitutions(&selected.body.header.binders, &slots)?;
-            solved = Some((selected, slots, substitution, has_requirements));
+            solved = Some((selected, slots, substitution));
         }
         let goal = if let Some(id) = self
             .ordinary_calls
@@ -671,7 +685,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         {
             id.clone()
         } else {
-            let selection = if let Some((c, _, substitution, _)) = &solved {
+            let selection = if let Some((c, _, substitution)) = &solved {
                 self.elab.reserve(substitution.len())?;
                 Some(GoalSelection {
                     implementation: &c.body.source.declaration,
@@ -709,61 +723,157 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         // If a selected header cannot yet supply its entire evidence output,
         // retain any independently fixed result, not a checked call.
-        if let Some((selected, mut slots, mut substitution, has_requirements)) = solved {
+        if let Some((selected, mut slots, _)) = solved {
             let binders = &selected.body.header.binders;
             let DeclarationShape::Function { result, .. } = &selected.body.header.shape else {
                 unreachable!()
             };
-            if !has_requirements {
-                let header = selected.body.substitution.as_ref().unwrap();
+            if let Some(proof_selection) = self.evidence.get(&goal).unwrap().selection.as_ref() {
+                self.elab.step(proof_selection.substitution.len())?;
+                for sub in &proof_selection.substitution {
+                    slots[sub.position] = Some(sub.argument.clone());
+                }
+            }
+            let header = selected.body.substitution.as_deref().unwrap();
+            if let Some(pending) = self.pending_output_slots(
+                &[
+                    (call.fact.callee, header),
+                    (&selected.body.source.declaration, &[]),
+                ],
+                binders,
+                &slots,
+            )? {
                 for explicit in written_arguments(call) {
-                    let term = &header[explicit.position].argument;
-                    if self.closed(term, binders, &|i| slots[i].is_some(), 1)? {
-                        continue;
-                    }
-                    self.elab.reserve(slots.len())?;
-                    let mut proposed = slots.clone();
-                    if self.input_equation(
-                        term,
+                    self.free_output_equation(
+                        &header[explicit.position].argument,
                         &explicit.argument,
                         binders,
-                        &mut proposed,
-                        &[],
-                        1,
-                    )? {
-                        slots = proposed;
-                    }
+                        &mut slots,
+                        &pending,
+                    )?;
                 }
-                if let Some(expected) = &expected
-                    && !self.closed(result, binders, &|i| slots[i].is_some(), 1)?
-                {
-                    self.elab.reserve(slots.len())?;
-                    let mut proposed = slots.clone();
-                    if self.input_equation(result, expected, binders, &mut proposed, &[], 1)? {
-                        slots = proposed;
-                    }
+                if let Some(expected) = &expected {
+                    self.free_output_equation(result, expected, binders, &mut slots, &pending)?;
                 }
-                substitution = self.slot_substitutions(binders, &slots)?;
+                output.defaults = self.selected_output_defaults(
+                    call.fact.callee,
+                    selected,
+                    &mut slots,
+                    &pending,
+                )?;
             }
+            let substitution = self.slot_substitutions(binders, &slots)?;
             if self.closed(result, binders, &|i| slots[i].is_some(), 1)? {
                 output.ty = Some(self.substitute(result, &substitution, 1)?);
                 if slots.iter().all(Option::is_some) {
                     let header = selected.body.substitution.as_ref().unwrap();
-                    self.elab.reserve(header.len())?;
-                    let arguments = header
+                    self.elab.reserve(header.len().checked_mul(2).ok_or(())?)?;
+                    let instantiated = header
                         .iter()
-                        .map(|s| self.substitute(&s.argument, &substitution, 1))
+                        .map(|s| {
+                            Ok(Substitution {
+                                argument: self.substitute(&s.argument, &substitution, 1)?,
+                                ..s.clone()
+                            })
+                        })
                         .collect::<Work<Vec<_>>>()?;
+                    let arguments: Vec<_> =
+                        instantiated.iter().map(|s| s.argument.clone()).collect();
                     output.agreement = self.check_selected_output(
                         written_arguments(call),
                         expected.as_ref(),
                         output.ty.as_ref().unwrap(),
                         &arguments,
                     )?;
+                    if matches!(output.agreement, OutputAgreement::Agrees) {
+                        output.instantiated_requirements = self.source_contract_requirements(
+                            Self::site(module, node),
+                            &[
+                                (call.fact.callee, &instantiated),
+                                (&selected.body.source.declaration, &substitution),
+                            ],
+                        )?;
+                    }
                 }
             }
         }
         Ok(output)
+    }
+
+    fn free_output_equation(
+        &mut self,
+        pattern: &Type<'g>,
+        actual: &Type<'g>,
+        binders: &[Binder<'g>],
+        slots: &mut [Option<Type<'g>>],
+        pending: &BTreeSet<usize>,
+    ) -> Work<bool> {
+        if self.closed(pattern, binders, &|i| slots[i].is_some(), 1)?
+            || !self.closed(pattern, binders, &|i| !pending.contains(&i), 1)?
+        {
+            return Ok(false);
+        }
+        self.elab.reserve(slots.len())?;
+        let mut proposed = slots.to_vec();
+        let fits = self.input_equation(pattern, actual, binders, &mut proposed, &[], 1)?;
+        if fits {
+            slots.clone_from_slice(&proposed);
+        }
+        Ok(fits)
+    }
+
+    fn selected_output_defaults(
+        &mut self,
+        callee: &'g DeclarationId,
+        selected: &SourceCandidate<'r, 'g>,
+        slots: &mut [Option<Type<'g>>],
+        pending: &BTreeSet<usize>,
+    ) -> Work<Vec<DefaultArgumentUse<'g>>> {
+        let ordinary = self.input.ordinary.unwrap();
+        let family = ordinary.captured_family(callee).unwrap();
+        let Some(written) = ordinary.headers().get(callee) else {
+            return Ok(Vec::new());
+        };
+        let binders = &selected.body.header.binders;
+        let header = selected.body.substitution.as_deref().unwrap();
+        let mut used = Vec::new();
+        for default in &written.defaults {
+            self.elab.step(header.len())?;
+            let Some(output) = header.iter().find(|s| s.binder == default.binder) else {
+                continue;
+            };
+            if self.closed(&output.argument, binders, &|i| slots[i].is_some(), 1)? {
+                continue;
+            }
+            let Some(ty) = &default.ty else {
+                continue;
+            };
+            let solved = self.slot_substitutions(binders, slots)?;
+            let mut known = Vec::new();
+            let mut positions = BTreeSet::new();
+            for slot in &header[..output.position] {
+                if self.closed(&slot.argument, binders, &|i| slots[i].is_some(), 1)? {
+                    self.elab.reserve(2)?;
+                    known.push(Substitution {
+                        argument: self.substitute(&slot.argument, &solved, 1)?,
+                        ..slot.clone()
+                    });
+                    positions.insert(slot.position);
+                }
+            }
+            if self.closed(ty, &family.header.binders, &|i| positions.contains(&i), 1)? {
+                let actual = self.substitute(ty, &known, 1)?;
+                if self.free_output_equation(&output.argument, &actual, binders, slots, pending)? {
+                    self.elab.reserve(1)?;
+                    used.push(DefaultArgumentUse {
+                        binder: default.binder,
+                        node: default.node,
+                        span: default.span,
+                    });
+                }
+            }
+        }
+        Ok(used)
     }
 
     fn determine_source(

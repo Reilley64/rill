@@ -432,6 +432,54 @@ fn borrowed_pattern_projects_callback_input_before_inferring_selected_output() {
 }
 
 #[test]
+fn only_a_free_selected_output_can_use_context_or_a_written_default() {
+    let fixture = Fixture::new(
+        "function make<T,R = i32>(value: T): R;
+         implement<U,R> make(value: U): R where noBorrow(R) { while (true) {} }
+         let inferred: bool = make(true);
+         let defaulted = make(true);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let mut calls = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind == NodeKind::Call);
+    for (kind, count) in [("bool", 0), ("i32", 1)] {
+        let (node, _) = calls.next().unwrap();
+        let call = report.ordinary_call(module, node).unwrap().unwrap();
+        assert!(
+            matches!(call.selected_result.as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == kind)
+        );
+        assert_eq!(call.defaults.len(), count);
+        let goal = report.goal(call.goal.as_ref().unwrap()).unwrap();
+        assert!(
+            goal.output.is_none(),
+            "independent determination cannot borrow the caller's expectation"
+        );
+        use compiler::analysis::generics::{GoalBlocker, GoalState, GoalVerdict};
+        assert_eq!(call.instantiated_requirements.len(), 1);
+        let proof = report.goal(&call.instantiated_requirements[0]).unwrap();
+        assert_eq!(
+            proof.state,
+            GoalState::Unresolved(GoalBlocker::OrdinaryAdmission)
+        );
+        assert_eq!(proof.hypothetical, Some(GoalVerdict::Proved));
+        assert_eq!(proof.source.span.bytes(), b"noBorrow(R)");
+        assert!(report.node(module, node).unwrap().is_none());
+    }
+}
+
+#[test]
 fn a_family_input_default_supplies_width_without_becoming_an_explicit_filter() {
     let fixture = Fixture::new(
         "function size<T = i32>(value: T): bool;
@@ -569,6 +617,34 @@ fn a_symbolic_call_requires_one_winner_across_its_whole_input_domain() {
     assert!(
         matches!(closed.selected_result.as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "i32")
     );
+}
+
+#[test]
+fn arrow_contract_diagnostics_retain_the_hypothetical_premise() {
+    use compiler::analysis::ordinary::InputPremise;
+    let fixture = Fixture::new(
+        "function apply<F>(callback: F): bool;
+         implement apply(callback: (i32) => bool): bool { return true; }
+         function wrong(): void { let a = apply((x: bool) => true); }
+         function uncovered(): void { let b = apply((x) => {}); }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    assert!(report.findings().is_empty(), "{:?}", report.findings());
+    for kind in [
+        ScalarFindingKind::TypeMismatch,
+        ScalarFindingKind::ReturnCoverage,
+    ] {
+        assert!(
+            report
+                .conditional_findings()
+                .iter()
+                .any(|f| f.premise == InputPremise::HypotheticalOrdinaryRole
+                    && f.finding.kind == kind)
+        );
+    }
 }
 
 #[test]

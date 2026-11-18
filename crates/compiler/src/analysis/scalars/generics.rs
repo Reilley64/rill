@@ -43,6 +43,7 @@ pub struct GenericReport<'g> {
     ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryCall<'g>>,
     ordinary_values: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryValue<'g>>,
     conditional_findings: Vec<ConditionalFinding<'g>>,
+    declaration_issues: Vec<ordinary::DeclarationIssue<'g>>,
 }
 
 impl<'g> GenericReport<'g> {
@@ -68,6 +69,10 @@ impl<'g> GenericReport<'g> {
 
     pub fn obligations(&self) -> &[ScalarObligation<'g>] {
         &self.facts.obligations
+    }
+
+    pub fn declaration_issues(&self) -> &[ordinary::DeclarationIssue<'g>] {
+        &self.declaration_issues
     }
 
     pub fn annotations(&self) -> &PartialFacts<'g> {
@@ -278,47 +283,60 @@ pub fn analyze_generics<'g>(
     if extended.is_some() || input.completion() == Completion::ResourceLimit {
         checker.elab.statistics = input.statistics();
     }
-    let exhausted = input.completion() == Completion::ResourceLimit
-        || (|| -> Work<()> {
-            for (key, finding) in &types.findings {
+    let mut declaration_issues = Vec::new();
+    let exhausted = (|| -> Work<()> {
+        use ordinary::DeclarationIssue;
+        for issue in input.declaration_issues() {
+            let extra = match issue {
+                DeclarationIssue::DuplicateMembers { members, .. } => members.len(),
+                DeclarationIssue::InlineCycle { steps } => steps.len(),
+                _ => 0,
+            };
+            checker.elab.reserve(1 + extra)?;
+            declaration_issues.push(issue.clone());
+        }
+        if input.completion() == Completion::ResourceLimit {
+            return Err(());
+        }
+        for (key, finding) in &types.findings {
+            checker
+                .elab
+                .reserve(1 + finding.bindings.len() + finding.candidates.len())?;
+            checker.elab.facts.findings.insert(*key, finding.clone());
+        }
+        for (key, obligation) in &types.obligations {
+            if !matches!(
+                obligation.reason,
+                Unsupported::GenericDefault | Unsupported::Requirements
+            ) {
+                checker.elab.reserve(1)?;
                 checker
                     .elab
-                    .reserve(1 + finding.bindings.len() + finding.candidates.len())?;
-                checker.elab.facts.findings.insert(*key, finding.clone());
+                    .facts
+                    .obligations
+                    .insert(*key, obligation.clone());
             }
-            for (key, obligation) in &types.obligations {
-                if !matches!(
-                    obligation.reason,
+        }
+        for (key, use_) in &types.uses {
+            checker
+                .elab
+                .reserve(1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len())?;
+            checker.elab.facts.uses.insert(*key, use_.clone());
+        }
+        if types.findings().next().is_none()
+            && !types.obligations().any(|o| {
+                !matches!(
+                    o.reason,
                     Unsupported::GenericDefault | Unsupported::Requirements
-                ) {
-                    checker.elab.reserve(1)?;
-                    checker
-                        .elab
-                        .facts
-                        .obligations
-                        .insert(*key, obligation.clone());
-                }
-            }
-            for (key, use_) in &types.uses {
-                checker.elab.reserve(
-                    1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len(),
-                )?;
-                checker.elab.facts.uses.insert(*key, use_.clone());
-            }
-            if types.findings().next().is_none()
-                && !types.obligations().any(|o| {
-                    !matches!(
-                        o.reason,
-                        Unsupported::GenericDefault | Unsupported::Requirements
-                    )
-                })
-                && input.declaration_issues().is_empty()
-            {
-                checker.run()?;
-            }
-            checker.annotation_nodes()
-        })()
-        .is_err();
+                )
+            })
+            && input.declaration_issues().is_empty()
+        {
+            checker.run()?;
+        }
+        checker.annotation_nodes()
+    })()
+    .is_err();
     checker.facts.annotations = checker.elab.facts;
     GenericReport {
         graph,
@@ -328,6 +346,7 @@ pub fn analyze_generics<'g>(
         ordinary_calls: checker.ordinary_calls,
         ordinary_values: checker.ordinary_values,
         conditional_findings: checker.conditional_findings,
+        declaration_issues,
         completion: if exhausted {
             ScalarFailureKind::ResourceLimit
         } else {

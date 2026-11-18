@@ -1,7 +1,7 @@
 use super::*;
 use ordinary::shape;
 
-struct Producer {
+pub(in crate::analysis::scalars) struct Producer {
     reads: BTreeSet<usize>,
     writes: BTreeSet<usize>,
     unavailable: bool,
@@ -63,6 +63,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 return Ok(false);
             }
         }
+        self.apply_callable_equations(&[(call.fact.callee, &[])], binders, &mut slots)?;
         if let Some(expected) = &inference.slots[&node].expected
             && !self.closed(&call.result, binders, &|i| slots[i].is_some(), 1)?
         {
@@ -82,7 +83,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.enqueue(inference, node)?;
         }
         for (pattern, &argument) in call.parameters.iter().zip(&call.fact.arguments) {
-            self.project_standalone(inference, argument, pattern, binders, &slots, &subs)?;
+            self.project_standalone(inference, argument, pattern, signature, &slots, &subs)?;
         }
         if subs.len() == binders.len()
             && call
@@ -125,7 +126,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         inference.calls_waiting_for_result.remove(&node);
         let mut producers = Vec::new();
         for (pattern, &argument) in call.parameters.iter().zip(&call.fact.arguments) {
-            self.source_producers(inference, argument, pattern, binders, slots, &mut producers)?;
+            self.source_producers(
+                inference,
+                argument,
+                pattern,
+                (binders, Some(call.fact.callee)),
+                slots,
+                &mut producers,
+            )?;
         }
         let mut defaulted = BTreeSet::new();
         for default in &header.defaults {
@@ -156,21 +164,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             if !self.closed(term, binders, &|i| slots[i].is_some(), 1)? {
                 continue;
             }
-            let mut blocked = false;
-            for producer in &producers {
-                self.elab.step(1 + producer.reads.len())?;
-                if producer.writes.contains(&binder.position)
-                    && (producer.unavailable
-                        || !producer
-                            .reads
-                            .iter()
-                            .any(|&i| necessary[i].contains(&binder.position)))
-                {
-                    blocked = true;
-                    break;
-                }
-            }
-            if !blocked {
+            if self.default_is_ready(binder.position, &producers, &necessary)? {
                 let argument = self.substitute(term, solved, 1)?;
                 self.elab.reserve(2)?;
                 call.fact.substitution.push(Substitution {
@@ -198,20 +192,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if defaulted.contains(&position) {
                     continue;
                 }
-                let mut required = true;
-                for producer in &producers {
-                    self.elab.step(1 + producer.reads.len())?;
-                    if producer.writes.contains(&position)
-                        && !producer
-                            .reads
-                            .iter()
-                            .any(|&i| necessary[i].contains(&position))
-                    {
-                        required = false;
-                        break;
-                    }
-                }
-                if required {
+                if self.default_is_ready(position, &producers, &necessary)? {
                     self.elab.reserve(1)?;
                     inference.calls_waiting_for_result.insert(node);
                     break;
@@ -327,7 +308,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         inference: &mut Inference<'g>,
         node: NodeId,
         pattern: &Type<'g>,
-        binders: &[Binder<'g>],
+        signature: &'r DeclarationFacts<'g>,
         slots: &[Option<Type<'g>>],
         subs: &[Substitution<'g>],
     ) -> Work<()> {
@@ -335,7 +316,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.reserve(1)?;
         work.push((node, pattern));
         while let Some((node, pattern)) = work.pop() {
-            if self.closed(pattern, binders, &|i| slots[i].is_some(), 1)? {
+            if self.closed(pattern, &signature.binders, &|i| slots[i].is_some(), 1)? {
                 let receiving = self.substitute(pattern, subs, 1)?;
                 self.establish(inference, node, receiving, true)?;
                 continue;
@@ -349,26 +330,19 @@ impl<'r, 'g> Checker<'r, 'g> {
                     self.elab.reserve(types.len())?;
                     work.extend(syntax.children.iter().copied().zip(types));
                 }
-                (
-                    TypeTerm::Callable {
-                        parameters, result, ..
-                    },
-                    NodeKind::Arrow | NodeKind::ValueReference,
-                ) => {
-                    self.elab.reserve(parameters.len())?;
-                    let mut terms = Vec::new();
-                    for parameter in parameters {
-                        terms.push(self.call_projection(parameter, binders, slots, subs)?);
+                (_, NodeKind::Arrow | NodeKind::ValueReference) => {
+                    if let Some(context) =
+                        self.written_callable_context(signature, pattern, subs, node)?
+                    {
+                        self.project_callable_context(
+                            inference,
+                            node,
+                            CallableContext {
+                                parameters: context.parameters,
+                                result: context.result,
+                            },
+                        )?;
                     }
-                    let result = self.call_projection(result, binders, slots, subs)?;
-                    self.project_callable_context(
-                        inference,
-                        node,
-                        CallableContext {
-                            parameters: terms,
-                            result,
-                        },
-                    )?;
                 }
                 _ => (),
             }
@@ -376,29 +350,16 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
-    fn call_projection(
-        &mut self,
-        term: &Type<'g>,
-        binders: &[Binder<'g>],
-        slots: &[Option<Type<'g>>],
-        subs: &[Substitution<'g>],
-    ) -> Work<Option<Type<'g>>> {
-        if self.closed(term, binders, &|i| slots[i].is_some(), 1)? {
-            Ok(Some(self.substitute(term, subs, 1)?))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn source_producers(
+    pub(in crate::analysis::scalars) fn source_producers(
         &mut self,
         inference: &Inference<'g>,
         node: NodeId,
         pattern: &Type<'g>,
-        binders: &[Binder<'g>],
+        scope: (&[Binder<'g>], Option<&DeclarationId>),
         slots: &[Option<Type<'g>>],
         producers: &mut Vec<Producer>,
     ) -> Work<()> {
+        let (binders, contract) = scope;
         let module = inference.module;
         let mut work = Vec::new();
         self.elab.reserve(1)?;
@@ -429,7 +390,15 @@ impl<'r, 'g> Checker<'r, 'g> {
                     },
                     NodeKind::Arrow,
                 ) => {
-                    let head = &inference.arrows[&node];
+                    let Some(head) = inference.arrows.get(&node) else {
+                        self.open_slots(pattern, binders, slots, &mut producer.writes, 1)?;
+                        producer.unavailable = true;
+                        if !producer.writes.is_empty() {
+                            self.elab.reserve(1)?;
+                            producers.push(producer);
+                        }
+                        continue;
+                    };
                     for (parameter, (_, written)) in parameters.iter().zip(&head.parameters) {
                         if written.is_none() {
                             self.open_slots(parameter, binders, slots, &mut producer.reads, 1)?;
@@ -444,6 +413,60 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 _ => {
                     self.open_slots(pattern, binders, slots, &mut producer.writes, 1)?;
+                    if let Some(head) = inference.arrows.get(&node)
+                        && let Some(metadata) =
+                            contract.and_then(|id| self.input.ordinary.unwrap().headers().get(id))
+                    {
+                        let mut written = false;
+                        for clause in &metadata.requirements {
+                            self.elab.step(1)?;
+                            if !super::ordinary_callbacks::is_callable_clause(clause.target) {
+                                continue;
+                            }
+                            let [Some(subject), Some(inputs), Some(output)] =
+                                clause.arguments.as_slice()
+                            else {
+                                continue;
+                            };
+                            if !self.same(subject, pattern)? {
+                                continue;
+                            }
+                            let TypeTerm::Tuple(inputs) = inputs.as_ref() else {
+                                continue;
+                            };
+                            written = true;
+                            producer.unavailable |= inputs.len() != head.parameters.len();
+                            for (parameter, (_, explicit)) in inputs.iter().zip(&head.parameters) {
+                                if explicit.is_none() {
+                                    self.open_slots(
+                                        parameter,
+                                        binders,
+                                        slots,
+                                        &mut producer.reads,
+                                        1,
+                                    )?;
+                                }
+                                self.open_slots(
+                                    parameter,
+                                    binders,
+                                    slots,
+                                    &mut producer.writes,
+                                    1,
+                                )?;
+                            }
+                            if head.reads_result {
+                                self.open_slots(output, binders, slots, &mut producer.reads, 1)?;
+                            }
+                            self.open_slots(output, binders, slots, &mut producer.writes, 1)?;
+                        }
+                        if written {
+                            if !producer.writes.is_empty() {
+                                self.elab.reserve(1)?;
+                                producers.push(producer);
+                            }
+                            continue;
+                        }
+                    }
                     let waits_for_shape = inference.arrows.get(&node).is_some_and(|head| {
                         head.reads_result || head.parameters.iter().any(|(_, ty)| ty.is_none())
                     });
@@ -452,6 +475,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                             && self.call_slot(pattern, binders)?.is_some()
                     {
                         self.open_slots(pattern, binders, slots, &mut producer.reads, 1)?;
+                    } else if let Some(frame) = inference.nominals.get(&node)
+                        && let Some(arguments) = frame.receiving_arguments(pattern)
+                    {
+                        for &i in &frame.receiving_reads {
+                            self.open_slots(&arguments[i], binders, slots, &mut producer.reads, 1)?;
+                        }
+                        producer.unavailable |= producer.reads.is_empty();
                     } else {
                         // Unknown source/evidence is not a proof of a mandatory read.
                         producer.unavailable = true;
@@ -466,7 +496,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
-    fn open_slots(
+    pub(super) fn open_slots(
         &mut self,
         term: &Type<'g>,
         binders: &[Binder<'g>],
@@ -488,7 +518,28 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
-    fn necessary_reads(
+    pub(in crate::analysis::scalars) fn default_is_ready(
+        &mut self,
+        position: usize,
+        producers: &[Producer],
+        necessary: &[BTreeSet<usize>],
+    ) -> Work<bool> {
+        for producer in producers {
+            self.elab.step(1 + producer.reads.len())?;
+            if producer.writes.contains(&position)
+                && (producer.unavailable
+                    || !producer
+                        .reads
+                        .iter()
+                        .any(|&i| necessary[i].contains(&position)))
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    pub(in crate::analysis::scalars) fn necessary_reads(
         &mut self,
         producers: &[Producer],
         slots: &[Option<Type<'g>>],

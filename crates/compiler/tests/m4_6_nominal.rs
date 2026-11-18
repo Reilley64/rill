@@ -569,6 +569,53 @@ fn a_conflicting_member_does_not_erase_independent_literal_validation() {
 }
 
 #[test]
+fn default_inventory_keeps_the_inline_cycle_witness_visible() {
+    inspect(
+        "type Cell<T = bool> = { next: Cell };",
+        |_module, report| {
+            use compiler::analysis::ordinary::DeclarationIssue;
+            assert!(report.declaration_issues().iter().any(|issue| matches!(issue, DeclarationIssue::InlineCycle { steps } if steps.len() == 1 && steps[0].member.name.as_deref() == Some("next"))));
+        },
+    );
+}
+
+#[test]
+fn a_nominal_default_waits_through_a_nested_receiving_application() {
+    inspect(
+        "type Inner<T> = { value: T };
+         type Outer<T = i32> = { child: Inner<T> };
+         let nested = Outer { child: Inner { value: 1 } };",
+        |module, report| {
+            assert!(
+                report.body(module, BodyOwner::Startup).unwrap().is_some(),
+                "{report:#?}"
+            );
+            let outer = module
+                .syntax
+                .nodes
+                .iter()
+                .enumerate()
+                .rfind(|(_, n)| n.kind == NodeKind::Construction)
+                .unwrap()
+                .0;
+            let NodeFactKind::Expression(fact) = &report.node(module, outer).unwrap().unwrap().kind
+            else {
+                panic!("outer construction")
+            };
+            let Some(DataExpression::Construction(construction)) = fact.data.as_ref() else {
+                panic!("outer construction provenance")
+            };
+            assert!(
+                construction
+                    .argument_sources
+                    .iter()
+                    .any(|s| s.origin == ArgumentOrigin::Default)
+            );
+        },
+    );
+}
+
+#[test]
 fn a_written_non_numeric_receiver_does_not_supply_a_numeric_width() {
     inspect(
         "type Cell<T = bool> = { value: T }; let bad = Cell { value: 1 };",

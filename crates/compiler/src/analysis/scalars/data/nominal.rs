@@ -13,6 +13,29 @@ pub(in crate::analysis::scalars) struct PreparedNominal<'g> {
     members: Vec<(NodeId, Type<'g>)>,
     base: Option<NodeId>,
     pub(super) arguments_closed: bool,
+    pub(in crate::analysis::scalars) receiving_reads: BTreeSet<usize>,
+}
+
+impl<'g> PreparedNominal<'g> {
+    pub(in crate::analysis::scalars) fn receiving_arguments<'a>(
+        &self,
+        ty: &'a Type<'g>,
+    ) -> Option<&'a [Type<'g>]> {
+        let parent = match ty.as_ref() {
+            TypeTerm::Variant {
+                declaration,
+                parent,
+            } if self.variant == Some(*declaration) => parent,
+            _ => ty,
+        };
+        match parent.as_ref() {
+            TypeTerm::Nominal {
+                declaration,
+                arguments,
+            } if *declaration == self.declaration => Some(arguments),
+            _ => None,
+        }
+    }
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
@@ -169,6 +192,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             members,
             base,
             arguments_closed: false,
+            receiving_reads: BTreeSet::new(),
         }))
     }
 
@@ -389,10 +413,21 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(false);
         }
-        if defaults_ready {
-            if let Some((substitution, source)) =
-                self.try_nominal_default(inference, node, frame, binders, &slots, &constraints)?
-            {
+        if defaults_ready
+            && frame
+                .base
+                .is_none_or(|base| inference.slots[&base].ty.is_some())
+        {
+            let owner = self.elab.owner(&frame.declaration.module)?;
+            if let Some((substitution, source)) = self.try_nominal_default(
+                inference,
+                node,
+                owner,
+                binders,
+                &slots,
+                &constraints,
+                &mut frame.receiving_reads,
+            )? {
                 self.elab.reserve(2)?;
                 frame.fixed.push(substitution);
                 frame.sources.push(source);
@@ -467,28 +502,52 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(false)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn try_nominal_default(
         &mut self,
         inference: &mut Inference<'g>,
         node: NodeId,
-        frame: &PreparedNominal<'g>,
+        owner: &'g Module,
         binders: &[Binder<'g>],
         slots: &[Option<Type<'g>>],
         constraints: &[(NodeId, &Type<'g>)],
+        receiving_reads: &mut BTreeSet<usize>,
     ) -> Work<Option<(Substitution<'g>, ArgumentSource<'g>)>> {
-        if frame.base.is_some_and(|i| inference.slots[&i].ty.is_none()) {
-            return Ok(None);
+        let mut producers = Vec::new();
+        for &(member, pattern) in constraints {
+            self.source_producers(
+                inference,
+                member,
+                pattern,
+                (binders, None),
+                slots,
+                &mut producers,
+            )?;
         }
-        let owner = self.elab.owner(&frame.declaration.module)?;
+        let mut defaulted = BTreeSet::new();
+        for binder in binders {
+            self.elab.step(1)?;
+            if self.elab.written_default(owner, binder).is_some() {
+                self.elab.reserve(1)?;
+                defaulted.insert(binder.position);
+            }
+        }
+        let mandatory = self.necessary_reads(&producers, slots, &defaulted)?;
+        receiving_reads.clear();
         for (binder, slot) in binders.iter().zip(slots) {
             self.elab.step(1)?;
             if slot.is_some() {
                 continue;
             }
+            let position = binder.position;
+            if !self.default_is_ready(position, &producers, &mandatory)? {
+                continue;
+            }
             let Some(default) = self.elab.written_default(owner, binder) else {
+                self.elab.reserve(1)?;
+                receiving_reads.insert(position);
                 continue;
             };
-            let position = binder.position;
             let earlier = &slots[..position];
             if !self.elab.default_dependencies_ready(
                 owner,
@@ -496,19 +555,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                 &binders[..position],
                 earlier,
             )? {
-                continue;
-            }
-            let mut ready = true;
-            for (member, pattern) in constraints {
-                if !self.closed(pattern, binders, &|i| i != position, 1)?
-                    && inference.slots[member].ty.is_none()
-                    && !self.nominal_literal_wait(inference, *member)?
-                {
-                    ready = false;
-                    break;
-                }
-            }
-            if !ready {
                 continue;
             }
             let Some(argument) = self
@@ -532,22 +578,5 @@ impl<'r, 'g> Checker<'r, 'g> {
             )));
         }
         Ok(None)
-    }
-
-    // These fresh expressions cannot provide an independent anchor: their
-    // result waits on the very receiving width that they could constrain.
-    fn nominal_literal_wait(&mut self, inference: &Inference<'g>, mut node: NodeId) -> Work<bool> {
-        loop {
-            self.elab.step(1)?;
-            if inference.slots[&node].blocked {
-                return Ok(false);
-            }
-            let n = &inference.module.syntax.nodes[node];
-            match n.kind {
-                NodeKind::Literal => return Ok(inference.slots[&node].expected.is_none()),
-                NodeKind::Group | NodeKind::Prefix("-" | "~") => node = n.children[0],
-                _ => return Ok(false),
-            }
-        }
     }
 }

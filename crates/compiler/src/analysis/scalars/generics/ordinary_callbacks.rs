@@ -15,7 +15,7 @@ struct TypeProjection<'g> {
     incompatible: bool,
 }
 
-fn is_callable_clause(target: Option<RequirementTarget<'_>>) -> bool {
+pub(super) fn is_callable_clause(target: Option<RequirementTarget<'_>>) -> bool {
     matches!(target, Some(RequirementTarget::Predicate(id)) if matches!(id.name(), "callable" | "callableMut" | "callableOnce"))
 }
 
@@ -31,20 +31,36 @@ impl<'r, 'g> Checker<'r, 'g> {
         &mut self,
         family: &'g DeclarationId,
         selected: &SourceCandidate<'r, 'g>,
-    ) -> Work<(Vec<Option<Type<'g>>>, bool)> {
+    ) -> Work<Vec<Option<Type<'g>>>> {
+        let binders = &selected.body.header.binders;
+        self.elab.reserve(binders.len())?;
+        let mut slots = vec![None; binders.len()];
+        for sub in &selected.substitution {
+            slots[sub.position] = Some(sub.argument.clone());
+        }
+        self.apply_callable_equations(
+            &[
+                (family, selected.body.substitution.as_deref().unwrap()),
+                (&selected.body.source.declaration, &[]),
+            ],
+            binders,
+            &mut slots,
+        )?;
+        Ok(slots)
+    }
+
+    pub(super) fn apply_callable_equations(
+        &mut self,
+        contracts: &[(&DeclarationId, &[Substitution<'g>])],
+        binders: &[Binder<'g>],
+        slots: &mut [Option<Type<'g>>],
+    ) -> Work<()> {
         let ordinary = self.input.ordinary.unwrap();
         let mut equations = Vec::new();
-        let mut has_requirements = false;
-        let selected_header = selected.body.substitution.as_deref().unwrap();
-        let empty: &[Substitution<'g>] = &[];
-        for (contract, substitution) in [
-            (family, selected_header),
-            (&selected.body.source.declaration, empty),
-        ] {
+        for &(contract, substitution) in contracts {
             let Some(header) = ordinary.headers().get(contract) else {
                 continue;
             };
-            has_requirements |= !header.requirements.is_empty();
             for requirement in &header.requirements {
                 self.elab.step(1)?;
                 if !is_callable_clause(requirement.target) {
@@ -62,12 +78,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                 });
             }
         }
-        let binders = &selected.body.header.binders;
-        self.elab.reserve(binders.len())?;
-        let mut slots = vec![None; binders.len()];
-        for sub in &selected.substitution {
-            slots[sub.position] = Some(sub.argument.clone());
-        }
         loop {
             let mut changed = false;
             for equation in &equations {
@@ -75,7 +85,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if !self.closed(&equation.receiver, binders, &|i| slots[i].is_some(), 1)? {
                     continue;
                 }
-                let solved = self.slot_substitutions(binders, &slots)?;
+                let solved = self.slot_substitutions(binders, slots)?;
                 let receiver = self.substitute(&equation.receiver, &solved, 1)?;
                 let receiver = match receiver.as_ref() {
                     TypeTerm::Reference { referent, .. } => referent,
@@ -94,7 +104,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     continue;
                 }
                 self.elab.reserve(slots.len())?;
-                let mut proposed = slots.clone();
+                let mut proposed = slots.to_vec();
                 let mut matches = true;
                 for (left, right) in expected.iter().zip(parameters) {
                     if !self.input_equation(left, right, binders, &mut proposed, &[], 1)? {
@@ -117,14 +127,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                         .iter()
                         .zip(&proposed)
                         .any(|(old, new)| old.is_none() && new.is_some());
-                    slots = proposed;
+                    slots.clone_from_slice(&proposed);
                 }
             }
             if !changed {
                 break;
             }
         }
-        Ok((slots, has_requirements))
+        Ok(())
     }
 
     pub(super) fn written_callable_context(

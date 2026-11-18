@@ -14,6 +14,8 @@ pub struct CaptureFact<'g> {
     pub site: Site<'g>,
     pub path: data::PlacePath<'g>,
     pub ty: Type<'g>,
+    /// Original captured storage, not the type reached after projection.
+    pub storage: Option<Type<'g>>,
     pub form: CaptureForm,
     pub access: data::Access,
     pub demand: Option<InvocationMode>,
@@ -96,6 +98,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 site: capture.site,
                                 path: capture.path.clone(),
                                 ty: capture.ty.clone(),
+                                storage: capture.storage.clone(),
                                 form: capture.form,
                                 access: capture.access,
                                 demand,
@@ -141,11 +144,37 @@ impl<'r, 'g> Checker<'r, 'g> {
                             })
                         },
                     );
+                    let ty = expression(node).unwrap_or(place).ty.clone();
+                    let storage = if matches!(form, CaptureForm::CarriedReference { .. }) {
+                        let mut base = node;
+                        let mut descriptor = None;
+                        while let Some(source) = expression(base)
+                            .filter(|e| e.path.as_ref().is_some_and(|p| p.root == path.root))
+                        {
+                            self.elab.step(1)?;
+                            if matches!(source.ty.as_ref(), TypeTerm::Reference { .. }) {
+                                descriptor = Some(source.ty.clone());
+                            }
+                            let syntax = &module.syntax.nodes[base];
+                            if matches!(
+                                syntax.kind,
+                                NodeKind::Field | NodeKind::Group | NodeKind::Prefix("*")
+                            ) {
+                                base = syntax.children[0];
+                            } else {
+                                break;
+                            }
+                        }
+                        descriptor
+                    } else {
+                        Some(ty.clone())
+                    };
                     self.elab.reserve(1 + path.projections.len())?;
                     captures.push(CaptureFact {
                         site: Self::site(module, node),
                         path: path.clone(),
-                        ty: expression(node).unwrap_or(place).ty.clone(),
+                        ty,
+                        storage,
                         form,
                         access: explicit.map_or(place.access, |mutable| {
                             if mutable {

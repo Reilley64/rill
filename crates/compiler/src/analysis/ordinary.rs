@@ -89,7 +89,7 @@ pub struct Comparison<'g> {
     pub intersection: Option<(usize, usize)>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum DeclarationIssue<'g> {
     DuplicateMembers {
         scope: &'g Declaration,
@@ -109,7 +109,7 @@ pub enum DeclarationIssue<'g> {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LayoutStep<'g> {
     pub origin: &'g DeclarationId,
     pub target: &'g DeclarationId,

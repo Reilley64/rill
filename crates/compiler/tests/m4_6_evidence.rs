@@ -64,6 +64,86 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn a_selected_clause_determines_open_output_before_checking_equality() {
+    let fixture = Fixture::new(
+        "function inner<T,E>(value: T): E;
+         implement<U> inner(value: U): i32 { return 1i32; }
+         function outer<T,E>(value: T): E;
+         implement<U,E> outer(value: U): E where inner(U,E) { while (true) {} }
+         let pending: bool = outer(true);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let (node, _) = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert!(
+        matches!(call.selected_result.as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "i32"),
+        "{call:?}"
+    );
+    assert!(matches!(
+        call.output_agreement,
+        compiler::analysis::generics::OutputAgreement::Disagrees { .. }
+    ));
+    let goal = report.goal(call.goal.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        goal.state,
+        GoalState::Unresolved(GoalBlocker::OrdinaryAdmission)
+    );
+    assert!(
+        goal.dependencies
+            .iter()
+            .any(|id| report.goal(id).unwrap().source.span.bytes() == b"inner(U,E)")
+    );
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
+fn an_output_producing_cycle_retains_the_active_edge_without_guessing_a_result() {
+    let fixture = Fixture::new(
+        "function read<T,E>(value: T): E;
+         implement<U,E> read(value: U): E where read(U,E) { while (true) {} }
+         let pending: bool = read<bool>(true);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let (node, _) = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert!(call.selected_result.is_none());
+    let goal = report.goal(call.goal.as_ref().unwrap()).unwrap();
+    assert_eq!(goal.state, GoalState::Unresolved(GoalBlocker::Cycle));
+    let back_edge = report.goal(&goal.dependencies[0]).unwrap();
+    assert_eq!(back_edge.cycle, [goal.id.clone(), back_edge.id.clone()]);
+    assert!(goal.hypothetical.is_none());
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
 fn equal_callable_signatures_do_not_merge_different_capture_origins() {
     let fixture = Fixture::new(
         "function keep<T>(value: T): T where noBorrow(T) { return value; }
@@ -98,6 +178,123 @@ fn equal_callable_signatures_do_not_merge_different_capture_origins() {
             .any(|d| d.id == *borrowed.captures[0].path.root && d.name.as_deref() == Some("value"))
     );
     assert_eq!(direct[1].dependencies.len(), 1);
+}
+
+#[test]
+fn callable_assumption_types_rigid_invocation_and_flexible_arrow() {
+    let fixture = Fixture::new(
+        "function run<F,R>(cb: F): R where callable(F,[i32],R) { return cb(1); }
+         let checked = run((x) => x == 1i32);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    assert!(
+        report.body(module, BodyOwner::Startup).unwrap().is_some(),
+        "{:?}",
+        report.obligations()
+    );
+    let run = module
+        .declarations
+        .iter()
+        .find(|d| d.name.as_deref() == Some("run"))
+        .unwrap();
+    assert!(
+        report
+            .body(module, BodyOwner::Declaration(&run.id))
+            .unwrap()
+            .is_some()
+    );
+    let (node, _) = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.kind == NodeKind::Call && n.span.bytes() == b"cb(1)")
+        .unwrap();
+    let invocation = report
+        .node(module, node)
+        .unwrap()
+        .unwrap()
+        .callable
+        .as_ref()
+        .unwrap()
+        .invocation
+        .as_ref()
+        .unwrap();
+    let assumed = report
+        .goal(invocation.assumption.as_ref().unwrap())
+        .unwrap();
+    assert_eq!(assumed.state, GoalState::Assumption);
+    assert_eq!(assumed.source.span.bytes(), b"callable(F,[i32],R)");
+}
+
+#[test]
+fn a_callable_clause_blocks_a_result_default_until_its_arrow_is_ready() {
+    let fixture = Fixture::new(
+        "function run<F,R = i32,A = bool>(cb: F): R where callable(F,[A],R) { while (true) {} }
+         let inferred = run((x) => true);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let (node, _) = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.kind == NodeKind::Call)
+        .unwrap();
+    let compiler::analysis::scalars::NodeFactKind::Expression(fact) = &report
+        .node(module, node)
+        .unwrap()
+        .expect("checked call")
+        .kind
+    else {
+        panic!("call")
+    };
+    assert!(matches!(fact.ty.as_ref(), TypeTerm::Primitive(id) if id.name() == "bool"));
+    let defaults = &fact.call.as_ref().unwrap().defaults;
+    assert_eq!(defaults.len(), 1);
+    assert_eq!(defaults[0].span.bytes(), b"bool");
+}
+
+#[test]
+fn projecting_a_scalar_keeps_the_captured_reference_dependency() {
+    let fixture = Fixture::new(
+        "type Cell = { value: i32 };
+         function keep<T>(value: T): T where noBorrow(T) { return value; }
+         function probe(cell: Cell): void {
+             let r = &cell;
+             let bad = keep(() => r.value == 1i32);
+         }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let goal = report
+        .goals()
+        .iter()
+        .find(|goal| goal.arrow_origin.is_some() && goal.source.span.bytes() == b"noBorrow(T)")
+        .unwrap();
+    assert_eq!(goal.state, GoalState::Disproved);
+    let dependency = report.goal(&goal.dependencies[0]).unwrap();
+    assert!(
+        matches!(&dependency.judgment, compiler::analysis::generics::GoalJudgment::Requirement { arguments, .. } if matches!(arguments[0].as_ref(), TypeTerm::Reference { .. }))
+    );
 }
 
 #[test]

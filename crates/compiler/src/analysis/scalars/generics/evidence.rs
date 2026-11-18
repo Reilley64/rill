@@ -1,4 +1,6 @@
 use super::*;
+
+mod output;
 use ordinary::{InputPremise, RequirementMetadata, RequirementTarget};
 
 /// An identity issued by one generic analysis report, not a proof input.
@@ -108,6 +110,7 @@ pub struct GoalFacts<'g> {
 pub(in crate::analysis::scalars) struct Evidence<'g> {
     report: Arc<()>,
     goals: Vec<GoalFacts<'g>>,
+    output_equations: BTreeMap<usize, output::OutputEquation<'g>>,
     // Check one written body at a time. Nested expressions inherit this set.
     assumptions: Vec<GoalId>,
 }
@@ -178,10 +181,6 @@ impl Predicate {
             _ => unreachable!("captured M3 predicate"),
         }
     }
-}
-
-fn satisfies_mode(actual: InvocationMode, required: InvocationMode) -> bool {
-    actual == required || actual == InvocationMode::ReadOnly || required == InvocationMode::Once
 }
 
 enum GoalChoice<'g> {
@@ -438,6 +437,65 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(!unresolved && !rejected)
     }
 
+    pub(super) fn symbolic_callable(
+        &mut self,
+        receiver: &Type<'g>,
+        arity: usize,
+    ) -> Work<Option<(Type<'g>, GoalId)>> {
+        let mut matching: Option<(InvocationMode, Type<'g>, Type<'g>, GoalId)> = None;
+        for i in 0..self.evidence.assumptions.len() {
+            self.elab.step(1)?;
+            let id = self.evidence.assumptions[i].clone();
+            let GoalJudgment::Requirement {
+                target: RequirementTarget::Predicate(predicate),
+                arguments,
+            } = &self.evidence.goals[id.index].judgment
+            else {
+                continue;
+            };
+            let Predicate::Callable(mode) = Predicate::of(predicate) else {
+                continue;
+            };
+            let [subject, inputs, output] = arguments.as_slice() else {
+                continue;
+            };
+            let TypeTerm::Tuple(fields) = inputs.as_ref() else {
+                continue;
+            };
+            if fields.len() != arity {
+                continue;
+            }
+            let (subject, inputs, output) = (subject.clone(), inputs.clone(), output.clone());
+            if !self.same(&subject, receiver)? {
+                continue;
+            }
+            if let Some((other, before, result, _)) = &matching {
+                if !self.same(before, &inputs)? || !self.same(result, &output)? {
+                    return Ok(None);
+                }
+                if Self::mode_admits(*other, mode) {
+                    continue;
+                }
+            }
+            matching = Some((mode, inputs, output, id));
+        }
+        let Some((mode, inputs, result, id)) = matching else {
+            return Ok(None);
+        };
+        let TypeTerm::Tuple(parameters) = inputs.as_ref() else {
+            unreachable!()
+        };
+        self.elab.reserve(1 + parameters.len())?;
+        Ok(Some((
+            Arc::new(TypeTerm::Callable {
+                mode,
+                parameters: parameters.clone(),
+                result,
+            }),
+            id,
+        )))
+    }
+
     fn arrow_subject(
         &mut self,
         inference: &Inference<'g>,
@@ -489,7 +547,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let matches = lt == rt
             || (weakening
                 && matches!((lt, rt), (RequirementTarget::Predicate(l), RequirementTarget::Predicate(r))
-                    if matches!((Predicate::of(l), Predicate::of(r)), (Predicate::Callable(a), Predicate::Callable(b)) if satisfies_mode(a, b))));
+                    if matches!((Predicate::of(l), Predicate::of(r)), (Predicate::Callable(a), Predicate::Callable(b)) if Self::mode_admits(a, b))));
         if !matches || l.key_len() != r.key_len() {
             return Ok(false);
         }
@@ -543,6 +601,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 frame.state = join(frame.state, state);
                 frame.next += 1;
             } else {
+                if let Some(equation) = self.evidence.output_equations.remove(&goal) {
+                    frame.state = join(frame.state, self.resume_selected_output(goal, equation)?);
+                    if frame.next < self.evidence.goals[goal].dependencies.len() {
+                        continue;
+                    }
+                }
                 let mut state = stack.pop().unwrap().state;
                 if let Some(equal) = self.finish_family_requirement(goal)?
                     && !equal
@@ -746,7 +810,6 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             unreachable!("determination judgment")
         };
-        let selection = self.evidence.goals[goal].selection.take();
         let prelude = self.input.graph.prelude();
         if *id == prelude.copy || *id == prelude.dispose {
             return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
@@ -755,7 +818,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         if let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)? {
             return Ok(state);
         }
-        let selection = if let Some(selection) = selection {
+        let selection = if let Some(selection) = self.evidence.goals[goal].selection.take() {
             selection
         } else {
             match self.select_goal_contract(id, &inputs, &filters)? {
@@ -924,38 +987,65 @@ impl<'r, 'g> Checker<'r, 'g> {
     fn expand_selected_contract(
         &mut self,
         goal: usize,
-        family: &ordinary::FamilyFacts<'g>,
+        family: &'r ordinary::FamilyFacts<'g>,
         selection: GoalSelection<'g>,
     ) -> Work<GoalState> {
+        self.evidence.goals[goal].selection = Some(selection);
+        self.continue_selected_contract(goal, family)
+    }
+
+    fn continue_selected_contract(
+        &mut self,
+        goal: usize,
+        family: &'r ordinary::FamilyFacts<'g>,
+    ) -> Work<GoalState> {
+        let selection = self.evidence.goals[goal].selection.as_ref().unwrap();
+        let implementation = selection.implementation;
         self.elab.step(family.implementations.len())?;
         let body = family
             .implementations
             .iter()
-            .find(|b| b.source.declaration == *selection.implementation)
+            .find(|b| b.source.declaration == *implementation)
             .unwrap();
         let DeclarationShape::Function { result, .. } = &body.header.shape else {
             unreachable!("implementation signature")
         };
+        self.elab.reserve(selection.substitution.len())?;
+        let mut selected_substitutions = selection.substitution.clone();
+        let binders = &body.header.binders;
+        if selected_substitutions.len() != binders.len() {
+            self.elab.reserve(binders.len())?;
+            let mut slots = vec![None; binders.len()];
+            for sub in &selected_substitutions {
+                slots[sub.position] = Some(sub.argument.clone());
+            }
+            self.apply_callable_equations(
+                &[
+                    (
+                        &family.header.declaration.id,
+                        body.substitution.as_deref().unwrap(),
+                    ),
+                    (implementation, &[]),
+                ],
+                binders,
+                &mut slots,
+            )?;
+            selected_substitutions = self.slot_substitutions(binders, &slots)?;
+            self.elab.reserve(selected_substitutions.len())?;
+            self.evidence.goals[goal]
+                .selection
+                .as_mut()
+                .unwrap()
+                .substitution = selected_substitutions.clone();
+            if selected_substitutions.len() != binders.len() {
+                return self.request_selected_output(goal, family, body, &selected_substitutions);
+            }
+        }
         let source = Self::site(
             self.evidence_module(&body.source.declaration.module)?,
             body.source.signature_node,
         );
         let site = self.evidence.goals[goal].site;
-        let implementation = selection.implementation;
-        self.evidence.goals[goal].selection = Some(selection);
-        let selection = self.evidence.goals[goal].selection.as_ref().unwrap();
-        for (index, binder) in body.header.binders.iter().enumerate() {
-            self.elab.step(1)?;
-            if selection
-                .substitution
-                .get(index)
-                .is_none_or(|sub| sub.binder != &binder.declaration.id)
-            {
-                return Ok(GoalState::Unresolved(GoalBlocker::SelectedOutput));
-            }
-        }
-        self.elab.reserve(selection.substitution.len())?;
-        let selected_substitutions = selection.substitution.clone();
         let result = self.substitute(result, &selected_substitutions, 1)?;
         let header_substitution = body.substitution.as_ref().unwrap();
         self.elab.reserve(header_substitution.len())?;
@@ -983,6 +1073,54 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(join(declared, selected))
     }
 
+    pub(super) fn source_contract_requirements(
+        &mut self,
+        site: Site<'g>,
+        contracts: &[(&DeclarationId, &[Substitution<'g>])],
+    ) -> Work<Vec<GoalId>> {
+        let mut goals = Vec::new();
+        for &(owner, substitutions) in contracts {
+            let Some(header) = self.input.ordinary.unwrap().headers().get(owner) else {
+                continue;
+            };
+            let module = self.evidence_module(&owner.module)?;
+            for requirement in &header.requirements {
+                self.elab.step(1)?;
+                let Some(child) =
+                    self.issue_header_requirement(site, module, requirement, substitutions)?
+                else {
+                    continue;
+                };
+                self.evidence.goals[child.index].premise =
+                    Some(InputPremise::HypotheticalOrdinaryRole);
+                self.elab.reserve(1)?;
+                goals.push(child.clone());
+                self.solve_goal(&child)?;
+            }
+        }
+        Ok(goals)
+    }
+
+    fn issue_header_requirement(
+        &mut self,
+        site: Site<'g>,
+        module: &'g Module,
+        requirement: &RequirementMetadata<'g>,
+        substitutions: &[Substitution<'g>],
+    ) -> Work<Option<GoalId>> {
+        let Some(judgment) = self.requirement_term(requirement, substitutions)? else {
+            return Ok(None);
+        };
+        self.issue_goal(
+            judgment,
+            site,
+            Self::site(module, requirement.node),
+            &requirement.routes,
+            false,
+        )
+        .map(Some)
+    }
+
     fn append_header_goals(
         &mut self,
         goal: usize,
@@ -997,17 +1135,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut state = GoalState::Proved;
         for requirement in &header.requirements {
             self.elab.step(1)?;
-            let Some(judgment) = self.requirement_term(requirement, substitutions)? else {
+            let Some(child) =
+                self.issue_header_requirement(site, module, requirement, substitutions)?
+            else {
                 state = GoalState::Unresolved(GoalBlocker::UnavailableRequirement);
                 continue;
             };
-            let child = self.issue_goal(
-                judgment,
-                site,
-                Self::site(module, requirement.node),
-                &requirement.routes,
-                false,
-            )?;
             self.link_goal(goal, child)?;
         }
         Ok(state)
@@ -1154,8 +1287,23 @@ impl<'r, 'g> Checker<'r, 'g> {
                 let Some(origin) = self.evidence.goals[goal].arrow_origin.clone() else {
                     return Ok(GoalState::Unresolved(GoalBlocker::CallableEnvironment));
                 };
+                let mut state = GoalState::Proved;
                 for capture in &origin.captures {
-                    self.property_dependency(goal, intrinsic, capture.ty.clone(), capture.site)?;
+                    self.elab.step(1)?;
+                    let Some(storage) = &capture.storage else {
+                        let blocked = if predicate == Predicate::NoBorrow
+                            && matches!(
+                                capture.form,
+                                callables::CaptureForm::CarriedReference { .. }
+                            ) {
+                            GoalState::Disproved
+                        } else {
+                            GoalState::Unresolved(GoalBlocker::CallableEnvironment)
+                        };
+                        state = join(state, blocked);
+                        continue;
+                    };
+                    self.property_dependency(goal, intrinsic, storage.clone(), capture.site)?;
                     if let Some(source) = capture.value_origin
                         && let Some(arrow) = self.facts.arrows.get(&(source.module, source.node))
                     {
@@ -1163,7 +1311,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         self.evidence.goals[child].arrow_origin = Some(arrow.clone());
                     }
                 }
-                Ok(GoalState::Proved)
+                Ok(state)
             }
             TypeTerm::Nominal { .. } => self.nominal_property(goal, intrinsic, &receiver, None),
             TypeTerm::Variant {
@@ -1313,7 +1461,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let TypeTerm::Tuple(parameters) = parameters.as_ref() else {
             unreachable!("validated requirement term")
         };
-        if !satisfies_mode(mode, required)
+        if !Self::mode_admits(mode, required)
             || actual.len() != parameters.len()
             || !self.same(actual_result, result)?
         {

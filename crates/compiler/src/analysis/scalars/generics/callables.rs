@@ -25,6 +25,7 @@ pub struct InvocationFacts<'g> {
     pub mode: InvocationMode,
     pub access: data::Access,
     pub path: Option<data::PlacePath<'g>>,
+    pub assumption: Option<GoalId>,
 }
 
 #[derive(Debug)]
@@ -459,7 +460,18 @@ impl<'r, 'g> Checker<'r, 'g> {
             {
                 continue;
             }
-            self.arrow_step(inference, node, context)?;
+            let premise = slot.ordinary_context;
+            let first = self.facts.findings.len();
+            let previous = std::mem::replace(&mut self.arrow_premise, premise);
+            let checked = self.arrow_step(inference, node, context);
+            let separated = if premise.is_some() {
+                self.separate_ordinary_findings(inference, first)
+            } else {
+                Ok(())
+            };
+            self.arrow_premise = previous;
+            checked?;
+            separated?;
             if inference.slots[&node].ty.is_some() || inference.slots[&node].blocked {
                 return Ok(true);
             }
@@ -557,8 +569,15 @@ impl<'r, 'g> Checker<'r, 'g> {
         let outer_size = context.scopes.iter().map(BTreeMap::len).sum::<usize>();
         self.elab
             .reserve(outer_size + context.scopes.len() + context.views.len())?;
-        let mut inner = context.clone();
-        inner.loops.clear();
+        let mut inner = Context {
+            signature: context.signature,
+            scopes: context.scopes.clone(),
+            loops: Vec::new(),
+            startup: context.startup,
+            arrow_return: None,
+            views: context.views.clone(),
+        };
+        self.elab.reserve(1)?;
         inner.scopes.push(scope);
         let target = ArrowReturn {
             node,
@@ -566,17 +585,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             contributions: Rc::default(),
         };
         inner.arrow_return = Some(target.clone());
-        let previous_premise = std::mem::replace(&mut self.arrow_premise, premise);
+        let coverage_premise = premise.filter(|_| head.result.is_none());
         self.arrow_depth += 1;
-        let inferred = self.check_arrow_body(module, body, &mut inner, &target);
+        let inferred = self.check_arrow_body(module, body, &mut inner, &target, coverage_premise);
         self.arrow_depth -= 1;
-        let separated = if premise.is_some() {
-            self.separate_ordinary_findings(inference, before.1)
-        } else {
-            Ok(())
-        };
-        self.arrow_premise = previous_premise;
-        separated?;
         if let Some(result) = inferred?
             && self.marks() == before
         {
@@ -613,6 +625,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         body: NodeId,
         context: &mut Context<'r, 'g>,
         target: &ArrowReturn<'g>,
+        coverage_premise: Option<ordinary::InputPremise>,
     ) -> Work<Option<Type<'g>>> {
         self.equation_depth(self.arrow_depth)?;
         if module.syntax.nodes[body].kind != NodeKind::Block {
@@ -624,6 +637,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         if let Some(expected) = &target.expected {
             if flow.normal && primitive_name(expected) != Some("void") {
                 self.finding(module, body, ScalarFindingKind::ReturnCoverage)?;
+                if let Some(premise) = coverage_premise {
+                    self.elab.reserve(1)?;
+                    self.conditional_findings.push(ConditionalFinding {
+                        premise,
+                        finding: self.facts.findings.pop().unwrap(),
+                    });
+                }
                 return Ok(None);
             }
             return Ok(Some(expected.clone()));
@@ -774,15 +794,28 @@ impl<'r, 'g> Checker<'r, 'g> {
             TypeTerm::Reference { mutable, referent } => (referent, Some(*mutable)),
             _ => (ty, None),
         };
+        let mut assumption = None;
+        let ty = if matches!(ty.as_ref(), TypeTerm::Parameter { .. }) {
+            if let Some((descriptor, goal)) =
+                self.symbolic_callable(ty, syntax.children.len() - 1)?
+            {
+                assumption = Some(goal);
+                descriptor
+            } else {
+                self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
+                inference.slots.get_mut(&node).unwrap().blocked = true;
+                return Ok(());
+            }
+        } else {
+            ty.clone()
+        };
         let TypeTerm::Callable {
-            mode, parameters, ..
+            mode,
+            parameters,
+            result,
         } = ty.as_ref()
         else {
-            if matches!(ty.as_ref(), TypeTerm::Parameter { .. }) {
-                self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
-            } else {
-                self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
-            }
+            self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
         };
@@ -813,13 +846,6 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.copy_path(slot.path.as_ref())?
         };
         let mode = *mode;
-        let ty = ty.clone();
-        let TypeTerm::Callable {
-            parameters, result, ..
-        } = ty.as_ref()
-        else {
-            unreachable!()
-        };
         for (&argument, parameter) in syntax.children[1..].iter().zip(parameters) {
             self.establish(inference, argument, parameter.clone(), true)?;
         }
@@ -829,6 +855,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             mode,
             access,
             path,
+            assumption,
         }));
         self.establish(inference, node, result.clone(), false)
     }
