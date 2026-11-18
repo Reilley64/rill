@@ -219,6 +219,10 @@ pub enum Operation<'g> {
 pub enum RetainedPlace<'g> {
     Local(Place<'g>),
     ThroughParameter(Place<'g>),
+    ThroughAlias {
+        descriptor: Place<'g>,
+        target: Place<'g>,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -584,6 +588,7 @@ enum Action<'g> {
         from: Slot,
         into: Slot,
         exclusive: bool,
+        retained_target: bool,
     },
     Reborrow {
         parent: Slot,
@@ -711,4 +716,5 @@ struct CallDestination {
 enum CallStorage {
     Local(Slot),
     ThroughParameter { descriptor: Slot, contents: Slot },
+    ThroughAlias { descriptor: Slot, argument: Slot },
 }

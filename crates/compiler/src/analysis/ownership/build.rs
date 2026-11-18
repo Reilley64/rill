@@ -1105,6 +1105,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         from,
                         into,
                         exclusive,
+                        retained_target: retained_bool_contents_type(&facts.ty).is_some(),
                     }
                 }
             }
@@ -1283,12 +1284,23 @@ impl<'a, 'g> Build<'a, 'g> {
             if !path.projections.is_empty() {
                 return Err(Stop::Pending(argument));
             }
-            let (descriptor, contents) = self.caller_contents(argument, path.root)?;
-            return Ok(CallDestination {
-                storage: CallStorage::ThroughParameter {
+            self.budget.step(2)?;
+            let descriptor = *self.locals.get(path.root).ok_or(Stop::Pending(argument))?;
+            let storage = if let Some(&contents) = self.retained.get(&descriptor) {
+                CallStorage::ThroughParameter {
                     descriptor,
                     contents,
-                },
+                }
+            } else if path.root.kind == DeclarationKind::Binding {
+                CallStorage::ThroughAlias {
+                    descriptor,
+                    argument: args[position],
+                }
+            } else {
+                return Err(Stop::Pending(argument));
+            };
+            return Ok(CallDestination {
+                storage,
                 input: args[input],
             });
         }
@@ -1406,7 +1418,10 @@ impl<'a, 'g> Build<'a, 'g> {
             );
             next = if existing_exclusive {
                 let parent = match destination.map(|destination| destination.storage) {
-                    Some(CallStorage::ThroughParameter { descriptor, .. }) => descriptor,
+                    Some(
+                        CallStorage::ThroughParameter { descriptor, .. }
+                        | CallStorage::ThroughAlias { descriptor, .. },
+                    ) => descriptor,
                     _ => self.place(arg)?,
                 };
                 self.emit(

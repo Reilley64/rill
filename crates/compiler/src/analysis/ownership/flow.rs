@@ -19,6 +19,8 @@ struct Held {
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
     stored_at: Option<NodeId>,
+    /// Exact local descriptor reached by an admitted exclusive access value.
+    retained_access: Option<Slot>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -190,7 +192,18 @@ fn conflict(
     for &holder in live {
         budget.step(1)?;
         if let State::Initialized(held) = &state[holder] {
-            for loan in held.loans.iter() {
+            // A live alias can still read the target's current contents, not
+            // only the contents present when its access was acquired.
+            let contents = if let Some(target) = held.retained_access {
+                budget.step(1)?;
+                match &state[target] {
+                    State::Initialized(value) => value.loans.as_ref(),
+                    _ => &[],
+                }
+            } else {
+                &[]
+            };
+            for loan in held.loans.iter().chain(contents) {
                 budget.step(1)?;
                 let blocks = match access {
                     Access::Observe => loan.exclusive,
@@ -740,6 +753,7 @@ pub(super) fn run<'g>(
                     from,
                     into,
                     exclusive,
+                    retained_target,
                 } => {
                     require_initialized(&slots, &state, from, node, budget)?;
                     conflict(
@@ -782,6 +796,7 @@ pub(super) fn run<'g>(
                     })?;
                     state[into] = State::Initialized(Held {
                         loans: loan_set(loans, budget)?,
+                        retained_access: retained_target.then_some(from),
                         ..Held::default()
                     });
                     Operation::Borrow {
@@ -833,6 +848,11 @@ pub(super) fn run<'g>(
                     };
                     state[into] = State::Initialized(Held {
                         loans,
+                        retained_access: if exclusive {
+                            held.retained_access
+                        } else {
+                            None
+                        },
                         ..Held::default()
                     });
                     Operation::Reborrow {
@@ -874,6 +894,23 @@ pub(super) fn run<'g>(
                                 RetainedPlace::ThroughParameter(local(descriptor)),
                                 Some(node),
                             ),
+                            CallStorage::ThroughAlias {
+                                descriptor,
+                                argument,
+                            } => {
+                                let held = initialized(&state[argument], node)?;
+                                let target = held.retained_access.ok_or(Stop::Pending(node))?;
+                                initialized(&state[target], node)?;
+                                (
+                                    descriptor,
+                                    target,
+                                    RetainedPlace::ThroughAlias {
+                                        descriptor: local(descriptor),
+                                        target: local(target),
+                                    },
+                                    None,
+                                )
+                            }
                         };
                         initialized(&state[access], node)?;
                         initialized(&state[destination.input], node)?;

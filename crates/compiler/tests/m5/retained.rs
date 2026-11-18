@@ -384,12 +384,6 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 let src = &mut local;
                 relay(slot, &*src);
             }
-            function aliased(seed: &bool): bool {
-                let mut out = seed;
-                let access = &mut out;
-                remember(access, seed);
-                return *out;
-            }
             function rejectedCaller(seed: &bool): bool {
                 let mut out = seed;
                 escapesThroughRelay(&mut out, seed);
@@ -528,11 +522,7 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
             assert_eq!(finding.site.span.bytes(), b"relay(slot, &*src)");
             assert_eq!(finding.related.span.bytes(), b"&mut local");
 
-            for name in [
-                "aliased",
-                "storesIncomingReborrow",
-                "forwardsIncomingReborrow",
-            ] {
+            for name in ["storesIncomingReborrow", "forwardsIncomingReborrow"] {
                 let pending = lower(name);
                 assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
                 assert!(pending.mir().is_none());
@@ -674,6 +664,186 @@ fn direct_calls_retain_sources_in_named_record_fields() {
                 assert_eq!(finding.code(), code);
                 assert_eq!(finding.related.span.bytes(), related);
             }
+            let limits = AnalysisLimits {
+                max_work: valid.statistics().work,
+                max_entries: valid.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("valid", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("valid", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn exclusive_aliases_retain_sources_in_the_proved_target() {
+    probe(
+        "retained::exclusive_aliases_retain_sources_in_the_proved_target",
+        r#"
+            type Holder = { value: &bool; text: string; }
+            function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function valid(seed: &bool, flag: bool): bool {
+                let mut out = seed;
+                let access = &mut out;
+                let moved = access;
+                remember(moved, &flag);
+                return *out;
+            }
+            function field(seed: &bool, flag: bool): bool {
+                let mut holder = Holder { value: seed, text: "tag" };
+                let access = &mut holder.value;
+                remember(access, &flag);
+                let saved = holder.value;
+                return *saved;
+            }
+            function expires(seed: &bool): bool {
+                let mut out = seed;
+                let access = &mut out;
+                { let flag = true; remember(access, &flag); }
+                return *out;
+            }
+            function moved(seed: &bool): bool {
+                let mut out = seed;
+                let access = &mut out;
+                let moved = access;
+                remember(access, seed);
+                return *out;
+            }
+            function stillExclusive(seed: &bool): bool {
+                let mut out = seed;
+                let access = &mut out;
+                remember(access, seed);
+                let value = *out;
+                remember(access, seed);
+                return value;
+            }
+            function expiresAtTarget(seed: &bool): bool {
+                let mut outer = seed;
+                let mut access = &mut outer;
+                { let mut inner = seed; access = &mut inner; }
+                remember(access, seed);
+                return false;
+            }
+            function expiresThroughAlias(seed: &bool): void {
+                let mut out = seed;
+                let access = &mut out;
+                { let flag = true; remember(access, &flag); }
+                remember(access, seed);
+            }
+            function readBool(value: &mut bool): bool { return *value; }
+            function conflictsThroughAlias(seed: &bool): bool {
+                let mut out = seed;
+                let access = &mut out;
+                let mut flag = true;
+                remember(access, &flag);
+                let value = readBool(&mut flag);
+                remember(access, seed);
+                return value;
+            }
+            function incomingMoved(slot: &mut &bool, seed: &bool): void {
+                let access = slot;
+                remember(access, seed);
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.name.as_deref() == Some(name)
+                            && d.id.kind == loader::DeclarationKind::Function
+                    })
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let role = &declaration("remember").id;
+            let valid = lower("valid");
+            for (name, descriptor_name, target_name) in [
+                ("valid", b"moved".as_slice(), b"out".as_slice()),
+                ("field", b"access".as_slice(), b"holder".as_slice()),
+            ] {
+                let report = lower(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let events: Vec<_> = linear(mir, mir.entry)
+                    .into_iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Reborrow { .. } | Operation::CallRetaining { .. }
+                        )
+                    })
+                    .collect();
+                let [
+                    Operation::Reborrow {
+                        parent,
+                        exclusive: true,
+                        ..
+                    },
+                    Operation::CallRetaining {
+                        callee,
+                        destination: RetainedPlace::ThroughAlias { descriptor, target },
+                        ..
+                    },
+                ] = events.as_slice()
+                else {
+                    panic!("expected exact reborrow and retained call: {events:?}")
+                };
+                assert_eq!(*callee, role);
+                assert_eq!(parent.root.node, descriptor.root.node);
+                assert_eq!(descriptor.root.span.bytes(), descriptor_name);
+                assert_eq!(target.root.span.bytes(), target_name);
+                if name == "field" {
+                    assert!(
+                        target
+                            .field()
+                            .is_some_and(|f| f.name.as_deref() == Some("value"))
+                    );
+                    assert!(
+                        matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
+                        if text.field().is_some_and(|f| f.name.as_deref() == Some("text")))
+                    );
+                } else {
+                    assert!(target.projection.is_none());
+                }
+            }
+            for (name, code, cause) in [
+                ("expires", "R0203", b"&flag".as_slice()),
+                ("moved", "R0200", b"access".as_slice()),
+                ("stillExclusive", "R0201", b"&mut out".as_slice()),
+                ("expiresAtTarget", "R0203", b"&mut inner".as_slice()),
+                ("expiresThroughAlias", "R0203", b"&flag".as_slice()),
+                ("conflictsThroughAlias", "R0201", b"&flag".as_slice()),
+            ] {
+                let bad = lower(name);
+                assert_eq!(bad.completion(), Completion::SourceRejected, "{name}");
+                assert!(bad.mir().is_none());
+                let [finding] = bad.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.related.span.bytes(), cause, "{name}");
+            }
+            let pending = lower("incomingMoved");
+            assert_eq!(pending.completion(), Completion::Incomplete);
+            assert!(pending.mir().is_none());
             let limits = AnalysisLimits {
                 max_work: valid.statistics().work,
                 max_entries: valid.statistics().entries,
