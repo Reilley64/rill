@@ -48,6 +48,14 @@ enum Binding<'a, 'g> {
     },
 }
 
+#[derive(Clone, Copy)]
+struct ProjectedTemporary {
+    site: NodeId,
+    base: NodeId,
+    scratch: Slot,
+    member: Slot,
+}
+
 impl<'a, 'g> Build<'a, 'g> {
     fn depth(&mut self, depth: usize) -> ResultOf<()> {
         self.budget.step(1)?;
@@ -417,8 +425,14 @@ impl<'a, 'g> Build<'a, 'g> {
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
                     Binding::Name(declaration, _) => {
-                        let slot = self.locals[declaration];
-                        self.expression(value, Some(slot), next, depth + 1)
+                        let into = self.locals[declaration];
+                        let temporary = self.temporary_projection(initializer, false)?;
+                        let tail = if let Some(temp) = temporary {
+                            self.cleanup(node, &[temp.scratch], next)?
+                        } else {
+                            next
+                        };
+                        self.stage_value(value, into, tail, temporary, depth + 1)
                     }
                     Binding::IrrefutableOwnedTuple { facts, .. } => {
                         self.bind_tuple(node, facts, next, depth + 1)
@@ -431,6 +445,13 @@ impl<'a, 'g> Build<'a, 'g> {
                 let value = children[1];
                 let ty = self.value(value)?.ty.clone();
                 let incoming = self.slot(value, &ty)?;
+                let initializer = self.ungroup(value)?;
+                let temporary = self.temporary_projection(initializer, false)?;
+                let next = if let Some(temp) = temporary {
+                    self.cleanup(node, &[temp.scratch], next)?
+                } else {
+                    next
+                };
                 let install = self.emit(
                     node,
                     Action::Install { target, incoming },
@@ -441,7 +462,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     Action::Displace { target, incoming },
                     Edges::Next(install),
                 )?;
-                self.expression(value, Some(incoming), displace, depth + 1)
+                self.stage_value(value, incoming, displace, temporary, depth + 1)
             }
             NodeKind::Return => {
                 if let Some(&value) = children.first() {
@@ -450,28 +471,13 @@ impl<'a, 'g> Build<'a, 'g> {
                     let export =
                         self.emit(node, Action::Export(output), Edges::Next(exits.returning))?;
                     let projected = self.ungroup(value)?;
-                    let facts = self.value(projected)?;
-                    if facts.path.is_none()
-                        && facts.access == Access::Owned
-                        && let Some((base, member)) = projection(facts)
-                    {
-                        // Stage the result before cleaning the rest of the
-                        // return expression's scratch aggregate.
-                        let ty = self.value(base)?.ty.clone();
-                        let scratch = self.slot(base, &ty)?;
-                        let from = self.member(projected, scratch, member)?;
-                        let finish = self.cleanup(node, &[scratch], export)?;
-                        let read = self.emit(
-                            projected,
-                            Action::Read {
-                                from,
-                                into: Some(output),
-                            },
-                            Edges::Next(finish),
-                        )?;
-                        return self.expression(base, Some(scratch), read, depth + 1);
-                    }
-                    self.expression(value, Some(output), export, depth + 1)
+                    let temporary = self.temporary_projection(projected, true)?;
+                    let finish = if let Some(temp) = temporary {
+                        self.cleanup(node, &[temp.scratch], export)?
+                    } else {
+                        export
+                    };
+                    self.stage_value(value, output, finish, temporary, depth + 1)
                 } else {
                     Ok(exits.returning)
                 }
@@ -517,6 +523,55 @@ impl<'a, 'g> Build<'a, 'g> {
             NodeKind::Break => Ok(exits.looping.ok_or(Stop::Pending(node))?.breaks),
             NodeKind::Continue => Ok(exits.looping.ok_or(Stop::Pending(node))?.continues),
             _ => Err(Stop::Pending(node)),
+        }
+    }
+
+    fn temporary_projection(
+        &mut self,
+        node: NodeId,
+        allow_field: bool,
+    ) -> ResultOf<Option<ProjectedTemporary>> {
+        let facts = self.value(node)?;
+        if facts.path.is_some() || facts.access != Access::Owned {
+            return Ok(None);
+        }
+        let Some((base, projection)) = projection(facts) else {
+            return Ok(None);
+        };
+        if !allow_field && matches!(projection, Projection::Field(_)) {
+            return Ok(None);
+        }
+        let ty = self.value(base)?.ty.clone();
+        let scratch = self.slot(base, &ty)?;
+        let member = self.member(node, scratch, projection)?;
+        Ok(Some(ProjectedTemporary {
+            site: node,
+            base,
+            scratch,
+            member,
+        }))
+    }
+
+    fn stage_value(
+        &mut self,
+        value: NodeId,
+        into: Slot,
+        next: Pc,
+        temporary: Option<ProjectedTemporary>,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        if let Some(temp) = temporary {
+            let read = self.emit(
+                temp.site,
+                Action::Read {
+                    from: temp.member,
+                    into: Some(into),
+                },
+                Edges::Next(next),
+            )?;
+            self.expression(temp.base, Some(temp.scratch), read, depth)
+        } else {
+            self.expression(value, Some(into), next, depth)
         }
     }
 
@@ -1005,17 +1060,21 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return Err(Stop::Pending(node));
         }
+        let mut retains = primitive_reference(&facts.ty);
         if matches!(
             facts.ty.as_ref(),
             TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
         ) {
-            // Aggregate result loans need their own routes. Only admit
-            // borrow-free flat aggregate results here.
+            // A flat tuple can hold the conservative input union at its
+            // root; a carried member read consults that whole root.
             let output = into.ok_or(Stop::Pending(node))?;
             for member in self.slots[output].storage(output).skip(1) {
                 self.budget.step(1)?;
                 if self.slots[member].reference_member {
-                    return Err(Stop::Pending(node));
+                    if !matches!(facts.ty.as_ref(), TypeTerm::Tuple(_)) {
+                        return Err(Stop::Pending(node));
+                    }
+                    retains = true;
                 }
             }
         }
@@ -1034,7 +1093,7 @@ impl<'a, 'g> Build<'a, 'g> {
             callee: call.callee,
             args,
             into,
-            retains: primitive_reference(&facts.ty),
+            retains,
         });
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;
         for (i, &arg) in call.arguments.iter().enumerate().rev() {

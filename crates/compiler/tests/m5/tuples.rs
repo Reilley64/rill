@@ -43,6 +43,24 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
             }
             function pass(value: [string, string, string]): [string, string, string] { return value; }
             function temporary(value: [string, string, string]): string { return pass(value)[1]; }
+            function bindTemporary(value: [string, string, string]): string {
+                let selected = pass(value)[0x1];
+                return selected;
+            }
+            function assignTemporary(value: [string, string, string], old: string): string {
+                let mut selected = old;
+                selected = pass(value)[1];
+                return selected;
+            }
+            function carry(p: &bool): [&bool, string] { return [p, "owned"]; }
+            function carrier(p: &bool): &bool { return carry(p)[0]; }
+            function carrierLocal(p: bool): &bool { return carry(&p)[0]; }
+            function wholeLoan(value: [string, string]): string {
+                let all = &value;
+                let selected = value[1];
+                let _ = all;
+                return selected;
+            }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -204,6 +222,49 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
                 .expect("return the selected element");
             assert!(mir.blocks.iter().any(|b| matches!(b.operation, Operation::Move { from, into: Some(into) }
                 if from.tuple_element() == Some(1) && into.root.node == output.root.node && into.projection.is_none())));
+
+            let bound = lower("bindTemporary");
+            let mir = bound
+                .mir()
+                .unwrap_or_else(|| panic!("bindTemporary: {:?}", bound.completion()));
+            assert_eq!(dropped_elements(mir, mir.entry), [2, 0]);
+            assert!(mir.blocks.iter().any(
+                |b| matches!(b.operation, Operation::Move { from, into: Some(into) }
+                if from.tuple_element() == Some(1) && into.root.span.bytes() == b"selected")
+            ));
+
+            let assigned = lower("assignTemporary");
+            let mir = assigned.mir().expect("assignment from tuple temporary");
+            assert!(matches!(path_drops(mir, mir.entry).as_slice(),
+                [Obligation::Drop(old), Obligation::Drop(high), Obligation::Drop(low)]
+                    if old.root.span.bytes() == b"selected" && high.tuple_element() == Some(2) && low.tuple_element() == Some(0)));
+            assert!(mir.blocks.iter().any(|b| matches!(b.terminator, Terminator::Goto(next)
+                if matches!(b.operation, Operation::Install { target, .. } if target.root.span.bytes() == b"selected")
+                    && matches!(&mir.blocks[next].operation, Operation::Cleanup(actions)
+                        if actions.iter().any(|a| matches!(a, Obligation::Drop(place) if place.tuple_element() == Some(2)))))));
+
+            let carrier = lower("carrier");
+            let mir = carrier
+                .mir()
+                .expect("caller backing survives aggregate call result");
+            assert_eq!(dropped_elements(mir, mir.entry), [1]);
+            assert!(mir.blocks.iter().any(
+                |b| matches!(b.operation, Operation::Copy { from, into: Some(_) }
+                if from.tuple_element() == Some(0))
+            ));
+            for (name, code, related) in [
+                ("carrierLocal", "R0202", b"p: bool".as_slice()),
+                ("wholeLoan", "R0203", b"&value".as_slice()),
+            ] {
+                let rejected = lower(name);
+                assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                assert!(rejected.mir().is_none());
+                let [finding] = rejected.findings() else {
+                    panic!("{name}: expected a loan diagnostic")
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.related.span.bytes(), related);
+            }
         },
     );
 }
