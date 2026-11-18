@@ -277,7 +277,11 @@ The `direct_calls_retain_compatible_inputs_not_the_access_loan` probe first stop
 | `replaced`, `dead`, `checkedCallee` | An explicit local overwrite or a dead destination permits cleanup. Calling a callee that retains its own local backing still rejects with `R0202` in that callee and publishes no caller MIR. |
 | Exact and one-short limits | The exact work and entry limits pass. A one-short limit publishes no MIR. |
 
-At `f569302`, `mise run test:compiler` passed 434 tests and `mise run test` passed 450. `mise run check`, `mise run build:scaffold`, and the whitespace check passed with a fresh short `TMPDIR` on macOS AArch64. The staged M4 replay issued both receipts. Independent reviews were requested. A separate caller that forwards an existing destination via `relay(slot, input)` has both typed receipts only. Existing descriptor aliases, more general input sets, imported or erased contracts, and cancellation remain outside this slice. No workflow changed. No Rill program ran.
+At `f569302`, `mise run test:compiler` passed 434 tests and `mise run test` passed 450. `mise run check`, `mise run build:scaffold`, and the whitespace check passed with a fresh short `TMPDIR` on macOS AArch64. The staged M4 replay issued both receipts. All four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44412100022) passed at `dd040e0`. The [native jobs](https://github.com/Reilley64/rill/actions/runs/44412099861) failed at the unavailable `test:runtime` entry point.
+
+Standards reviewed `f569302` against `c13f9d9`. At `50aa8721cd290cbe161324d1c33148af7f732844`, checked target and input lookups and exact address comparisons charge work. The code distinguishes result retention from destination effects. The reversed-formal probe also checks staging order. All four local gates and the whitespace check passed again. Spec review remains open at recording time.
+
+A separate caller that forwards an existing destination via `relay(slot, input)` has both typed receipts only. Existing descriptor aliases, more general input sets, imported or erased contracts, and cancellation remain outside this slice. No workflow changed. No Rill program ran.
 
 ## Open acceptance obligations
 
