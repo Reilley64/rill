@@ -81,6 +81,17 @@ The [record tests](m5/records.rs) run in both installed load modes:
 
 A monomorphic application disposer for its own record previously blocked the installed M4 receipt. The typed handoff now checks that body under the closed installed role inventory. Canonical identity, ordinary placement and compatibility, duplicate detection and the separate protection gate still apply. The alias in the fixture exercises the canonical family. A separate capture with a second implementation under the canonical name produces `R0304` without a call and has no receipt. The M4 receipt still grants no ownership permission.
 
+### Record-place review and verification
+
+Standards and Spec independently reviewed `737088ad264ee8977161f28d6b8c4d1f24b8960f` against `9d072a1a8a8657ff6b5af25d9b2b592f3a22af7b`. The checked corrections are at `b35d2503b696d84072c8e121bd8d329b01a9a76f`. The binary diff from the reviewed revision has SHA-256 `160ad3022e59b9effd83053cf0063d46adc875e0d97020a0421cd83357a21202`. The corrections passed local checks and were not independently re-reviewed.
+
+- Standards: share primitive ownership classification and cleanup dependency lookup. Store only the proved custom-disposer flag after selection. Record verification separately. The original `check` run also caught needless borrows in the probe; the corrected run passed.
+- Spec: add direct return of an owned temporary's field, a same-field access conflict, and the duplicate-disposer receipt denial. A separate regression proves that incomplete custom cleanup on one path does not hide a forbidden partial move on another.
+
+At `b35d250` on macOS AArch64, `mise run test:compiler` passed 425 tests, `mise run test` passed 441, and `mise run check` and `mise run build:scaffold` passed. The documentation checker found no errors across 1,857 destinations. The installed M4 runner again issued typed receipts in both modes. The M5 probe checked both modes in both test groups. No Rill code ran.
+
+No workflow changed, so `check:ci` was not run. The hosted scaffold runs for this revision were pending at recording time. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM and provider ABI acceptance were not run.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. These must distinguish transferring a contained reference from borrowing its slot.
