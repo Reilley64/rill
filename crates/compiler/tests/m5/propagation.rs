@@ -192,6 +192,7 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
     probe_with_typed(
         "propagation::result_postfix_forwards_existing_failure_before_cleanup",
         r#"
+            import std::result::Ok as successValue;
             function pass(value: Result<bool, i32>): Result<bool, i32> { return value; }
             function paths(input: Result<bool, i32>, flag: bool, first: string, second: string): Result<i32, i32> {
                 let owner = first;
@@ -205,6 +206,10 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
                 dispose(owner);
                 return Result.Ok(9i32);
             }
+            function nestedError(input: Result<bool, i32>.Err, owner: string): Result<i32, i32> {
+                if (true) { let inner = owner; let _ = input?; }
+                return Err(1i32);
+            }
             function knownOk(input: Result<bool, i32>.Ok, owner: string): Result<i32, i32> {
                 let _ = input?;
                 dispose(owner);
@@ -214,6 +219,10 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
                 let _ = input?;
                 let _ = input?;
                 return Result.Ok(true);
+            }
+            function ordinaryHelper(): Result<i32, i32> {
+                let _ = successValue<bool, i32>(true)?;
+                return Result.Ok(7i32);
             }
             function needsDrop(input: Result<bool, i32>): Result<bool, i32> {
                 let _ = input;
@@ -287,6 +296,18 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
                 op,
                 Operation::ConstructVariant { .. } | Operation::Dispose { .. }
             )));
+            let nested = lower("nestedError");
+            let mir = nested
+                .mir()
+                .unwrap_or_else(|| panic!("nestedError: {:?}", nested.completion()));
+            let failure = linear(mir, mir.entry);
+            assert_forward(&failure, role, b"input", &[b"inner"]);
+            assert!(
+                !failure
+                    .iter()
+                    .any(|op| matches!(op, Operation::ConstructVariant { .. }))
+            );
+
             let succeeded = lower("knownOk");
             let mir = succeeded.mir().expect("known Ok continues");
             let success = linear(mir, mir.entry);
@@ -308,9 +329,11 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
             assert_eq!(finding.related.span.bytes(), b"input");
             assert!(finding.related.span.start() < finding.site.span.start());
 
-            let pending = lower("needsDrop");
-            assert_eq!(pending.completion(), Completion::Incomplete);
-            assert!(pending.mir().is_none());
+            for name in ["ordinaryHelper", "needsDrop"] {
+                let pending = lower(name);
+                assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
+                assert!(pending.mir().is_none());
+            }
 
             let limits = AnalysisLimits {
                 max_work: report.statistics().work,

@@ -441,20 +441,21 @@ impl<'a, 'g> Build<'a, 'g> {
                 for (index, &child) in children.iter().enumerate() {
                     self.budget.step(1)?;
                     let statement = &self.module.syntax.nodes[child];
-                    if matches!(statement.kind, NodeKind::Binding { .. }) {
+                    let control = if matches!(statement.kind, NodeKind::Binding { .. }) {
                         self.declare_binding(child, &mut locals)?;
-                        let initializer = self.ungroup(*statement.children.last().unwrap())?;
-                        // A proved failure has no continuation to lower, even
-                        // when the typed suffix contains unsupported operations.
-                        if self.module.syntax.nodes[initializer].kind == NodeKind::Propagate
-                            && let Some(DataExpression::Propagation(exit)) =
-                                &self.value(initializer)?.data
-                            && !exit.can_continue
-                            && exit.can_return
-                        {
-                            prefix = index + 1;
-                            break;
-                        }
+                        *statement.children.last().unwrap()
+                    } else {
+                        child
+                    };
+                    // Typed statement flow already composes nested exits.
+                    // An infeasible suffix introduces no slots or obligations.
+                    if self
+                        .facts
+                        .get(&control)
+                        .is_some_and(|facts| !facts.flow.normal && !facts.flow.pending)
+                    {
+                        prefix = index + 1;
+                        break;
                     }
                 }
                 let exits = Exits {
