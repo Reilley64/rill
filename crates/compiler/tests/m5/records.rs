@@ -39,6 +39,15 @@ fn owned_record_projections() {
                 let last = access;
                 return taken;
             }
+            function sameField(seed: Pack): void {
+                let mut pack = seed;
+                let access = &mut pack.first;
+                pack.first = "new";
+                let last = access;
+            }
+            function temporaryField(): string {
+                return (Pack { first: "a", second: "b", third: "c" }).first;
+            }
             function overlappingWhole(pack: Pack): string {
                 let access = &pack;
                 let taken = pack.second;
@@ -57,11 +66,20 @@ fn owned_record_projections() {
             type CustomPack = { text: string; remaining: string; }
             implement release(value: CustomPack): void { }
             function customPartial(pack: CustomPack): string { return pack.text; }
+            function customConditional(flag: bool, pack: CustomPack): void {
+                if (flag) { let before = true; let taken = pack.text; }
+            }
             function customWhole(pack: CustomPack): CustomPack { return pack; }
             function customCleanup(pack: CustomPack): void { }
             function borrowedFieldMove(pack: &Pack): string { return pack.first; }
+            type FlagPack = { bit: bool; }
+            function copyRecord(pack: FlagPack): bool {
+                let other = pack;
+                let original = pack.bit;
+                return other.bit;
+            }
         "#,
-        |_, module, receipt| {
+        |request, module, receipt| {
             let lower = |name| {
                 let id = &module
                     .declarations
@@ -173,6 +191,33 @@ fn owned_record_projections() {
                 .mir()
                 .unwrap_or_else(|| panic!("{:?}", replaced.completion()));
             assert_eq!(dropped_fields(mir), ["third", "second", "third", "first"]);
+            let temporary = lower("temporaryField");
+            let mir = temporary
+                .mir()
+                .unwrap_or_else(|| panic!("{:?}", temporary.completion()));
+            assert_eq!(dropped_fields(mir), ["third", "second"]);
+            assert!(mir.blocks.iter().any(
+                |b| matches!(b.operation, Operation::Move { from, into: Some(_) }
+                if from.field.is_some_and(|field| field.name.as_deref() == Some("first")))
+            ));
+            let copy = lower("copyRecord");
+            let mir = copy
+                .mir()
+                .unwrap_or_else(|| panic!("{:?}", copy.completion()));
+            assert!(mir.blocks.iter().any(
+                |b| matches!(b.operation, Operation::Copy { from, into: Some(into) }
+                if from.field.is_none() && from.root.span.bytes() == b"pack: FlagPack"
+                    && into.root.span.bytes() == b"other")
+            ));
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let same = lower("sameField");
+            assert_eq!(same.completion(), Completion::SourceRejected);
+            assert!(same.mir().is_none());
+            let [finding] = same.findings() else {
+                panic!("expected one finding")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.related.span.bytes(), b"&mut pack.first");
             let transferred = lower("customWhole");
             let mir = transferred
                 .mir()
@@ -186,6 +231,7 @@ fn owned_record_projections() {
                 ("overlappingWhole", "R0203"),
                 ("escapingField", "R0202"),
                 ("customPartial", "R0501"),
+                ("customConditional", "R0501"),
                 ("borrowedFieldMove", "R0501"),
             ] {
                 let report = lower(name);
@@ -193,6 +239,25 @@ fn owned_record_projections() {
                 assert_eq!(report.findings()[0].code(), code, "{name}");
                 assert!(report.mir().is_none());
             }
+
+            let duplicate = request.entry.with_file_name("duplicate.rill");
+            let mut source = fs::read_to_string(&request.entry).unwrap();
+            source.push_str("\nimplement dispose(other: CustomPack): void { }\n");
+            fs::write(&duplicate, source).unwrap();
+            let graph = loader::load_installed(InstalledRequest {
+                entry: duplicate,
+                ..request.clone()
+            })
+            .unwrap();
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            assert!(typed.receipt().is_none());
+            assert!(
+                typed
+                    .bodies()
+                    .findings()
+                    .iter()
+                    .any(|f| f.kind.code() == Some("R0304"))
+            );
         },
     );
 }

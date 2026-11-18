@@ -373,7 +373,7 @@ struct Local<'g> {
     owner: Slot,
     field: Option<&'g Declaration>,
     fields: usize,
-    disposer: Option<&'g DeclarationId>,
+    has_custom_disposer: bool,
     moves: bool,
     drops: bool,
 }

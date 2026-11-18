@@ -205,7 +205,7 @@ fn ownership_from_installed_source() {
                     .is_some()
             );
             let limited = lower_body(
-                &receipt,
+                receipt,
                 module,
                 id,
                 AnalysisLimits {
@@ -219,7 +219,7 @@ fn ownership_from_installed_source() {
             let entries = split.statistics().entries;
             assert!(
                 lower_body(
-                    &receipt,
+                    receipt,
                     module,
                     id,
                     AnalysisLimits {
@@ -232,7 +232,7 @@ fn ownership_from_installed_source() {
                 .is_some()
             );
             let limited = lower_body(
-                &receipt,
+                receipt,
                 module,
                 id,
                 AnalysisLimits {

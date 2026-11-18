@@ -9,6 +9,10 @@ use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
+fn owns_text(ty: &TypeTerm<'_>) -> bool {
+    matches!(ty, TypeTerm::Primitive(p) if p.name() == "string")
+}
+
 fn primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { referent, .. } if matches!(referent.as_ref(), TypeTerm::Primitive(_)))
 }
@@ -37,22 +41,16 @@ impl<'a, 'g> Build<'a, 'g> {
 
     fn slot(&mut self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<Slot> {
         let slot = self.slots.len();
-        let (moves, drops, fields, disposer) = match ty {
-            TypeTerm::Primitive(p) if p.name() == "string" => (true, true, &[][..], None),
-            TypeTerm::Primitive(_) => (false, false, &[][..], None),
-            TypeTerm::Reference { mutable, .. } => (*mutable, false, &[][..], None),
-            TypeTerm::Callable { .. } => (true, false, &[][..], None),
+        let (moves, drops, fields, has_custom_disposer) = match ty {
+            TypeTerm::Primitive(_) => {
+                let owned = owns_text(ty);
+                (owned, owned, &[][..], false)
+            }
+            TypeTerm::Reference { mutable, .. } => (*mutable, false, &[][..], false),
+            TypeTerm::Callable { .. } => (true, false, &[][..], false),
             TypeTerm::Nominal { .. } => {
-                let (fields, disposer) = self.record_layout(node, ty)?;
-                let mut moves = disposer.is_some();
-                for field in fields {
-                    self.budget.step(1)?;
-                    let TypeTerm::Primitive(p) = field.ty.as_ref() else {
-                        return Err(Stop::Pending(node));
-                    };
-                    moves |= p.name() == "string";
-                }
-                (moves, false, fields, disposer)
+                let (fields, custom) = self.record_layout(node, ty)?;
+                (custom, false, fields, custom)
             }
             _ => return Err(Stop::Pending(node)),
         };
@@ -62,22 +60,25 @@ impl<'a, 'g> Build<'a, 'g> {
             owner: slot,
             field: None,
             fields: fields.len(),
-            disposer,
+            has_custom_disposer,
             moves,
             drops,
         });
         for field in fields {
             self.budget.step(1)?;
-            let owns_text =
-                matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string");
+            if !matches!(field.ty.as_ref(), TypeTerm::Primitive(_)) {
+                return Err(Stop::Pending(node));
+            }
+            let owned = owns_text(&field.ty);
+            self.slots[slot].moves |= owned;
             self.slots.push(Local {
                 node,
                 owner: slot,
                 field: Some(field.declaration),
                 fields: 0,
-                disposer: None,
-                moves: owns_text,
-                drops: owns_text,
+                has_custom_disposer: false,
+                moves: owned,
+                drops: owned,
             });
         }
         Ok(slot)
@@ -87,7 +88,7 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         node: NodeId,
         ty: &TypeTerm<'g>,
-    ) -> ResultOf<(&'a [MemberType<'g>], Option<&'g DeclarationId>)> {
+    ) -> ResultOf<(&'a [MemberType<'g>], bool)> {
         let TypeTerm::Nominal {
             declaration,
             arguments,
@@ -117,7 +118,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let viable =
             ordinary::source::project(family, &[Some(Arc::new(ty.clone()))], &[], self.budget)?;
         match ordinary::source::rank(family, &viable, self.budget)? {
-            Some(HypotheticalOutcome::NoMatch) => Ok((fields, None)),
+            Some(HypotheticalOutcome::NoMatch) => Ok((fields, false)),
             Some(HypotheticalOutcome::Winner(winner)) => {
                 // A selected but conditional implementation is not proof of a
                 // custom disposer. Keep substitution/evidence-dependent cases open.
@@ -135,7 +136,7 @@ impl<'a, 'g> Build<'a, 'g> {
                             .is_some_and(|h| h.requirements.is_empty())
                     })
                 {
-                    Ok((fields, Some(winner)))
+                    Ok((fields, true))
                 } else {
                     Err(Stop::Pending(node))
                 }
@@ -280,6 +281,29 @@ impl<'a, 'g> Build<'a, 'g> {
                     let output = self.slot(value, &ty)?;
                     let export =
                         self.emit(node, Action::Export(output), Edges::Next(exits.returning))?;
+                    let projected = self.ungroup(value)?;
+                    let facts = self.value(projected)?;
+                    if facts.path.is_none()
+                        && facts.access == Access::Owned
+                        && let Some(DataExpression::Projection(projection)) = &facts.data
+                    {
+                        // The return expression owns this scratch record. Once
+                        // its result field is staged, clean the remaining fields
+                        // before returning, without borrowing the scratch place.
+                        let base_ty = self.value(projection.base)?.ty.clone();
+                        let scratch = self.slot(projection.base, &base_ty)?;
+                        let field = self.field(projected, scratch, &projection.field.id)?;
+                        let finish = self.cleanup(node, &[scratch], export)?;
+                        let read = self.emit(
+                            projected,
+                            Action::Read {
+                                from: field,
+                                into: Some(output),
+                            },
+                            Edges::Next(finish),
+                        )?;
+                        return self.expression(projection.base, Some(scratch), read, depth + 1);
+                    }
                     self.expression(value, Some(output), export, depth + 1)
                 } else {
                     Ok(exits.returning)
@@ -346,6 +370,14 @@ impl<'a, 'g> Build<'a, 'g> {
         self.expression(value, Some(slot), end, depth)
     }
 
+    fn ungroup(&mut self, mut node: NodeId) -> ResultOf<NodeId> {
+        while self.module.syntax.nodes[node].kind == NodeKind::Group {
+            self.budget.step(1)?;
+            node = self.module.syntax.nodes[node].children[0];
+        }
+        Ok(node)
+    }
+
     fn outcomes(&self, node: NodeId) -> ResultOf<(bool, bool)> {
         Ok(self
             .value(node)?
@@ -386,10 +418,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let action = match syntax.kind {
             NodeKind::Group => return self.expression(syntax.children[0], into, next, depth + 1),
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
-            NodeKind::Field
-                if facts.access != Access::Owned
-                    && matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string") =>
-            {
+            NodeKind::Field if facts.access != Access::Owned && owns_text(&facts.ty) => {
                 let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
                 let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
                 Action::ForbiddenBorrowedMove(root)
@@ -552,11 +581,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;
         for (i, &arg) in call.arguments.iter().enumerate().rev() {
             let slot = self.calls[index].args[i];
-            let mut root = arg;
-            while self.module.syntax.nodes[root].kind == NodeKind::Group {
-                self.budget.step(1)?;
-                root = self.module.syntax.nodes[root].children[0];
-            }
+            let root = self.ungroup(arg)?;
             let existing_exclusive = matches!(
                 self.value(arg)?.ty.as_ref(),
                 TypeTerm::Reference { mutable: true, .. }

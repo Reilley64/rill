@@ -204,7 +204,7 @@ fn require_initialized(
 
 fn forbid_custom_partial(slots: &[Local<'_>], slot: Slot, node: NodeId) -> ResultOf<()> {
     let owner = slots[slot].owner;
-    if owner != slot && slots[owner].disposer.is_some() {
+    if owner != slot && slots[owner].has_custom_disposer {
         return Err(Stop::Rejected {
             site: node,
             related: slots[owner].node,
@@ -251,6 +251,14 @@ fn cleanup_boundary<'g>(
     budget.reserve(3 * scope.len())?;
     let mut indegrees = vec![0usize; scope.len()];
     let mut remaining = 0usize;
+    let source_rank = |loan: &Loan, state: &[State]| {
+        if loan.kind == LoanKind::Suspension {
+            return None;
+        }
+        let owner = slots[loan.source].owner;
+        let rank = scope.binary_search(&owner).ok()?;
+        matches!(state[owner], State::Initialized(_)).then_some(rank)
+    };
     // Count an incoming edge at each source for every dependent that must
     // retire before it. Only initialized storage participates.
     for &slot in scope {
@@ -258,7 +266,7 @@ fn cleanup_boundary<'g>(
         let State::Initialized(held) = &state[slot] else {
             continue;
         };
-        if slots[slot].disposer.is_some() {
+        if slots[slot].has_custom_disposer {
             return Err(Stop::Pending(node));
         }
         remaining += 1;
@@ -273,11 +281,7 @@ fn cleanup_boundary<'g>(
         )?;
         for loan in held.loans.iter() {
             budget.step(1)?;
-            let owner = slots[loan.source].owner;
-            if loan.kind != LoanKind::Suspension
-                && let Ok(source) = scope.binary_search(&owner)
-                && matches!(state[owner], State::Initialized(_))
-            {
+            if let Some(source) = source_rank(loan, state) {
                 indegrees[source] += 1;
             }
         }
@@ -299,11 +303,7 @@ fn cleanup_boundary<'g>(
         };
         for loan in held.loans.iter() {
             budget.step(1)?;
-            let owner = slots[loan.source].owner;
-            if loan.kind != LoanKind::Suspension
-                && let Ok(source) = scope.binary_search(&owner)
-                && matches!(state[owner], State::Initialized(_))
-            {
+            if let Some(source) = source_rank(loan, state) {
                 indegrees[source] -= 1;
                 if indegrees[source] == 0 {
                     ready.insert(source);
@@ -412,6 +412,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
         state[region].fill(State::Initialized(empty.clone()));
     }
     let entry = add(entry, state, &mut known, &mut pending, budget)?;
+    let mut blocked = None;
     while blocks.len() < pending.len() {
         let (pc, state) = &mut pending[blocks.len()];
         let mut state = std::mem::take(state);
@@ -423,354 +424,373 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
         } = code[pc];
         let site = site_at(module, node);
         let local = |slot: Slot| slots[slot].place(module);
-        let operation = match action {
-            Action::None => Operation::None,
-            Action::Init(slot) => {
-                for field in slots[slot].storage(slot).skip(1) {
-                    budget.step(1)?;
-                    initialized(&state[field], node)?;
+        let operation = (|| -> ResultOf<_> {
+            Ok(match action {
+                Action::None => Operation::None,
+                Action::Init(slot) => {
+                    for field in slots[slot].storage(slot).skip(1) {
+                        budget.step(1)?;
+                        initialized(&state[field], node)?;
+                    }
+                    state[slot] = State::Initialized(empty.clone());
+                    Operation::Initialize(local(slot))
                 }
-                state[slot] = State::Initialized(empty.clone());
-                Operation::Initialize(local(slot))
-            }
-            Action::Read { from, into } => {
-                require_initialized(&slots, &state, from, node, budget)?;
-                let moves = slots[from].moves;
-                if moves {
-                    forbid_custom_partial(&slots, from, node)?;
-                }
-                let kind = if moves {
-                    Conflict::Release
-                } else {
-                    Conflict::Access
-                };
-                let access = if moves {
-                    Access::Exclusive
-                } else {
-                    Access::Observe
-                };
-                conflict(
-                    &slots,
-                    &state,
-                    &live[pc],
-                    from,
-                    (node, kind),
-                    access,
-                    budget,
-                )?;
-                if let Some(into) = into
-                    && slots[from].fields != slots[into].fields
-                {
-                    return Err(Stop::Pending(node));
-                }
-                let region = slots[from].storage(from);
-                budget.step(region.len())?;
-                for member in region {
-                    let held = if moves {
-                        std::mem::replace(&mut state[member], State::Moved(node))
+                Action::Read { from, into } => {
+                    require_initialized(&slots, &state, from, node, budget)?;
+                    let moves = slots[from].moves;
+                    if moves {
+                        forbid_custom_partial(&slots, from, node)?;
+                    }
+                    let kind = if moves {
+                        Conflict::Release
                     } else {
-                        state[member].clone()
+                        Conflict::Access
                     };
-                    if let Some(into) = into {
-                        state[into + (member - from)] = held;
-                    }
-                }
-                if moves {
-                    retire_loans(&slots, &mut state, &[from], budget)?;
-                }
-                if moves {
-                    Operation::Move {
-                        from: local(from),
-                        into: into.map(local),
-                    }
-                } else {
-                    Operation::Copy {
-                        from: local(from),
-                        into: into.map(local),
-                    }
-                }
-            }
-            Action::ForbiddenBorrowedMove(slot) => {
-                initialized(&state[slot], node)?;
-                return Err(Stop::Rejected {
-                    site: node,
-                    related: slots[slot].node,
-                    kind: Conflict::ForbiddenMove,
-                });
-            }
-            Action::Borrow {
-                from,
-                into,
-                exclusive,
-            } => {
-                require_initialized(&slots, &state, from, node, budget)?;
-                let held = initialized(&state[from], node)?;
-                conflict(
-                    &slots,
-                    &state,
-                    &live[pc],
-                    from,
-                    (node, Conflict::Access),
-                    if exclusive {
+                    let access = if moves {
                         Access::Exclusive
                     } else {
                         Access::Observe
-                    },
-                    budget,
-                )?;
-                budget.reserve(2 * (held.loans.len() + 1))?;
-                let mut loans = Vec::with_capacity(held.loans.len() + 1);
-                loans.push(Loan {
-                    source: from,
-                    site: node,
-                    exclusive,
-                    kind: LoanKind::Backing,
-                });
-                // A borrowed descriptor exposes its stored reference. Preserve
-                // that backing without calling it the address of the descriptor.
-                loans.extend(held.loans.iter().map(|loan| Loan {
-                    kind: if loan.kind == LoanKind::Suspension {
-                        LoanKind::Suspension
-                    } else {
-                        LoanKind::Contents
-                    },
-                    ..*loan
-                }));
-                loans.sort_unstable();
-                loans.dedup();
-                state[into] = State::Initialized(Held {
-                    loans: Arc::from(loans),
-                    capture_drop: None,
-                });
-                Operation::Borrow {
-                    source: local(from),
-                    holder: local(into),
-                    exclusive,
-                }
-            }
-            Action::Reborrow {
-                parent,
-                into,
-                exclusive,
-                suspends,
-            } => {
-                let held = initialized(&state[parent], node)?;
-                let access = if exclusive || suspends {
-                    Access::Exclusive
-                } else {
-                    Access::Observe
-                };
-                conflict(
-                    &slots,
-                    &state,
-                    &live[pc],
-                    parent,
-                    (node, Conflict::Access),
-                    access,
-                    budget,
-                )?;
-                let loans = if suspends {
-                    budget.reserve(held.loans.len() + 1)?;
-                    let mut loans = held.loans.to_vec();
-                    loans.push(Loan {
-                        source: parent,
-                        site: node,
-                        exclusive: true,
-                        kind: LoanKind::Suspension,
-                    });
-                    loans.sort_unstable();
-                    loans.dedup();
-                    Arc::from(loans)
-                } else {
-                    held.loans.clone()
-                };
-                state[into] = State::Initialized(Held {
-                    loans,
-                    capture_drop: None,
-                });
-                Operation::Reborrow {
-                    parent: local(parent),
-                    holder: local(into),
-                    exclusive,
-                }
-            }
-            Action::Dereference { from, into } => {
-                initialized(&state[from], node)?;
-                conflict(
-                    &slots,
-                    &state,
-                    &live[pc],
-                    from,
-                    (node, Conflict::Access),
-                    Access::Observe,
-                    budget,
-                )?;
-                if let Some(into) = into {
-                    state[into] = State::Initialized(empty.clone());
-                }
-                Operation::Dereference(local(from))
-            }
-            Action::Call(index) => {
-                let call = &calls[index];
-                let mut retained = BTreeSet::new();
-                for &arg in &call.args {
-                    budget.step(1)?;
-                    let loans = &initialized(&state[arg], node)?.loans;
-                    if call.retains && call.into.is_some() {
-                        for loan in loans.iter().copied() {
-                            budget.step(1)?;
-                            if !retained.contains(&loan) {
-                                budget.reserve(1)?;
-                                retained.insert(loan);
-                            }
-                        }
-                    }
-                    state[arg] = State::Vacant;
-                }
-                if let Some(into) = call.into {
-                    budget.reserve(retained.len())?;
-                    state[into] = State::Initialized(Held {
-                        loans: Arc::from_iter(retained),
-                        capture_drop: None,
-                    });
-                }
-                Operation::Call(call.callee)
-            }
-            Action::FormClosure {
-                capture,
-                into,
-                mode,
-            } => {
-                let mut held = initialized(&state[capture], node)?.clone();
-                held.capture_drop = slots[capture].drops.then_some(slots[capture].node);
-                state[capture] = State::Vacant;
-                state[into] = State::Initialized(held);
-                Operation::FormClosure {
-                    closure: local(into).root,
-                    capture: local(capture).root,
-                    mode,
-                }
-            }
-            Action::Dispose(slot) => {
-                initialized(&state[slot], node)?;
-                forbid_custom_partial(&slots, slot, node)?;
-                conflict(
-                    &slots,
-                    &state,
-                    &live[pc],
-                    slot,
-                    (node, Conflict::Release),
-                    Access::Exclusive,
-                    budget,
-                )?;
-                state[slot] = State::Moved(node);
-                retire_loans(&slots, &mut state, &[slot], budget)?;
-                Operation::Dispose {
-                    callee: dispose.ok_or(Stop::Pending(node))?,
-                    operand: local(slot),
-                }
-            }
-            Action::Displace { target, .. }
-                if slots[target].fields > 0 || slots[target].disposer.is_some() =>
-            {
-                cleanup_boundary(
-                    module,
-                    &slots,
-                    &mut state,
-                    &[target],
-                    &live[pc],
-                    node,
-                    budget,
-                )?
-            }
-            Action::Displace { target, .. } => {
-                let owner = slots[target].owner;
-                if owner != target
-                    && (slots[owner].disposer.is_some()
-                        || !matches!(state[owner], State::Initialized(_)))
-                {
-                    return Err(Stop::Pending(node));
-                }
-                conflict(
-                    &slots,
-                    &state,
-                    &live[pc],
-                    target,
-                    (node, Conflict::Release),
-                    Access::Exclusive,
-                    budget,
-                )?;
-                let displaced = std::mem::replace(&mut state[target], State::Vacant);
-                retire_loans(&slots, &mut state, &[target], budget)?;
-                cleanup_operation(module, slots[target], displaced)
-            }
-            Action::Install { target, incoming } => {
-                require_initialized(&slots, &state, incoming, node, budget)?;
-                if slots[target].fields != slots[incoming].fields {
-                    return Err(Stop::Pending(node));
-                }
-                let storage = slots[target].storage(target);
-                budget.step(storage.len())?;
-                for member in storage {
-                    state[member] =
-                        std::mem::replace(&mut state[incoming + (member - target)], State::Vacant);
-                }
-                Operation::Install {
-                    target: local(target),
-                    incoming: local(incoming),
-                }
-            }
-            Action::Export(slot) => {
-                require_initialized(&slots, &state, slot, node, budget)?;
-                let loans = &initialized(&state[slot], node)?.loans;
-                budget.step(loans.len())?;
-                if let Some(loan) = loans.iter().find(|loan| loan.kind == LoanKind::Backing) {
-                    return Err(Stop::Rejected {
-                        site: node,
-                        related: if slots[loan.source].field.is_some() {
-                            loan.site
-                        } else {
-                            slots[loan.source].node
-                        },
-                        kind: Conflict::Escape,
-                    });
-                }
-                let region = slots[slot].storage(slot);
-                budget.step(region.len())?;
-                state[region].fill(State::Vacant);
-                Operation::Export(local(slot))
-            }
-            Action::Cleanup(index) => cleanup_boundary(
-                module,
-                &slots,
-                &mut state,
-                &cleanups[index],
-                &live[pc],
-                node,
-                budget,
-            )?,
-            Action::End(slot) => {
-                if matches!(state[slot], State::Initialized(_)) {
-                    if slots[slot].disposer.is_some() {
+                    };
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        from,
+                        (node, kind),
+                        access,
+                        budget,
+                    )?;
+                    if let Some(into) = into
+                        && slots[from].fields != slots[into].fields
+                    {
                         return Err(Stop::Pending(node));
                     }
+                    let region = slots[from].storage(from);
+                    budget.step(region.len())?;
+                    for member in region {
+                        let held = if moves {
+                            std::mem::replace(&mut state[member], State::Moved(node))
+                        } else {
+                            state[member].clone()
+                        };
+                        if let Some(into) = into {
+                            state[into + (member - from)] = held;
+                        }
+                    }
+                    if moves {
+                        retire_loans(&slots, &mut state, &[from], budget)?;
+                    }
+                    if moves {
+                        Operation::Move {
+                            from: local(from),
+                            into: into.map(local),
+                        }
+                    } else {
+                        Operation::Copy {
+                            from: local(from),
+                            into: into.map(local),
+                        }
+                    }
+                }
+                Action::ForbiddenBorrowedMove(slot) => {
+                    initialized(&state[slot], node)?;
+                    return Err(Stop::Rejected {
+                        site: node,
+                        related: slots[slot].node,
+                        kind: Conflict::ForbiddenMove,
+                    });
+                }
+                Action::Borrow {
+                    from,
+                    into,
+                    exclusive,
+                } => {
+                    require_initialized(&slots, &state, from, node, budget)?;
+                    let held = initialized(&state[from], node)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        from,
+                        (node, Conflict::Access),
+                        if exclusive {
+                            Access::Exclusive
+                        } else {
+                            Access::Observe
+                        },
+                        budget,
+                    )?;
+                    budget.reserve(2 * (held.loans.len() + 1))?;
+                    let mut loans = Vec::with_capacity(held.loans.len() + 1);
+                    loans.push(Loan {
+                        source: from,
+                        site: node,
+                        exclusive,
+                        kind: LoanKind::Backing,
+                    });
+                    // A borrowed descriptor exposes its stored reference. Preserve
+                    // that backing without calling it the address of the descriptor.
+                    loans.extend(held.loans.iter().map(|loan| Loan {
+                        kind: if loan.kind == LoanKind::Suspension {
+                            LoanKind::Suspension
+                        } else {
+                            LoanKind::Contents
+                        },
+                        ..*loan
+                    }));
+                    loans.sort_unstable();
+                    loans.dedup();
+                    state[into] = State::Initialized(Held {
+                        loans: Arc::from(loans),
+                        capture_drop: None,
+                    });
+                    Operation::Borrow {
+                        source: local(from),
+                        holder: local(into),
+                        exclusive,
+                    }
+                }
+                Action::Reborrow {
+                    parent,
+                    into,
+                    exclusive,
+                    suspends,
+                } => {
+                    let held = initialized(&state[parent], node)?;
+                    let access = if exclusive || suspends {
+                        Access::Exclusive
+                    } else {
+                        Access::Observe
+                    };
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        parent,
+                        (node, Conflict::Access),
+                        access,
+                        budget,
+                    )?;
+                    let loans = if suspends {
+                        budget.reserve(held.loans.len() + 1)?;
+                        let mut loans = held.loans.to_vec();
+                        loans.push(Loan {
+                            source: parent,
+                            site: node,
+                            exclusive: true,
+                            kind: LoanKind::Suspension,
+                        });
+                        loans.sort_unstable();
+                        loans.dedup();
+                        Arc::from(loans)
+                    } else {
+                        held.loans.clone()
+                    };
+                    state[into] = State::Initialized(Held {
+                        loans,
+                        capture_drop: None,
+                    });
+                    Operation::Reborrow {
+                        parent: local(parent),
+                        holder: local(into),
+                        exclusive,
+                    }
+                }
+                Action::Dereference { from, into } => {
+                    initialized(&state[from], node)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        from,
+                        (node, Conflict::Access),
+                        Access::Observe,
+                        budget,
+                    )?;
+                    if let Some(into) = into {
+                        state[into] = State::Initialized(empty.clone());
+                    }
+                    Operation::Dereference(local(from))
+                }
+                Action::Call(index) => {
+                    let call = &calls[index];
+                    let mut retained = BTreeSet::new();
+                    for &arg in &call.args {
+                        budget.step(1)?;
+                        let loans = &initialized(&state[arg], node)?.loans;
+                        if call.retains && call.into.is_some() {
+                            for loan in loans.iter().copied() {
+                                budget.step(1)?;
+                                if !retained.contains(&loan) {
+                                    budget.reserve(1)?;
+                                    retained.insert(loan);
+                                }
+                            }
+                        }
+                        state[arg] = State::Vacant;
+                    }
+                    if let Some(into) = call.into {
+                        budget.reserve(retained.len())?;
+                        state[into] = State::Initialized(Held {
+                            loans: Arc::from_iter(retained),
+                            capture_drop: None,
+                        });
+                    }
+                    Operation::Call(call.callee)
+                }
+                Action::FormClosure {
+                    capture,
+                    into,
+                    mode,
+                } => {
+                    let mut held = initialized(&state[capture], node)?.clone();
+                    held.capture_drop = slots[capture].drops.then_some(slots[capture].node);
+                    state[capture] = State::Vacant;
+                    state[into] = State::Initialized(held);
+                    Operation::FormClosure {
+                        closure: local(into).root,
+                        capture: local(capture).root,
+                        mode,
+                    }
+                }
+                Action::Dispose(slot) => {
+                    initialized(&state[slot], node)?;
+                    forbid_custom_partial(&slots, slot, node)?;
                     conflict(
                         &slots,
                         &state,
                         &live[pc],
                         slot,
                         (node, Conflict::Release),
-                        Access::EndScope,
+                        Access::Exclusive,
                         budget,
                     )?;
-                    let ended = std::mem::replace(&mut state[slot], State::Vacant);
+                    state[slot] = State::Moved(node);
                     retire_loans(&slots, &mut state, &[slot], budget)?;
-                    cleanup_operation(module, slots[slot], ended)
-                } else {
-                    state[slot] = State::Vacant;
-                    Operation::None
+                    Operation::Dispose {
+                        callee: dispose.ok_or(Stop::Pending(node))?,
+                        operand: local(slot),
+                    }
                 }
+                Action::Displace { target, .. }
+                    if slots[target].fields > 0 || slots[target].has_custom_disposer =>
+                {
+                    cleanup_boundary(
+                        module,
+                        &slots,
+                        &mut state,
+                        &[target],
+                        &live[pc],
+                        node,
+                        budget,
+                    )?
+                }
+                Action::Displace { target, .. } => {
+                    let owner = slots[target].owner;
+                    if owner != target
+                        && (slots[owner].has_custom_disposer
+                            || !matches!(state[owner], State::Initialized(_)))
+                    {
+                        return Err(Stop::Pending(node));
+                    }
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        target,
+                        (node, Conflict::Release),
+                        Access::Exclusive,
+                        budget,
+                    )?;
+                    let displaced = std::mem::replace(&mut state[target], State::Vacant);
+                    retire_loans(&slots, &mut state, &[target], budget)?;
+                    cleanup_operation(module, slots[target], displaced)
+                }
+                Action::Install { target, incoming } => {
+                    require_initialized(&slots, &state, incoming, node, budget)?;
+                    if slots[target].fields != slots[incoming].fields {
+                        return Err(Stop::Pending(node));
+                    }
+                    let storage = slots[target].storage(target);
+                    budget.step(storage.len())?;
+                    for member in storage {
+                        state[member] = std::mem::replace(
+                            &mut state[incoming + (member - target)],
+                            State::Vacant,
+                        );
+                    }
+                    Operation::Install {
+                        target: local(target),
+                        incoming: local(incoming),
+                    }
+                }
+                Action::Export(slot) => {
+                    require_initialized(&slots, &state, slot, node, budget)?;
+                    let loans = &initialized(&state[slot], node)?.loans;
+                    budget.step(loans.len())?;
+                    if let Some(loan) = loans.iter().find(|loan| loan.kind == LoanKind::Backing) {
+                        return Err(Stop::Rejected {
+                            site: node,
+                            related: if slots[loan.source].field.is_some() {
+                                loan.site
+                            } else {
+                                slots[loan.source].node
+                            },
+                            kind: Conflict::Escape,
+                        });
+                    }
+                    let region = slots[slot].storage(slot);
+                    budget.step(region.len())?;
+                    state[region].fill(State::Vacant);
+                    Operation::Export(local(slot))
+                }
+                Action::Cleanup(index) => cleanup_boundary(
+                    module,
+                    &slots,
+                    &mut state,
+                    &cleanups[index],
+                    &live[pc],
+                    node,
+                    budget,
+                )?,
+                Action::End(slot) => {
+                    if matches!(state[slot], State::Initialized(_)) {
+                        if slots[slot].has_custom_disposer {
+                            return Err(Stop::Pending(node));
+                        }
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            slot,
+                            (node, Conflict::Release),
+                            Access::EndScope,
+                            budget,
+                        )?;
+                        let ended = std::mem::replace(&mut state[slot], State::Vacant);
+                        retire_loans(&slots, &mut state, &[slot], budget)?;
+                        cleanup_operation(module, slots[slot], ended)
+                    } else {
+                        state[slot] = State::Vacant;
+                        Operation::None
+                    }
+                }
+            })
+        })();
+        let operation = match operation {
+            Ok(operation) => operation,
+            Err(Stop::Pending(node)) => {
+                // This path cannot continue without the missing judgment. Keep
+                // checking independent reached paths for definite rejection.
+                blocked.get_or_insert(node);
+                blocks.push(Block {
+                    site,
+                    operation: Operation::None,
+                    terminator: Terminator::Return,
+                });
+                continue;
             }
+            Err(stop) => return Err(stop),
         };
         if matches!(edges, Edges::Branch { .. }) {
             budget.reserve(state.len())?;
@@ -789,6 +809,9 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
             operation,
             terminator,
         });
+    }
+    if let Some(node) = blocked {
+        return Err(Stop::Pending(node));
     }
     Ok(Mir { entry, blocks })
 }
