@@ -1,5 +1,5 @@
 import std::format::show;
-export import std::result::{value, intoValue};
+export import std::result::{value, intoValue, formatError};
 
 export type Error = { private message: string };
 
@@ -14,6 +14,19 @@ export function error(message: string): Error {
 }
 
 export function display<E>(value: &E): string;
+
+function renderLocation(value: &SourceLocation): string;
+function renderCause(value: &Cause): string;
+
+export function formatLocation(value: &SourceLocation): string {
+    return renderLocation(value);
+}
+
+export function formatCause(value: &Cause): string {
+    return renderCause(value);
+}
+
+implement show(value: &Cause): string { return formatCause(value); }
 
 implement display(value: &Error): string {
     return show(&value.message);

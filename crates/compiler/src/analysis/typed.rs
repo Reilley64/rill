@@ -20,9 +20,9 @@ pub use collections::{
 };
 pub(super) use core::PrimitiveCore;
 pub use core::{
-    DisplayProtection, ErrorOperation, ErrorProviders, ErrorRepresentation, OptionRole,
-    PrimitiveBinding, PrimitiveCoverage, PrimitiveOverlap, PrimitiveProtection, PrimitiveProvider,
-    PrimitiveRole, ResultRole,
+    DisplayProtection, ErrorOperation, ErrorProviders, ErrorRenderer, ErrorRepresentation,
+    OptionRole, PrimitiveBinding, PrimitiveCoverage, PrimitiveOverlap, PrimitiveProtection,
+    PrimitiveProvider, PrimitiveRole, ResultRole,
 };
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
 pub(in crate::analysis) use numeric::ConversionCore;
@@ -104,7 +104,7 @@ impl<'g> TypedReport<'g> {
         self.core.result.as_ref()?.representation.as_ref()
     }
 
-    /// Bound constructor/retention operations, independent of protection clearance.
+    /// Bound construction, retention and rendering operations, independent of protection clearance.
     pub fn error_providers(&self) -> Option<&ErrorProviders<'g>> {
         self.core.result.as_ref()?.providers.as_ref()
     }

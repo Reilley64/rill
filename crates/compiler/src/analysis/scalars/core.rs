@@ -37,9 +37,17 @@ pub(super) struct GuardOperand<'g> {
 
 impl<'r, 'g> Checker<'r, 'g> {
     pub(super) fn installed_bridge(&mut self, id: &DeclarationId) -> Work<bool> {
-        self.elab.step(self.native_ownership.len())?;
+        let renderers = self
+            .result
+            .as_ref()
+            .and_then(|role| role.providers.as_ref())
+            .map(|providers| &providers.renderers);
+        self.elab
+            .step(self.native_ownership.len() + renderers.map_or(0, |r| r.len()))?;
         Ok(self.is_linked_bridge(id)
             || self.primitive_bridge(id).is_some()
+            || renderers
+                .is_some_and(|r| r.iter().flatten().any(|provider| provider.entry.id == *id))
             || self
                 .native_ownership
                 .iter()

@@ -1,19 +1,29 @@
 //! Capture-local nominal roles. These checks do not admit opaque storage or actions.
 use super::*;
-use crate::analysis::MemberType;
-use rill_error_storage::{Error, OwnedErr, SourceLocation};
+use crate::analysis::{MemberType, ordinary::RequirementTarget};
+use rill_error_storage::{Cause, Error, OwnedErr, SourceLocation};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorOperation {
     Construct,
     Retain,
     Wrap,
+    RenderLocation,
+    RenderCause,
+    RenderError,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct ErrorProviders<'g> {
     pub constructor: &'g Declaration,
     pub storage_source: &'g std::path::Path,
+    pub renderers: [Option<ErrorRenderer<'g>>; 3],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ErrorRenderer<'g> {
+    pub operation: ErrorOperation,
+    pub entry: &'g Declaration,
 }
 
 impl ErrorOperation {
@@ -22,6 +32,9 @@ impl ErrorOperation {
             Self::Construct => "rill_error_storage::OwnedErr::new",
             Self::Retain => "rill_error_storage::OwnedErr::wrapping",
             Self::Wrap => "rill_error_storage::wrap_result",
+            Self::RenderLocation => "rill_error_storage::SourceLocation::format",
+            Self::RenderCause => "rill_error_storage::Cause::format",
+            Self::RenderError => "rill_error_storage::OwnedErr::format",
         }
     }
 }
@@ -52,6 +65,9 @@ const fn bind_error_operations<
     let _: fn(E, SourceLocation) -> OwnedErr<E> = OwnedErr::new;
     let _: Retain<E, C> = OwnedErr::wrapping;
     let _: Wrap<T, E, C, F> = rill_error_storage::wrap_result;
+    let _: fn(&SourceLocation) -> String = SourceLocation::format;
+    let _: fn(&Cause) -> String = Cause::format;
+    let _: fn(&OwnedErr<E>, fn(&E) -> String) -> String = OwnedErr::format;
     assert_sealed::<Error>();
     assert_sealed::<SourceLocation>();
     assert_sealed::<OwnedErr<()>>();
@@ -252,13 +268,46 @@ pub(in crate::analysis::typed) fn check_result<'g>(
             cause,
             message: error,
         });
-    let providers =
-        constructor
-            .zip(graph.error_storage_source())
-            .map(|(constructor, storage_source)| ErrorProviders {
-                constructor,
-                storage_source,
-            });
+    let providers = if let Some((constructor, storage_source)) =
+        constructor.zip(graph.error_storage_source())
+    {
+        let mut renderers = [None; 3];
+        for (slot, (module, name, subject, operation)) in renderers.iter_mut().zip([
+            (
+                error_module,
+                "renderLocation",
+                site,
+                ErrorOperation::RenderLocation,
+            ),
+            (
+                error_module,
+                "renderCause",
+                cause,
+                ErrorOperation::RenderCause,
+            ),
+            (
+                result_module,
+                "renderError",
+                wrapper,
+                ErrorOperation::RenderError,
+            ),
+        ]) {
+            *slot = renderer(
+                inventory,
+                module,
+                (name, subject, operation),
+                display,
+                budget,
+            )?;
+        }
+        Some(ErrorProviders {
+            constructor,
+            storage_source,
+            renderers,
+        })
+    } else {
+        None
+    };
     budget.reserve(1 + usize::from(representation.is_some()) + usize::from(providers.is_some()))?;
     Ok(Some(ResultRole {
         declaration: result,
@@ -276,6 +325,79 @@ pub(in crate::analysis::typed) fn check_result<'g>(
         providers,
         representation,
     }))
+}
+
+fn renderer<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    (name, owner, operation): (&str, &'g Declaration, ErrorOperation),
+    display: Option<&'g Declaration>,
+    budget: &mut Budget,
+) -> Work<Option<ErrorRenderer<'g>>> {
+    let mut entry = None;
+    for declaration in &module.declarations {
+        budget.step(1)?;
+        if declaration.name.as_deref() == Some(name)
+            && declaration.id.kind == DeclarationKind::Family
+            && !declaration.public
+        {
+            entry = Some(declaration);
+            break;
+        }
+    }
+    let Some(entry) = entry else {
+        return Ok(None);
+    };
+    budget.step(3)?;
+    let (Some(family), Some(header)) = (
+        inventory.captured_family(&entry.id),
+        inventory.headers().get(&entry.id),
+    ) else {
+        return Ok(None);
+    };
+    if inventory.declaration_unusable(&entry.id)
+        || !header.defaults.is_empty()
+        || !family.implementations.is_empty()
+    {
+        return Ok(None);
+    }
+    let DeclarationShape::Function { parameters, result } = &family.header.shape else {
+        return Ok(None);
+    };
+    let [parameter] = parameters.as_slice() else {
+        return Ok(None);
+    };
+    let TypeTerm::Reference {
+        mutable: false,
+        referent,
+    } = parameter.ty.as_ref()
+    else {
+        return Ok(None);
+    };
+    let Some(arguments) = arguments_of(referent, owner) else {
+        return Ok(None);
+    };
+    let schema = match (
+        operation,
+        family.header.binders.as_slice(),
+        arguments,
+        header.requirements.as_slice(),
+    ) {
+        (ErrorOperation::RenderError, [e], [arg], [requirement]) => {
+            binder_is(arg, e)
+                && display.is_some_and(|display| {
+                    requirement.target == Some(RequirementTarget::Family(&display.id))
+                })
+                && matches!(requirement.arguments.as_slice(), [Some(ty)] if binder_is(ty, e))
+        }
+        (ErrorOperation::RenderCause | ErrorOperation::RenderLocation, [], [], []) => true,
+        _ => false,
+    };
+    if !schema || !matches!(result.as_ref(), TypeTerm::Primitive(ty) if ty.name() == "string") {
+        return Ok(None);
+    }
+    budget.reserve(1)?;
+    Ok(Some(ErrorRenderer { operation, entry }))
 }
 
 fn display_matches(

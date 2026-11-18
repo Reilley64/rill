@@ -14,6 +14,10 @@ fn formats_owned_heterogeneous_causes_with_original_sites() {
         |number| format!("number {}", number.0),
     );
     drop(source_name);
+    assert!(outer.origin().format().contains("entry.rill:byte 3"));
+    let retained = outer.cause().unwrap();
+    assert_eq!(retained.format(), "number 17 (user.rill:byte 12)");
+    assert!(retained.cause().is_none());
     assert_eq!(
         outer.format(Error::display),
         "context (entry.rill:byte 3)\ncaused by: number 17 (user.rill:byte 12)"

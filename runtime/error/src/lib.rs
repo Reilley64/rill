@@ -26,6 +26,12 @@ impl SourceLocation {
         }
     }
 
+    pub fn format(&self) -> String {
+        let mut output = String::new();
+        self.append_to(&mut output);
+        output
+    }
+
     fn append_to(&self, output: &mut String) {
         use std::fmt::Write;
         write!(output, " ({}:byte {})", self.source, self.offset).expect("String writer");
@@ -54,7 +60,7 @@ impl<E> OwnedErr<E> {
         inner: OwnedErr<C>,
         display: fn(&C) -> String,
     ) -> Self {
-        let causes = CauseChain(Some(Box::new(CauseNode {
+        let causes = CauseChain(Some(Box::new(Cause {
             payload: Box::new(Formatted {
                 value: inner.value,
                 display,
@@ -85,15 +91,20 @@ impl<E> OwnedErr<E> {
         }
     }
 
+    pub fn origin(&self) -> &SourceLocation {
+        &self.origin
+    }
+
+    pub fn cause(&self) -> Option<&Cause> {
+        self.causes.0.as_deref()
+    }
+
     pub fn format(&self, display: fn(&E) -> String) -> String {
         let mut output = display(self.value());
-        self.origin.append_to(&mut output);
-        let mut current = self.causes.0.as_deref();
-        while let Some(node) = current {
+        self.origin().append_to(&mut output);
+        if let Some(cause) = self.cause() {
             output.push_str("\ncaused by: ");
-            output.push_str(&node.payload.display());
-            node.origin.append_to(&mut output);
-            current = node.next.0.as_deref();
+            cause.append_chain(&mut output);
         }
         output
     }
@@ -112,12 +123,41 @@ pub fn wrap_result<T, E, C: Send + Sync + 'static, F: FnOnce() -> (E, SourceLoca
     })
 }
 
-struct CauseChain(Option<Box<CauseNode>>);
+struct CauseChain(Option<Box<Cause>>);
 
-struct CauseNode {
+pub struct Cause {
     payload: Box<dyn DisplayPayload>,
     origin: SourceLocation,
     next: CauseChain,
+}
+
+impl Cause {
+    pub fn origin(&self) -> &SourceLocation {
+        &self.origin
+    }
+
+    pub fn cause(&self) -> Option<&Cause> {
+        self.next.0.as_deref()
+    }
+
+    pub fn format(&self) -> String {
+        let mut output = String::new();
+        self.append_chain(&mut output);
+        output
+    }
+
+    fn append_chain(&self, output: &mut String) {
+        let mut current = self;
+        loop {
+            output.push_str(&current.payload.display());
+            current.origin().append_to(output);
+            let Some(next) = current.cause() else {
+                break;
+            };
+            output.push_str("\ncaused by: ");
+            current = next;
+        }
+    }
 }
 
 impl Drop for CauseChain {

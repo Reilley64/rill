@@ -554,6 +554,78 @@ fn installed_pipe_constructs_then_propagates_only_failure() {
 }
 
 #[test]
+fn installed_error_rendering_uses_the_checked_display_requirement() {
+    installed(
+        "installed_error_rendering_uses_the_checked_display_requirement",
+        |request| {
+            fs::write(&request.entry, "
+            import std::result::Err as Wrapped;
+            import std::error::{Cause, SourceLocation, display, formatError, formatCause, formatLocation};
+            type Plain = { flag: bool; };
+            function render<T>(value: &Wrapped<T>): string where display(T) {
+                return formatError<T>(value);
+            }
+            function renderCause(value: &Cause): string { return formatCause(value); }
+            function renderLocation(value: &SourceLocation): string { return formatLocation(value); }
+            function interpolate(value: &Wrapped<i32>): string { return `${*value}`; }
+            function invalid(value: &Wrapped<Plain>): string { return formatError<Plain>(value); }
+        ").unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let bindings = report
+                    .error_providers()
+                    .unwrap()
+                    .renderers
+                    .map(|binding| binding.unwrap().operation.rust_binding());
+                assert_eq!(
+                    bindings,
+                    [
+                        "rill_error_storage::SourceLocation::format",
+                        "rill_error_storage::Cause::format",
+                        "rill_error_storage::OwnedErr::format"
+                    ]
+                );
+                let app = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application)
+                    .unwrap();
+                for (name, checked) in [
+                    ("render", true),
+                    ("renderCause", true),
+                    ("renderLocation", true),
+                    ("interpolate", true),
+                    ("invalid", false),
+                ] {
+                    let d = app
+                        .declarations
+                        .iter()
+                        .find(|d| d.name.as_deref() == Some(name))
+                        .unwrap();
+                    assert_eq!(
+                        report
+                            .bodies()
+                            .body(
+                                app,
+                                compiler::analysis::scalars::BodyOwner::Declaration(&d.id)
+                            )
+                            .unwrap()
+                            .is_some(),
+                        checked,
+                        "{name}"
+                    );
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_capture_replays_its_error_storage_input() {
     installed(
         "installed_capture_replays_its_error_storage_input",

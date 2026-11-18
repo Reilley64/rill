@@ -1,4 +1,5 @@
 import std::error::{Cause, Error, SourceLocation, display};
+import std::format::show;
 import std::option::Option;
 
 export type Err<E> = {
@@ -16,6 +17,16 @@ export function Ok<T, E = Error>(value: T): Result<T, E> {
 // The compiler binds this closed operation to owned error storage.
 // The second value, when supplied, is an owned Err<C>, not an overload.
 export function Err<T, E>(value: E): Result<T, E>;
+
+function renderError<E>(value: &Err<E>): string where display(E);
+
+export function formatError<E>(value: &Err<E>): string where display(E) {
+    return renderError<E>(value);
+}
+
+implement<E> show(value: &Err<E>): string where display(E) {
+    return formatError<E>(value);
+}
 
 export function value<E>(wrapped: &Err<E>): &E {
     return &wrapped.payload;
