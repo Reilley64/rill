@@ -292,7 +292,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                             .and_then(|scope| scope.winner())
                             .is_some()
                         || self.rigid_copy_input(id, inputs)
-                        || matches!(inputs.as_slice(), [input] if self.local_disposer_subject(id, input)) =>
+                        || matches!(inputs.as_slice(), [input] if self.local_disposer_subject(id, input)?) =>
                 {
                     None
                 }
@@ -454,7 +454,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         // The closed installed role inventory also permits checking a canonical
         // disposer in the module that defines its monomorphic record. The
         // typed receipt still requires the separate protection inventory.
-        let local_disposer = self.local_disposer_contract(&source.family, body);
+        let local_disposer = self.local_disposer_contract(&source.family, body)?;
         if body.placement == ordinary::Placement::OutsideOwners
             && self.conversion_family(&source.family).is_none()
         {
@@ -514,28 +514,47 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
 
     fn local_disposer_contract(
-        &self,
+        &mut self,
         family: &DeclarationId,
         body: &ordinary::ImplementationFacts<'g>,
-    ) -> bool {
-        body.source.declaration.module.origin == crate::loader::Origin::Application
-            && body.header.binders.is_empty()
-            && matches!(&body.header.shape, DeclarationShape::Function { parameters, .. } if matches!(
-                parameters.as_slice(), [parameter] if self.local_disposer_subject(family, &parameter.ty)
-                    && matches!(parameter.ty.as_ref(), TypeTerm::Nominal { declaration: owner, .. }
-                        if body.placement == ordinary::Placement::ParameterOwner(owner))
-            ))
+    ) -> Work<bool> {
+        Ok(
+            body.source.declaration.module.origin == crate::loader::Origin::Application
+                && body.header.binders.is_empty()
+                && matches!(&body.header.shape, DeclarationShape::Function { parameters, .. } if matches!(
+                    parameters.as_slice(), [parameter] if self.local_disposer_subject(family, &parameter.ty)?
+                        && matches!(parameter.ty.as_ref(), TypeTerm::Nominal { declaration: owner, .. }
+                            if body.placement == ordinary::Placement::ParameterOwner(owner))
+                )),
+        )
     }
 
-    pub(super) fn local_disposer_subject(&self, family: &DeclarationId, ty: &TypeTerm<'g>) -> bool {
-        self.ordinary_scope.is_some()
+    pub(super) fn local_disposer_subject(
+        &mut self,
+        family: &DeclarationId,
+        ty: &TypeTerm<'g>,
+    ) -> Work<bool> {
+        if self.ordinary_scope.is_some()
             && self
                 .primitives
                 .and_then(|core| core.dispose)
                 .is_some_and(|role| role.id == *family)
-            && matches!(ty, TypeTerm::Nominal { declaration, arguments }
-                if arguments.is_empty() && declaration.module.origin == crate::loader::Origin::Application
-                    && self.input.facts.declarations.get(declaration).is_some_and(|facts| matches!(facts.shape, DeclarationShape::Record { .. })))
+            && let TypeTerm::Nominal {
+                declaration,
+                arguments,
+            } = ty
+            && arguments.is_empty()
+            && declaration.module.origin == crate::loader::Origin::Application
+        {
+            self.elab.step(1)?;
+            return Ok(self
+                .input
+                .facts
+                .declarations
+                .get(declaration)
+                .is_some_and(|facts| matches!(facts.shape, DeclarationShape::Record { .. })));
+        }
+        Ok(false)
     }
 
     fn local_disposer_selection(
@@ -545,7 +564,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         filters: &[Substitution<'g>],
     ) -> Work<Option<GoalSelection<'g>>> {
         let id = &family.header.declaration.id;
-        if !matches!(inputs, [input] if self.local_disposer_subject(id, input)) {
+        if !matches!(inputs, [input] if self.local_disposer_subject(id, input)?) {
             return Ok(None);
         }
         // Compare the complete family, including any competing registration.
@@ -556,11 +575,16 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(None);
         };
         self.elab.step(family.implementations.len())?;
-        let admitted = family.implementations.iter().any(|body| {
-            body.source.declaration == *selection.implementation
-                && body.compatibility == ordinary::Compatibility::Compatible
-                && self.local_disposer_contract(id, body)
-        });
+        let admitted = match family
+            .implementations
+            .iter()
+            .find(|body| body.source.declaration == *selection.implementation)
+        {
+            Some(body) if body.compatibility == ordinary::Compatibility::Compatible => {
+                self.local_disposer_contract(id, body)?
+            }
+            _ => false,
+        };
         Ok(admitted.then_some(selection))
     }
 

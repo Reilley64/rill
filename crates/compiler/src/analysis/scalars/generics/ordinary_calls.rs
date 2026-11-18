@@ -35,6 +35,7 @@ pub struct OrdinaryCall<'g> {
     pub site: Site<'g>,
     pub family: &'g DeclarationId,
     pub checked: bool,
+    checked_local_disposer: bool,
     /// A premise retained by the comparison or its dependent evidence.
     pub premise: Option<InputPremise>,
     pub routes: Vec<&'g Binding>,
@@ -309,8 +310,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.establish(inference, node, result, false)?;
             return Ok(false);
         }
-        let local_disposal = matches!(inputs.as_slice(), [Some(subject)]
-            if self.local_disposer_subject(call.fact.callee, subject));
+        let eligible_local_disposer = matches!(inputs.as_slice(), [Some(subject)]
+            if self.local_disposer_subject(call.fact.callee, subject)?);
         let (output, use_premise) = if consistent {
             let prior = self.arrow_premise;
             let scope = match inputs.as_slice() {
@@ -322,7 +323,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             };
             let result = (|| {
                 if self.has_application_ordinary_scope(call.fact.callee)
-                    || local_disposal
+                    || eligible_local_disposer
                     || scope.and_then(|scope| scope.winner()).is_some()
                 {
                     // Admission of the callee cannot settle premises of its operands.
@@ -336,7 +337,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 let output =
                     self.conditional_output(inference, node, &call, &inputs, &viable, outcome)?;
-                let premise = if local_disposal {
+                let premise = if eligible_local_disposer {
                     self.arrow_premise
                 } else {
                     self.ordinary_use_premise(call.fact.callee)
@@ -373,7 +374,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
             }
             let actual_scope =
-                local_disposal || self.has_application_ordinary_scope(call.fact.callee);
+                eligible_local_disposer || self.has_application_ordinary_scope(call.fact.callee);
             if proof.premise.is_none() && (!actual_scope || premise.is_none()) {
                 match (proof.state, &output.agreement, &output.ty) {
                     (GoalState::Proved, OutputAgreement::Agrees, Some(ty)) => {
@@ -413,6 +414,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 site: Self::site(module, node),
                 family: call.fact.callee,
                 checked,
+                checked_local_disposer: checked && eligible_local_disposer,
                 premise,
                 routes: call.fact.bindings.clone(),
                 inputs,
@@ -1490,14 +1492,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             .evidence
             .get(call.instantiation.as_ref().or(call.goal.as_ref()).unwrap())
             .unwrap();
-        let local_disposer = self
-            .primitives
-            .and_then(|core| core.dispose)
-            .is_some_and(|role| &role.id == call.family)
-            && proof.selection.as_ref().is_some_and(|selected| {
-                selected.implementation.module.origin == crate::loader::Origin::Application
-            });
-        if self.has_application_ordinary_scope(call.family) || local_disposer {
+        if self.has_application_ordinary_scope(call.family) || call.checked_local_disposer {
             self.elab.reserve(call.defaults.len())?;
             facts.defaults = call.defaults.clone();
             if let Some(selection) = &proof.selection {

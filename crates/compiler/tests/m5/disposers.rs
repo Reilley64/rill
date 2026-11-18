@@ -103,8 +103,10 @@ fn active_disposer_cleans_only_remaining_fields() {
             let invocation = mir
                 .blocks
                 .iter()
-                .find(|block| block.site.span.bytes() == b"release(value)")
-                .expect("explicit call site");
+                .find(|block| matches!(&block.operation, Operation::Cleanup(actions)
+                    if actions.iter().any(|action| matches!(action, Obligation::InvokeDisposer { .. }))))
+                .expect("explicit invocation");
+            assert_eq!(invocation.site.span.bytes(), b"release(value)");
             let fact = typed
                 .bodies()
                 .node(module, invocation.site.node)
@@ -137,6 +139,33 @@ fn active_disposer_cleans_only_remaining_fields() {
                     panic!("{name}: expected ownership diagnostic")
                 };
                 assert_eq!(finding.code(), code);
+            }
+
+            let limits = AnalysisLimits {
+                max_work: explicit.statistics().work,
+                max_entries: explicit.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            let declaration = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("explicit"))
+                .unwrap();
+            let at_limits = |limits| lower_body(receipt, module, &declaration.id, limits).unwrap();
+            assert!(at_limits(limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = at_limits(short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
             }
 
             let checked = lower("normal");
