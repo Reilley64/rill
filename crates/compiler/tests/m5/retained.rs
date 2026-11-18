@@ -252,9 +252,22 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
 
             let reverse = lower("reverse");
             let mir = reverse.mir().expect("same contract with reversed formals");
-            assert!(linear(mir, mir.entry).iter().any(|op| matches!(op,
-                Operation::CallRetaining { callee, destination, input }
-                if *callee == &declaration("inReverse").id && destination.root.span.bytes() == b"out" && input.root.span.bytes() == b"&flag")));
+            let reverse_events: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. } | Operation::CallRetaining { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(reverse_events.as_slice(), [
+                Operation::Borrow { source, holder, exclusive: false },
+                Operation::Borrow { source: target, exclusive: true, .. },
+                Operation::CallRetaining { callee, destination, input },
+            ] if *callee == &declaration("inReverse").id && source.root.span.bytes() == b"flag: bool"
+                && destination.root.span.bytes() == b"out" && target.root.node == destination.root.node
+                && holder.root.node == input.root.node));
 
             for name in ["replaced", "dead"] {
                 let report = lower(name);

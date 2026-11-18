@@ -872,7 +872,7 @@ pub(super) fn run<'g>(
                         require_initialized(&slots, &state, arg, node, budget)?;
                         forbid_active_escape(&state[arg], node)?;
                         let storage = slots[arg].storage(arg);
-                        if call.retains && call.into.is_some() {
+                        if call.retains_result && call.into.is_some() {
                             include_loans(&mut retained, &state, storage.clone(), budget)?;
                         }
                         budget.step(storage.len())?;

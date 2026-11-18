@@ -1233,17 +1233,24 @@ impl<'a, 'g> Build<'a, 'g> {
         let DeclarationShape::Function { parameters, result } = &signature.shape else {
             return Err(Stop::Pending(node));
         };
-        if parameters.len() != 2
-            || call.arguments.len() != 2
+        let [first, second] = parameters.as_slice() else {
+            return Err(Stop::Pending(node));
+        };
+        if call.arguments.len() != 2
             || call.pipe_input.is_some()
             || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
         {
             return Err(Stop::Pending(node));
         }
+        let (destination_formal, input_formal, input) = match position {
+            0 => (first, second, 1),
+            1 => (second, first, 0),
+            _ => return Err(Stop::Pending(node)),
+        };
         let contents =
-            retained_bool_contents_type(&parameters[position].ty).ok_or(Stop::Pending(node))?;
-        let input = 1 - position;
-        if parameters[input].ty != *contents || self.value(call.arguments[input])?.ty != *contents {
+            retained_bool_contents_type(&destination_formal.ty).ok_or(Stop::Pending(node))?;
+        self.budget.step(1)?;
+        if input_formal.ty != *contents || self.value(call.arguments[input])?.ty != *contents {
             return Err(Stop::Pending(node));
         }
         let argument = self.ungroup(call.arguments[position])?;
@@ -1252,14 +1259,21 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(argument));
         }
         let target = syntax.children[0];
+        self.budget.step(1)?;
         let facts = self.value(target)?;
+        let Some(path) = &facts.path else {
+            return Err(Stop::Pending(target));
+        };
         if facts.access != Access::Owned
             || facts.ty != *contents
-            || !matches!(&facts.path, Some(path) if path.root.kind == DeclarationKind::Binding && path.projections.is_empty())
+            || path.root.kind != DeclarationKind::Binding
+            || !path.projections.is_empty()
         {
             return Err(Stop::Pending(target));
         }
-        Ok((self.place(target)?, input))
+        self.budget.step(1)?;
+        let place = *self.locals.get(path.root).ok_or(Stop::Pending(target))?;
+        Ok((place, input))
     }
 
     fn call(&mut self, node: NodeId, into: Option<Slot>, next: Pc, depth: usize) -> ResultOf<Pc> {
@@ -1291,7 +1305,7 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return Err(Stop::Pending(node));
         }
-        let mut retains = primitive_reference(&facts.ty);
+        let mut retains_result = primitive_reference(&facts.ty);
         if matches!(
             facts.ty.as_ref(),
             TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
@@ -1305,7 +1319,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     if !matches!(facts.ty.as_ref(), TypeTerm::Tuple(_)) {
                         return Err(Stop::Pending(node));
                     }
-                    retains = true;
+                    retains_result = true;
                 }
             }
         }
@@ -1331,7 +1345,7 @@ impl<'a, 'g> Build<'a, 'g> {
             callee: call.callee,
             args,
             into,
-            retains,
+            retains_result,
             destination,
         });
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;

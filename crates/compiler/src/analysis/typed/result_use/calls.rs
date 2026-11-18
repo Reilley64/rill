@@ -123,24 +123,26 @@ impl<'a, 'g> Check<'a, 'g> {
             });
             for address @ (owner, _) in referents {
                 if observer && exact.is_none() || mutable_referent.is_some() && !observer {
-                    if matches!(mutable_referent, Some(TypeTerm::Primitive(_))) {
-                        // A call may change a saved Boolean refinement. A
-                        // possible address may still cover other components.
+                    let scalar = matches!(mutable_referent, Some(TypeTerm::Primitive(_)));
+                    let exact_descriptor = if bool_descriptor && let Some(exact) = &exact {
+                        self.budget.step(1 + exact.1.len().min(address.1.len()))?;
+                        exact == &address
+                    } else {
+                        false
+                    };
+                    if scalar || exact_descriptor {
+                        // Mutation invalidates Boolean refinements or the alias
+                        // in an exact descriptor, never a Result residence.
                         let affected = state.take(address.0, &address.1, self.budget)?;
                         self.budget.step(affected.len())?;
-                        if affected.iter().any(|entry| {
-                            !matches!(&entry.content, Content::Test(tag, _) if matches!(tag.as_ref(), Constructor::Boolean(_)))
-                        }) {
-                            self.pending(argument, ResultUseBlocker::Storage)?;
-                        }
-                    } else if bool_descriptor && exact.as_ref() == Some(&address) {
-                        // The call can replace this shared bool descriptor. Discard
-                        // the stale alias fact, but never a tracked Result residence.
-                        let affected = state.take(address.0, &address.1, self.budget)?;
-                        self.budget.step(affected.len())?;
-                        if affected.iter().any(|entry| {
-                            !matches!(entry.content, Content::Alias(_) | Content::PossibleAlias(_))
-                        }) {
+                        let stale = |entry: &Located<'g>| match &entry.content {
+                            Content::Test(tag, _) if scalar => {
+                                matches!(tag.as_ref(), Constructor::Boolean(_))
+                            }
+                            Content::Alias(_) | Content::PossibleAlias(_) => exact_descriptor,
+                            _ => false,
+                        };
+                        if affected.iter().any(|entry| !stale(entry)) {
                             self.pending(argument, ResultUseBlocker::Storage)?;
                         }
                     } else {

@@ -681,7 +681,7 @@ struct Call<'g> {
     callee: &'g DeclarationId,
     args: Vec<Slot>,
     into: Option<Slot>,
-    retains: bool,
+    retains_result: bool,
     destination: Option<CallDestination>,
 }
 
