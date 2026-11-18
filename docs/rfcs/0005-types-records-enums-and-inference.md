@@ -578,6 +578,23 @@ Before Rust implementation, validate finite coverage with a separate reference m
 
 Direct compiler tests must cross the agreed data entry/body/node seams using real M3/M4 declarations. Missing core contracts, generic completion or copy classification remain explicit incomplete obligations. Full interface admission, evidence, ownership, cleanup and execution remain unperformed.
 
+### Proposed M4.8 List, index and aggregate handoff
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes these checks for the shared typed checker. They require separate checkpoint approval.
+
+Keep the existing bracket category decision. In List context, use the admitted List declaration and its element argument. Without that argument, find an agreed element type from the operands and existing contextual equations. Do not infer a width from List itself. An empty List with no established element type needs an annotation. Check each element once and retain its admission. No failed List construction becomes a tuple.
+
+Index rules below are proposed static rules. They do not specify layout or execute indexing.
+
+| Established base | Index and selected component |
+| --- | --- |
+| Tuple, or reference to a tuple | Require a single unsuffixed integer literal. Use its decoded nonnegative value as a zero-based component selector. Reject a selector outside the tuple's arity. Do not evaluate expressions to obtain a selector. |
+| Admitted List<T>, or reference to it | Check a `u64` index. Supply that context to an untyped literal. Select component type T using the admitted index contract. Dynamic bounds checks are fatal if executed out of range, not Option construction. |
+
+Keep the access of the base in the projection. A borrow of the projection preserves the source path. A List index does not prove that two places are distinct, even when the indices differ. The owning or borrowed projection uses the same type and access policy as other aggregate projections. This procedure grants no move out of indexed storage or mutable access to a shared view. A missing index contract is incomplete. This proposal adds no indexing for strings or arbitrary same-shaped types.
+
+Compute aggregate and capture prerequisites from actual storage facts. Use the [inline summaries](#proposed-m42-declaration-validity-and-inline-containment) for representation validity. Use [RFC 0007's pattern and capture rules](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification) for implicit-copy eligibility and access. Do not infer copyability from finite size or absence of known fields. Retain the substituted member or capture witness. An erased callable interface gives no hidden storage facts. An indirect representation can stop inline containment without erasing result-use or property obligations.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

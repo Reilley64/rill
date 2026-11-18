@@ -377,6 +377,26 @@ Carry requirement targets and default terms across modules as metadata. Do not r
 
 A successful source name lookup is not evidence or role admission. Protected references and conversion targets retain their own prerequisites. When the role is not available, ordinary derivations retain a conditional premise. Paths, public exports and schema agreement alone cannot establish that role.
 
+### Proposed M4.8 core admission and interface checks
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes this procedure. It requires separate checkpoint approval. It does not admit a provider.
+
+Start with one resolved graph. Use the original canonical declarations, binding routes, syntax and snapshots. Do not load missing modules during typing. A compiler-required metadata dependency must already be present in the capture. A metadata edge does not install a source binding.
+
+Separate a role designation from admission. A role designates the declaration that owns a specified rule. Validate the designation against its captured identity and exact schema, including binder relationships, visibility and variant identities. Validate actual provider and representation evidence separately. A name, path, standard origin, private field or matching signature does not supply this evidence.
+
+Use only compiler-owned facts or evidence admitted by the selected toolchain. Bind the latter to the capture, source revision, target and options it describes. Retain its authority and provenance. A public analysis request cannot mark source as trusted. A required provider must resolve to a particular captured implementation and the applicable contract. An indirect representation needs evidence for its stored and forwarded type arguments. Neither a role nor an indirect representation proves a release action or a property.
+
+Classify families from the validated role inventory before comparing implementations. A complete role inventory can exclude a family from the special roles. A partial inventory cannot do so by omission. Use [RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary) for required winners and prohibited inputs. Use [RFC 0009](0009-user-implementable-conversions.md#proposed-m47-conversion-checking-procedure) for pair keys and the identity gate. Numeric gaps come from the specified catalogue. A missing required provider is not a gap. Check all loaded implementations, including unused bodies.
+
+If evidence is absent, record the missing role, provider, protection inventory or representation at its dependent obligation. Report contradictory or foreign admission as an invalid request. Do not promote a hypothetical fact after a shape check. Re-evaluate its dependent judgment with the validated inputs. The repository does not yet supply an installed core implementation or provider evidence. Source fixtures cannot fill this gap.
+
+#### Public interfaces and nested declarations
+
+Check exported enum payloads and exported header defaults and requirements through their canonical terms and routes. Follow type arguments and both callable parameter and result terms. Publicly exposed payload types and source-written public default and requirement names must have public origin paths. An imported alias does not make an inaccessible target public. The approved canonical Result default does not require a caller binding. Do not walk into a private record representation to check an opaque signature. A private nominal may remain opaque in an exported operation's signature. A public type need not be imported locally for a client to use its visible representation.
+
+Use the captured lexical scopes for nested functions and nominal declarations. Identity and visibility do not extend outside the defining scope. Reuse the captured declaration and parameter identities across shadowing. The presence of an inventoried binding does not hoist a runtime `let`. A named function cannot capture enclosing runtime values. An expectation cannot capture startup values. Report such a capture as R0502 even if the value can be folded. An arrow keeps its own return context and its actual typed capture evidence.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

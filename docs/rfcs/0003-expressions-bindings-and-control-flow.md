@@ -558,6 +558,36 @@ Check failure-block noncontinuation with the actual enclosing callable/loop cont
 
 No direct Option/Result guard can complete until actual canonical core admission exists. The bounded M4.4 implementation must retain this prerequisite explicitly. It can still check ordinary user-enum matches and irrefutable patterns without assuming core identities.
 
+### Proposed M4.8 result-use checking
+
+[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes a rule for discarded results in named storage and aggregates. It requires separate checkpoint approval. It uses admitted Result identity, not enum spelling. A proved `Ok` still belongs to Result. References do not own the referenced Result.
+
+#### Which operations count as use
+
+Track each owned Result occurrence, including an occurrence inside a record, tuple, variant payload, list or capture. Use exact substitutions and real stored members, not all written type arguments. Track private parts without making them visible to source. Unused type arguments and uninhabited alternatives introduce no occurrences. Use only admitted containment facts for opaque core storage. A containing Result also has its own obligation, distinct from any nested Result.
+
+Follow the obligation through local bindings, aggregate construction, capture, rebuild and projection. A new local name does not satisfy it. Observe a Result through its discriminant or an operation that checks its outcome. Such an observation handles only that occurrence. Borrow creation, printing, and reading an unrelated member do not count. Inspection that merely returns a descriptor also does not count. Use canonical contracts to distinguish observers from other calls.
+
+An explicit `let _ = value;` acknowledges every contained occurrence in that value. A written wildcard in a destructuring pattern acknowledges the component it matches. An implicit omission, scope exit or explicit `dispose` is not acknowledgement. A pattern that selects a variant checks its discriminant. Bindings for its payload carry their own obligations. A direct guard handles the guarded discriminant, but does not acknowledge an unbound nested Result in a discarded payload.
+
+Forwarding an owned value across a checked return or by-value call boundary is a use at that boundary. Check known contained obligations at a source callee's parameter entry. Check returned values at their receiving expression. A call through an interface without checked result-use semantics cannot substitute for a checked boundary. These rules check typed source and contracts. They do not prove that ownership transfer or disposal is legal.
+
+#### Where to check
+
+Use the typed control edges and place identities from the shared checker. Seed each occurrence at its source or entry site. Keep its canonical component path and current residence. A forwarding event inside a body changes the residence, not the source. Project only the selected components. Replacing a residence checks the displaced value before installing the new one. On a normal scope exit, check each obligation whose residence leaves scope. A return only forwards the returned components. A `break` or `continue` leaves the scopes of its actual target.
+
+Check each alternative with its own variant and residence facts. At a join keep all feasible alternatives. One handled branch cannot clear a pending branch. Do not require disposal on fatal or diverging paths. Still check simple discarded expressions and typed local flow in unexecuted source. For an unreachable region start at its lexical entry with the bindings visible there. Do not merge those paths into reachable normal-flow facts. Do not require evaluating user code or folding general expressions to decide feasibility.
+
+For loops, merge iteration and normal exit alternatives at their actual control targets. Use finite states for a fixed set of sites and component paths. Include a separate occurrence partition when values from different iterations can coexist. Do not conflate those values at their common source site. If dynamic storage, aliasing or recursive containment needs a summary, preserve which obligations it can prove. Without a sound summary, keep the dependent judgment incomplete. Use the same rule for unknown closure environments. Keep open generic components as predicates on substituted storage shapes. Discharge such predicates only by a parametric proof or an applicable specialization. An unresolved predicate is not proof of absence.
+
+At a proved implicit discard, report R0103 at the discard or exit site. Retain the source and component path as related evidence. Do not report a discard based solely on a missing type, admission or unresolved path. Bound the traversal, state comparisons, retained witnesses and worklist by the analysis limits. Resource exhaustion is not a completed result-use check.
+
+#### Pipe and iteration handoff
+
+For pipes, use the parsed insertion position, including the written placeholder when present. Type the input once, using the established first or placeholder argument context. Use the same call rules and record the input before the written arguments. A postfix question mark on the step applies to the call result. Do not introduce implicit Result handling.
+
+For `for ... of`, use the admitted canonical `iterate` and `next` families without installing source bindings. Apply normal ordinary selection and evidence, including no fallback after selecting a body with failed evidence. Establish iterator type `I` from `iterate` on the actual source. Check `next` with the required mutable access to `I` and require exact `Option<T>` with admitted Option. Use `T` for the iteration pattern under the existing binding rules. Keep the source node, selected operations, substitutions, pattern and loop targets. A hypothetical iterator or missing `next` output supplies no yield type. These facts grant no loan or permission to advance with live exclusive access.
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Dependency state |
