@@ -512,8 +512,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
             }
             let available = if possible {
-                !self
-                    .coverage_within(module, node, &value.ty, &handled, restriction)?
+                self.coverage_within(module, node, &value.ty, &handled, restriction)?
                     .is_some_and(|remaining| !remaining.exhaustive())
             } else {
                 false
