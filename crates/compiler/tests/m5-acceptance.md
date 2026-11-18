@@ -317,7 +317,11 @@ Both installed modes tested the public receipt-to-MIR boundary at `c3ba6187f7489
 | `expiresThroughAlias`, `conflictsThroughAlias` | The first alias attempt let new contents go dead even though the alias could still read them. With current-target liveness, the same witnesses reject early scope exit (`R0203`) or conflicting exclusive access to the backing (`R0201`). |
 | Exact and one-short limits | The exact work and entry limits pass. Reducing either by one publishes no MIR. |
 
-All four local gates and the whitespace check passed at `c3ba618` on macOS AArch64 with a fresh short `TMPDIR` (437 compiler tests and 453 workspace tests). The staged M4 replay issued both receipts. Independent reviews were requested. The `incomingMoved` probe still returns incomplete with no MIR for an alias made by moving the incoming exclusive parameter. General reads or writes through aliases, indexed and nested places, broader call contracts and cancellation are outside this increment. No workflow changed. No Rill program ran.
+All four local gates and the whitespace check passed at `c3ba618` on macOS AArch64 with a fresh short `TMPDIR` (437 compiler tests and 453 workspace tests). The staged M4 replay issued both receipts. All four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44419184531) passed at `0c52837`. Its [native jobs](https://github.com/Reilley64/rill/actions/runs/44419184436) reached the unavailable `test:runtime` entry point.
+
+Standards reviewed `c3ba618` against `c8f04b0`. A borrowed view of the alias descriptor originally missed the target's recently retained backing. The `viewOfAlias` probe went from `Checked` to `R0201` after the correction at `6a3cea4bf3db456b4d5f6e63012366a6590cfec7`. That correction snapshots current target contents into the view, meters alias resolution, and checks canonical field and staged input identities. All four local gates passed there. A branch test at `b96d8c23b3aea1f3f81eef9c490fefd8b44b4cf0` also checks the exact selected target on each path. The first Spec review stopped at an automated safety flag without findings; the compiler-semantics review of the corrected pin remains open at recording time.
+
+The `incomingMoved` probe still returns incomplete with no MIR for an alias made by moving the incoming exclusive parameter. General reads or writes through aliases, indexed and nested places, broader call contracts and cancellation are outside this increment. No workflow changed. No Rill program ran.
 
 ## Open acceptance obligations
 
