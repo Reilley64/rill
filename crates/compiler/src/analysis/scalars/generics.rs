@@ -20,11 +20,19 @@ pub struct BodyStatus<'g> {
     pub completion: BodyCompletion,
     pub not_performed: &'static [Stage],
 }
+mod evidence;
+
+pub(in crate::analysis::scalars) use evidence::Evidence;
+pub use evidence::{
+    GoalBlocker, GoalEquality, GoalFacts, GoalId, GoalJudgment, GoalOutput, GoalSelection,
+    GoalState, GoalVerdict,
+};
 
 #[derive(Debug)]
 pub struct GenericReport<'g> {
     graph: &'g Graph,
     facts: ScalarFacts<'g>,
+    evidence: Evidence<'g>,
     statistics: Statistics,
     completion: ScalarFailureKind,
     ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryCall<'g>>,
@@ -173,6 +181,14 @@ impl<'g> GenericReport<'g> {
             .find(|n| n.site.module == &module.key && n.site.node == node))
     }
 
+    pub fn goals(&self) -> &[GoalFacts<'g>] {
+        self.evidence.goals()
+    }
+
+    pub fn goal(&self, id: &GoalId) -> Result<&GoalFacts<'g>, QueryError> {
+        self.evidence.get(id)
+    }
+
     /// Conditional context, selection and result facts, not a checked call.
     pub fn ordinary_call(
         &self,
@@ -214,9 +230,12 @@ pub fn analyze_generics<'g>(
     );
     let exhausted = input.completion() == Completion::ResourceLimit
         || (types.findings().next().is_none()
-            && !types
-                .obligations()
-                .any(|o| o.reason != Unsupported::GenericDefault)
+            && !types.obligations().any(|o| {
+                !matches!(
+                    o.reason,
+                    Unsupported::GenericDefault | Unsupported::Requirements
+                )
+            })
             && input.declaration_issues().is_empty()
             && checker
                 .run()
@@ -226,6 +245,7 @@ pub fn analyze_generics<'g>(
     GenericReport {
         graph,
         facts: checker.facts,
+        evidence: checker.evidence,
         statistics: checker.elab.statistics,
         ordinary_calls: checker.ordinary_calls,
         conditional_findings: checker.conditional_findings,

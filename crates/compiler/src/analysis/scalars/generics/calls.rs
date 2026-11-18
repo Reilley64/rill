@@ -87,6 +87,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .iter()
                 .all(|a| inference.slots[a].ty.is_some())
         {
+            if !self.check_call_requirements(module, node, call.fact.callee, &subs)? {
+                inference.slots.get_mut(&node).unwrap().blocked = true;
+                return Ok(false);
+            }
             let result = self.substitute(&call.result, &subs, 1)?;
             self.establish(inference, node, result.clone(), false)?;
             call.parameters = self.substitute_all(&call.parameters, &subs, 1)?;

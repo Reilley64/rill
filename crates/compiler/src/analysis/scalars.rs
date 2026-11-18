@@ -165,6 +165,7 @@ pub enum ScalarFindingKind {
     InsufficientContext,
     InvalidTarget,
     MissingValue,
+    MissingRequirement,
     PrivateValue,
     StartupCapture,
     DuplicateBinding,
@@ -185,6 +186,7 @@ impl ScalarFindingKind {
             Self::LiteralRange => Some("R0002"),
             Self::NumericContext => Some("R0003"),
             Self::MissingValue => Some("R0400"),
+            Self::MissingRequirement => Some("R0302"),
             Self::PrivateValue => Some("R0401"),
             Self::StartupCapture => Some("R0502"),
             Self::ExpectationBoolean => Some("R0101"),
@@ -402,6 +404,7 @@ struct Checker<'r, 'g> {
     facts: ScalarFacts<'g>,
     data: bool,
     data_depth: usize,
+    evidence: generics::Evidence<'g>,
     prepared_calls: BTreeMap<(&'g ModuleKey, NodeId), PreparedCall<'g>>,
     match_inputs: BTreeMap<(&'g ModuleKey, NodeId), Option<ExpressionResult<'g>>>,
     match_hints: BTreeMap<(&'g ModuleKey, NodeId), Option<Type<'g>>>,
@@ -423,6 +426,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             facts: ScalarFacts::default(),
             data,
             data_depth: 0,
+            evidence: generics::Evidence::default(),
             prepared_calls: BTreeMap::new(),
             match_inputs: BTreeMap::new(),
             match_hints: BTreeMap::new(),
@@ -1334,24 +1338,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             .get(1)
             .map(|&id| &module.syntax.nodes[id].children[..])
             .unwrap_or(&[]);
-        if !family
-            && self.input.ordinary.is_some_and(|ordinary| {
-                ordinary
-                    .headers()
-                    .get(&declaration.id)
-                    .is_some_and(|header| !header.requirements.is_empty())
-            })
-        {
-            self.deferred_declaration(
-                module,
-                node,
-                ScalarUnsupported::Requirements,
-                declaration,
-                bindings,
-            )?;
-            return Ok(None);
-        }
-        let infer = family || argument_nodes.len() < signature.binders.len();
+        let requires_evidence = self.input.ordinary.is_some_and(|ordinary| {
+            ordinary
+                .headers()
+                .get(&declaration.id)
+                .is_some_and(|header| !header.requirements.is_empty())
+        });
+        let infer = family || requires_evidence || argument_nodes.len() < signature.binders.len();
         if infer && self.input.ordinary.is_none() {
             self.deferred_declaration(
                 module,
@@ -2438,15 +2431,15 @@ impl<'r, 'g> Checker<'r, 'g> {
         if !self.source_scope_ready(module, node)? {
             return Ok(());
         }
-        let before = self.marks();
         if pending_role {
             self.defer(module, node, ScalarUnsupported::FamilySelection)?;
         }
+        let before = self.marks();
         if let Some(ordinary) = self.input.ordinary
             && let Some(metadata) = ordinary.headers().get(&declaration.id)
         {
-            if !metadata.requirements.is_empty() {
-                self.defer(module, node, ScalarUnsupported::Requirements)?;
+            if !pending_role {
+                self.add_body_assumptions(module, node, &declaration.id, &[])?;
             }
             if metadata.defaults.iter().any(|d| d.ty.is_none()) {
                 self.defer(module, node, ScalarUnsupported::GenericInference)?;
@@ -2454,10 +2447,11 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let mut context = self.context(Some(typed))?;
         let flow = self.statement(module, node, 1, &mut context)?;
+        self.clear_body_assumptions();
         if before == self.marks() {
             if flow.normal && primitive_name(result) != Some("void") {
                 self.finding(module, node, ScalarFindingKind::ReturnCoverage)?;
-            } else {
+            } else if !pending_role {
                 self.elab.reserve(1)?;
                 self.facts.bodies.push(BodyFacts {
                     site: Self::site(module, node),
@@ -2468,30 +2462,6 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
         }
         Ok(())
-    }
-
-    fn implementation_header(
-        &mut self,
-        id: &DeclarationId,
-    ) -> Work<Option<&'r DeclarationFacts<'g>>> {
-        let Some(ordinary) = self.input.ordinary else {
-            return Ok(None);
-        };
-        for source in self.input.graph.implementations() {
-            self.elab.step(1)?;
-            if source.declaration != *id {
-                continue;
-            }
-            if let Some(family) = ordinary.captured_family(&source.family) {
-                self.elab.step(family.implementations.len())?;
-                return Ok(family
-                    .implementations
-                    .iter()
-                    .find(|b| b.source.declaration == *id)
-                    .map(|b| &b.header));
-            }
-        }
-        Ok(None)
     }
 
     fn run(&mut self) -> Work<()> {
@@ -2516,8 +2486,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else if declaration.id.kind == DeclarationKind::Implementation
                     && self.input.ordinary.is_some()
                 {
-                    if let Some(typed) = self.implementation_header(&declaration.id)? {
+                    if let Some((typed, _)) = self.implementation_contract(module, declaration)? {
                         self.check_named_body(module, typed, true)?;
+                        self.clear_body_assumptions();
                     } else {
                         self.defer(module, declaration.node, ScalarUnsupported::FamilySelection)?;
                     }
