@@ -153,6 +153,23 @@ At `760434d` on macOS AArch64 with a short, fresh `TMPDIR` under `/tmp`, `mise r
 
 Hosted checks for this revision were queued at recording time. No workflow changed, so `check:ci` was not run. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM and provider ABI acceptance were not run. No Rill program ran.
 
+## Fixed owned tuple places
+
+[#74](https://github.com/Reilley64/rill/issues/74#issuecomment-6983811432) extends the receipt-to-MIR check to flat tuples of primitive values and shared primitive references, after ruling out a custom outer disposer. The M4 index fact supplies the constant position. The M5 checker does not reinterpret the selector as a runtime index. The [approved initialization and cleanup policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379) keep per-path storage state separate from carried sources and specify reverse-position cleanup. The [mutation decision](https://github.com/Reilley64/rill/issues/15#issuecomment-6853088155) governs staging and displacement. This check adds no loan-disjointness rule for indexed places.
+
+The installed probe `tuples::fixed_tuple_places_preserve_initialization_and_order` first failed with `Incomplete` for `split` despite having a typed receipt. It then passed in normal and test modes at `ef2493630f5302a7e41a48570e1fdc0fab8c5e2c`.
+
+| Cases | Observed compiler and MIR obligations |
+| --- | --- |
+| `split`, `usedAfterJoin`, `wholeAfterJoin` | Move position 0 on one edge and return position 1 on either edge. The true edge drops the moved binding and position 2. The false edge drops positions 2 and 0. Reading position 0 or the whole tuple after the join rejects with `R0200` and no MIR. |
+| `construct`, `restore`, `replace` | Evaluate elements in written order. Refill a moved slot without dropping it. Replacing an initialized slot drops its old value before installation; final cleanup drops positions 1 and 0. |
+| `forward`, `forwardCall`, `temporary` | Copy a carried reference out of the tuple and forward it through a checked direct call. A borrow-free tuple result can feed a return projection. The remaining positions 2 and 0 clean after staging position 1. |
+| `borrowElement` | Taking a fresh loan of an indexed slot is incomplete and exposes no MIR. Copying the reference stored in a slot is a separate operation. |
+
+`mise run test:compiler` passed 428 tests and `mise run test` passed 444 at the exact code revision above. `mise run check`, `mise run build:scaffold`, and `git diff --check` also passed on macOS AArch64 with a fresh short `TMPDIR` under `/tmp`. The staged M4 replay still issued both receipts. The separate `let [left, _, right] = value;` preflight also issued both receipts. That preflight has no M5 pattern or cleanup result.
+
+Independent Standards and Spec review requests for `9dda758778e874262c93e9c4fc6fcc25d237afcb...ef2493630f5302a7e41a48570e1fdc0fab8c5e2c` failed with provider HTTP 429. Both reviews remain required. No workflow changed; `check:ci` was not run. No Rill code ran. Product, runtime and client acceptance remain unavailable; LLVM and provider ABI acceptance were not run.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
