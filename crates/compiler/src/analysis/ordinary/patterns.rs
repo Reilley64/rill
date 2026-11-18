@@ -2,8 +2,10 @@ use super::*;
 
 mod admissions;
 mod relations;
+mod source;
 pub(super) use admissions::alternatives;
 pub(super) use relations::{included, intersection};
+pub(super) use source::project;
 
 fn terms<'a, 'g>(mut vector: &'a [Node<'g>]) -> impl Iterator<Item = &'a [Node<'g>]> {
     std::iter::from_fn(move || {

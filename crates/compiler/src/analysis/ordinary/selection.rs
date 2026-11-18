@@ -287,42 +287,13 @@ fn query<'g>(
         output.blocker = Some(SelectionBlocker::InputShape);
         return Ok(Ok(()));
     }
-    budget.step(analysis.types.obligations.len())?;
-    if !analysis.declaration_issues.is_empty()
-        || !analysis.types.findings.is_empty()
-        || analysis.types.obligations.values().any(|o| {
-            !matches!(
-                o.reason,
-                Unsupported::Requirements | Unsupported::GenericDefault
-            )
-        })
-    {
-        output.blocker = Some(SelectionBlocker::DeclarationPrerequisite);
-        return Ok(Ok(()));
-    }
-    let Some(family) = analysis.families.get(id) else {
-        output.blocker = Some(SelectionBlocker::HeaderOrPlacement);
-        return Ok(Ok(()));
-    };
-    let mut count = 0;
-    for source in analysis.graph.implementations() {
-        budget.step(1)?;
-        if source.family == *id {
-            count += 1;
+    let family = match eligible_family(analysis, id, budget)? {
+        Ok(family) => family,
+        Err(blocker) => {
+            output.blocker = Some(blocker);
+            return Ok(Ok(()));
         }
-    }
-    budget.step(count)?;
-    if family.implementations.len() != count
-        || !family.duplicate_keys.is_empty()
-        || family.implementations.iter().any(|body| {
-            body.compatibility != Compatibility::Compatible
-                || body.alternatives.is_empty()
-                || body.placement == Placement::OutsideOwners
-        })
-    {
-        output.blocker = Some(SelectionBlocker::HeaderOrPlacement);
-        return Ok(Ok(()));
-    }
+    };
     let mut filter = Vec::new();
     if !explicit.is_empty() {
         let (_, input_positions) = patterns::input_key(&family.header, budget)?;
@@ -346,6 +317,47 @@ fn query<'g>(
     let key = patterns::ground(established, budget)?;
     match_and_rank(family, &key, &filter, output, budget)?;
     Ok(Ok(()))
+}
+
+pub(super) fn eligible_family<'a, 'g>(
+    analysis: &'a OrdinaryAnalysis<'g>,
+    id: &DeclarationId,
+    budget: &mut Budget,
+) -> Work<Result<&'a FamilyFacts<'g>, SelectionBlocker>> {
+    budget.step(analysis.types.obligations.len())?;
+    if !analysis.declaration_issues.is_empty()
+        || !analysis.types.findings.is_empty()
+        || analysis.types.obligations.values().any(|o| {
+            !matches!(
+                o.reason,
+                Unsupported::Requirements | Unsupported::GenericDefault
+            )
+        })
+    {
+        return Ok(Err(SelectionBlocker::DeclarationPrerequisite));
+    }
+    let Some(family) = analysis.families.get(id) else {
+        return Ok(Err(SelectionBlocker::HeaderOrPlacement));
+    };
+    let mut count = 0;
+    for source in analysis.graph.implementations() {
+        budget.step(1)?;
+        if source.family == *id {
+            count += 1;
+        }
+    }
+    budget.step(count)?;
+    if family.implementations.len() != count
+        || !family.duplicate_keys.is_empty()
+        || family.implementations.iter().any(|body| {
+            body.compatibility != Compatibility::Compatible
+                || body.alternatives.is_empty()
+                || body.placement == Placement::OutsideOwners
+        })
+    {
+        return Ok(Err(SelectionBlocker::HeaderOrPlacement));
+    }
+    Ok(Ok(family))
 }
 
 /// Compare established input contracts, not source expressions. Since M3 has

@@ -57,9 +57,9 @@ pub(in crate::analysis::ordinary) fn included(
 }
 
 #[derive(Clone, Copy)]
-struct Site<'a, 'g> {
-    side: bool,
-    term: &'a [Node<'g>],
+pub(super) struct Site<'a, 'g> {
+    pub(super) side: bool,
+    pub(super) term: &'a [Node<'g>],
 }
 
 impl Site<'_, '_> {
@@ -69,7 +69,7 @@ impl Site<'_, '_> {
             Head::Fixed(_) => None,
         }
     }
-    fn children(self) -> impl Iterator<Item = Self> {
+    pub(super) fn children(self) -> impl Iterator<Item = Self> {
         terms(&self.term[1..]).map(move |term| Self {
             side: self.side,
             term,
@@ -77,7 +77,9 @@ impl Site<'_, '_> {
     }
 }
 
-fn chase<'a, 'g>(
+pub(super) type Solution<'a, 'g> = BTreeMap<(bool, usize), Site<'a, 'g>>;
+
+pub(super) fn chase<'a, 'g>(
     mut site: Site<'a, 'g>,
     solved: &BTreeMap<(bool, usize), Site<'a, 'g>>,
     budget: &mut Budget,
@@ -110,7 +112,11 @@ fn occurs<'a, 'g>(
     Ok(false)
 }
 
-fn unifies<'g>(left: &InputKey<'g>, right: &InputKey<'g>, budget: &mut Budget) -> Work<bool> {
+pub(super) fn unify<'a, 'g>(
+    left: &'a InputKey<'g>,
+    right: &'a InputKey<'g>,
+    budget: &mut Budget,
+) -> Work<Option<Solution<'a, 'g>>> {
     let mut pending = Vec::new();
     let mut a = terms(&left.nodes);
     let mut b = terms(&right.nodes);
@@ -131,7 +137,7 @@ fn unifies<'g>(left: &InputKey<'g>, right: &InputKey<'g>, budget: &mut Budget) -
                     },
                 ));
             }
-            _ => return Ok(false),
+            _ => return Ok(None),
         }
     }
     let mut solved = BTreeMap::new();
@@ -139,7 +145,7 @@ fn unifies<'g>(left: &InputKey<'g>, right: &InputKey<'g>, budget: &mut Budget) -
         budget.step(1)?;
         let mut a = chase(left, &solved, budget)?;
         let mut b = chase(right, &solved, budget)?;
-        if a.variable().is_none() && b.variable().is_some() {
+        if b.variable().is_some() && (a.variable().is_none() || (a.side && !b.side)) {
             std::mem::swap(&mut a, &mut b);
         }
         if let Some(variable) = a.variable() {
@@ -147,20 +153,20 @@ fn unifies<'g>(left: &InputKey<'g>, right: &InputKey<'g>, budget: &mut Budget) -
                 continue;
             }
             if occurs(variable, b, &solved, budget)? {
-                return Ok(false);
+                return Ok(None);
             }
             budget.reserve(1)?;
             solved.insert(variable, b);
         } else {
             let (a_node, b_node) = (a.term[0], b.term[0]);
             if a_node.head != b_node.head || a_node.children != b_node.children {
-                return Ok(false);
+                return Ok(None);
             }
             budget.reserve(a_node.children)?;
             pending.extend(a.children().zip(b.children()));
         }
     }
-    Ok(true)
+    Ok(Some(solved))
 }
 
 pub(in crate::analysis::ordinary) fn intersection<'g>(
@@ -171,7 +177,7 @@ pub(in crate::analysis::ordinary) fn intersection<'g>(
     for (i, a) in left.iter().enumerate() {
         budget.step(1)?;
         for (j, b) in right.iter().enumerate() {
-            if unifies(a, b, budget)? {
+            if unify(a, b, budget)?.is_some() {
                 return Ok(Some((i, j)));
             }
         }

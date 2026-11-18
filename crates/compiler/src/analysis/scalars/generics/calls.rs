@@ -10,7 +10,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let waiting: Vec<_> = inference
             .calls
             .iter()
-            .filter_map(|(&node, call)| call.infer.then_some(node))
+            .filter_map(|(&node, call)| (call.infer && !call.family).then_some(node))
             .collect();
         for node in waiting {
             if self.infer_standalone_call(inference, node, true)? {
@@ -161,7 +161,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(false)
     }
 
-    fn slot_substitutions(
+    pub(super) fn slot_substitutions(
         &mut self,
         binders: &[Binder<'g>],
         slots: &[Option<Type<'g>>],
@@ -203,7 +203,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.step(1)
     }
 
-    fn closed(
+    pub(super) fn closed(
         &mut self,
         term: &Type<'g>,
         binders: &[Binder<'g>],
@@ -222,7 +222,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(true)
     }
 
-    fn accept_input(
+    pub(super) fn accept_input(
         &mut self,
         pattern: &Type<'g>,
         actual: &Type<'g>,

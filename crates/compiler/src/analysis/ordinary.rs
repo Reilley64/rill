@@ -8,6 +8,7 @@ use crate::loader::Implementation;
 pub(super) mod metadata;
 mod patterns;
 mod selection;
+pub(super) mod source;
 pub use metadata::{DefaultMetadata, HeaderMetadata, RequirementMetadata, RequirementTarget};
 pub use patterns::InputKey;
 pub use selection::{
@@ -134,6 +135,10 @@ impl<'g> OrdinaryAnalysis<'g> {
 
     pub(super) fn headers(&self) -> &metadata::Headers<'g> {
         &self.headers
+    }
+
+    pub(super) fn captured_family(&self, id: &DeclarationId) -> Option<&FamilyFacts<'g>> {
+        self.families.get(id)
     }
 
     pub fn completion(&self) -> Completion {

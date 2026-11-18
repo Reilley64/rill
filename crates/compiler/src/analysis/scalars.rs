@@ -91,6 +91,7 @@ pub struct ExpressionFacts<'g> {
     pub literal: Option<LiteralEvidence<'g>>,
     pub binding: Option<&'g DeclarationId>,
     pub call: Option<CallFacts<'g>>,
+    pub ordinary_context: Option<ordinary::InputPremise>,
     pub place: Place,
     pub boolean: Option<BooleanSet>,
     pub data: Option<data::DataExpression<'g>>,
@@ -328,6 +329,7 @@ impl<'g> ScalarReceipt<'_, 'g> {
 struct Slot<'g> {
     ty: Option<Type<'g>>,
     expected: Option<Type<'g>>,
+    ordinary_context: Option<ordinary::InputPremise>,
     literal: Option<LiteralEvidence<'g>>,
     blocked: bool,
     binding: Option<&'g DeclarationId>,
@@ -377,6 +379,7 @@ struct PreparedCall<'g> {
     parameters: Vec<Type<'g>>,
     result: Type<'g>,
     infer: bool,
+    family: bool,
 }
 struct Inference<'g> {
     module: &'g Module,
@@ -386,6 +389,7 @@ struct Inference<'g> {
     calls: BTreeMap<NodeId, PreparedCall<'g>>,
     data: BTreeMap<NodeId, data::PreparedData<'g>>,
     data_nodes: BTreeSet<NodeId>,
+    ordinary_tuples: BTreeSet<NodeId>,
 }
 struct BodyInput<'r, 'g> {
     graph: &'g Graph,
@@ -402,6 +406,8 @@ struct Checker<'r, 'g> {
     match_inputs: BTreeMap<(&'g ModuleKey, NodeId), Option<ExpressionResult<'g>>>,
     match_hints: BTreeMap<(&'g ModuleKey, NodeId), Option<Type<'g>>>,
     match_blocks: BTreeMap<(&'g ModuleKey, NodeId), Flow>,
+    ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), generics::OrdinaryCall<'g>>,
+    conditional_findings: Vec<generics::ConditionalFinding<'g>>,
 }
 impl<'r, 'g> Checker<'r, 'g> {
     fn new(input: BodyInput<'r, 'g>, limits: AnalysisLimits, data: bool) -> Self {
@@ -421,6 +427,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             match_inputs: BTreeMap::new(),
             match_hints: BTreeMap::new(),
             match_blocks: BTreeMap::new(),
+            ordinary_calls: BTreeMap::new(),
+            conditional_findings: Vec::new(),
         }
     }
 
@@ -1288,7 +1296,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
             return Ok(None);
         };
-        if declaration.id.kind != DeclarationKind::Function {
+        let family =
+            declaration.id.kind == DeclarationKind::Family && self.input.ordinary.is_some();
+        if declaration.id.kind != DeclarationKind::Function && !family {
             self.deferred_declaration(
                 module,
                 node,
@@ -1298,19 +1308,40 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             return Ok(None);
         }
-        let signature = &self.input.facts.declarations[&declaration.id];
+        let signature = if family {
+            let Some(facts) = self
+                .input
+                .ordinary
+                .unwrap()
+                .captured_family(&declaration.id)
+            else {
+                self.deferred_declaration(
+                    module,
+                    node,
+                    ScalarUnsupported::FamilySelection,
+                    declaration,
+                    bindings,
+                )?;
+                return Ok(None);
+            };
+            &facts.header
+        } else {
+            &self.input.facts.declarations[&declaration.id]
+        };
         let callee_syntax = &module.syntax.nodes[callee];
         let argument_nodes = callee_syntax
             .children
             .get(1)
             .map(|&id| &module.syntax.nodes[id].children[..])
             .unwrap_or(&[]);
-        if self.input.ordinary.is_some_and(|ordinary| {
-            ordinary
-                .headers()
-                .get(&declaration.id)
-                .is_some_and(|header| !header.requirements.is_empty())
-        }) {
+        if !family
+            && self.input.ordinary.is_some_and(|ordinary| {
+                ordinary
+                    .headers()
+                    .get(&declaration.id)
+                    .is_some_and(|header| !header.requirements.is_empty())
+            })
+        {
             self.deferred_declaration(
                 module,
                 node,
@@ -1320,7 +1351,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             return Ok(None);
         }
-        let infer = argument_nodes.len() < signature.binders.len();
+        let infer = family || argument_nodes.len() < signature.binders.len();
         if infer && self.input.ordinary.is_none() {
             self.deferred_declaration(
                 module,
@@ -1332,7 +1363,17 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(None);
         }
         if argument_nodes.len() > signature.binders.len() {
-            self.finding(module, node, ScalarFindingKind::Arity)?;
+            if family {
+                self.deferred_declaration(
+                    module,
+                    node,
+                    ScalarUnsupported::FamilySelection,
+                    declaration,
+                    bindings,
+                )?;
+            } else {
+                self.finding(module, node, ScalarFindingKind::Arity)?;
+            }
             return Ok(None);
         }
         let mut substitution = Vec::new();
@@ -1357,6 +1398,16 @@ impl<'r, 'g> Checker<'r, 'g> {
             unreachable!()
         };
         if parameters.len() != n.children.len() - 1 {
+            if family {
+                self.deferred_declaration(
+                    module,
+                    node,
+                    ScalarUnsupported::FamilySelection,
+                    declaration,
+                    bindings,
+                )?;
+                return Ok(None);
+            }
             self.finding(module, node, ScalarFindingKind::Arity)?;
         }
         self.elab.reserve(parameters.len())?;
@@ -1389,6 +1440,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             parameters,
             result,
             infer,
+            family,
         }))
     }
     fn record_callee(
@@ -1461,6 +1513,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         expected: Option<Type<'g>>,
         context: &Context<'r, 'g>,
     ) -> Work<Option<ExpressionResult<'g>>> {
+        let finding_start = self.facts.findings.len();
         let mut inference = Inference {
             module,
             slots: BTreeMap::new(),
@@ -1469,6 +1522,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             calls: BTreeMap::new(),
             data: BTreeMap::new(),
             data_nodes: BTreeSet::new(),
+            ordinary_tuples: BTreeSet::new(),
         };
         self.elab.reserve(1)?;
         let mut stack = vec![root];
@@ -1646,7 +1700,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                             self.match_step(&mut inference, node, context)?;
                         }
                     }
-                    NodeKind::Bracket if self.data => self.tuple_step(&mut inference, node)?,
+                    NodeKind::Bracket if self.data => {
+                        self.tuple_step(&mut inference, node)?;
+                        if inference.ordinary_tuples.contains(&node)
+                            && !inference.data.contains_key(&node)
+                        {
+                            self.gather_ordinary_tuple(&mut inference, node)?;
+                        }
+                    }
                     NodeKind::Literal if slot.ty.is_none() => {
                         if let Some(ty) = self.literal_type(module, node, &slot)? {
                             self.establish(&mut inference, node, ty, false)?;
@@ -1655,6 +1716,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     NodeKind::Call => {
                         if inference.data_nodes.contains(&node) {
                             self.variant_step(&mut inference, node, context)?;
+                        } else if inference.calls.get(&node).is_some_and(|c| c.family) {
+                            self.ordinary_call_step(&mut inference, node)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.infer) {
                             self.infer_standalone_call(&mut inference, node, false)?;
                         } else if let Some(call) = inference.calls.get(&node) {
@@ -1722,6 +1785,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             for node in pending {
                 self.match_step(&mut inference, node, context)?;
             }
+        }
+        if self.input.ordinary.is_some() {
+            self.defer_ordinary_calls(&mut inference)?;
         }
         if self.data {
             self.defer_pending_constructions(&mut inference)?;
@@ -1911,6 +1977,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         literal: slot.literal,
                         binding: slot.binding,
                         call: inference.calls.remove(&node).map(|c| c.fact),
+                        ordinary_context: slot.ordinary_context,
                         place: slot.place,
                         boolean: slot.boolean,
                         data: inference.data.remove(&node).map(|p| p.fact),
@@ -1934,6 +2001,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                     });
                 }
             }
+        }
+        if self.input.ordinary.is_some() {
+            self.separate_ordinary_findings(&inference, finding_start)?;
         }
         Ok(result)
     }
@@ -2017,6 +2087,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         a.continues.extend(&b.continues);
         Ok(a)
     }
+    fn scope_may_be_missing_bindings(&self, module: &Module, node: NodeId) -> bool {
+        let syntax = &module.syntax.nodes[node];
+        self.input.ordinary.is_none()
+            || (matches!(syntax.kind, NodeKind::Binding { .. })
+                && simple_name(module, syntax.children[0]).is_none()
+                && module.syntax.nodes[syntax.children[0]].kind != NodeKind::Wildcard)
+    }
     fn source_scope_ready(&mut self, module: &'g Module, root: NodeId) -> Work<bool> {
         self.elab.reserve(1)?;
         let mut stack = vec![root];
@@ -2062,7 +2139,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         flow.normal = false;
                         flow = self.union(flow, &next)?;
                     }
-                    if obligations != self.facts.obligations.len() {
+                    if obligations != self.facts.obligations.len()
+                        && self.scope_may_be_missing_bindings(module, child)
+                    {
                         break;
                     }
                 }
@@ -2345,6 +2424,76 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         Ok(())
     }
+    fn check_named_body(
+        &mut self,
+        module: &'g Module,
+        typed: &'r DeclarationFacts<'g>,
+        pending_role: bool,
+    ) -> Work<()> {
+        let declaration = typed.declaration;
+        let DeclarationShape::Function { result, .. } = &typed.shape else {
+            unreachable!()
+        };
+        let node = module.syntax.nodes[declaration.node].children[1];
+        if !self.source_scope_ready(module, node)? {
+            return Ok(());
+        }
+        let before = self.marks();
+        if pending_role {
+            self.defer(module, node, ScalarUnsupported::FamilySelection)?;
+        }
+        if let Some(ordinary) = self.input.ordinary
+            && let Some(metadata) = ordinary.headers().get(&declaration.id)
+        {
+            if !metadata.requirements.is_empty() {
+                self.defer(module, node, ScalarUnsupported::Requirements)?;
+            }
+            if metadata.defaults.iter().any(|d| d.ty.is_none()) {
+                self.defer(module, node, ScalarUnsupported::GenericInference)?;
+            }
+        }
+        let mut context = self.context(Some(typed))?;
+        let flow = self.statement(module, node, 1, &mut context)?;
+        if before == self.marks() {
+            if flow.normal && primitive_name(result) != Some("void") {
+                self.finding(module, node, ScalarFindingKind::ReturnCoverage)?;
+            } else {
+                self.elab.reserve(1)?;
+                self.facts.bodies.push(BodyFacts {
+                    site: Self::site(module, node),
+                    owner: BodyOwner::Declaration(&declaration.id),
+                    result: Some(result.clone()),
+                    flow,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn implementation_header(
+        &mut self,
+        id: &DeclarationId,
+    ) -> Work<Option<&'r DeclarationFacts<'g>>> {
+        let Some(ordinary) = self.input.ordinary else {
+            return Ok(None);
+        };
+        for source in self.input.graph.implementations() {
+            self.elab.step(1)?;
+            if source.declaration != *id {
+                continue;
+            }
+            if let Some(family) = ordinary.captured_family(&source.family) {
+                self.elab.step(family.implementations.len())?;
+                return Ok(family
+                    .implementations
+                    .iter()
+                    .find(|b| b.source.declaration == *id)
+                    .map(|b| &b.header));
+            }
+        }
+        Ok(None)
+    }
+
     fn run(&mut self) -> Work<()> {
         for module in self.input.graph.modules() {
             self.elab.step(1)?;
@@ -2363,38 +2512,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 if declaration.id.kind == DeclarationKind::Function {
                     let typed = &self.input.facts.declarations[&declaration.id];
-                    let DeclarationShape::Function { result, .. } = &typed.shape else {
-                        unreachable!()
-                    };
-                    let node = module.syntax.nodes[declaration.node].children[1];
-                    if !self.source_scope_ready(module, node)? {
-                        continue;
-                    }
-                    let before = self.marks();
-                    if let Some(ordinary) = self.input.ordinary
-                        && let Some(metadata) = ordinary.headers().get(&declaration.id)
-                    {
-                        if !metadata.requirements.is_empty() {
-                            self.defer(module, node, ScalarUnsupported::Requirements)?;
-                        }
-                        if metadata.defaults.iter().any(|d| d.ty.is_none()) {
-                            self.defer(module, node, ScalarUnsupported::GenericInference)?;
-                        }
-                    }
-                    let mut context = self.context(Some(typed))?;
-                    let flow = self.statement(module, node, 1, &mut context)?;
-                    if before == self.marks() {
-                        if flow.normal && primitive_name(result) != Some("void") {
-                            self.finding(module, node, ScalarFindingKind::ReturnCoverage)?;
-                        } else {
-                            self.elab.reserve(1)?;
-                            self.facts.bodies.push(BodyFacts {
-                                site: Self::site(module, node),
-                                owner: BodyOwner::Declaration(&declaration.id),
-                                result: Some(result.clone()),
-                                flow,
-                            });
-                        }
+                    self.check_named_body(module, typed, false)?;
+                } else if declaration.id.kind == DeclarationKind::Implementation
+                    && self.input.ordinary.is_some()
+                {
+                    if let Some(typed) = self.implementation_header(&declaration.id)? {
+                        self.check_named_body(module, typed, true)?;
+                    } else {
+                        self.defer(module, declaration.node, ScalarUnsupported::FamilySelection)?;
                     }
                 } else if declaration.id.kind == DeclarationKind::Expectation {
                     let before = self.marks();
@@ -2450,7 +2575,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if self.input.ordinary.is_some()
                     && module.syntax.nodes[node].kind == NodeKind::Implementation
                 {
-                    self.defer(module, node, ScalarUnsupported::FamilySelection)?;
                     continue;
                 }
                 if !self.source_scope_ready(module, node)? {
@@ -2462,7 +2586,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                     flow.normal = false;
                     flow = self.union(flow, &next)?;
                 }
-                if obligations != self.facts.obligations.len() {
+                if obligations != self.facts.obligations.len()
+                    && self.scope_may_be_missing_bindings(module, node)
+                {
                     break;
                 }
             }

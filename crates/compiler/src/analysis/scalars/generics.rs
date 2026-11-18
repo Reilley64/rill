@@ -3,6 +3,23 @@ use super::*;
 use ordinary::{Completion, OrdinaryAnalysis};
 
 mod calls;
+mod ordinary_calls;
+pub use ordinary_calls::{ConditionalFinding, OrdinaryCall, OrdinaryCandidate, OutputAgreement};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BodyCompletion {
+    Checked,
+    SourceRejected,
+    Incomplete,
+    ResourceLimit,
+}
+
+#[derive(Debug)]
+pub struct BodyStatus<'g> {
+    pub site: Site<'g>,
+    pub completion: BodyCompletion,
+    pub not_performed: &'static [Stage],
+}
 
 #[derive(Debug)]
 pub struct GenericReport<'g> {
@@ -10,6 +27,8 @@ pub struct GenericReport<'g> {
     facts: ScalarFacts<'g>,
     statistics: Statistics,
     completion: ScalarFailureKind,
+    ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryCall<'g>>,
+    conditional_findings: Vec<ConditionalFinding<'g>>,
 }
 
 impl<'g> GenericReport<'g> {
@@ -27,6 +46,10 @@ impl<'g> GenericReport<'g> {
 
     pub fn findings(&self) -> &[ScalarFinding<'g>] {
         &self.facts.findings
+    }
+
+    pub fn conditional_findings(&self) -> &[ConditionalFinding<'g>] {
+        &self.conditional_findings
     }
 
     pub fn obligations(&self) -> &[ScalarObligation<'g>] {
@@ -60,6 +83,79 @@ impl<'g> GenericReport<'g> {
             .find(|b| b.site.module == &module.key && b.owner == owner))
     }
 
+    /// Scope completeness is independent of role/protection clearance elsewhere.
+    pub fn body_status(
+        &self,
+        module: &Module,
+        owner: BodyOwner<'_>,
+    ) -> Result<BodyStatus<'g>, QueryError> {
+        let module = self.check_module(module)?;
+        let checked = self.body(module, owner)?;
+        let node = match owner {
+            BodyOwner::Startup => module.syntax.root,
+            BodyOwner::Declaration(id) => {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.id == *id)
+                    .unwrap()
+                    .node
+            }
+        };
+        let site = Checker::site(module, node);
+        let inside = |other: Site<'_>| {
+            if other.module != &module.key {
+                return false;
+            }
+            if owner == BodyOwner::Startup {
+                // A top-level declaration belongs to its own body, not startup.
+                return !module
+                    .declarations
+                    .iter()
+                    .filter(|d| {
+                        d.scope.is_none()
+                            && matches!(
+                                d.id.kind,
+                                DeclarationKind::Function
+                                    | DeclarationKind::Implementation
+                                    | DeclarationKind::Expectation
+                            )
+                    })
+                    .any(|d| {
+                        let span = &module.syntax.nodes[d.node].span;
+                        span.start() <= other.span.start() && other.span.end() <= span.end()
+                    });
+            }
+            site.span.start() <= other.span.start() && other.span.end() <= site.span.end()
+        };
+        let completion = if checked.is_some() {
+            BodyCompletion::Checked
+        } else if self.completion == ScalarFailureKind::ResourceLimit {
+            BodyCompletion::ResourceLimit
+        } else if self.facts.obligations.iter().any(|o| inside(o.site)) {
+            BodyCompletion::Incomplete
+        } else if self.facts.findings.iter().any(|f| inside(f.site)) {
+            BodyCompletion::SourceRejected
+        } else {
+            BodyCompletion::Incomplete
+        };
+        let not_performed = if completion == BodyCompletion::Checked {
+            &[Stage::Ownership, Stage::Execution][..]
+        } else {
+            &[
+                Stage::Inference,
+                Stage::Evidence,
+                Stage::Ownership,
+                Stage::Execution,
+            ][..]
+        };
+        Ok(BodyStatus {
+            site,
+            completion,
+            not_performed,
+        })
+    }
+
     /// A node fact can be established even if the enclosing body is incomplete.
     pub fn node(
         &self,
@@ -77,12 +173,25 @@ impl<'g> GenericReport<'g> {
             .find(|n| n.site.module == &module.key && n.site.node == node))
     }
 
-    fn check_module(&self, module: &Module) -> Result<(), QueryError> {
-        if self.graph.modules().iter().any(|m| std::ptr::eq(m, module)) {
-            Ok(())
-        } else {
-            Err(QueryError::InvalidRequest)
+    /// Conditional context, selection and result facts, not a checked call.
+    pub fn ordinary_call(
+        &self,
+        module: &Module,
+        node: NodeId,
+    ) -> Result<Option<&OrdinaryCall<'g>>, QueryError> {
+        let module = self.check_module(module)?;
+        if node >= module.syntax.nodes.len() {
+            return Err(QueryError::InvalidRequest);
         }
+        Ok(self.ordinary_calls.get(&(&module.key, node)))
+    }
+
+    fn check_module(&self, module: &Module) -> Result<&'g Module, QueryError> {
+        self.graph
+            .modules()
+            .iter()
+            .find(|m| std::ptr::eq(*m, module))
+            .ok_or(QueryError::InvalidRequest)
     }
 }
 
@@ -118,6 +227,8 @@ pub fn analyze_generics<'g>(
         graph,
         facts: checker.facts,
         statistics: checker.elab.statistics,
+        ordinary_calls: checker.ordinary_calls,
+        conditional_findings: checker.conditional_findings,
         completion: if exhausted {
             ScalarFailureKind::ResourceLimit
         } else {
