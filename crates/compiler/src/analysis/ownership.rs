@@ -223,6 +223,11 @@ pub enum RetainedPlace<'g> {
         descriptor: Place<'g>,
         target: Place<'g>,
     },
+    /// A local binding holds the exclusive access moved from this parameter.
+    ThroughParameterAlias {
+        descriptor: Place<'g>,
+        parameter: Place<'g>,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]

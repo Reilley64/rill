@@ -19,8 +19,22 @@ struct Held {
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
     stored_at: Option<NodeId>,
-    /// Exact local descriptor reached by an admitted exclusive access value.
-    exact_target: Option<Slot>,
+    /// Identity of the stored descriptor, independent of the access loans.
+    exact_target: Option<ExactTarget>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum ExactTarget {
+    Local(Slot),
+    Caller { parameter: Slot, contents: Slot },
+}
+
+impl ExactTarget {
+    fn contents(self) -> Slot {
+        match self {
+            Self::Local(slot) | Self::Caller { contents: slot, .. } => slot,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -194,7 +208,7 @@ fn conflict(
         if let State::Initialized(held) = &state[holder] {
             // A live alias can still read the target's current contents, not
             // only the contents present when its access was acquired.
-            let contents = if let Some(target) = held.exact_target {
+            let contents = if let Some(ExactTarget::Local(target)) = held.exact_target {
                 budget.step(1)?;
                 match &state[target] {
                     State::Initialized(value) => value.loans.as_ref(),
@@ -584,6 +598,16 @@ pub(super) fn run<'g>(
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
     }
+    for (&parameter, &contents) in &retained {
+        budget.step(1)?;
+        state[parameter] = State::Initialized(Held {
+            exact_target: Some(ExactTarget::Caller {
+                parameter,
+                contents,
+            }),
+            ..Held::default()
+        });
+    }
     if let Some(frame) = active {
         state[frame.operand] = State::Initialized(Held {
             disposal_started_at: Some(slots[frame.operand].node),
@@ -797,11 +821,17 @@ pub(super) fn run<'g>(
                     visit_loans(&state, slots[from].storage(from), budget, &mut include)?;
                     budget.step(1)?;
                     if let Some(target) = initialized(&state[from], node)?.exact_target {
-                        visit_loans(&state, slots[target].storage(target), budget, &mut include)?;
+                        let contents = target.contents();
+                        visit_loans(
+                            &state,
+                            slots[contents].storage(contents),
+                            budget,
+                            &mut include,
+                        )?;
                     }
                     state[into] = State::Initialized(Held {
                         loans: loan_set(loans, budget)?,
-                        exact_target: retained_target.then_some(from),
+                        exact_target: retained_target.then_some(ExactTarget::Local(from)),
                         ..Held::default()
                     });
                     Operation::Borrow {
@@ -899,19 +929,35 @@ pub(super) fn run<'g>(
                                 descriptor,
                                 argument,
                             } => {
-                                budget.step(2)?;
+                                budget.step(1)?;
                                 let held = initialized(&state[argument], node)?;
-                                let target = held.exact_target.ok_or(Stop::Pending(node))?;
-                                initialized(&state[target], node)?;
-                                (
-                                    descriptor,
-                                    target,
-                                    RetainedPlace::ThroughAlias {
-                                        descriptor: local(descriptor),
-                                        target: local(target),
-                                    },
-                                    None,
-                                )
+                                match held.exact_target.ok_or(Stop::Pending(node))? {
+                                    ExactTarget::Local(target) => {
+                                        budget.step(1)?;
+                                        initialized(&state[target], node)?;
+                                        (
+                                            descriptor,
+                                            target,
+                                            RetainedPlace::ThroughAlias {
+                                                descriptor: local(descriptor),
+                                                target: local(target),
+                                            },
+                                            None,
+                                        )
+                                    }
+                                    ExactTarget::Caller {
+                                        parameter,
+                                        contents,
+                                    } => (
+                                        descriptor,
+                                        contents,
+                                        RetainedPlace::ThroughParameterAlias {
+                                            descriptor: local(descriptor),
+                                            parameter: local(parameter),
+                                        },
+                                        Some(node),
+                                    ),
+                                }
                             }
                         };
                         initialized(&state[access], node)?;

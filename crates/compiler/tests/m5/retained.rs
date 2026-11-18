@@ -805,10 +805,6 @@ fn exclusive_aliases_retain_sources_in_the_proved_target() {
                 let _ = view;
                 return value;
             }
-            function incomingMoved(slot: &mut &bool, seed: &bool): void {
-                let access = slot;
-                remember(access, seed);
-            }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -916,9 +912,188 @@ fn exclusive_aliases_retain_sources_in_the_proved_target() {
                     Operation::CallRetaining { callee, destination: RetainedPlace::ThroughAlias { target, .. }, .. }
                         if *callee == role && target.root.span.bytes() == expected)));
             }
-            let pending = lower("incomingMoved");
-            assert_eq!(pending.completion(), Completion::Incomplete);
-            assert!(pending.mir().is_none());
+            let limits = AnalysisLimits {
+                max_work: valid.statistics().work,
+                max_entries: valid.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("valid", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("valid", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn moved_incoming_access_keeps_the_original_caller_destination() {
+    probe(
+        "retained::moved_incoming_access_keeps_the_original_caller_destination",
+        r#"
+            function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function relay(slot: &mut &bool, input: &bool): void {
+                let access = slot;
+                remember(access, input);
+                let moved = access;
+                remember(moved, input);
+            }
+            function valid(seed: &bool, flag: bool): bool {
+                let mut out = seed;
+                relay(&mut out, &flag);
+                return *out;
+            }
+            function callerExpires(seed: &bool): bool {
+                let mut out = seed;
+                { let flag = true; relay(&mut out, &flag); }
+                return *out;
+            }
+            function wrongAccess(slot: &mut &bool, input: &bool): void {
+                let access = slot;
+                remember(slot, input);
+            }
+            function escape(slot: &mut &bool, input: &bool): void {
+                let flag = true;
+                let access = slot;
+                remember(access, &flag);
+            }
+            function escapeAfterMove(slot: &mut &bool, input: &bool): void {
+                let flag = true;
+                *slot = &flag;
+                let access = slot;
+                remember(access, input);
+            }
+            function endsBeforeReturn(slot: &mut &bool, input: &bool): void {
+                let access = slot;
+                { let flag = true; remember(access, &flag); }
+            }
+            function stillExternal(slot: &mut &bool, input: &bool): void {
+                let flag = true;
+                { let access = slot; remember(access, &flag); }
+            }
+            function rejectedCaller(seed: &bool): void {
+                let mut out = seed;
+                escape(&mut out, seed);
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.name.as_deref() == Some(name)
+                            && d.id.kind == loader::DeclarationKind::Function
+                    })
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let remember = &declaration("remember").id;
+            let relay = lower("relay");
+            let mir = relay
+                .mir()
+                .unwrap_or_else(|| panic!("relay: {:?}", relay.completion()));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Reborrow { .. }
+                            | Operation::CallRetaining { .. }
+                    )
+                })
+                .collect();
+            let [
+                Operation::Move {
+                    from: original,
+                    into: Some(access),
+                },
+                Operation::Reborrow {
+                    parent: first_parent,
+                    exclusive: true,
+                    ..
+                },
+                Operation::CallRetaining {
+                    callee: first,
+                    destination:
+                        RetainedPlace::ThroughParameterAlias {
+                            descriptor: first_desc,
+                            parameter: first_param,
+                        },
+                    ..
+                },
+                Operation::Move {
+                    from,
+                    into: Some(moved),
+                },
+                Operation::Reborrow {
+                    parent: next_parent,
+                    exclusive: true,
+                    ..
+                },
+                Operation::CallRetaining {
+                    callee: next,
+                    destination:
+                        RetainedPlace::ThroughParameterAlias {
+                            descriptor: next_desc,
+                            parameter: next_param,
+                        },
+                    ..
+                },
+            ] = route.as_slice()
+            else {
+                panic!("expected moves, reborrows and writes to original parameter: {route:?}")
+            };
+            assert_eq!(*first, remember);
+            assert_eq!(*next, remember);
+            assert_eq!(original.root.span.bytes(), b"slot: &mut &bool");
+            assert_eq!(original.root.node, first_param.root.node);
+            assert_eq!(original.root.node, next_param.root.node);
+            for place in [first_parent, first_desc, from] {
+                assert_eq!(access.root.node, place.root.node);
+            }
+            for place in [next_parent, next_desc] {
+                assert_eq!(moved.root.node, place.root.node);
+            }
+            let valid = lower("valid");
+            let mir = valid
+                .mir()
+                .expect("the owner and both the relay and its reached callee check");
+            assert!(linear(mir, mir.entry).iter().any(|op| matches!(op,
+                Operation::CallRetaining { callee, destination: RetainedPlace::Local(place), .. }
+                if *callee == &declaration("relay").id && place.root.span.bytes() == b"out")));
+
+            for (name, code, related) in [
+                ("callerExpires", "R0203", b"&flag".as_slice()),
+                ("wrongAccess", "R0200", b"slot".as_slice()),
+                ("escape", "R0202", b"&flag".as_slice()),
+                ("escapeAfterMove", "R0202", b"&flag".as_slice()),
+                ("endsBeforeReturn", "R0203", b"&flag".as_slice()),
+                ("stillExternal", "R0202", b"&flag".as_slice()),
+                ("rejectedCaller", "R0202", b"&flag".as_slice()),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected ownership diagnostic")
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.related.span.bytes(), related);
+            }
             let limits = AnalysisLimits {
                 max_work: valid.statistics().work,
                 max_entries: valid.statistics().entries,
