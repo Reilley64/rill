@@ -108,24 +108,33 @@ impl<'r, 'g> Checker<'r, 'g> {
                 == NodeKind::PipeStep { propagate: true }
     }
 
+    pub(super) fn valid_propagation_target(
+        &mut self,
+        module: &'g Module,
+        node: NodeId,
+        context: &Context<'r, 'g>,
+    ) -> Work<bool> {
+        let valid = self.propagation_target(context).is_some_and(|(_, result)| {
+            result.is_none_or(|ty| {
+                matches!(
+                    ty.as_ref(),
+                    TypeTerm::Nominal { .. } | TypeTerm::Parameter { .. }
+                )
+            })
+        });
+        if !valid {
+            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+        }
+        Ok(valid)
+    }
+
     pub(super) fn pending_propagation(
         &mut self,
         module: &'g Module,
         node: NodeId,
         context: &Context<'r, 'g>,
     ) -> Work<()> {
-        let Some((_, result)) = self.propagation_target(context) else {
-            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
-            return Ok(());
-        };
-        if result.is_some_and(|ty| {
-            !matches!(
-                ty.as_ref(),
-                TypeTerm::Nominal { .. } | TypeTerm::Parameter { .. }
-            )
-        }) {
-            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
-        } else {
+        if self.valid_propagation_target(module, node, context)? {
             self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
         }
         Ok(())

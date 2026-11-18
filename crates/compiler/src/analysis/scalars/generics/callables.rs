@@ -669,6 +669,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .map(|actual| target.expected.clone().unwrap_or(actual.ty)));
         }
         let flow = self.statement(module, body, 1, context)?;
+        if self.integrated && flow.pending {
+            return Ok(None);
+        }
         if let Some(expected) = &target.expected {
             if flow.normal && primitive_name(expected) != Some("void") {
                 self.finding(module, body, ScalarFindingKind::ReturnCoverage)?;

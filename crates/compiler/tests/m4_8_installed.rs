@@ -2,7 +2,7 @@
 use compiler::analysis::scalars::data::DataExpression;
 use compiler::analysis::scalars::{
     BodyOwner, NodeFactKind, PropagationTarget, ScalarFailureKind, ScalarFindingKind,
-    ScalarUnsupported,
+    ScalarUnsupported, generics::BodyCompletion,
 };
 use compiler::analysis::typed::{CoreBlocker, analyze_typed};
 use compiler::analysis::{AnalysisLimits, TypeTerm};
@@ -28,6 +28,7 @@ fn installed_option_uses_pinned_sources_in_both_modes() {
         };
         installed_option(&request);
         reject_propagation(&root, &request);
+        propagation_prerequisites(&root, &request);
         untrusted_profiles(&root, &request);
         metadata_trigger(&root, &request);
         pin_mismatch(&root, request);
@@ -182,6 +183,40 @@ fn installed_option(profile: &InstalledRequest) {
                     .is_some()
             );
         }
+        let module_scan = graph
+            .modules()
+            .iter()
+            .position(|m| m.key == option.key)
+            .unwrap()
+            + 1;
+        let binding_scan = graph
+            .bindings()
+            .iter()
+            .position(|b| b.module == option.key && b.name == "Option")
+            .unwrap()
+            + 1;
+        let declaration_scan = option
+            .declarations
+            .iter()
+            .position(|d| d.id == role.declaration.id)
+            .unwrap()
+            + 1;
+        let role_work = report.inventory().statistics().work + module_scan + binding_scan + declaration_scan
+            + 3 // declaration, validity and header lookups
+            + 1; // admitted role entry
+        let at_role = AnalysisLimits {
+            max_work: role_work,
+            ..AnalysisLimits::default()
+        };
+        let before_role = AnalysisLimits {
+            max_work: role_work - 1,
+            ..at_role
+        };
+        assert!(analyze_typed(&graph, at_role).option_role().is_some());
+        let exhausted = analyze_typed(&graph, before_role);
+        assert_eq!(exhausted.completion(), ScalarFailureKind::ResourceLimit);
+        assert!(exhausted.option_role().is_none());
+
         let short = AnalysisLimits {
             max_work: report.statistics().work - 1,
             ..AnalysisLimits::default()
@@ -195,7 +230,7 @@ fn installed_option(profile: &InstalledRequest) {
 
 fn reject_propagation(root: &Path, profile: &InstalledRequest) {
     let entry = root.join("app/invalid.rill");
-    fs::write(&entry, "import std::option::Option; function borrowed(x: &Option<bool>): Option<bool> { let b = x?; return Option.Some(b); } function wrong(x: Option<bool>): bool { return x?; }").unwrap();
+    fs::write(&entry, "import std::option::Option; function borrowed(x: &Option<bool>): Option<bool> { let b = x?; return Option.Some(b); } function wrong(x: Option<bool>): bool { return x?; } enum Local { Item } function wrongWithoutRole(x: Local): bool { return x?; }").unwrap();
     let graph = loader::load_installed(InstalledRequest {
         entry,
         ..profile.clone()
@@ -209,8 +244,70 @@ fn reject_propagation(root: &Path, profile: &InstalledRequest) {
             .iter()
             .filter(|f| f.kind == ScalarFindingKind::InvalidTarget)
             .count(),
-        2
+        3
     );
+}
+
+fn propagation_prerequisites(root: &Path, profile: &InstalledRequest) {
+    let entry = root.join("app/prerequisites.rill");
+    fs::write(&entry, "
+        import std::option::Option;
+        enum Local { Item }
+        function invalidOperand(): Option<bool> { let _ = missing?; return Option.None; }
+        function pendingArrow(x: Local): void { let cb: () => Local = () => { let _ = x?; }; }
+        function fallsThrough(x: Option<bool>): void { let cb: () => Option<bool> = () => { let _ = x?; }; }
+    ").unwrap();
+    let graph = loader::load_installed(InstalledRequest {
+        entry,
+        ..profile.clone()
+    })
+    .unwrap();
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let app = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.origin == Origin::Application)
+        .unwrap();
+    let body = |name| {
+        app.declarations
+            .iter()
+            .find(|d| d.name.as_deref() == Some(name))
+            .unwrap()
+    };
+    let invalid = body("invalidOperand");
+    assert_eq!(
+        report
+            .bodies()
+            .body_status(app, BodyOwner::Declaration(&invalid.id))
+            .unwrap()
+            .completion,
+        BodyCompletion::SourceRejected
+    );
+    assert!(
+        report
+            .bodies()
+            .findings()
+            .iter()
+            .any(|f| f.kind == ScalarFindingKind::MissingValue)
+    );
+    let pending = body("pendingArrow");
+    let core_blockers: Vec<_> = report
+        .bodies()
+        .obligations()
+        .iter()
+        .filter(|o| o.reason == ScalarUnsupported::CoreAdmission)
+        .collect();
+    assert_eq!(core_blockers.len(), 1);
+    assert!(core_blockers[0].site.span.start() >= pending.span.start());
+    assert!(core_blockers[0].site.span.end() <= pending.span.end());
+    let coverage: Vec<_> = report
+        .bodies()
+        .findings()
+        .iter()
+        .filter(|f| f.kind == ScalarFindingKind::ReturnCoverage)
+        .collect();
+    assert_eq!(coverage.len(), 1);
+    assert!(coverage[0].site.span.start() >= body("fallsThrough").span.start());
 }
 
 fn untrusted_profiles(root: &Path, profile: &InstalledRequest) {

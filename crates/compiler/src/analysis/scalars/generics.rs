@@ -112,11 +112,7 @@ impl<'g> GenericReport<'g> {
         {
             return Err(QueryError::InvalidRequest);
         }
-        Ok(self
-            .facts
-            .bodies
-            .iter()
-            .find(|b| b.site.module == &module.key && b.owner == owner))
+        Ok(self.facts.bodies.iter().find(|b| b.owned_by(module, owner)))
     }
 
     pub(in crate::analysis) fn checked_body(
@@ -127,7 +123,7 @@ impl<'g> GenericReport<'g> {
     ) -> Work<Option<&BodyFacts<'g>>> {
         for body in &self.facts.bodies {
             budget.step(1)?;
-            if body.site.module == &module.key && body.owner == owner {
+            if body.owned_by(module, owner) {
                 return Ok(Some(body));
             }
         }

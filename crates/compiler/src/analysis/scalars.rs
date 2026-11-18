@@ -49,6 +49,11 @@ pub struct BodyFacts<'g> {
     pub result: Option<Type<'g>>,
     pub flow: Flow,
 }
+impl BodyFacts<'_> {
+    fn owned_by(&self, module: &Module, owner: BodyOwner<'_>) -> bool {
+        self.site.module == &module.key && self.owner == owner
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiteralValue {
     Integer { magnitude: u128, negative: bool },
@@ -335,11 +340,7 @@ impl<'g> ScalarReceipt<'_, 'g> {
         {
             return Err(QueryError::InvalidRequest);
         }
-        Ok(self
-            .facts
-            .bodies
-            .iter()
-            .find(|b| b.site.module == &module.key && b.owner == owner))
+        Ok(self.facts.bodies.iter().find(|b| b.owned_by(module, owner)))
     }
     pub fn node(
         &self,
@@ -371,6 +372,7 @@ struct Slot<'g> {
     diverges: bool,
     boolean: Option<BooleanSet>,
     propagation: Option<Propagation<'g>>,
+    pending_propagation: bool,
     admission: Option<data::Admission<'g>>,
     path: Option<data::PlacePath<'g>>,
     refinement: Option<Arc<data::Refinement<'g>>>,
@@ -1921,11 +1923,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 NodeKind::Literal => (),
                 NodeKind::Propagate | NodeKind::Wrap if self.integrated => {
-                    if syntax.kind == NodeKind::Wrap || self.option.is_none() {
+                    if syntax.kind == NodeKind::Wrap {
                         self.pending_propagation(module, node, context)?;
                         inference.slots.get_mut(&node).unwrap().blocked = true;
-                    } else if self.propagation_target(context).is_none() {
-                        self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+                    } else if !self.valid_propagation_target(module, node, context)? {
                         inference.slots.get_mut(&node).unwrap().blocked = true;
                     }
                     for &child in &syntax.children {
@@ -2255,7 +2256,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     && slot.propagation.is_none()
                     && module.syntax.nodes[node].kind == NodeKind::Propagate
                 {
-                    self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                    slot.pending_propagation = true;
                     slot.blocked = true;
                 }
             }
@@ -2368,6 +2369,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         for &node in &ordered {
             let children = self.runtime_children(&inference, node)?;
             let blocked = children.iter().any(|child| inference.slots[child].blocked);
+            if !blocked && inference.slots[&node].pending_propagation {
+                // An invalid or pending operand has its own finding or prerequisite.
+                self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+            }
             let mut normal = inference.slots[&node]
                 .ty
                 .as_ref()

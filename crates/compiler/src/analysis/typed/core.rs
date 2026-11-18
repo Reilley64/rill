@@ -1,7 +1,7 @@
 //! Admission of delivered contracts from the installed capture.
 use super::*;
 use crate::analysis::scalars::BodyOwner;
-use crate::analysis::{Declaration, DeclarationShape, Payload, Type, TypeTerm};
+use crate::analysis::{Declaration, DeclarationFacts, DeclarationShape, Payload, Type, TypeTerm};
 use crate::loader::{DeclarationKind, Module, Namespace, Target};
 
 #[derive(Clone, Copy, Debug)]
@@ -43,6 +43,27 @@ fn export<'g>(
     Ok(None)
 }
 
+fn unconditional_declaration<'a, 'g>(
+    inventory: &'a OrdinaryAnalysis<'g>,
+    declaration: &Declaration,
+    budget: &mut Budget,
+) -> Work<Option<&'a DeclarationFacts<'g>>> {
+    budget.step(1)?;
+    let Some(facts) = inventory.type_facts().declarations.get(&declaration.id) else {
+        return Ok(None);
+    };
+    budget.step(1)?;
+    if inventory.declaration_unusable(&declaration.id) {
+        return Ok(None);
+    }
+    budget.step(1)?;
+    let plain = inventory
+        .headers()
+        .get(&declaration.id)
+        .is_some_and(|header| header.defaults.is_empty() && header.requirements.is_empty());
+    Ok(plain.then_some(facts))
+}
+
 pub(super) fn check_roles<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     budget: &mut Budget,
@@ -59,11 +80,10 @@ pub(super) fn check_roles<'g>(
     let Some(module) = module else {
         return Ok(None);
     };
-    let types = inventory.type_facts();
     let Some(option) = export(graph, module, Namespace::TypeModule, "Option", budget)? else {
         return Ok(None);
     };
-    let Some(facts) = types.declarations.get(&option.id) else {
+    let Some(facts) = unconditional_declaration(inventory, option, budget)? else {
         return Ok(None);
     };
     let (DeclarationShape::Enum { variants }, [parameter]) =
@@ -84,7 +104,6 @@ pub(super) fn check_roles<'g>(
         || none.declaration.name.as_deref() != Some("None")
         || !parameter_is(element, parameter.declaration)
         || !matches!(none.payload, Payload::Unit)
-        || inventory.declaration_unusable(&option.id)
     {
         return Ok(None);
     }
@@ -114,7 +133,6 @@ pub(super) fn check_providers<'g>(
         return Ok(());
     };
     let graph = inventory.graph();
-    let types = inventory.type_facts();
     let mut owner = None;
     for module in graph.modules() {
         budget.step(1)?;
@@ -128,12 +146,10 @@ pub(super) fn check_providers<'g>(
     else {
         return Ok(());
     };
-    if inspection.id.kind != DeclarationKind::Function
-        || inventory.declaration_unusable(&inspection.id)
-    {
+    if inspection.id.kind != DeclarationKind::Function {
         return Ok(());
     }
-    let Some(signature) = types.declarations.get(&inspection.id) else {
+    let Some(signature) = unconditional_declaration(inventory, inspection, budget)? else {
         return Ok(());
     };
     let (DeclarationShape::Function { parameters, result }, [binder]) =
@@ -173,4 +189,90 @@ pub(super) fn check_providers<'g>(
         admitted.option_inspection = Some(inspection);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::loader::{Limits, Prelude, Request, Selector, load};
+    use std::{collections::BTreeMap, fs};
+
+    #[test]
+    fn closed_option_headers_cannot_add_defaults_or_requirements() {
+        let root = std::env::temp_dir().join(format!("rill-option-header-{}", std::process::id()));
+        let app = root.join("app");
+        let standard = root.join("std");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&standard).unwrap();
+        let entry = app.join("main.rill");
+        fs::write(
+            &entry,
+            "
+            enum Plain<T> { Some(T), None }
+            enum Defaulted<T = bool> { Some(T), None }
+            function inspect<T>(value: &Plain<T>): bool { return true; }
+            function conditional<T>(value: &Plain<T>): bool where shareable(T) { return true; }
+        ",
+        )
+        .unwrap();
+        fs::write(
+            standard.join("core.rill"),
+            "export function copy<T>(value: &T): T; export function dispose<T>(value: T): void;",
+        )
+        .unwrap();
+        let selector = |name: &str| Selector {
+            module: "core.rill".into(),
+            name: name.into(),
+        };
+        let loaded = load(Request {
+            entry,
+            standard_root: standard,
+            prelude: Prelude {
+                copy: selector("copy"),
+                dispose: selector("dispose"),
+            },
+            target: "aarch64-apple-darwin".into(),
+            options: BTreeMap::new(),
+            test_mode: false,
+            limits: Limits::default(),
+        });
+        fs::remove_dir_all(&root).unwrap();
+        let graph = loaded.unwrap();
+        let limits = AnalysisLimits::default();
+        let inventory = analyze_typed_inventory(&graph, limits);
+        let mut budget = Budget {
+            limits,
+            statistics: inventory.statistics(),
+        };
+        let app = graph
+            .modules()
+            .iter()
+            .find(|module| module.key.path == "main.rill")
+            .unwrap();
+        for (name, plain) in [
+            ("Plain", true),
+            ("Defaulted", false),
+            ("inspect", true),
+            ("conditional", false),
+        ] {
+            let declaration = app
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some(name))
+                .unwrap();
+            assert!(
+                inventory
+                    .type_facts()
+                    .declarations
+                    .contains_key(&declaration.id)
+            );
+            assert_eq!(
+                unconditional_declaration(&inventory, declaration, &mut budget)
+                    .unwrap()
+                    .is_some(),
+                plain,
+                "{name}"
+            );
+        }
+    }
 }
