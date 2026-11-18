@@ -94,9 +94,11 @@ fn liveness(
             }
             Action::FormClosure { capture, into, .. } => (Some(capture), Some(into)),
             Action::Call(index) => (None, calls[index].into),
-            Action::TestOption { operand, .. } => (Some(operand), None),
+            Action::TestVariant { operand, .. } => (Some(operand), None),
             Action::CopyOptionPayload { operand, into } => (Some(operand), Some(into)),
-            Action::ConstructOption { payload, into, .. } => (payload, Some(into)),
+            Action::ConstructVariant { payload, into, .. } => (payload, Some(into)),
+            Action::TakeResultSuccess { operand, into } => (Some(operand), into),
+            Action::ForwardResultFailure { operand, into, .. } => (Some(operand), Some(into)),
         };
         let cleaned = match instruction.action {
             Action::Cleanup(index) => cleanups[index].as_slice(),
@@ -296,32 +298,41 @@ fn forbid_custom_partial(
     Ok(())
 }
 
-fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, held: &Held) -> Cleanup<'g> {
+fn cleanup_of<'g>(
+    module: &'g Module,
+    local: Local<'g>,
+    held: &Held,
+    node: NodeId,
+) -> ResultOf<Cleanup<'g>> {
     let place = local.place(module);
-    if let Some(field) = held.capture_drop {
-        Cleanup::DropCapture {
+    match local.cleanup {
+        StorageCleanup::Unlowered => Err(Stop::Pending(node)),
+        StorageCleanup::Drop => Ok(Cleanup::Drop(place)),
+        StorageCleanup::End if let Some(field) = held.capture_drop => Ok(Cleanup::DropCapture {
             closure: place.root,
             field: site_at(module, field),
-        }
-    } else if local.drops {
-        Cleanup::Drop(place)
-    } else {
-        Cleanup::EndStorage(place)
+        }),
+        StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
 }
 
-fn cleanup_operation<'g>(module: &'g Module, local: Local<'g>, state: State) -> Operation<'g> {
+fn cleanup_operation<'g>(
+    module: &'g Module,
+    local: Local<'g>,
+    state: State,
+    node: NodeId,
+) -> ResultOf<Operation<'g>> {
     let State::Initialized(held) = state else {
-        return Operation::None;
+        return Ok(Operation::None);
     };
-    match cleanup_of(module, local, &held) {
+    Ok(match cleanup_of(module, local, &held, node)? {
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
         Cleanup::EndStorage(_) => Operation::None,
         Cleanup::InvokeDisposer { .. } | Cleanup::DeferDisposerFields { .. } => {
             unreachable!("local storage cleanup cannot transfer disposer obligations")
         }
-    }
+    })
 }
 
 fn cleanup_boundary<'g>(
@@ -433,7 +444,7 @@ fn cleanup_boundary<'g>(
                 if member != slot {
                     budget.reserve(1)?;
                 }
-                actions.push(cleanup_of(module, slots[member], &held));
+                actions.push(cleanup_of(module, slots[member], &held, node)?);
             }
         }
     }
@@ -638,11 +649,11 @@ pub(super) fn run<'g>(
                         }
                     }
                 }
-                Action::TestOption { operand, some } => {
+                Action::TestVariant { operand, success } => {
                     initialized(&state[operand], node)?;
-                    Operation::TestOption {
+                    Operation::TestVariant {
                         operand: local(operand),
-                        some,
+                        success,
                     }
                 }
                 Action::CopyOptionPayload { operand, into } => {
@@ -653,7 +664,7 @@ pub(super) fn run<'g>(
                         into: local(into),
                     }
                 }
-                Action::ConstructOption {
+                Action::ConstructVariant {
                     variant,
                     payload,
                     into,
@@ -663,10 +674,36 @@ pub(super) fn run<'g>(
                         state[payload] = State::Vacant;
                     }
                     state[into] = State::Initialized(empty.clone());
-                    Operation::ConstructOption {
+                    Operation::ConstructVariant {
                         variant,
                         payload: payload.map(local),
                         into: local(into),
+                    }
+                }
+                Action::TakeResultSuccess { operand, into } => {
+                    initialized(&state[operand], node)?;
+                    state[operand] = State::Vacant;
+                    if let Some(into) = into {
+                        state[into] = State::Initialized(empty.clone());
+                    }
+                    Operation::TakeResultSuccess {
+                        operand: local(operand),
+                        into: into.map(local),
+                    }
+                }
+                Action::ForwardResultFailure {
+                    operand,
+                    into,
+                    variant,
+                    wrapper,
+                } => {
+                    initialized(&state[operand], node)?;
+                    state[into] = std::mem::replace(&mut state[operand], State::Vacant);
+                    Operation::ForwardResultFailure {
+                        operand: local(operand),
+                        into: local(into),
+                        variant,
+                        wrapper,
                     }
                 }
                 Action::ForbiddenBorrowedMove(slot) => {
@@ -828,7 +865,8 @@ pub(super) fn run<'g>(
                     mode,
                 } => {
                     let mut held = initialized(&state[capture], node)?.clone();
-                    held.capture_drop = slots[capture].drops.then_some(slots[capture].node);
+                    held.capture_drop = (slots[capture].cleanup == StorageCleanup::Drop)
+                        .then_some(slots[capture].node);
                     state[capture] = State::Vacant;
                     state[into] = State::Initialized(held);
                     Operation::FormClosure {
@@ -887,7 +925,7 @@ pub(super) fn run<'g>(
                     )?;
                     let displaced = std::mem::replace(&mut state[target], State::Vacant);
                     retire_loans(&slots, &mut state, &[target], budget)?;
-                    cleanup_operation(module, slots[target], displaced)
+                    cleanup_operation(module, slots[target], displaced, node)?
                 }
                 Action::Install { target, incoming } => {
                     require_initialized(&slots, &state, incoming, node, budget)?;
@@ -957,7 +995,7 @@ pub(super) fn run<'g>(
                         )?;
                         let ended = std::mem::replace(&mut state[slot], State::Vacant);
                         retire_loans(&slots, &mut state, &[slot], budget)?;
-                        cleanup_operation(module, slots[slot], ended)
+                        cleanup_operation(module, slots[slot], ended, node)?
                     } else {
                         state[slot] = State::Vacant;
                         Operation::None

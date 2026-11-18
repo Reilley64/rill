@@ -156,19 +156,31 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
-    /// Select the Some edge of an admitted Option operand.
-    TestOption {
+    /// Select the success variant of an admitted postfix operand.
+    TestVariant {
         operand: Place<'g>,
-        some: &'g DeclarationId,
+        success: &'g DeclarationId,
     },
     CopyOptionPayload {
         operand: Place<'g>,
         into: Place<'g>,
     },
-    ConstructOption {
+    ConstructVariant {
         variant: &'g DeclarationId,
         payload: Option<Place<'g>>,
         into: Place<'g>,
+    },
+    /// Consume a proved Ok operand after transferring or discarding its payload.
+    TakeResultSuccess {
+        operand: Place<'g>,
+        into: Option<Place<'g>>,
+    },
+    /// Move the existing Err wrapper, including its origin and retained cause.
+    ForwardResultFailure {
+        operand: Place<'g>,
+        into: Place<'g>,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
     },
     Dispose {
         callee: &'g DeclarationId,
@@ -493,7 +505,14 @@ struct Local<'g> {
     reference_member: bool,
     custom_disposer: Option<&'g DeclarationId>,
     moves: bool,
-    drops: bool,
+    cleanup: StorageCleanup,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StorageCleanup {
+    End,
+    Drop,
+    Unlowered,
 }
 
 impl<'g> Local<'g> {
@@ -546,18 +565,28 @@ enum Action<'g> {
         into: Option<Slot>,
     },
     Call(usize),
-    TestOption {
+    TestVariant {
         operand: Slot,
-        some: &'g DeclarationId,
+        success: &'g DeclarationId,
     },
     CopyOptionPayload {
         operand: Slot,
         into: Slot,
     },
-    ConstructOption {
+    ConstructVariant {
         variant: &'g DeclarationId,
         payload: Option<Slot>,
         into: Slot,
+    },
+    TakeResultSuccess {
+        operand: Slot,
+        into: Option<Slot>,
+    },
+    ForwardResultFailure {
+        operand: Slot,
+        into: Slot,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
     },
     FormClosure {
         capture: Slot,

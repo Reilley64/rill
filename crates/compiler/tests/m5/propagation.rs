@@ -65,29 +65,7 @@ fn option_postfix_returns_through_initialized_cleanup() {
                 (flag_yes, &[b"owner".as_slice()][..]),
                 (flag_no, &[b"owner".as_slice(), b"second: string"][..]),
             ] {
-                let mut test = start;
-                let mut calls = 0;
-                let (some, none) = (0..mir.blocks.len())
-                    .find_map(|_| {
-                        match (&mir.blocks[test].operation, mir.blocks[test].terminator) {
-                            (
-                                Operation::TestOption { operand, some },
-                                Terminator::Branch { yes, no },
-                            ) => {
-                                assert_eq!(operand.root.span.bytes(), b"pass(input)");
-                                assert_eq!(*some, &role.some.id);
-                                Some((yes, no))
-                            }
-                            (op, Terminator::Goto(next)) => {
-                                calls += usize::from(matches!(op, Operation::Call(_)));
-                                test = next;
-                                None
-                            }
-                            other => panic!("expected option test: {other:?}"),
-                        }
-                    })
-                    .expect("path reaches the Option test");
-                assert_eq!(calls, 1);
+                let (some, none) = call_then_test(mir, start, &role.some.id);
                 let failure = linear(mir, none);
                 assert_return(&failure, &role.none.id, false, expected);
                 assert!(!failure.iter().any(|op| matches!(
@@ -197,6 +175,181 @@ fn option_postfix_returns_through_initialized_cleanup() {
     );
 }
 
+#[test]
+fn result_postfix_forwards_existing_failure_before_cleanup() {
+    probe_with_typed(
+        "propagation::result_postfix_forwards_existing_failure_before_cleanup",
+        r#"
+            function pass(value: Result<bool, i32>): Result<bool, i32> { return value; }
+            function paths(input: Result<bool, i32>, flag: bool, first: string, second: string): Result<i32, i32> {
+                let owner = first;
+                if (flag) { dispose(second); }
+                let value = pass(input)?;
+                dispose(owner);
+                return Result.Ok(7i32);
+            }
+            function knownError(input: Result<bool, i32>.Err, owner: string): Result<i32, i32> {
+                let _ = input?;
+                dispose(owner);
+                return Result.Ok(9i32);
+            }
+            function knownOk(input: Result<bool, i32>.Ok, owner: string): Result<i32, i32> {
+                let _ = input?;
+                dispose(owner);
+                return Result.Ok(9i32);
+            }
+            function rejected(input: Result<bool, i32>): Result<bool, i32> {
+                let _ = input?;
+                let _ = input?;
+                return Result.Ok(true);
+            }
+            function needsDrop(input: Result<bool, i32>): Result<bool, i32> {
+                let _ = input;
+                return Result.Ok(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let check = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let lower = |name| check(name, AnalysisLimits::default());
+            let role = typed.result_role().expect("admitted Result role");
+            let report = lower("paths");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("paths: {:?}", report.completion()));
+            let (flag_yes, flag_no) = branch_targets(mir);
+            for (start, expected) in [
+                (flag_yes, &[b"owner".as_slice()][..]),
+                (flag_no, &[b"owner".as_slice(), b"second: string"][..]),
+            ] {
+                let (ok, err) = call_then_test(mir, start, &role.ok.id);
+                let failure = linear(mir, err);
+                assert_forward(&failure, role, b"pass(input)", expected);
+                assert!(!failure.iter().any(|op| matches!(
+                    op,
+                    Operation::Dispose { .. }
+                        | Operation::TakeResultSuccess { .. }
+                        | Operation::ConstructVariant { .. }
+                )));
+
+                let success = linear(mir, ok);
+                let transfer: Vec<_> = success
+                    .iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::TakeResultSuccess { .. } | Operation::Dispose { .. }
+                        )
+                    })
+                    .collect();
+                assert!(
+                    matches!(transfer.as_slice(), [Operation::TakeResultSuccess { operand, into: Some(into) }, Operation::Dispose { operand: owner, .. }]
+                    if operand.root.span.bytes() == b"pass(input)" && into.root.span.bytes() == b"value" && owner.root.span.bytes() == b"owner")
+                );
+                assert_return(&success, &role.ok.id, true, &expected[1..]);
+            }
+
+            let failed = lower("knownError");
+            let mir = failed.mir().expect("known Err forwards and cleans");
+            let failure = linear(mir, mir.entry);
+            assert_forward(&failure, role, b"input", &[b"owner: string"]);
+            assert!(!failure.iter().any(|op| matches!(
+                op,
+                Operation::ConstructVariant { .. } | Operation::Dispose { .. }
+            )));
+            let succeeded = lower("knownOk");
+            let mir = succeeded.mir().expect("known Ok continues");
+            let success = linear(mir, mir.entry);
+            assert_return(&success, &role.ok.id, true, &[]);
+            assert!(
+                success
+                    .iter()
+                    .any(|op| matches!(op, Operation::TakeResultSuccess { into: None, .. }))
+            );
+
+            let bad = lower("rejected");
+            assert_eq!(bad.completion(), Completion::SourceRejected);
+            assert!(bad.mir().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected reused Result operand")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"input");
+            assert_eq!(finding.related.span.bytes(), b"input");
+            assert!(finding.related.span.start() < finding.site.span.start());
+
+            let pending = lower("needsDrop");
+            assert_eq!(pending.completion(), Completion::Incomplete);
+            assert!(pending.mir().is_none());
+
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("paths", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("paths", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+fn call_then_test(
+    mir: &Mir<'_>,
+    mut pc: usize,
+    expected: &loader::DeclarationId,
+) -> (usize, usize) {
+    let mut calls = 0;
+    for _ in 0..mir.blocks.len() {
+        let block = &mir.blocks[pc];
+        match (&block.operation, block.terminator) {
+            (Operation::TestVariant { operand, success }, Terminator::Branch { yes, no }) => {
+                assert_eq!(operand.root.span.bytes(), b"pass(input)");
+                assert_eq!(*success, expected);
+                assert_eq!(calls, 1);
+                return (yes, no);
+            }
+            (op, Terminator::Goto(next)) => {
+                calls += usize::from(matches!(op, Operation::Call(_)));
+                pc = next;
+            }
+            other => panic!("expected reachable variant test: {other:?}"),
+        }
+    }
+    panic!("path did not reach the variant test");
+}
+
+fn assert_forward(
+    ops: &[&Operation<'_>],
+    role: &compiler::analysis::typed::ResultRole<'_>,
+    expected_operand: &[u8],
+    expected_drops: &[&[u8]],
+) {
+    assert_export(ops, expected_drops, |op, output| {
+        matches!(op, Operation::ForwardResultFailure { operand, into, variant, wrapper }
+        if operand.root.span.bytes() == expected_operand && into.root.node == output.root.node
+            && *variant == &role.err.id && *wrapper == &role.wrapper.id)
+    });
+}
+
 fn linear<'a, 'g>(mir: &'a Mir<'g>, mut pc: usize) -> Vec<&'a Operation<'g>> {
     let mut ops = Vec::new();
     for _ in 0..mir.blocks.len() {
@@ -217,6 +370,17 @@ fn assert_return(
     has_payload: bool,
     expected_drops: &[&[u8]],
 ) {
+    assert_export(ops, expected_drops, |op, output| {
+        matches!(op, Operation::ConstructVariant { variant, payload, into }
+        if *variant == expected && payload.is_some() == has_payload && into.root.node == output.root.node)
+    });
+}
+
+fn assert_export<'g>(
+    ops: &[&Operation<'g>],
+    expected_drops: &[&[u8]],
+    defines_output: impl Fn(&Operation<'g>, &compiler::analysis::ownership::Place<'g>) -> bool,
+) {
     let (export, output) = ops
         .iter()
         .enumerate()
@@ -225,8 +389,7 @@ fn assert_return(
             _ => None,
         })
         .expect("export the return value");
-    assert!(ops[..export].iter().any(|op| matches!(op, Operation::ConstructOption { variant, payload, into }
-        if *variant == expected && payload.is_some() == has_payload && into.root.node == output.root.node)));
+    assert!(ops[..export].iter().any(|op| defines_output(op, output)));
     let mut drops = Vec::new();
     for (index, op) in ops.iter().enumerate() {
         match op {
