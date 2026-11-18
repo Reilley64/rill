@@ -110,20 +110,55 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         context: &Context<'r, 'g>,
     ) -> Work<()> {
-        let module = inference.module;
-        let operand = module.syntax.nodes[node].children[0];
+        let operand = inference.module.syntax.nodes[node].children[0];
         let slot = &inference.slots[&operand];
         let (Some(ty), Some((target, Some(result)))) =
-            (slot.ty.as_ref(), self.propagation_target(context))
+            (slot.ty.clone(), self.propagation_target(context))
         else {
             return Ok(());
         };
         if inference.slots[&node].propagation.is_some() || slot.blocked {
             return Ok(());
         }
+        if let Some(payload) =
+            self.resolve_propagation(inference, node, (&ty, slot.access), (target, result))?
+        {
+            self.establish(inference, node, payload, false)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn pipe_propagation_output(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        ty: &Type<'g>,
+    ) -> Work<Option<Type<'g>>> {
+        if (self.option.is_none() && self.result.is_none()) || inference.slots[&node].blocked {
+            return Ok(None);
+        }
+        let Some((target, Some(result))) = inference.slots[&node].pipe_target.clone() else {
+            return Ok(None);
+        };
+        self.resolve_propagation(
+            inference,
+            node,
+            (ty, data::Access::Owned),
+            (target, &result),
+        )
+    }
+
+    fn resolve_propagation(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        (ty, access): (&Type<'g>, data::Access),
+        (target, result): (PropagationTarget<'g>, &Type<'g>),
+    ) -> Work<Option<Type<'g>>> {
+        let module = inference.module;
         let (access, container) = match ty.as_ref() {
             TypeTerm::Reference { referent, .. } => (data::Access::ReadOnly, referent.as_ref()),
-            container => (slot.access, container),
+            container => (access, container),
         };
         let (container, variant) = match container {
             TypeTerm::Variant {
@@ -143,7 +178,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
                 inference.slots.get_mut(&node).unwrap().blocked = true;
             }
-            return Ok(());
+            return Ok(None);
         };
         let (success, failure, error) = if let Some(role) = self.option
             && *declaration == &role.declaration.id
@@ -161,7 +196,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }),
             )
         } else {
-            return Ok(());
+            return Ok(None);
         };
         let TypeTerm::Nominal {
             declaration: returned,
@@ -170,19 +205,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
             inference.slots.get_mut(&node).unwrap().blocked = true;
-            return Ok(());
+            return Ok(None);
         };
         if access != data::Access::Owned || declaration != returned {
             self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
             inference.slots.get_mut(&node).unwrap().blocked = true;
-            return Ok(());
+            return Ok(None);
         }
         if let Some(error) = &error
             && !self.same(&error.payload, &returned_args[1])?
         {
             self.mismatch(module, node, &error.payload, &returned_args[1])?;
             inference.slots.get_mut(&node).unwrap().blocked = true;
-            return Ok(());
+            return Ok(None);
         }
         let payload = arguments[0].clone();
         let propagation = Propagation {
@@ -195,7 +230,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         self.elab.reserve(1)?;
         inference.slots.get_mut(&node).unwrap().propagation = Some(propagation);
-        self.establish(inference, node, payload, false)
+        Ok(Some(payload))
     }
 
     pub(super) fn propagating_pipe(module: &Module, node: NodeId) -> bool {
@@ -223,18 +258,6 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
         }
         Ok(valid)
-    }
-
-    pub(super) fn pending_propagation(
-        &mut self,
-        module: &'g Module,
-        node: NodeId,
-        context: &Context<'r, 'g>,
-    ) -> Work<()> {
-        if self.valid_propagation_target(module, node, context)? {
-            self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
-        }
-        Ok(())
     }
 
     pub(super) fn prepare_pipe(
@@ -267,8 +290,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             bound.insert(0, input);
         }
         let invocation = self.value_callee(module, callee, context)?;
-        if Self::propagating_pipe(module, node) {
-            self.pending_propagation(module, children[1], context)?;
+        if Self::propagating_pipe(module, node)
+            && self.valid_propagation_target(module, children[1], context)?
+        {
+            inference.slots.get_mut(&node).unwrap().pipe_target = self
+                .propagation_target(context)
+                .map(|(target, result)| (target, result.cloned()));
         }
         if invocation {
             self.elab.reserve(2 + bound.len())?;

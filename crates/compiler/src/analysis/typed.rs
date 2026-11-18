@@ -11,6 +11,7 @@ mod interfaces;
 mod numeric;
 mod ownership;
 mod primitive;
+mod result_use;
 pub(super) use core::IntoAdmission;
 pub use core::{OptionRole, ResultRole};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
@@ -20,6 +21,10 @@ pub use ownership::{
     OwnershipProtection, OwnershipRule,
 };
 pub use primitive::{Primitive, PrimitiveValue};
+pub use result_use::{
+    PendingResultUse, ResultComponent, ResultDiscard, ResultDiscardKind, ResultUseBlocker,
+    ResultUseReport,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CoreBlocker {
@@ -39,6 +44,7 @@ pub struct TypedReport<'g> {
     completion: ScalarFailureKind,
     statistics: Statistics,
     not_performed: Vec<Stage>,
+    result_use: Option<ResultUseReport<'g>>,
 }
 
 impl<'g> TypedReport<'g> {
@@ -108,6 +114,11 @@ impl<'g> TypedReport<'g> {
 
     pub fn ownership_overlaps(&self) -> &[OwnershipOverlap<'g>] {
         &self.ownership.overlaps
+    }
+
+    /// A partial pass over owned occurrences. `None` means no admitted role or no work reached.
+    pub fn result_use(&self) -> Option<&ResultUseReport<'g>> {
+        self.result_use.as_ref()
     }
 
     pub fn core_blockers(&self) -> &'static [CoreBlocker] {
@@ -194,7 +205,31 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     {
         completion = ScalarFailureKind::ResourceLimit;
     }
-    let mut not_performed = vec![Stage::ResultUse, Stage::Ownership, Stage::Execution];
+    let result_use = if let Some(role) = core.result
+        && completion != ScalarFailureKind::ResourceLimit
+    {
+        let mut report = ResultUseReport::default();
+        if result_use::check(
+            &inventory,
+            &bodies,
+            &role.declaration.id,
+            Some(&role.cause.id),
+            core.result_inspection.map(|d| &d.id),
+            &mut budget,
+            &mut report,
+        )
+        .is_err()
+        {
+            completion = ScalarFailureKind::ResourceLimit;
+        }
+        Some(report)
+    } else {
+        None
+    };
+    let mut not_performed = vec![Stage::Ownership, Stage::Execution];
+    if result_use.is_none() {
+        not_performed.push(Stage::ResultUse);
+    }
     if core.option.is_none()
         && core.show.is_none()
         && core.into.is_none()
@@ -227,5 +262,6 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         completion,
         statistics: budget.statistics,
         not_performed,
+        result_use,
     }
 }

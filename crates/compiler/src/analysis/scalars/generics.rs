@@ -227,6 +227,14 @@ impl<'g> GenericReport<'g> {
             .find(|n| n.site.module == &module.key && n.site.node == node))
     }
 
+    pub(in crate::analysis) fn typed_nodes(&self) -> &[NodeFacts<'g>] {
+        &self.facts.nodes
+    }
+
+    pub(in crate::analysis) fn checked_bodies(&self) -> &[BodyFacts<'g>] {
+        &self.facts.bodies
+    }
+
     pub fn goals(&self) -> &[GoalFacts<'g>] {
         self.evidence.goals()
     }

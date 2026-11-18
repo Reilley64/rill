@@ -380,6 +380,8 @@ struct Slot<'g> {
     propagation: Option<Propagation<'g>>,
     pending_core: bool,
     installed_operation: Option<data::DataExpression<'g>>,
+    pipe_target: Option<(PropagationTarget<'g>, Option<Type<'g>>)>,
+    pipe_expected: Option<Type<'g>>,
     admission: Option<data::Admission<'g>>,
     path: Option<data::PlacePath<'g>>,
     refinement: Option<Arc<data::Refinement<'g>>>,
@@ -812,12 +814,18 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
         }
-        if self.integrated && Self::propagating_pipe(inference.module, node) {
-            // The invocation's result is not its unwrapped result. Neither can
-            // supply context to the other before the core role is admitted.
-            return Ok(());
-        }
-        let previous = if expected {
+        let pipe = self.integrated && Self::propagating_pipe(inference.module, node);
+        let ty = if pipe && !expected {
+            let Some(payload) = self.pipe_propagation_output(inference, node, &ty)? else {
+                return Ok(());
+            };
+            payload
+        } else {
+            ty
+        };
+        let previous = if pipe && expected {
+            &inference.slots[&node].pipe_expected
+        } else if expected {
             &inference.slots[&node].expected
         } else {
             &inference.slots[&node].ty
@@ -836,13 +844,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.mark_conversion_dependency(inference, node, premise, !expected)?;
         }
         let slot = inference.slots.get_mut(&node).unwrap();
-        let target = if expected {
+        let target = if pipe && expected {
+            &mut slot.pipe_expected
+        } else if expected {
             &mut slot.expected
         } else {
             &mut slot.ty
         };
         if target.is_none() {
             *target = Some(ty);
+            if pipe && expected {
+                // The receiving context belongs to the unwrapped result, never
+                // to the underlying invocation or its candidate selection.
+                return Ok(());
+            }
             self.enqueue(inference, node)?;
             let mut child = node;
             while let Some(&parent) = inference.parents.get(&child) {
@@ -2313,8 +2328,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         if self.integrated {
             for (&node, slot) in &mut inference.slots {
                 self.elab.step(1)?;
-                slot.blocked |= Self::propagating_pipe(module, node);
-                if !slot.blocked
+                if Self::propagating_pipe(module, node) {
+                    if slot.propagation.is_none() {
+                        slot.pending_core = !slot.blocked && slot.pipe_target.is_some();
+                        slot.blocked = true;
+                    } else {
+                        slot.expected = slot.pipe_expected.take();
+                    }
+                } else if !slot.blocked
                     && ((slot.propagation.is_none()
                         && matches!(
                             module.syntax.nodes[node].kind,
@@ -2441,7 +2462,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             let blocked = children.iter().any(|child| inference.slots[child].blocked);
             if !blocked && inference.slots[&node].pending_core {
                 // An invalid or pending operand has its own finding or prerequisite.
-                let index = self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                let site = if Self::propagating_pipe(module, node) {
+                    module.syntax.nodes[node].children[1]
+                } else {
+                    node
+                };
+                let index = self.defer(module, site, ScalarUnsupported::CoreAdmission)?;
                 if let Some(call) = inference
                     .calls
                     .get(&node)

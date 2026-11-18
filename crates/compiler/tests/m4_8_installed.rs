@@ -28,6 +28,7 @@ fn installed_option_uses_pinned_sources_in_both_modes() {
         };
         installed_option(&request);
         option_guards(&root, &request);
+        option_pipe(&root, &request);
         reject_propagation(&root, &request);
         propagation_prerequisites(&root, &request);
         untrusted_profiles(&root, &request);
@@ -270,6 +271,60 @@ fn option_guards(root: &Path, profile: &InstalledRequest) {
             );
         }
     }
+}
+
+fn option_pipe(root: &Path, profile: &InstalledRequest) {
+    let entry = root.join("app/option-pipe.rill");
+    fs::write(&entry, "
+        import std::option::Option as Maybe;
+        function receive(flag: bool, offset: i32): Maybe<i32> { return if (flag) Maybe.Some(offset) else Maybe.None; }
+        function piped(value: bool): Maybe<bool> {
+            let n: i32 = value |> receive(3)?;
+            return Maybe.Some(n > 0);
+        }
+        function callable(value: bool, receiver: (bool) => Maybe<i32>): Maybe<bool> {
+            let n = value |> receiver?;
+            return Maybe.Some(n > 0);
+        }
+    ").unwrap();
+    let graph = loader::load_installed(InstalledRequest {
+        entry,
+        ..profile.clone()
+    })
+    .unwrap();
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    assert!(report.bodies().findings().is_empty());
+    let app = graph
+        .modules()
+        .iter()
+        .find(|module| module.key.origin == Origin::Application)
+        .unwrap();
+    let mut count = 0;
+    for (node, syntax) in app.syntax.nodes.iter().enumerate() {
+        if syntax.kind != NodeKind::Pipe {
+            continue;
+        }
+        let fact = report
+            .bodies()
+            .node(app, node)
+            .unwrap()
+            .expect("checked pipe");
+        let NodeFactKind::Expression(expression) = &fact.kind else {
+            panic!("expression")
+        };
+        assert!(matches!(expression.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"));
+        assert!(matches!(
+            expression.data,
+            Some(DataExpression::Propagation(_))
+        ));
+        assert!(fact.flow.normal && fact.flow.returns);
+        if let Some(call) = &expression.call {
+            assert_eq!(call.pipe_input, Some(syntax.children[0]));
+            assert_eq!(call.argument_evaluation_order().count(), 2);
+        }
+        count += 1;
+    }
+    assert_eq!(count, 2);
 }
 
 fn reject_propagation(root: &Path, profile: &InstalledRequest) {

@@ -7,6 +7,73 @@ use compiler::parser::NodeKind;
 use std::{fs, path::PathBuf, process::Command};
 
 #[test]
+fn installed_result_discards_keep_original_storage_and_early_exit() {
+    installed(
+        "installed_result_discards_keep_original_storage_and_early_exit",
+        |request| {
+            fs::write(
+                &request.entry,
+                "
+            import std::result::{Result as Outcome, isOk};
+            function make(): Outcome<bool> { return Outcome.Ok(true); }
+            function discardTemporary(): void { make(); }
+            function renamed(): void { let x = make(); let y = x; }
+            function project(first: Outcome<bool>, second: Outcome<bool>): Outcome<bool> {
+                let pair: [Outcome<bool>, Outcome<bool>] = [first, second];
+                return pair[0];
+            }
+            function observe(value: Outcome<bool>): void { isOk(&value); }
+            function propagate(outer: Outcome<bool>, sibling: Outcome<bool>): Outcome<bool> {
+                let b = outer?;
+                let _ = sibling;
+                return Outcome.Ok(b);
+            }
+        ",
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let result = report.result_role().expect("installed Result identity");
+                assert_eq!(result.declaration.id.context, graph.id());
+                let uses = report.result_use().expect("source-level Result-use pass");
+                let witnesses: Vec<_> = uses
+                    .discards()
+                    .iter()
+                    .filter(|f| f.origin.module.origin == Origin::Application)
+                    .collect();
+                assert_eq!(
+                    witnesses.len(),
+                    4,
+                    "{:?}",
+                    witnesses
+                        .iter()
+                        .map(|w| (
+                            String::from_utf8_lossy(w.origin.span.bytes()),
+                            String::from_utf8_lossy(w.discard.span.bytes())
+                        ))
+                        .collect::<Vec<_>>()
+                );
+                assert!(witnesses.iter().all(|f| f.code() == "R0103"));
+                assert!(
+                    witnesses
+                        .iter()
+                        .any(|w| w.discard.span.bytes() == b"make();")
+                );
+                assert!(witnesses.iter().any(|w| w.storage_component
+                    == [compiler::analysis::typed::ResultComponent::TupleElement(1)]));
+                assert!(witnesses.iter().any(|w| w.discard.span.bytes() == b"outer?"
+                    && w.origin.span.bytes().starts_with(b"sibling:")));
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_result_default_is_canonical_without_an_error_binding() {
     installed(
         "installed_result_default_is_canonical_without_an_error_binding",
