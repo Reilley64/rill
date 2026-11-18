@@ -9,11 +9,16 @@ use super::{AnalysisLimits, Graph, Stage, Statistics};
 mod core;
 mod interfaces;
 mod numeric;
+mod ownership;
 mod primitive;
 pub(super) use core::IntoAdmission;
 pub use core::{OptionRole, ResultRole};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
 pub use numeric::{InfallibleNumericContract, NumericConversion, NumericConversionError};
+pub use ownership::{
+    NativeOwnershipAction, NativeOwnershipProvider, OwnershipCoverage, OwnershipOverlap,
+    OwnershipProtection, OwnershipRule,
+};
 pub use primitive::{Primitive, PrimitiveValue};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,6 +35,7 @@ pub struct TypedReport<'g> {
     bodies: GenericReport<'g>,
     public_interface_findings: Vec<PublicInterfaceFinding<'g>>,
     core: core::InstalledCore<'g>,
+    ownership: ownership::Report<'g>,
     completion: ScalarFailureKind,
     statistics: Statistics,
     not_performed: Vec<Stage>,
@@ -95,6 +101,15 @@ impl<'g> TypedReport<'g> {
         self.core.result_inspection
     }
 
+    /// Per-owner static evidence, not clearance for an entire family or Rill call.
+    pub fn ownership_protection(&self) -> &[OwnershipProtection<'g>] {
+        &self.ownership.protection
+    }
+
+    pub fn ownership_overlaps(&self) -> &[OwnershipOverlap<'g>] {
+        &self.ownership.overlaps
+    }
+
     pub fn core_blockers(&self) -> &'static [CoreBlocker] {
         &[
             CoreBlocker::Roles,
@@ -148,6 +163,10 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         _ => Ok(None),
     };
     core.result = result_roles.unwrap_or_default();
+    let mut ownership = ownership::Report::default();
+    let authority_exhausted = exhausted
+        || result_roles.is_err()
+        || ownership::check(&inventory, &mut budget, &mut ownership).is_err();
     let bodies = analyze_integrated_bodies(
         &inventory,
         budget,
@@ -156,7 +175,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             result: core.result,
             show: core.show,
             into: core.into.as_ref(),
-            exhausted: exhausted || result_roles.is_err(),
+            exhausted: authority_exhausted,
         },
     );
     let mut budget = Budget {
@@ -176,7 +195,11 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         completion = ScalarFailureKind::ResourceLimit;
     }
     let mut not_performed = vec![Stage::ResultUse, Stage::Ownership, Stage::Execution];
-    if core.option.is_none() && core.show.is_none() && core.into.is_none() {
+    if core.option.is_none()
+        && core.show.is_none()
+        && core.into.is_none()
+        && ownership.protection.iter().all(|p| p.provider.is_none())
+    {
         not_performed.push(Stage::CoreAdmission);
     }
     if inventory.lexical().is_none() {
@@ -200,6 +223,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         bodies,
         public_interface_findings,
         core,
+        ownership,
         completion,
         statistics: budget.statistics,
         not_performed,

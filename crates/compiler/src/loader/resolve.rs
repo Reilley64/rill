@@ -27,7 +27,11 @@ struct Engine {
     error_storage: Option<(PathBuf, Vec<u8>)>,
 }
 
-pub(super) fn load(request: Request, installed: Option<InstalledProfile>) -> Result<Graph> {
+pub(super) fn load(
+    request: Request,
+    installed: Option<InstalledProfile>,
+    prefix: Option<&Path>,
+) -> Result<Graph> {
     let mut engine = Engine {
         id: GraphId(Arc::new(())),
         host: Host::new(request.limits),
@@ -41,8 +45,8 @@ pub(super) fn load(request: Request, installed: Option<InstalledProfile>) -> Res
         installed,
         error_storage: None,
     };
-    match engine.run() {
-        Ok((bindings, implementations, prelude)) => Ok(Graph {
+    match engine.run(prefix) {
+        Ok((bindings, implementations, prelude, ownership_archive)) => Ok(Graph {
             id: engine.id,
             request: engine.request,
             modules: engine.modules.into_values().collect(),
@@ -53,6 +57,7 @@ pub(super) fn load(request: Request, installed: Option<InstalledProfile>) -> Res
             host: engine.host,
             installed,
             error_storage: engine.error_storage,
+            ownership_archive,
         }),
         Err(mut error) => {
             error.findings.append(&mut engine.findings);
@@ -76,8 +81,15 @@ pub(super) fn load(request: Request, installed: Option<InstalledProfile>) -> Res
     }
 }
 
+type Resolved = (
+    Vec<Binding>,
+    Vec<Implementation>,
+    PreludeIdentities,
+    Option<PathBuf>,
+);
+
 impl Engine {
-    fn run(&mut self) -> Result<(Vec<Binding>, Vec<Implementation>, PreludeIdentities)> {
+    fn run(&mut self, prefix: Option<&Path>) -> Result<Resolved> {
         let parent = self
             .request
             .entry
@@ -361,6 +373,16 @@ impl Engine {
         };
         let implementations = self.attach_implementations(&bindings, &prelude)?;
         self.capture_error_storage()?;
+        let mut archive = None;
+        if let Some(prefix) = prefix.filter(|_| self.installed.is_some()) {
+            for key in self.modules.keys() {
+                self.host.charge(1)?;
+                if key.origin == Origin::Standard && installed::is_ownership_source(&key.path) {
+                    archive = installed::observe_ownership_archive(&mut self.host, prefix)?;
+                    break;
+                }
+            }
+        }
         self.host.replay(
             self.request.limits,
             self.modules
@@ -369,6 +391,11 @@ impl Engine {
                 .chain(
                     self.error_storage
                         .iter()
+                        .map(|(path, bytes)| (path.as_path(), bytes.as_slice())),
+                )
+                .chain(
+                    archive
+                        .as_ref()
                         .map(|(path, bytes)| (path.as_path(), bytes.as_slice())),
                 ),
             true,
@@ -383,7 +410,20 @@ impl Engine {
             error.path = Some(path.clone());
             return Err(error);
         }
-        Ok((bindings, implementations, prelude))
+        let ownership_archive = if let Some((path, bytes)) = archive {
+            if Some(bytes.as_slice()) != installed::OWNERSHIP_ARCHIVE {
+                let mut error = failure(
+                    FailureKind::InvalidRequest,
+                    "installed ownership archive differs from toolchain pin",
+                );
+                error.path = Some(path);
+                return Err(error);
+            }
+            Some(path)
+        } else {
+            None
+        };
+        Ok((bindings, implementations, prelude, ownership_archive))
     }
 
     fn capture_error_storage(&mut self) -> Result<()> {

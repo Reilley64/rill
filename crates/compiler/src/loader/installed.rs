@@ -2,6 +2,40 @@
 use super::*;
 use std::path::Path;
 
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+pub(super) const OWNERSHIP_ARCHIVE: Option<&[u8]> =
+    Some(include_bytes!(env!("RILL_OWNERSHIP_ARCHIVE")));
+#[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+pub(super) const OWNERSHIP_ARCHIVE: Option<&[u8]> = None;
+
+pub(super) fn is_ownership_source(path: &str) -> bool {
+    matches!(path, "shared.rill" | "mutex.rill" | "channel.rill")
+}
+
+pub(super) fn observe_ownership_archive(
+    host: &mut Host,
+    prefix: &Path,
+) -> Result<Option<(PathBuf, Vec<u8>)>> {
+    if OWNERSHIP_ARCHIVE.is_none() {
+        return Ok(None);
+    }
+    let path = prefix.join("lib/rill/runtime/aarch64-apple-darwin/librill_ownership.rlib");
+    let Some(probe) = host.probe(&path, Some(prefix))? else {
+        return Ok(None);
+    };
+    if probe.kind != filesystem::Kind::File || probe.path != path {
+        let mut error = failure(
+            FailureKind::InvalidRequest,
+            "ownership archive requires its exact installed path",
+        );
+        error.path = Some(path);
+        return Err(error);
+    }
+    let bytes = host.read(&path, true)?;
+    host.charge(bytes.len())?;
+    Ok(Some((path, bytes)))
+}
+
 #[derive(Clone, Debug)]
 pub struct InstalledRequest {
     pub entry: PathBuf,
@@ -63,6 +97,15 @@ impl InstalledProfile {
             (Self::DarwinArm64, "error.rill") => {
                 Some(include_bytes!("../../../../stdlib/error.rill"))
             }
+            (Self::DarwinArm64, "shared.rill") => {
+                Some(include_bytes!("../../../../stdlib/shared.rill"))
+            }
+            (Self::DarwinArm64, "mutex.rill") => {
+                Some(include_bytes!("../../../../stdlib/mutex.rill"))
+            }
+            (Self::DarwinArm64, "channel.rill") => {
+                Some(include_bytes!("../../../../stdlib/channel.rill"))
+            }
             _ => None,
         }
     }
@@ -108,5 +151,6 @@ pub fn load_installed(input: InstalledRequest) -> Result<Graph> {
             limits: input.limits,
         },
         profile,
+        Some(prefix),
     )
 }

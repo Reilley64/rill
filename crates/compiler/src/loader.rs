@@ -329,9 +329,14 @@ pub struct Graph {
     host: Host,
     installed: Option<InstalledProfile>,
     error_storage: Option<(PathBuf, Vec<u8>)>,
+    ownership_archive: Option<PathBuf>,
 }
 
 impl Graph {
+    pub(crate) fn ownership_archive(&self) -> Option<&std::path::Path> {
+        self.ownership_archive.as_deref()
+    }
+
     /// This does not admit roles, implementations or representations.
     pub(crate) fn is_pinned_standard_source(&self, module: &Module) -> bool {
         module.context == self.id
@@ -425,7 +430,7 @@ impl Graph {
 /// Load through M1 snapshots and M2 syntax. Success resolves only M3 bindings;
 /// types, bodies, ownership, protected operations and execution remain unchecked.
 pub fn load(request: Request) -> Result<Graph> {
-    resolve::load(request, None)
+    resolve::load(request, None, None)
 }
 
 /// Recheck a retained capture without changing its snapshots or graph identity.
@@ -442,7 +447,8 @@ pub fn validate_inputs(graph: &Graph, limits: Limits) -> Result<()> {
                     .error_storage
                     .iter()
                     .map(|(path, bytes)| (path.as_path(), bytes.as_slice())),
-            ),
+            )
+            .chain(graph.ownership_archive().zip(installed::OWNERSHIP_ARCHIVE)),
         false,
     )
 }

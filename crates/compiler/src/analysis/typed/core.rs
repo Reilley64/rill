@@ -34,7 +34,7 @@ pub(in crate::analysis) struct IntoAdmission<'g> {
     pub(in crate::analysis) issues: Vec<RegistrationIssue<'g>>,
 }
 
-fn export<'g>(
+pub(super) fn export<'g>(
     graph: &'g Graph,
     module: &'g Module,
     namespace: Namespace,
@@ -60,7 +60,7 @@ fn export<'g>(
     Ok(None)
 }
 
-fn unconditional_declaration<'a, 'g>(
+pub(super) fn unconditional_declaration<'a, 'g>(
     inventory: &'a OrdinaryAnalysis<'g>,
     declaration: &Declaration,
     budget: &mut Budget,
@@ -244,6 +244,10 @@ pub(super) fn check_into<'g>(
 fn binder_is(term: &Type<'_>, binder: &Binder<'_>) -> bool {
     matches!(term.as_ref(), TypeTerm::Parameter { declaration, position }
         if **declaration == binder.declaration.id && *position == binder.position)
+}
+
+pub(super) fn parameter_is(term: &Type<'_>, binder: &Declaration) -> bool {
+    matches!(term.as_ref(), TypeTerm::Parameter { declaration, position: 0 } if **declaration == binder.id)
 }
 
 pub(super) fn check_providers<'g>(
