@@ -1044,6 +1044,34 @@ fn installed_receipts(request: &InstalledRequest) {
             );
         });
         assert_eq!(receipt.context(), graph.id());
+        let entry = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+            .unwrap();
+        let call = entry
+            .syntax
+            .nodes
+            .iter()
+            .position(|node| {
+                node.kind == compiler::parser::NodeKind::Call
+                    && node.span.bytes() == b"chooseOne(&value)"
+            })
+            .unwrap();
+        let call = report.bodies().ordinary_call(entry, call).unwrap().unwrap();
+        assert!(call.checked);
+        let goal = report.bodies().goal(call.goal.as_ref().unwrap()).unwrap();
+        assert_eq!(goal.state, compiler::analysis::generics::GoalState::Proved);
+        assert!(goal.premise.is_none());
+        let source = graph
+            .implementations()
+            .iter()
+            .find(|source| &source.family == call.family)
+            .unwrap();
+        assert_eq!(
+            goal.selection.as_ref().unwrap().implementation,
+            &source.declaration
+        );
         assert_eq!(
             receipt.not_performed(),
             &[Stage::Ownership, Stage::Execution]
