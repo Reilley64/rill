@@ -106,7 +106,7 @@ fn owned_record_projections() {
                     .map(|drop| match drop {
                         Obligation::Drop(place) => (
                             place.root.span.bytes(),
-                            place.field.map(|field| field.name.as_deref().unwrap()),
+                            place.field().map(|field| field.name.as_deref().unwrap()),
                         ),
                         other => panic!("unexpected cleanup {other:?}"),
                     })
@@ -150,7 +150,7 @@ fn owned_record_projections() {
                 .filter_map(|b| match b.operation {
                     Operation::Move {
                         into: Some(place), ..
-                    } => place.field.and_then(|field| field.name.as_deref()),
+                    } => place.field().and_then(|field| field.name.as_deref()),
                     _ => None,
                 })
                 .collect();
@@ -179,8 +179,8 @@ fn owned_record_projections() {
                 .unwrap_or_else(|| panic!("{:?}", replaced.completion()));
             assert_eq!(dropped_fields(mir), ["second", "third", "second", "first"]);
             assert!(mir.blocks.iter().any(|block| matches!(( &block.operation, block.terminator), (Operation::Drop(place), Terminator::Goto(next))
-            if place.field.is_some_and(|f| f.name.as_deref() == Some("second"))
-                && matches!(mir.blocks[next].operation, Operation::Install { target, .. } if target.field.is_some_and(|f| f.name.as_deref() == Some("second"))))));
+            if place.field().is_some_and(|f| f.name.as_deref() == Some("second"))
+                && matches!(mir.blocks[next].operation, Operation::Install { target, .. } if target.field().is_some_and(|f| f.name.as_deref() == Some("second"))))));
             let disjoint = lower("disjointFields");
             let mir = disjoint
                 .mir()
@@ -198,7 +198,7 @@ fn owned_record_projections() {
             assert_eq!(dropped_fields(mir), ["third", "second"]);
             assert!(mir.blocks.iter().any(
                 |b| matches!(b.operation, Operation::Move { from, into: Some(_) }
-                if from.field.is_some_and(|field| field.name.as_deref() == Some("first")))
+                if from.field().is_some_and(|field| field.name.as_deref() == Some("first")))
             ));
             let copy = lower("copyRecord");
             let mir = copy
@@ -206,7 +206,7 @@ fn owned_record_projections() {
                 .unwrap_or_else(|| panic!("{:?}", copy.completion()));
             assert!(mir.blocks.iter().any(
                 |b| matches!(b.operation, Operation::Copy { from, into: Some(into) }
-                if from.field.is_none() && from.root.span.bytes() == b"pack: FlagPack"
+                if from.projection.is_none() && from.root.span.bytes() == b"pack: FlagPack"
                     && into.root.span.bytes() == b"other")
             ));
             assert!(path_drops(mir, mir.entry).is_empty());
@@ -273,7 +273,7 @@ fn dropped_fields<'g>(mir: &Mir<'g>) -> Vec<&'g str> {
     path_drops(mir, mir.entry)
         .into_iter()
         .filter_map(|drop| match drop {
-            Obligation::Drop(place) => place.field.and_then(|field| field.name.as_deref()),
+            Obligation::Drop(place) => place.field().and_then(|field| field.name.as_deref()),
             _ => None,
         })
         .collect()

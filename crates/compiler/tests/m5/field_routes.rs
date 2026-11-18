@@ -152,12 +152,12 @@ fn carried_field_and_slot_borrow_differ() {
 
             let mir = require_mir(&forwarded, "forward");
             assert!(mir.blocks.iter().any(|block| matches!(block.operation, Operation::Copy { from, into: Some(_) }
-                if from.root.span.bytes() == b"x: Holder" && from.field.is_some_and(|field| field.name.as_deref() == Some("value")))));
+                if from.root.span.bytes() == b"x: Holder" && from.field().is_some_and(|field| field.name.as_deref() == Some("value")))));
             assert!(mir.blocks.iter().any(|block| matches!(block.operation, Operation::Export(place) if place.root.span.bytes() == b"x.value")));
             assert!(mir.blocks.iter().any(|block| matches!(&block.operation, Operation::Cleanup(cleanup)
                 if matches!(cleanup.as_slice(), [Obligation::EndStorage(field), Obligation::EndStorage(root)]
-                    if field.field.is_some_and(|decl| decl.name.as_deref() == Some("value"))
-                        && root.field.is_none() && root.root.span.bytes() == b"x: Holder"))));
+                    if field.field().is_some_and(|decl| decl.name.as_deref() == Some("value"))
+                        && root.projection.is_none() && root.root.span.bytes() == b"x: Holder"))));
             assert!(path_drops(mir, mir.entry).is_empty());
 
             let mixed = lower("forwardAndClean");
@@ -165,7 +165,7 @@ fn carried_field_and_slot_borrow_differ() {
             let mir = require_mir(&mixed, "forwardAndClean");
             assert!(
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)]
-                if place.root.span.bytes() == b"x: WithText" && place.field.is_some_and(|decl| decl.name.as_deref() == Some("text")))
+                if place.root.span.bytes() == b"x: WithText" && place.field().is_some_and(|decl| decl.name.as_deref() == Some("text")))
             );
 
             let caller = lower("callerForward");
@@ -185,15 +185,15 @@ fn carried_field_and_slot_borrow_differ() {
             let mir = require_mir(&replacement, "fieldReplacement");
             assert!(mir.blocks.iter().any(
                 |block| matches!(block.operation, Operation::Install { target, .. }
-                if target.field.is_some_and(|decl| decl.name.as_deref() == Some("value")))
+                if target.field().is_some_and(|decl| decl.name.as_deref() == Some("value")))
             ));
             let ordered = lower("storageBeforeSource");
 
             let mir = require_mir(&ordered, "storageBeforeSource");
             assert!(mir.blocks.iter().any(|block| matches!(&block.operation, Operation::Cleanup(cleanup)
                 if matches!(cleanup.as_slice(), [Obligation::EndStorage(field), Obligation::EndStorage(root), Obligation::EndStorage(source)]
-                    if field.field.is_some_and(|decl| decl.name.as_deref() == Some("value"))
-                        && root.field.is_none() && root.root.span.bytes() == b"x"
+                    if field.field().is_some_and(|decl| decl.name.as_deref() == Some("value"))
+                        && root.projection.is_none() && root.root.span.bytes() == b"x"
                         && source.root.span.bytes() == b"local"))));
 
             let looped = lower("loopClears");
@@ -209,7 +209,7 @@ fn carried_field_and_slot_borrow_differ() {
             let grouped_reborrow = lower("groupedReborrow");
             let mir = require_mir(&grouped_reborrow, "groupedReborrow");
             assert!(mir.blocks.iter().any(|block| matches!(block.operation, Operation::Reborrow { parent, exclusive: false, .. }
-                if parent.field.is_some_and(|field| field.name.as_deref() == Some("value")))));
+                if parent.field().is_some_and(|field| field.name.as_deref() == Some("value")))));
 
             let exclusive = lower("retainsExclusiveRestriction");
             assert_eq!(exclusive.completion(), Completion::SourceRejected);

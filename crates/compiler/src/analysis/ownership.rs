@@ -4,7 +4,7 @@ use super::declarations::Budget;
 use super::scalars::{NodeFactKind, NodeFacts, Site};
 use super::typed::{TypedReceipt, TypedReport};
 use super::{
-    AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics,
+    AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
     TypeTerm,
 };
 use crate::loader::{Declaration, DeclarationId, DeclarationKind};
@@ -98,11 +98,33 @@ pub struct Block<'g> {
     pub terminator: Terminator,
 }
 
-/// A named or temporary storage root, optionally projected to one owned field.
+/// A named or temporary storage root, optionally projected to one member.
 #[derive(Clone, Copy, Debug)]
 pub struct Place<'g> {
     pub root: Site<'g>,
-    pub field: Option<&'g Declaration>,
+    pub projection: Option<Projection<'g>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Projection<'g> {
+    Field(&'g Declaration),
+    TupleElement(usize),
+}
+
+impl<'g> Place<'g> {
+    pub fn field(self) -> Option<&'g Declaration> {
+        match self.projection {
+            Some(Projection::Field(field)) => Some(field),
+            _ => None,
+        }
+    }
+
+    pub fn tuple_element(self) -> Option<usize> {
+        match self.projection {
+            Some(Projection::TupleElement(position)) => Some(position),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -450,9 +472,9 @@ struct DisposerFrame {
 struct Local<'g> {
     node: NodeId,
     owner: Slot,
-    field: Option<&'g Declaration>,
-    fields: usize,
-    reference_field: bool,
+    projection: Option<Projection<'g>>,
+    members: usize,
+    reference_member: bool,
     custom_disposer: Option<&'g DeclarationId>,
     moves: bool,
     drops: bool,
@@ -460,15 +482,15 @@ struct Local<'g> {
 
 impl<'g> Local<'g> {
     fn storage(self, slot: Slot) -> Range<Slot> {
-        slot..slot + 1 + self.fields
+        slot..slot + 1 + self.members
     }
 
     fn needs_boundary_cleanup(self) -> bool {
-        self.fields > 0 || self.custom_disposer.is_some()
+        self.members > 0 || self.custom_disposer.is_some()
     }
 
     fn carried_loan_root(self, slot: Slot) -> Slot {
-        if self.reference_field {
+        if self.reference_member {
             self.owner
         } else {
             slot
@@ -478,7 +500,7 @@ impl<'g> Local<'g> {
     fn place(self, module: &'g Module) -> Place<'g> {
         Place {
             root: site_at(module, self.node),
-            field: self.field,
+            projection: self.projection,
         }
     }
 }

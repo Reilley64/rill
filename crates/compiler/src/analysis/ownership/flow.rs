@@ -362,7 +362,8 @@ fn cleanup_boundary<'g>(
         visit_loans(state, slots[slot].storage(slot), budget, |loan, _| {
             if let Some(source) = source_rank(&loan, state) {
                 indegrees[source] += 1;
-                grouped_dependencies |= slots[slot].fields != 0 || slots[scope[source]].fields != 0;
+                grouped_dependencies |=
+                    slots[slot].members != 0 || slots[scope[source]].members != 0;
             }
             Ok(())
         })?;
@@ -591,7 +592,7 @@ pub(super) fn run<'g>(
                         budget,
                     )?;
                     if let Some(into) = into
-                        && slots[from].fields != slots[into].fields
+                        && slots[from].members != slots[into].members
                     {
                         return Err(Stop::Pending(node));
                     }
@@ -856,7 +857,7 @@ pub(super) fn run<'g>(
                 }
                 Action::Install { target, incoming } => {
                     require_initialized(&slots, &state, incoming, node, budget)?;
-                    if slots[target].fields != slots[incoming].fields {
+                    if slots[target].members != slots[incoming].members {
                         return Err(Stop::Pending(node));
                     }
                     let storage = slots[target].storage(target);
@@ -887,7 +888,7 @@ pub(super) fn run<'g>(
                     if let Some(loan) = escape {
                         return Err(Stop::Rejected {
                             site: node,
-                            related: if slots[loan.source].field.is_some() {
+                            related: if slots[loan.source].projection.is_some() {
                                 loan.site
                             } else {
                                 slots[loan.source].node

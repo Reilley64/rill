@@ -110,7 +110,7 @@ fn active_disposer_cleans_only_remaining_fields() {
                     .blocks
                     .iter()
                     .filter(|b| matches!(b.operation, Operation::Dispose { operand, .. }
-                if operand.field.is_some_and(|field| field.name.as_deref() == Some("manual"))))
+                if operand.field().is_some_and(|field| field.name.as_deref() == Some("manual"))))
                     .count(),
                 1
             );
@@ -127,11 +127,11 @@ fn active_disposer_cleans_only_remaining_fields() {
             };
             assert_eq!(saved.root.span.bytes(), b"saved");
             assert_eq!(
-                tail.field.and_then(|field| field.name.as_deref()),
+                tail.field().and_then(|field| field.name.as_deref()),
                 Some("tail")
             );
             assert_eq!(
-                head.field.and_then(|field| field.name.as_deref()),
+                head.field().and_then(|field| field.name.as_deref()),
                 Some("head")
             );
 
@@ -164,12 +164,12 @@ fn active_disposer_cleans_only_remaining_fields() {
             let (yes, no) = branch_targets(active);
             assert!(
                 matches!(path_drops(active, yes).as_slice(), [Obligation::Drop(saved), Obligation::Drop(rest)]
-                if saved.root.span.bytes() == b"saved" && rest.field.and_then(|f| f.name.as_deref()) == Some("rest"))
+                if saved.root.span.bytes() == b"saved" && rest.field().and_then(|f| f.name.as_deref()) == Some("rest"))
             );
             assert!(
                 matches!(path_drops(active, no).as_slice(), [Obligation::Drop(rest), Obligation::Drop(first)]
-                if rest.field.and_then(|f| f.name.as_deref()) == Some("rest")
-                    && first.field.and_then(|f| f.name.as_deref()) == Some("first"))
+                if rest.field().and_then(|f| f.name.as_deref()) == Some("rest")
+                    && first.field().and_then(|f| f.name.as_deref()) == Some("first"))
             );
 
             let ordered = lower("ordered");
@@ -190,7 +190,7 @@ fn active_disposer_cleans_only_remaining_fields() {
                 })
                 .expect("later explicit disposal");
             let remaining = active.blocks.iter().position(|b| matches!(&b.operation, Operation::Cleanup(actions)
-                if actions.iter().any(|a| matches!(a, Obligation::Drop(place) if place.field.is_some_and(|f| f.name.as_deref() == Some("text")))))).expect("remaining field cleanup");
+                if actions.iter().any(|a| matches!(a, Obligation::Drop(place) if place.field().is_some_and(|f| f.name.as_deref() == Some("text")))))).expect("remaining field cleanup");
             assert!(
                 deferred < explicit && explicit < remaining,
                 "retiring the inner alias must not drop fields before the disposer ends"
@@ -202,7 +202,7 @@ fn active_disposer_cleans_only_remaining_fields() {
                 .expect("ordinary custom record's field replacement");
             assert!(
                 matches!(path_drops(field, field.entry).as_slice(), [Obligation::Drop(old), Obligation::InvokeDisposer { .. }]
-                if old.field.is_some_and(|f| f.name.as_deref() == Some("tail")))
+                if old.field().is_some_and(|f| f.name.as_deref() == Some("tail")))
             );
             let result = lower("cleanResult");
             let result = result

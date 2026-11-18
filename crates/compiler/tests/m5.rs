@@ -21,6 +21,8 @@ mod field_routes;
 #[path = "m5/records.rs"]
 mod records;
 mod support;
+#[path = "m5/tuples.rs"]
+mod tuples;
 
 #[test]
 fn ownership_from_installed_source() {

@@ -7,7 +7,6 @@ use crate::analysis::scalars::data::{Access, DataExpression, PathProjection};
 use crate::analysis::scalars::generics::callables::CaptureForm;
 use crate::loader::Origin;
 use crate::parser::NodeKind;
-use std::sync::Arc;
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(p) if p.name() == "string")
@@ -15,6 +14,18 @@ fn owns_text(ty: &TypeTerm<'_>) -> bool {
 
 fn primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { referent, .. } if matches!(referent.as_ref(), TypeTerm::Primitive(_)))
+}
+
+fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>)> {
+    match &facts.data {
+        Some(DataExpression::Projection(field)) => {
+            Some((field.base, Projection::Field(field.field)))
+        }
+        Some(DataExpression::TupleIndex {
+            base, component, ..
+        }) => Some((*base, Projection::TupleElement(*component))),
+        _ => None,
+    }
 }
 
 impl<'a, 'g> Build<'a, 'g> {
@@ -31,7 +42,7 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         id: &'g DeclarationId,
         node: NodeId,
-        ty: &TypeTerm<'g>,
+        ty: &Type<'g>,
     ) -> ResultOf<Slot> {
         let slot = self.slot(node, ty)?;
         self.budget.reserve(1)?;
@@ -39,64 +50,101 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(slot)
     }
 
-    pub(super) fn slot(&mut self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<Slot> {
-        let slot = self.slots.len();
-        let (moves, drops, fields, custom_disposer) = match ty {
+    pub(super) fn slot(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Slot> {
+        let (moves, drops) = match ty.as_ref() {
             TypeTerm::Primitive(_) => {
                 let owned = owns_text(ty);
-                (owned, owned, &[][..], None)
+                (owned, owned)
             }
-            TypeTerm::Reference { mutable, .. } => (*mutable, false, &[][..], None),
-            TypeTerm::Callable { .. } => (true, false, &[][..], None),
+            TypeTerm::Reference { mutable, .. } => (*mutable, false),
+            TypeTerm::Callable { .. } => (true, false),
             TypeTerm::Nominal { .. } => {
-                let (fields, custom) = self.record_layout(node, ty)?;
-                (custom.is_some(), false, fields, custom)
+                let fields = self.record_fields(node, ty)?;
+                let disposer = self.outer_disposer(node, ty)?;
+                return self.aggregate(
+                    node,
+                    disposer,
+                    fields
+                        .iter()
+                        .map(|field| (Projection::Field(field.declaration), &field.ty)),
+                );
+            }
+            TypeTerm::Tuple(elements) => {
+                if self.outer_disposer(node, ty)?.is_some() {
+                    return Err(Stop::Pending(node));
+                }
+                return self.aggregate(
+                    node,
+                    None,
+                    elements
+                        .iter()
+                        .enumerate()
+                        .map(|(i, element)| (Projection::TupleElement(i), element)),
+                );
             }
             _ => return Err(Stop::Pending(node)),
         };
-        self.budget.reserve(1 + fields.len())?;
+        self.budget.reserve(1)?;
+        let slot = self.slots.len();
         self.slots.push(Local {
             node,
             owner: slot,
-            field: None,
-            fields: fields.len(),
-            reference_field: false,
-            custom_disposer,
+            projection: None,
+            members: 0,
+            reference_member: false,
+            custom_disposer: None,
             moves,
             drops,
         });
-        for field in fields {
+        Ok(slot)
+    }
+
+    fn aggregate<'t>(
+        &mut self,
+        node: NodeId,
+        custom_disposer: Option<&'g DeclarationId>,
+        members: impl ExactSizeIterator<Item = (Projection<'g>, &'t Type<'g>)>,
+    ) -> ResultOf<Slot>
+    where
+        'g: 't,
+    {
+        self.budget.reserve(1 + members.len())?;
+        let root = self.slots.len();
+        self.slots.push(Local {
+            node,
+            owner: root,
+            projection: None,
+            members: members.len(),
+            reference_member: false,
+            custom_disposer,
+            moves: custom_disposer.is_some(),
+            drops: false,
+        });
+        for (projection, ty) in members {
             self.budget.step(1)?;
-            let reference_field = custom_disposer.is_none()
-                && primitive_reference(&field.ty)
-                && matches!(
-                    field.ty.as_ref(),
-                    TypeTerm::Reference { mutable: false, .. }
-                );
-            if !reference_field && !matches!(field.ty.as_ref(), TypeTerm::Primitive(_)) {
+            let reference_member = custom_disposer.is_none()
+                && primitive_reference(ty)
+                && matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, .. });
+            if !reference_member && !matches!(ty.as_ref(), TypeTerm::Primitive(_)) {
                 return Err(Stop::Pending(node));
             }
-            let owned = owns_text(&field.ty);
-            self.slots[slot].moves |= owned;
+            let owned = owns_text(ty);
+            self.slots[root].moves |= owned;
             self.slots.push(Local {
                 node,
-                owner: slot,
-                field: Some(field.declaration),
-                fields: 0,
-                reference_field,
+                owner: root,
+                projection: Some(projection),
+                members: 0,
+                reference_member,
                 custom_disposer: None,
                 moves: owned,
                 drops: owned,
             });
         }
-        Ok(slot)
+        Ok(root)
     }
 
-    fn record_layout(
-        &mut self,
-        node: NodeId,
-        ty: &TypeTerm<'g>,
-    ) -> ResultOf<(&'a [MemberType<'g>], Option<&'g DeclarationId>)> {
+    fn record_fields(&self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<&'a [MemberType<'g>]> {
         let TypeTerm::Nominal {
             declaration,
             arguments,
@@ -119,14 +167,22 @@ impl<'a, 'g> Build<'a, 'g> {
         if !facts.binders.is_empty() {
             return Err(Stop::Pending(node));
         }
+        Ok(fields)
+    }
+
+    fn outer_disposer(
+        &mut self,
+        node: NodeId,
+        ty: &Type<'g>,
+    ) -> ResultOf<Option<&'g DeclarationId>> {
+        let inventory = self.typed.inventory();
         let dispose = self.dispose.ok_or(Stop::Pending(node))?;
         let family = ordinary::source::admitted_family(inventory, dispose, self.budget)?
             .map_err(|_| Stop::Pending(node))?;
         self.budget.reserve(1)?;
-        let viable =
-            ordinary::source::project(family, &[Some(Arc::new(ty.clone()))], &[], self.budget)?;
+        let viable = ordinary::source::project(family, &[Some(ty.clone())], &[], self.budget)?;
         match ordinary::source::rank(family, &viable, self.budget)? {
-            Some(HypotheticalOutcome::NoMatch) => Ok((fields, None)),
+            Some(HypotheticalOutcome::NoMatch) => Ok(None),
             Some(HypotheticalOutcome::Winner(winner)) => {
                 // A selected but conditional implementation is not proof of a
                 // custom disposer. Keep substitution/evidence-dependent cases open.
@@ -144,7 +200,7 @@ impl<'a, 'g> Build<'a, 'g> {
                             .is_some_and(|h| h.requirements.is_empty())
                     })
                 {
-                    Ok((fields, Some(winner)))
+                    Ok(Some(winner))
                 } else {
                     Err(Stop::Pending(node))
                 }
@@ -166,6 +222,7 @@ impl<'a, 'g> Build<'a, 'g> {
         match path.projections.as_slice() {
             [] => Ok(root),
             [PathProjection::Field(field)] => self.field(node, root, field),
+            [PathProjection::TupleElement(element)] => self.element(node, root, *element),
             _ => Err(Stop::Pending(node)),
         }
     }
@@ -173,11 +230,30 @@ impl<'a, 'g> Build<'a, 'g> {
     fn field(&mut self, node: NodeId, root: Slot, id: &DeclarationId) -> ResultOf<Slot> {
         for field in self.slots[root].storage(root).skip(1) {
             self.budget.step(1)?;
-            if self.slots[field].field.is_some_and(|f| f.id == *id) {
+            if matches!(self.slots[field].projection, Some(Projection::Field(f)) if f.id == *id) {
                 return Ok(field);
             }
         }
         Err(Stop::Pending(node))
+    }
+
+    fn element(&mut self, node: NodeId, root: Slot, position: usize) -> ResultOf<Slot> {
+        self.budget.step(1)?;
+        if position >= self.slots[root].members {
+            return Err(Stop::Pending(node));
+        }
+        let slot = root + 1 + position;
+        match self.slots[slot].projection {
+            Some(Projection::TupleElement(index)) if index == position => Ok(slot),
+            _ => Err(Stop::Pending(node)),
+        }
+    }
+
+    fn member(&mut self, node: NodeId, root: Slot, projection: Projection<'g>) -> ResultOf<Slot> {
+        match projection {
+            Projection::Field(field) => self.field(node, root, &field.id),
+            Projection::TupleElement(position) => self.element(node, root, position),
+        }
     }
 
     pub(super) fn emit(&mut self, node: NodeId, action: Action, edges: Edges) -> ResultOf<Pc> {
@@ -293,24 +369,23 @@ impl<'a, 'g> Build<'a, 'g> {
                     let facts = self.value(projected)?;
                     if facts.path.is_none()
                         && facts.access == Access::Owned
-                        && let Some(DataExpression::Projection(projection)) = &facts.data
+                        && let Some((base, member)) = projection(facts)
                     {
-                        // The return expression owns this scratch record. Once
-                        // its result field is staged, clean the remaining fields
-                        // before returning, without borrowing the scratch place.
-                        let base_ty = self.value(projection.base)?.ty.clone();
-                        let scratch = self.slot(projection.base, &base_ty)?;
-                        let field = self.field(projected, scratch, &projection.field.id)?;
+                        // Stage the result before cleaning the rest of the
+                        // return expression's scratch aggregate.
+                        let ty = self.value(base)?.ty.clone();
+                        let scratch = self.slot(base, &ty)?;
+                        let from = self.member(projected, scratch, member)?;
                         let finish = self.cleanup(node, &[scratch], export)?;
                         let read = self.emit(
                             projected,
                             Action::Read {
-                                from: field,
+                                from,
                                 into: Some(output),
                             },
                             Edges::Next(finish),
                         )?;
-                        return self.expression(projection.base, Some(scratch), read, depth + 1);
+                        return self.expression(base, Some(scratch), read, depth + 1);
                     }
                     self.expression(value, Some(output), export, depth + 1)
                 } else {
@@ -423,15 +498,23 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return Err(Stop::Pending(node));
         }
-        let action = match syntax.kind {
-            NodeKind::Group => return self.expression(syntax.children[0], into, next, depth + 1),
-            NodeKind::Literal => into.map_or(Action::None, Action::Init),
-            NodeKind::Field if facts.access != Access::Owned && owns_text(&facts.ty) => {
+        if projection(facts).is_some() {
+            let action = if facts.access != Access::Owned && owns_text(&facts.ty) {
                 let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
                 let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
                 Action::ForbiddenBorrowedMove(root)
-            }
-            NodeKind::ValueReference | NodeKind::Field => Action::Read {
+            } else {
+                Action::Read {
+                    from: self.place(node)?,
+                    into,
+                }
+            };
+            return self.emit(node, action, Edges::Next(next));
+        }
+        let action = match syntax.kind {
+            NodeKind::Group => return self.expression(syntax.children[0], into, next, depth + 1),
+            NodeKind::Literal => into.map_or(Action::None, Action::Init),
+            NodeKind::ValueReference => Action::Read {
                 from: self.place(node)?,
                 into,
             },
@@ -453,8 +536,17 @@ impl<'a, 'g> Build<'a, 'g> {
                         suspends,
                     }
                 } else {
+                    let from = self.place(operand)?;
+                    // Initialization is per position. It does not establish a
+                    // loan-overlap rule for separately borrowed tuple elements.
+                    if matches!(
+                        self.slots[from].projection,
+                        Some(Projection::TupleElement(_))
+                    ) {
+                        return Err(Stop::Pending(node));
+                    }
                     Action::Borrow {
-                        from: self.place(operand)?,
+                        from,
                         into,
                         exclusive,
                     }
@@ -466,6 +558,21 @@ impl<'a, 'g> Build<'a, 'g> {
                     into,
                 }
             }
+            NodeKind::Bracket => {
+                let into = into.ok_or(Stop::Pending(node))?;
+                let Some(DataExpression::Tuple { elements }) = &facts.data else {
+                    return Err(Stop::Pending(node));
+                };
+                if self.slots[into].members != elements.len() {
+                    return Err(Stop::Pending(node));
+                }
+                let mut tail = self.emit(node, Action::Init(into), Edges::Next(next))?;
+                for (position, &value) in elements.iter().enumerate().rev() {
+                    let target = self.element(node, into, position)?;
+                    tail = self.expression(value, Some(target), tail, depth + 1)?;
+                }
+                return Ok(tail);
+            }
             NodeKind::Construction => {
                 let into = into.ok_or(Stop::Pending(node))?;
                 let Some(DataExpression::Construction(data)) = facts.data.as_ref() else {
@@ -473,7 +580,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 };
                 if data.base.is_some()
                     || !data.arguments.is_empty()
-                    || self.slots[into].fields != data.fields.len()
+                    || self.slots[into].members != data.fields.len()
                 {
                     return Err(Stop::Pending(node));
                 }
@@ -566,18 +673,21 @@ impl<'a, 'g> Build<'a, 'g> {
             || !call.substitution.is_empty()
             || !matches!(
                 facts.ty.as_ref(),
-                TypeTerm::Primitive(_) | TypeTerm::Nominal { .. }
+                TypeTerm::Primitive(_) | TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
             ) && !primitive_reference(&facts.ty)
         {
             return Err(Stop::Pending(node));
         }
-        if matches!(facts.ty.as_ref(), TypeTerm::Nominal { .. }) {
-            // Return loans for record-valued results need their own routes.
-            // Admit only the flat borrow-free record storage in this slice.
+        if matches!(
+            facts.ty.as_ref(),
+            TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
+        ) {
+            // Aggregate result loans need their own routes. Only admit
+            // borrow-free flat aggregate results here.
             let output = into.ok_or(Stop::Pending(node))?;
             for member in self.slots[output].storage(output).skip(1) {
                 self.budget.step(1)?;
-                if self.slots[member].reference_field {
+                if self.slots[member].reference_member {
                     return Err(Stop::Pending(node));
                 }
             }
@@ -589,7 +699,7 @@ impl<'a, 'g> Build<'a, 'g> {
             let ty = self.value(arg)?.ty.clone();
             if !matches!(
                 ty.as_ref(),
-                TypeTerm::Primitive(_) | TypeTerm::Nominal { .. }
+                TypeTerm::Primitive(_) | TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
             ) && !primitive_reference(&ty)
             {
                 return Err(Stop::Pending(arg));
