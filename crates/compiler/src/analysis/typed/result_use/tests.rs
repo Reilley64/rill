@@ -83,12 +83,26 @@ fn typed_sources_preserve_origins_across_rename_projection_replacement_and_paths
         .flat_map(|m| &m.declarations)
         .find(|d| d.name.as_deref() == Some("Watched"))
         .unwrap();
+    let variant = |name| {
+        &graph
+            .modules()
+            .iter()
+            .flat_map(|m| &m.declarations)
+            .find(|d| d.id.kind == DeclarationKind::Variant && d.name.as_deref() == Some(name))
+            .unwrap()
+            .id
+    };
     let mut report = ResultUseReport::default();
     check(
         &inventory,
         &bodies,
         Inputs {
-            result: &watched.id,
+            result: Container {
+                declaration: &watched.id,
+                success: variant("Good"),
+                failure: variant("Bad"),
+            },
+            option: None,
             opaque_cause: None,
             opaque_list: None,
             outcome_observer: None,

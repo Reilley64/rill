@@ -1,24 +1,33 @@
 //! Result-use analysis consumes typed control and place facts. It does not grant moves.
 use super::{Budget, GenericReport, OrdinaryAnalysis, Work};
-use crate::analysis::scalars::data::{Access, DataExpression, PathProjection, PlacePath};
+use crate::analysis::scalars::data::{
+    Access, Constructor, DataExpression, PathProjection, PlacePath,
+};
 use crate::analysis::scalars::{
     BodyOwner, ExpressionFacts, NodeFactKind, NodeFacts, Propagation, Site,
 };
 use crate::analysis::{
-    Binder, DeclarationId, DeclarationShape, MemberType, Payload, Type, TypeTerm,
+    Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Type, TypeTerm,
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+mod arrows;
+mod calls;
+mod control;
 mod loops;
+mod patterns;
+mod shape;
 mod storage;
+mod values;
 use loops::LoopExits;
 #[cfg(test)]
 mod tests;
 pub use storage::ResultComponent;
-use storage::{Located, Occurrence, Residence, Root};
+use storage::{Address, Content, Located, Occurrence, Residence, Root};
+use values::PlaceStorage;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResultDiscardKind {
@@ -77,10 +86,18 @@ type Alternatives<'g> = Vec<Residence<'g>>;
 
 #[derive(Clone, Copy)]
 pub(super) struct Inputs<'g> {
-    pub result: &'g DeclarationId,
+    pub result: Container<'g>,
+    pub option: Option<Container<'g>>,
     pub opaque_cause: Option<&'g DeclarationId>,
     pub opaque_list: Option<&'g DeclarationId>,
     pub outcome_observer: Option<&'g DeclarationId>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Container<'g> {
+    pub declaration: &'g DeclarationId,
+    pub success: &'g DeclarationId,
+    pub failure: &'g DeclarationId,
 }
 
 pub(super) fn check<'g>(
@@ -91,15 +108,7 @@ pub(super) fn check<'g>(
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
     let mut nodes = BTreeMap::new();
-    let mut immutable_bindings = BTreeMap::new();
     for facts in bodies.typed_nodes() {
-        if let NodeFactKind::Binding(binding) = &facts.kind
-            && binding.ty.is_some()
-            && !binding.mutable
-        {
-            budget.reserve(1)?;
-            immutable_bindings.insert(binding.declaration, facts.site.node);
-        }
         budget.reserve(1)?;
         nodes
             .entry((facts.site.module, facts.site.node))
@@ -113,6 +122,35 @@ pub(super) fn check<'g>(
             checked.insert(id);
         }
     }
+    let mut variants = BTreeMap::new();
+    for declaration in inventory.type_facts().declarations.values() {
+        budget.step(1)?;
+        if let DeclarationShape::Enum { variants: members } = &declaration.shape {
+            for variant in members {
+                budget.reserve(1)?;
+                variants.insert(&variant.declaration.id, &variant.payload);
+            }
+        }
+    }
+    let mut implementation_headers = BTreeMap::new();
+    let mut families = BTreeSet::new();
+    for source in inventory.graph().implementations() {
+        budget.reserve(1)?;
+        if families.insert(&source.family)
+            && let Some(family) = inventory.captured_family(&source.family)
+        {
+            for implementation in &family.implementations {
+                budget.step(1)?;
+                if implementation.compatibility
+                    == crate::analysis::ordinary::Compatibility::Compatible
+                {
+                    budget.reserve(1)?;
+                    implementation_headers
+                        .insert(&implementation.source.declaration, &implementation.header);
+                }
+            }
+        }
+    }
     for module in inventory.graph().modules() {
         budget.step(1)?;
         let mut scopes = BTreeMap::new();
@@ -124,38 +162,40 @@ pub(super) fn check<'g>(
             inventory,
             nodes: &nodes,
             checked: &checked,
+            variants: &variants,
+            implementation_headers: &implementation_headers,
             module,
             scopes,
             core,
-            immutable_bindings: &immutable_bindings,
             budget,
             report,
             loops: Vec::new(),
+            match_views: Vec::new(),
+            checked_arrows: BTreeSet::new(),
             dead_depth: 0,
+            dead_start: None,
         };
         check.roots()?;
     }
     Ok(())
 }
 
-struct Arguments<'a, 'g> {
-    binders: &'a [Binder<'g>],
-    types: &'a [Type<'g>],
-    outer: Option<&'a Arguments<'a, 'g>>,
-}
-
 struct Check<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
+    variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
+    implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
     module: &'g Module,
     scopes: BTreeMap<&'g DeclarationId, Option<usize>>,
     core: Inputs<'g>,
-    immutable_bindings: &'a BTreeMap<&'g DeclarationId, NodeId>,
     budget: &'a mut Budget,
     report: &'a mut ResultUseReport<'g>,
     loops: Vec<LoopExits<'g>>,
+    match_views: Vec<(Address<'g>, Root<'g>)>,
+    checked_arrows: BTreeSet<NodeId>,
     dead_depth: usize,
+    dead_start: Option<usize>,
 }
 
 impl<'a, 'g> Check<'a, 'g> {
@@ -208,8 +248,25 @@ impl<'a, 'g> Check<'a, 'g> {
             Root::Temporary(_) => None,
         };
         let discard = self.site(node);
+        if kind == ResultDiscardKind::ScopeExit
+            && self.dead_start.is_some_and(|start| match root {
+                Root::Local(id) => id.start < start,
+                Root::Temporary(node) => self.site(node).span.start() < start,
+            })
+        {
+            return Ok(());
+        }
         for value in values {
-            let origin = self.site(value.occurrence.origin);
+            self.budget.step(1)?;
+            let occurrence = match value.content {
+                Content::Result(occurrence) => occurrence,
+                Content::Unclassified(origin) => {
+                    self.pending(origin, ResultUseBlocker::Containment)?;
+                    continue;
+                }
+                _ => continue,
+            };
+            let origin = self.site(occurrence.origin);
             let mut duplicate = false;
             for old in &self.report.discards {
                 self.budget.step(1)?;
@@ -220,8 +277,8 @@ impl<'a, 'g> Check<'a, 'g> {
                     && old.storage == storage
                 {
                     self.budget
-                        .step(value.occurrence.component.len() + value.component.len())?;
-                    if old.component == value.occurrence.component
+                        .step(occurrence.component.len() + value.component.len())?;
+                    if old.component == occurrence.component
                         && old.storage_component == value.component
                     {
                         duplicate = true;
@@ -233,7 +290,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 self.budget.reserve(1)?;
                 self.report.discards.push(ResultDiscard {
                     origin,
-                    component: value.occurrence.component,
+                    component: occurrence.component,
                     discard,
                     kind,
                     storage,
@@ -242,6 +299,24 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         Ok(())
+    }
+
+    fn discard_at(
+        &mut self,
+        mut values: Vec<Located<'g>>,
+        (root, prefix): &Address<'g>,
+        suffix: &[ResultComponent<'g>],
+        site: NodeId,
+        kind: ResultDiscardKind,
+    ) -> Work<()> {
+        for value in &mut values {
+            self.budget.reserve(prefix.len() + suffix.len())?;
+            self.budget.step(1 + value.component.len())?;
+            value
+                .component
+                .splice(..0, prefix.iter().chain(suffix).copied());
+        }
+        self.discard(values, *root, site, kind)
     }
 
     fn singleton(&mut self, state: Residence<'g>) -> Work<Alternatives<'g>> {
@@ -260,17 +335,18 @@ impl<'a, 'g> Check<'a, 'g> {
                         continue;
                     };
                     self.budget.step(1)?;
-                    let mut state = Residence::default();
+                    let mut states = self.singleton(Residence::default())?;
                     if let Some(signature) = self
                         .inventory
                         .type_facts()
                         .declarations
                         .get(&declaration.id)
+                        .or_else(|| self.implementation_headers.get(&declaration.id).copied())
                         && let DeclarationShape::Function { parameters, .. } = &signature.shape
                     {
                         for parameter in parameters {
-                            self.seed(
-                                &mut state,
+                            states = self.seed(
+                                states,
                                 Root::Local(&parameter.declaration.id),
                                 parameter.declaration.node,
                                 &parameter.ty,
@@ -279,8 +355,13 @@ impl<'a, 'g> Check<'a, 'g> {
                     } else {
                         self.pending(node, ResultUseBlocker::TypedInput)?;
                     }
-                    for state in self.statement(body, state, 1)? {
-                        self.exit(state, body)?;
+                    if states.is_empty() {
+                        self.dead_statement(body, Residence::default(), 1)?;
+                    }
+                    for state in states {
+                        for state in self.statement(body, state, 1)? {
+                            self.exit(state, body)?;
+                        }
                     }
                 }
                 DeclarationKind::Expectation => {
@@ -309,6 +390,38 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
+    fn dead_statement(&mut self, node: NodeId, state: Residence<'g>, depth: usize) -> Work<()> {
+        self.in_dead(node, |check| check.statement(node, state, depth))
+            .map(|_| ())
+    }
+
+    fn dead_node(&mut self, node: NodeId, state: Residence<'g>, depth: usize) -> Work<()> {
+        if self.module.syntax.nodes[node].kind == NodeKind::Block {
+            self.dead_statement(node, state, depth)
+        } else {
+            self.in_dead(node, |check| check.expression(node, state, depth))
+                .map(|_| ())
+        }
+    }
+
+    fn in_dead<T>(&mut self, node: NodeId, check: impl FnOnce(&mut Self) -> Work<T>) -> Work<T> {
+        let previous = self.dead_start;
+        self.dead_start = previous.or(Some(self.site(node).span.start()));
+        self.dead_depth += 1;
+        let result = check(self);
+        self.dead_depth -= 1;
+        self.dead_start = previous;
+        result
+    }
+
+    fn exit_scope(&mut self, state: &mut Residence<'g>, scope: usize, site: NodeId) -> Work<()> {
+        for (root, value) in state.take_scope(|root| matches!(root, Root::Local(id) if self.scopes.get(id).is_some_and(|s| *s == Some(scope))), self.budget)? {
+            self.budget.reserve(1)?;
+            self.discard(vec![value], root, site, ResultDiscardKind::ScopeExit)?;
+        }
+        Ok(())
+    }
+
     fn block(
         &mut self,
         node: NodeId,
@@ -316,33 +429,52 @@ impl<'a, 'g> Check<'a, 'g> {
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         let mut running = self.singleton(state)?;
-        let mut dead = Vec::new();
+        let mut dead: Alternatives<'g> = Vec::new();
+        let mut entry = None;
         for &child in &self.module.syntax.nodes[node].children {
-            let reachable = !running.is_empty();
-            let alternatives = if reachable {
-                std::mem::take(&mut running)
-            } else if dead.is_empty() {
-                self.singleton(Residence::default())?
+            let reachable = entry.is_none() && !running.is_empty();
+            let mut lexical = Vec::new();
+            let (input, output) = if reachable {
+                (std::mem::take(&mut running), &mut running)
             } else {
-                std::mem::take(&mut dead)
-            };
-            for state in alternatives {
-                if reachable {
-                    running.extend(self.statement(child, state, depth + 1)?);
-                } else {
-                    self.dead_depth += 1;
-                    let next = self.statement(child, state, depth + 1);
-                    self.dead_depth -= 1;
-                    dead.extend(next?);
+                let entry = *entry.get_or_insert(child);
+                for state in std::mem::take(&mut dead) {
+                    let before = state.fork(self.budget)?;
+                    let next =
+                        self.in_dead(entry, |check| check.statement(child, state, depth + 1))?;
+                    if next.is_empty() {
+                        lexical.extend(self.singleton(before)?);
+                    }
+                    dead.extend(next);
                 }
+                if dead.is_empty() {
+                    dead = lexical;
+                }
+                continue;
+            };
+            for state in input {
+                let before = state.fork(self.budget)?;
+                let next = self.statement(child, state, depth + 1)?;
+                if next.is_empty() {
+                    lexical.extend(self.singleton(before)?);
+                }
+                output.extend(next);
+            }
+            if running.is_empty() {
+                dead = lexical;
             }
         }
         let scope = self.module.syntax.nodes[node].span.start();
-        for state in running.iter_mut().chain(dead.iter_mut()) {
-            for (root, value) in state.take_scope(|root| matches!(root, Root::Local(id) if self.scopes.get(id).is_some_and(|s| *s == Some(scope))), self.budget)? {
-                self.budget.reserve(1)?;
-                self.discard(vec![value], root, node, ResultDiscardKind::ScopeExit)?;
-            }
+        for state in &mut running {
+            self.exit_scope(state, scope, node)?;
+        }
+        if let Some(entry) = entry {
+            self.in_dead(entry, |check| {
+                for state in &mut dead {
+                    check.exit_scope(state, scope, node)?;
+                }
+                Ok(())
+            })?;
         }
         Ok(running)
     }
@@ -350,7 +482,7 @@ impl<'a, 'g> Check<'a, 'g> {
     fn statement(
         &mut self,
         node: NodeId,
-        mut state: Residence<'g>,
+        state: Residence<'g>,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         self.depth(depth)?;
@@ -371,44 +503,61 @@ impl<'a, 'g> Check<'a, 'g> {
                 let facts = self.facts(node)?;
                 let mut running = Vec::new();
                 for mut state in alternatives {
-                    let values = state.take(Root::Temporary(source), &[], self.budget)?;
+                    let root = Root::Temporary(source);
                     if let Some(NodeFactKind::Binding(binding)) = facts.map(|f| &f.kind)
                         && binding.ty.is_some()
                     {
-                        state.install(
-                            values,
+                        self.move_value(
+                            &mut state,
+                            root,
+                            &[],
                             Root::Local(binding.declaration),
                             &[],
-                            self.budget,
                         )?;
-                    } else if self.module.syntax.nodes[children[0]].kind != NodeKind::Wildcard {
-                        self.pending(node, ResultUseBlocker::Storage)?;
+                    } else if let Some(NodeFactKind::Pattern(pattern)) =
+                        self.facts(children[0])?.map(|f| &f.kind)
+                    {
+                        self.commit_pattern(&mut state, root, &[], pattern)?;
+                        let remaining = state.take(root, &[], self.budget)?;
+                        self.discard(remaining, root, node, ResultDiscardKind::Expression)?;
+                    } else {
+                        state.take(root, &[], self.budget)?;
+                        if self.module.syntax.nodes[children[0]].kind != NodeKind::Wildcard {
+                            self.pending(node, ResultUseBlocker::Storage)?;
+                        }
                     }
                     self.budget.reserve(1)?;
                     running.push(state);
                 }
                 Ok(running)
             }
-            NodeKind::Assignment("=") => {
+            NodeKind::Assignment(_) => {
                 let (left, right) = (children[0], children[1]);
                 let path = self.facts(left)?.and_then(|f| match &f.kind {
                     NodeFactKind::Expression(e) => e.path.as_ref(),
                     _ => None,
                 });
-                let target = self.exact_path(path)?;
                 let checked = self.facts(node)?.is_some();
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
                     let incoming = state.take(Root::Temporary(right), &[], self.budget)?;
-                    if let Some((root, path)) = &target
+                    if let Some(target @ (root, path)) = &self.address(state, path)?
                         && checked
                     {
                         let displaced = state.take(*root, path, self.budget)?;
-                        self.discard(displaced, *root, node, ResultDiscardKind::Replacement)?;
+                        self.discard_at(
+                            displaced,
+                            target,
+                            &[],
+                            node,
+                            ResultDiscardKind::Replacement,
+                        )?;
                         state.install(incoming, *root, path, self.budget)?;
                     } else {
                         self.pending(node, ResultUseBlocker::Storage)?;
-                        *state = Residence::default();
+                        for address in self.place_storage(state, path)?.addresses() {
+                            self.forget_address(state, &address, node)?;
+                        }
                     }
                 }
                 Ok(alternatives)
@@ -444,78 +593,15 @@ impl<'a, 'g> Check<'a, 'g> {
                 Ok(Vec::new())
             }
             NodeKind::IfStatement => self.conditional(node, state, false, depth + 1),
+            NodeKind::Guard => self.guard(node, state, depth + 1),
             NodeKind::While => self.while_loop(node, state, depth + 1),
-            NodeKind::For => self.owned_literal_iteration(node, state, depth + 1),
+            NodeKind::For => self.for_loop(node, state, depth + 1),
             NodeKind::Break | NodeKind::Continue => self.loop_jump(node, state),
             _ => {
                 self.pending(node, ResultUseBlocker::Control)?;
-                state = Residence::default();
-                self.singleton(state)
+                self.unsettled(node, depth + 1)
             }
         }
-    }
-
-    fn conditional(
-        &mut self,
-        node: NodeId,
-        state: Residence<'g>,
-        expression: bool,
-        depth: usize,
-    ) -> Work<Alternatives<'g>> {
-        self.depth(depth)?;
-        let children = &self.module.syntax.nodes[node].children;
-        let [condition, yes, rest @ ..] = children.as_slice() else {
-            unreachable!()
-        };
-        let Some(NodeFactKind::Expression(fact)) = self.facts(*condition)?.map(|f| &f.kind) else {
-            self.pending(node, ResultUseBlocker::Control)?;
-            return self.singleton(Residence::default());
-        };
-        let truth = fact
-            .boolean
-            .unwrap_or(crate::analysis::scalars::BooleanSet::BOTH);
-        let mut result = Vec::new();
-        for state in self.expression(*condition, state, depth + 1)? {
-            for (reachable, child) in [
-                (truth.can_be_true(), Some(*yes)),
-                (truth.can_be_false(), rest.first().copied()),
-            ] {
-                if !reachable {
-                    if let Some(child) = child {
-                        self.dead_depth += 1;
-                        let checked = if expression {
-                            self.expression(child, Residence::default(), depth + 1)
-                        } else {
-                            self.statement(child, Residence::default(), depth + 1)
-                        };
-                        self.dead_depth -= 1;
-                        checked?;
-                    }
-                    continue;
-                }
-                let alternative = state.fork(self.budget)?;
-                let Some(child) = child else {
-                    result.extend(self.singleton(alternative)?);
-                    continue;
-                };
-                if expression {
-                    let mut next = self.expression(child, alternative, depth + 1)?;
-                    for state in &mut next {
-                        self.move_value(
-                            state,
-                            Root::Temporary(child),
-                            &[],
-                            Root::Temporary(node),
-                            &[],
-                        )?;
-                    }
-                    result.extend(next);
-                } else {
-                    result.extend(self.statement(child, alternative, depth + 1)?);
-                }
-            }
-        }
-        Ok(result)
     }
 
     fn expression(
@@ -527,18 +613,38 @@ impl<'a, 'g> Check<'a, 'g> {
         self.depth(depth)?;
         let Some(facts) = self.facts(node)? else {
             self.pending(node, ResultUseBlocker::TypedInput)?;
-            return self.singleton(Residence::default());
+            return self.unsettled(node, depth + 1);
         };
         let NodeFactKind::Expression(value) = &facts.kind else {
             self.pending(node, ResultUseBlocker::TypedInput)?;
-            return self.singleton(Residence::default());
+            return self.unsettled(node, depth + 1);
         };
         let syntax = &self.module.syntax.nodes[node];
         let root = Root::Temporary(node);
-        if value.access == Access::Owned
-            && let Some((from, component)) = self.exact_path(value.path.as_ref())?
-        {
-            self.move_value(&mut state, from, &component, root, &[])?;
+        if let Some((from, component)) = self.address(&state, value.path.as_ref())? {
+            if matches!(value.ty.as_ref(), TypeTerm::Reference { .. }) {
+                if let Some(alias) = state.alias(from, &component, self.budget)? {
+                    state.store(root, &[], Content::Alias(alias), self.budget)?;
+                } else {
+                    for address in state.aliases_under(from, &component, self.budget)? {
+                        state.store(root, &[], Content::PossibleAlias(address), self.budget)?;
+                    }
+                }
+                return self.singleton(state);
+            }
+            if matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool") {
+                if let Some(truth) =
+                    state.test(from, &component, &Constructor::Boolean(true), self.budget)?
+                {
+                    self.record_boolean(&mut state, root, &[], truth)?;
+                }
+                return self.singleton(state);
+            }
+            if value.access == Access::Owned {
+                self.move_value(&mut state, from, &component, root, &[])?;
+            } else {
+                state.store(root, &[], Content::Alias((from, component)), self.budget)?;
+            }
             return self.singleton(state);
         }
         if let Some(data) = &value.data {
@@ -581,21 +687,21 @@ impl<'a, 'g> Check<'a, 'g> {
                     }
                     for state in &mut alternatives {
                         self.add_source(state, root, node, &[])?;
+                        self.budget.reserve(1)?;
+                        state.store(
+                            root,
+                            &[],
+                            Content::Test(Arc::new(Constructor::Variant(error.failure)), true),
+                            self.budget,
+                        )?;
                     }
                     return Ok(alternatives);
                 }
                 DataExpression::List { elements, .. } => {
-                    let mut alternatives = self.singleton(state)?;
-                    for (i, &element) in elements.iter().enumerate() {
-                        alternatives = self.component(
-                            alternatives,
-                            element,
-                            root,
-                            &[ResultComponent::ListElement(i)],
-                            depth + 1,
-                        )?;
-                    }
-                    return Ok(alternatives);
+                    return self.opaque_list(node, elements, state, depth + 1);
+                }
+                DataExpression::ListIndex { base, selector, .. } => {
+                    return self.dynamic_index(node, (*base, *selector), value, state, depth + 1);
                 }
                 DataExpression::Tuple { elements } => {
                     let mut alternatives = self.singleton(state)?;
@@ -610,7 +716,10 @@ impl<'a, 'g> Check<'a, 'g> {
                     }
                     return Ok(alternatives);
                 }
-                DataExpression::Construction(construction) if construction.base.is_none() => {
+                DataExpression::Construction(construction) => {
+                    if let Some(base) = construction.base {
+                        return self.rebuild(node, base, construction, state, depth + 1);
+                    }
                     let variant = match construction.ty.as_ref() {
                         TypeTerm::Variant { declaration, .. } => Some(*declaration),
                         _ => None,
@@ -638,142 +747,141 @@ impl<'a, 'g> Check<'a, 'g> {
                             depth + 1,
                         )?;
                     }
-                    if self.is_result(&value.ty) {
-                        for state in &mut alternatives {
+                    for state in &mut alternatives {
+                        if self.is_result(&construction.ty) {
                             self.add_source(state, root, node, &[])?;
+                        }
+                        if let Some(variant) = variant {
+                            self.budget.reserve(1)?;
+                            state.store(
+                                root,
+                                &[],
+                                Content::Test(Arc::new(Constructor::Variant(variant)), true),
+                                self.budget,
+                            )?;
                         }
                     }
                     return Ok(alternatives);
                 }
-                DataExpression::Match(matched)
-                    if self.is_result(
-                        &matched
-                            .arms
-                            .first()
-                            .map(|arm| arm.pattern.ty.clone())
-                            .unwrap_or_else(|| value.ty.clone()),
-                    ) && matched.arms.iter().all(|arm| arm.guard.is_none()) =>
-                {
-                    return self.match_result(node, matched, state, depth + 1);
+                DataExpression::Projection(projection) => {
+                    return self.project(
+                        node,
+                        state,
+                        (
+                            projection.base,
+                            ResultComponent::Field(&projection.field.id),
+                        ),
+                        value,
+                        depth + 1,
+                    );
+                }
+                DataExpression::TupleIndex {
+                    base, component, ..
+                } => {
+                    return self.project(
+                        node,
+                        state,
+                        (*base, ResultComponent::TupleElement(*component)),
+                        value,
+                        depth + 1,
+                    );
+                }
+                DataExpression::Interpolation(holes) => {
+                    return self.interpolate(node, holes, state, depth + 1);
+                }
+                DataExpression::Match(matched) => {
+                    return self.match_expression(node, matched, state, depth + 1);
                 }
                 _ => {}
             }
         }
         match syntax.kind {
+            NodeKind::Arrow => self.arrow(node, facts, state, depth + 1),
             NodeKind::Group => {
                 let alternatives = self.singleton(state)?;
                 self.component(alternatives, syntax.children[0], root, &[], depth + 1)
             }
             NodeKind::IfExpression => self.conditional(node, state, true, depth + 1),
-            NodeKind::Literal | NodeKind::ValueReference => self.singleton(state),
+            NodeKind::Template
+                if syntax
+                    .children
+                    .iter()
+                    .all(|&c| self.module.syntax.nodes[c].kind == NodeKind::TemplateText) =>
+            {
+                self.singleton(state)
+            }
+            NodeKind::Literal | NodeKind::ValueReference | NodeKind::Prefix("*") => {
+                use crate::analysis::scalars::BooleanSet;
+                if let Some(truth @ (BooleanSet::TRUE | BooleanSet::FALSE)) = value.boolean {
+                    self.record_boolean(&mut state, root, &[], truth == BooleanSet::TRUE)?;
+                }
+                self.singleton(state)
+            }
+            NodeKind::Binary("&&" | "||") | NodeKind::Prefix("!") => {
+                self.boolean_expression(node, state, depth + 1)
+            }
+            NodeKind::Binary(_) | NodeKind::Prefix("+" | "-" | "~") => {
+                self.primitive_operands(syntax.children.as_slice(), state, depth + 1)
+            }
             NodeKind::Prefix("&" | "&mut") => {
                 let operand = syntax.children[0];
-                if self.facts(operand)?.is_some_and(
-                    |f| matches!(&f.kind, NodeFactKind::Expression(e) if e.path.is_some()),
-                ) {
+                let path = self.facts(operand)?.and_then(|fact| match &fact.kind {
+                    NodeFactKind::Expression(e) => e.path.as_ref(),
+                    _ => None,
+                });
+                if let PlaceStorage::Exact(address) = self.place_storage(&state, path)? {
+                    state.store(root, &[], Content::Alias(address), self.budget)?;
                     return self.singleton(state);
                 }
-                let root = Root::Temporary(operand);
                 let mut alternatives = self.expression(operand, state, depth + 1)?;
                 for state in &mut alternatives {
-                    let values = state.take(root, &[], self.budget)?;
-                    self.discard(values, root, node, ResultDiscardKind::Expression)?;
+                    if path.is_none() {
+                        state.store(
+                            root,
+                            &[],
+                            Content::Alias((Root::Temporary(operand), Vec::new())),
+                            self.budget,
+                        )?;
+                    } else {
+                        for address in self.place_storage(state, path)?.addresses() {
+                            state.store(root, &[], Content::PossibleAlias(address), self.budget)?;
+                        }
+                    }
                 }
                 Ok(alternatives)
             }
             NodeKind::Call | NodeKind::Pipe => self.call(node, value, state, depth + 1),
             _ => {
-                if state.has_values()
-                    || !matches!(
-                        value.ty.as_ref(),
-                        TypeTerm::Primitive(_) | TypeTerm::Reference { .. }
-                    )
-                {
-                    self.pending(node, ResultUseBlocker::Control)?;
-                    state = Residence::default();
-                }
-                if facts.flow.normal {
-                    self.singleton(state)
+                self.pending(node, ResultUseBlocker::Control)?;
+                let lexical = self.unsettled(node, depth + 1)?;
+                Ok(if facts.flow.normal {
+                    lexical
                 } else {
-                    Ok(Vec::new())
-                }
+                    Vec::new()
+                })
             }
         }
     }
 
-    fn inspect_argument(
-        &mut self,
-        mut state: Residence<'g>,
-        node: NodeId,
-        depth: usize,
-    ) -> Work<Alternatives<'g>> {
-        let syntax = &self.module.syntax.nodes[node];
-        if matches!(syntax.kind, NodeKind::Prefix("&" | "&mut")) {
-            let operand = syntax.children[0];
-            if let Some(NodeFactKind::Expression(value)) = self.facts(operand)?.map(|f| &f.kind) {
-                if let Some((root, component)) = self.exact_path(value.path.as_ref())? {
-                    state.observe(root, &component, self.budget)?;
-                    return self.singleton(state);
-                }
-                if value.path.is_none() {
-                    let root = Root::Temporary(operand);
-                    let mut alternatives = self.expression(operand, state, depth)?;
-                    for state in &mut alternatives {
-                        state.observe(root, &[], self.budget)?;
-                        let remaining = state.take(root, &[], self.budget)?;
-                        self.discard(remaining, root, node, ResultDiscardKind::Expression)?;
-                    }
-                    return Ok(alternatives);
-                }
-            }
-        }
-        let limit = self.immutable_borrow_target(node)?;
-        let mut alternatives = self.expression(node, state, depth)?;
-        for state in &mut alternatives {
-            if let Some((root, component)) = &limit {
-                // The written immutable reference limits which occurrence it can
-                // observe. This does not assert alias validity or a legal borrow.
-                state.observe(*root, component, self.budget)?;
-            } else if state.has_values() {
-                self.pending(node, ResultUseBlocker::Storage)?;
-                *state = Residence::default();
-            }
-        }
-        Ok(alternatives)
+    fn unsettled(&mut self, node: NodeId, depth: usize) -> Work<Alternatives<'g>> {
+        // An unsettled edge cannot settle the exit of any incoming residence.
+        // Still check typed islands in the written source as lexical entries.
+        self.unsettled_children(node, depth)?;
+        self.singleton(Residence::default())
     }
 
-    fn immutable_borrow_target(
-        &mut self,
-        node: NodeId,
-    ) -> Work<Option<(Root<'g>, Vec<ResultComponent<'g>>)>> {
-        let Some(NodeFactKind::Expression(alias)) = self.facts(node)?.map(|f| &f.kind) else {
-            return Ok(None);
-        };
-        let Some(alias) = alias
-            .path
-            .as_ref()
-            .filter(|path| path.root.module == self.module.key && path.projections.is_empty())
-        else {
-            return Ok(None);
-        };
-        self.budget.step(1)?;
-        let Some(&binding) = self.immutable_bindings.get(alias.root) else {
-            return Ok(None);
-        };
-        let syntax = &self.module.syntax.nodes[binding];
-        if !matches!(syntax.kind, NodeKind::Binding { .. }) {
-            return Ok(None);
+    fn unsettled_children(&mut self, node: NodeId, depth: usize) -> Work<()> {
+        self.depth(depth)?;
+        for &child in &self.module.syntax.nodes[node].children {
+            if self.module.syntax.nodes[child].kind == NodeKind::Block {
+                self.dead_statement(child, Residence::default(), depth + 1)?;
+            } else if self.expression_facts(child)?.is_some() {
+                self.dead_node(child, Residence::default(), depth + 1)?;
+            } else {
+                self.unsettled_children(child, depth + 1)?;
+            }
         }
-        let source = &self.module.syntax.nodes[*syntax.children.last().unwrap()];
-        if source.kind != NodeKind::Prefix("&") {
-            return Ok(None);
-        }
-        let Some(NodeFactKind::Expression(referent)) =
-            self.facts(source.children[0])?.map(|f| &f.kind)
-        else {
-            return Ok(None);
-        };
-        self.exact_path(referent.path.as_ref())
+        Ok(())
     }
 
     fn propagate(
@@ -787,24 +895,14 @@ impl<'a, 'g> Check<'a, 'g> {
         let operand = self.module.syntax.nodes[node].children[0];
         let source = Root::Temporary(operand);
         let mut normal = Vec::new();
-        for mut state in self.expression(operand, state, depth)? {
-            state.observe(source, &[], self.budget)?;
-            if branch.can_return {
-                let mut returned = state.fork(self.budget)?;
-                // The existing failure wrapper is forwarded; unrelated storage leaves scope.
-                returned.take(source, &[], self.budget)?;
-                if let Some(outer) = outer {
-                    for mut completed in self.expression(outer, returned, depth + 1)? {
-                        completed.take(Root::Temporary(outer), &[], self.budget)?;
-                        self.exit(completed, node)?;
-                    }
-                } else {
-                    self.exit(returned, node)?;
-                }
-            }
-            if branch.can_continue {
+        for state in self.expression(operand, state, depth)? {
+            let mut failed = Vec::new();
+            if let Some(mut success) =
+                self.split_variant(state, source, branch.success, &mut failed, depth)?
+                && branch.can_continue
+            {
                 self.move_value(
-                    &mut state,
+                    &mut success,
                     source,
                     &[ResultComponent::VariantPayload {
                         variant: branch.success,
@@ -813,131 +911,25 @@ impl<'a, 'g> Check<'a, 'g> {
                     Root::Temporary(node),
                     &[],
                 )?;
-                state.take(source, &[], self.budget)?;
-                self.budget.reserve(1)?;
-                normal.push(state);
+                success.take(source, &[], self.budget)?;
+                normal.extend(self.singleton(success)?);
+            }
+            if branch.can_return {
+                for mut returned in failed {
+                    // The existing failure wrapper is forwarded; unrelated storage leaves scope.
+                    returned.take(source, &[], self.budget)?;
+                    if let Some(outer) = outer {
+                        for mut completed in self.expression(outer, returned, depth + 1)? {
+                            completed.take(Root::Temporary(outer), &[], self.budget)?;
+                            self.exit(completed, node)?;
+                        }
+                    } else {
+                        self.exit(returned, node)?;
+                    }
+                }
             }
         }
         Ok(normal)
-    }
-
-    fn match_result(
-        &mut self,
-        node: NodeId,
-        matched: &'a crate::analysis::scalars::data::Match<'g>,
-        state: Residence<'g>,
-        depth: usize,
-    ) -> Work<Alternatives<'g>> {
-        self.depth(depth)?;
-        let source = Root::Temporary(matched.scrutinee);
-        let mut result = Vec::new();
-        for incoming in self.expression(matched.scrutinee, state, depth + 1)? {
-            for arm in &matched.arms {
-                self.budget.step(1)?;
-                if !arm.body_reachable {
-                    continue;
-                }
-                let mut state = incoming.fork(self.budget)?;
-                let pattern_id = self.module.syntax.nodes[arm.site.node].children[0];
-                let pattern = &self.module.syntax.nodes[pattern_id];
-                if pattern.kind == NodeKind::Wildcard {
-                    state.take(source, &[], self.budget)?;
-                } else if matches!(
-                    pattern.kind,
-                    NodeKind::PayloadPattern | NodeKind::RecordPattern | NodeKind::NamePattern
-                ) && !arm.views.is_empty()
-                {
-                    state.observe(source, &[], self.budget)?;
-                    let payload = state.take(source, &[], self.budget)?;
-                    if !payload.is_empty() || !arm.pattern.binders.is_empty() {
-                        self.pending(arm.site.node, ResultUseBlocker::Storage)?;
-                    }
-                } else {
-                    self.pending(arm.site.node, ResultUseBlocker::Storage)?;
-                    state.take(source, &[], self.budget)?;
-                }
-                if self.module.syntax.nodes[arm.body].kind == NodeKind::Block {
-                    result.extend(self.statement(arm.body, state, depth + 1)?);
-                } else {
-                    let mut next = self.expression(arm.body, state, depth + 1)?;
-                    for state in &mut next {
-                        self.move_value(
-                            state,
-                            Root::Temporary(arm.body),
-                            &[],
-                            Root::Temporary(node),
-                            &[],
-                        )?;
-                    }
-                    result.extend(next);
-                }
-            }
-        }
-        Ok(result)
-    }
-
-    fn call(
-        &mut self,
-        node: NodeId,
-        value: &'a ExpressionFacts<'g>,
-        state: Residence<'g>,
-        depth: usize,
-    ) -> Work<Alternatives<'g>> {
-        self.depth(depth)?;
-        let Some(call) = &value.call else {
-            self.pending(node, ResultUseBlocker::CallBoundary)?;
-            return self.singleton(Residence::default());
-        };
-        self.budget.step(1)?;
-        let checked_boundary =
-            value.ordinary_context.is_none() && self.checked.contains(call.callee);
-        let mut alternatives = self.singleton(state)?;
-        for arg in call.argument_evaluation_order() {
-            let mut next = Vec::new();
-            for state in alternatives {
-                if Some(call.callee) == self.core.outcome_observer {
-                    next.extend(self.inspect_argument(state, arg, depth + 1)?);
-                    continue;
-                }
-                let mut evaluated = self.expression(arg, state, depth + 1)?;
-                for state in &mut evaluated {
-                    let root = Root::Temporary(arg);
-                    let passed = state.take(root, &[], self.budget)?;
-                    if !passed.is_empty() {
-                        if *call.callee == self.inventory.graph().prelude().dispose {
-                            self.discard(passed, root, node, ResultDiscardKind::Expression)?;
-                        } else if !checked_boundary {
-                            self.pending(node, ResultUseBlocker::CallBoundary)?;
-                        }
-                    }
-                }
-                next.extend(evaluated);
-            }
-            alternatives = next;
-        }
-        if value.ordinary_context.is_some() {
-            self.pending(node, ResultUseBlocker::CallBoundary)?;
-            return Ok(alternatives);
-        }
-        if let Some(DataExpression::Propagation(branch)) = &value.data {
-            // The checked call creates the container, and this pipe immediately
-            // observes it. Only its success payload can become a new residence.
-            if branch.can_return {
-                for state in &alternatives {
-                    let returned = state.fork(self.budget)?;
-                    self.exit(returned, node)?;
-                }
-            }
-            if !branch.can_continue {
-                return Ok(Vec::new());
-            }
-        } else if matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "never") {
-            return Ok(Vec::new());
-        }
-        for state in &mut alternatives {
-            self.seed(state, Root::Temporary(node), node, &value.ty)?;
-        }
-        Ok(alternatives)
     }
 
     fn component(
@@ -971,33 +963,13 @@ impl<'a, 'g> Check<'a, 'g> {
         state.install(values, to, target, self.budget)
     }
 
-    fn exact_path(
-        &mut self,
-        path: Option<&PlacePath<'g>>,
-    ) -> Work<Option<(Root<'g>, Vec<ResultComponent<'g>>)>> {
-        let Some(path) = path else {
-            return Ok(None);
-        };
-        self.budget.reserve(path.projections.len())?;
-        let mut component = Vec::with_capacity(path.projections.len());
-        for projection in &path.projections {
-            component.push(match projection {
-                PathProjection::Field(field) => ResultComponent::Field(field),
-                PathProjection::TupleElement(i) => ResultComponent::TupleElement(*i),
-                // Includes indirection and any more storage paths not yet admitted here.
-                _ => return Ok(None),
-            });
-        }
-        Ok(Some((Root::Local(path.root), component)))
-    }
-
     fn is_result(&self, ty: &Type<'g>) -> bool {
         let ty = if let TypeTerm::Variant { parent, .. } = ty.as_ref() {
             parent
         } else {
             ty
         };
-        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, .. } if *declaration == self.core.result)
+        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, .. } if *declaration == self.core.result.declaration)
     }
 
     fn add_source(
@@ -1017,171 +989,5 @@ impl<'a, 'g> Check<'a, 'g> {
             path,
             self.budget,
         )
-    }
-
-    fn seed(
-        &mut self,
-        state: &mut Residence<'g>,
-        root: Root<'g>,
-        origin: NodeId,
-        ty: &Type<'g>,
-    ) -> Work<()> {
-        let mut path = Vec::new();
-        let mut components = Vec::new();
-        if self.containment(ty, None, &mut path, &mut components, 1)? {
-            self.pending(origin, ResultUseBlocker::Containment)?;
-        }
-        for path in components {
-            self.add_source(state, root, origin, &path)?;
-        }
-        Ok(())
-    }
-
-    fn containment(
-        &mut self,
-        ty: &Type<'g>,
-        env: Option<&Arguments<'_, 'g>>,
-        path: &mut Vec<ResultComponent<'g>>,
-        out: &mut Vec<Vec<ResultComponent<'g>>>,
-        depth: usize,
-    ) -> Work<bool> {
-        self.depth(depth)?;
-        let (ty, variant) = match ty.as_ref() {
-            TypeTerm::Variant {
-                parent,
-                declaration,
-            } => (parent, Some(*declaration)),
-            _ => (ty, None),
-        };
-        match ty.as_ref() {
-            TypeTerm::Primitive(_) | TypeTerm::Reference { .. } => Ok(false),
-            TypeTerm::Callable { .. } => Ok(true),
-            TypeTerm::Parameter {
-                declaration,
-                position,
-            } => {
-                let mut env = env;
-                while let Some(frame) = env {
-                    self.budget.step(1)?;
-                    if frame
-                        .binders
-                        .get(*position)
-                        .is_some_and(|b| b.declaration.id == **declaration)
-                    {
-                        return self.containment(
-                            &frame.types[*position],
-                            frame.outer,
-                            path,
-                            out,
-                            depth + 1,
-                        );
-                    }
-                    env = frame.outer;
-                }
-                Ok(true)
-            }
-            TypeTerm::Tuple(types) => {
-                let mut pending = false;
-                for (i, ty) in types.iter().enumerate() {
-                    self.budget.reserve(1)?;
-                    path.push(ResultComponent::TupleElement(i));
-                    pending |= self.containment(ty, env, path, out, depth + 1)?;
-                    path.pop();
-                }
-                Ok(pending)
-            }
-            TypeTerm::Nominal {
-                declaration,
-                arguments,
-            } => {
-                if Some(*declaration) == self.core.opaque_cause
-                    || Some(*declaration) == self.core.opaque_list
-                {
-                    // A sealed source shape does not classify opaque owned storage.
-                    return Ok(true);
-                }
-                let is_result = *declaration == self.core.result;
-                if is_result {
-                    self.budget.reserve(1 + path.len())?;
-                    out.push(path.clone());
-                }
-                self.budget.step(1)?;
-                let Some(shape) = self.inventory.type_facts().declarations.get(*declaration) else {
-                    return Ok(true);
-                };
-                let inner = Arguments {
-                    binders: &shape.binders,
-                    types: arguments,
-                    outer: env,
-                };
-                match &shape.shape {
-                    DeclarationShape::Record { fields } => {
-                        self.fields(fields, &inner, path, out, depth)
-                    }
-                    DeclarationShape::Enum { variants } => {
-                        let mut pending = false;
-                        for member in variants {
-                            self.budget.step(1)?;
-                            if variant.is_some_and(|id| *id != member.declaration.id) {
-                                continue;
-                            }
-                            let mut possible = Vec::new();
-                            let components = if variant.is_some() {
-                                &mut *out
-                            } else {
-                                &mut possible
-                            };
-                            match &member.payload {
-                                Payload::Unit => {}
-                                Payload::Record(fields) => {
-                                    pending |=
-                                        self.fields(fields, &inner, path, components, depth)?;
-                                }
-                                Payload::Tuple(types) => {
-                                    for (index, ty) in types.iter().enumerate() {
-                                        self.budget.reserve(1)?;
-                                        path.push(ResultComponent::VariantPayload {
-                                            variant: &member.declaration.id,
-                                            index,
-                                        });
-                                        pending |= self.containment(
-                                            ty,
-                                            Some(&inner),
-                                            path,
-                                            components,
-                                            depth + 1,
-                                        )?;
-                                        path.pop();
-                                    }
-                                }
-                            }
-                            // Without an exact variant, these payload occurrences are alternatives.
-                            pending |= !possible.is_empty();
-                        }
-                        Ok(pending)
-                    }
-                    DeclarationShape::Function { .. } => Ok(true),
-                }
-            }
-            TypeTerm::Variant { .. } => unreachable!("variant parents are nominal"),
-        }
-    }
-
-    fn fields(
-        &mut self,
-        fields: &[MemberType<'g>],
-        inner: &Arguments<'_, 'g>,
-        path: &mut Vec<ResultComponent<'g>>,
-        out: &mut Vec<Vec<ResultComponent<'g>>>,
-        depth: usize,
-    ) -> Work<bool> {
-        let mut pending = false;
-        for field in fields {
-            self.budget.reserve(1)?;
-            path.push(ResultComponent::Field(&field.declaration.id));
-            pending |= self.containment(&field.ty, Some(inner), path, out, depth + 1)?;
-            path.pop();
-        }
-        Ok(pending)
     }
 }

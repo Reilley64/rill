@@ -507,6 +507,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         ty: value.ty.clone(),
                         binders,
                         coverage: irrefutable,
+                        pattern: pattern.clone(),
                     },
                     guard,
                     body,
@@ -545,7 +546,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                             boolean.can_be_false()
                         }
                     }
-                    Pattern::Any if boolean == BooleanSet::TRUE || boolean == BooleanSet::FALSE => {
+                    Pattern::Any | Pattern::Wildcard
+                        if boolean == BooleanSet::TRUE || boolean == BooleanSet::FALSE =>
+                    {
                         self.elab.reserve(1)?;
                         restriction = Arc::new(Pattern::Constructor(
                             Constructor::Boolean(boolean == BooleanSet::TRUE),

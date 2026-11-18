@@ -6,6 +6,7 @@ pub(super) mod nominal;
 mod patterns;
 mod places;
 pub use matches::{Arm, Match};
+pub(in crate::analysis) use patterns::Pattern;
 pub use patterns::{
     Access, Constructor, Coverage, CoverageStep, PatternBinder, PatternFacts, PatternProjection,
 };

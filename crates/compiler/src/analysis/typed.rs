@@ -356,7 +356,16 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             &inventory,
             &bodies,
             result_use::Inputs {
-                result: &role.declaration.id,
+                result: result_use::Container {
+                    declaration: &role.declaration.id,
+                    success: &role.ok.id,
+                    failure: &role.err.id,
+                },
+                option: core.option.map(|option| result_use::Container {
+                    declaration: &option.declaration.id,
+                    success: &option.some.id,
+                    failure: &option.none.id,
+                }),
                 opaque_cause: Some(&role.cause.id),
                 opaque_list: collections.list.map(|list| &list.declaration.id),
                 outcome_observer: core.result_inspection.map(|d| &d.id),
@@ -367,6 +376,8 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         .is_err()
         {
             completion = ScalarFailureKind::ResourceLimit;
+        } else if !report.pending().is_empty() {
+            completion = ScalarFailureKind::Incomplete;
         }
         Some(report)
     } else {

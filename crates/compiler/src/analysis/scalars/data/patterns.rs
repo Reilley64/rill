@@ -53,10 +53,12 @@ pub struct PatternFacts<'g> {
     pub ty: Type<'g>,
     pub binders: Vec<PatternBinder<'g>>,
     pub coverage: Coverage<'g>,
+    pub(in crate::analysis) pattern: Arc<Pattern<'g>>,
 }
-#[derive(Clone)]
-pub(super) enum Pattern<'g> {
+#[derive(Clone, Debug)]
+pub(in crate::analysis) enum Pattern<'g> {
     Any,
+    Wildcard,
     Constructor(Constructor<'g>, Vec<Arc<Pattern<'g>>>, Option<NodeId>),
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -120,7 +122,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(None);
         };
         let Some(reachable) =
-            self.coverage_within(module, pattern, &container.payload, &[], prepared)?
+            self.coverage_within(module, pattern, &container.payload, &[], prepared.clone())?
         else {
             return Ok(None);
         };
@@ -148,6 +150,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 ty: container.payload.clone(),
                 binders,
                 coverage,
+                pattern: prepared,
             }),
         });
         Ok(Some(truth))
@@ -265,7 +268,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut binders = Vec::new();
         if let Some(pattern) = self.pattern(module, node, input, depth, context, &mut binders)?
             && before == self.marks()
-            && let Some(coverage) = self.coverage(module, site, ty, vec![pattern])?
+            && let Some(coverage) = self.coverage(module, site, ty, vec![pattern.clone()])?
         {
             if !coverage.exhaustive() {
                 self.finding(module, node, ScalarFindingKind::RefutableBinding)?;
@@ -283,6 +286,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         ty: ty.clone(),
                         binders,
                         coverage,
+                        pattern,
                     }),
                 });
             }
@@ -517,7 +521,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         if n.kind == NodeKind::Wildcard {
             self.elab.reserve(1)?;
-            return Ok(Some(Arc::new(Pattern::Any)));
+            return Ok(Some(Arc::new(Pattern::Wildcard)));
         }
         if let Some(name) = simple_name(module, node).or((n.kind == NodeKind::Name).then_some(node))
         {
@@ -1167,11 +1171,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         while let Some(state) = stack.pop() {
             self.elab
                 .step(1 + state.rows.iter().map(|r| r.len()).sum::<usize>())?;
-            if state
-                .rows
-                .iter()
-                .any(|r| r.iter().all(|p| matches!(p.as_ref(), Pattern::Any)))
-            {
+            if state.rows.iter().any(|r| {
+                r.iter()
+                    .all(|p| matches!(p.as_ref(), Pattern::Any | Pattern::Wildcard))
+            }) {
                 continue;
             }
             if state.columns.is_empty() {
@@ -1195,7 +1198,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 let mut rows = Vec::new();
                 for row in &state.rows {
                     let mut selected = match row[0].as_ref() {
-                        Pattern::Any => {
+                        Pattern::Any | Pattern::Wildcard => {
                             self.elab.reserve(fields.len() + 1)?;
                             {
                                 let any = Arc::new(Pattern::Any);
@@ -1243,7 +1246,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     path.push(index);
                     self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(path.len());
                     let restriction = match column.restriction.as_ref() {
-                        Pattern::Any => {
+                        Pattern::Any | Pattern::Wildcard => {
                             self.elab.reserve(1)?;
                             Arc::new(Pattern::Any)
                         }
@@ -1268,7 +1271,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if rows.is_empty()
                     && columns
                         .iter()
-                        .all(|c| matches!(c.restriction.as_ref(), Pattern::Any))
+                        .all(|c| matches!(c.restriction.as_ref(), Pattern::Any | Pattern::Wildcard))
                 {
                     return Ok(Some(Coverage {
                         witness: Some(trail),

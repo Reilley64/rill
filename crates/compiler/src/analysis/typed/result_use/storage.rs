@@ -1,5 +1,5 @@
 //! Exact residences on one control-flow alternative.
-use crate::analysis::{DeclarationId, Work, declarations::Budget};
+use crate::analysis::{DeclarationId, Work, declarations::Budget, scalars::data::Constructor};
 use crate::parser::NodeId;
 use std::sync::Arc;
 
@@ -26,10 +26,41 @@ pub(super) struct Occurrence<'g> {
     pub(super) component: Arc<[ResultComponent<'g>]>,
 }
 
+pub(super) type Address<'g> = (Root<'g>, Vec<ResultComponent<'g>>);
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(super) enum Content<'g> {
+    Result(Occurrence<'g>),
+    Test(Arc<Constructor<'g>>, bool),
+    Alias(Address<'g>),
+    PossibleAlias(Address<'g>),
+    /// Containment is unresolved at this origin, not known empty.
+    Unclassified(NodeId),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(super) struct Located<'g> {
-    pub(super) occurrence: Occurrence<'g>,
+    pub(super) content: Content<'g>,
     pub(super) component: Vec<ResultComponent<'g>>,
+}
+
+impl Located<'_> {
+    fn size(&self) -> usize {
+        1 + self.component.len()
+            + match &self.content {
+                Content::Result(value) => value.component.len(),
+                Content::Test(tag, _) => tag_size(tag),
+                Content::Alias((_, path)) | Content::PossibleAlias((_, path)) => path.len(),
+                Content::Unclassified(_) => 0,
+            }
+    }
+}
+
+fn tag_size(tag: &Constructor<'_>) -> usize {
+    match tag {
+        Constructor::Text(text) => text.len() + 1,
+        _ => 1,
+    }
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
@@ -40,7 +71,7 @@ pub(super) struct Residence<'g> {
 impl<'g> Residence<'g> {
     pub(super) fn fork(&self, budget: &mut Budget) -> Work<Self> {
         for (_, value) in &self.locations {
-            budget.reserve(1 + value.component.len())?;
+            budget.reserve(value.size())?;
         }
         Ok(self.clone())
     }
@@ -50,7 +81,7 @@ impl<'g> Residence<'g> {
         let mut deepest = 1;
         for (_, value) in &self.locations {
             budget.step(1)?;
-            deepest = deepest.max(1 + value.component.len() + value.occurrence.component.len());
+            deepest = deepest.max(value.size());
         }
         let comparisons = n
             .checked_mul(1 + n.checked_ilog2().unwrap_or(0) as usize)
@@ -66,16 +97,12 @@ impl<'g> Residence<'g> {
             return Ok(false);
         }
         for (a, b) in self.locations.iter().zip(&other.locations) {
-            budget.step(1 + a.1.component.len() + a.1.occurrence.component.len())?;
+            budget.step(a.1.size() + b.1.size())?;
             if a != b {
                 return Ok(false);
             }
         }
         Ok(true)
-    }
-
-    pub(super) fn has_values(&self) -> bool {
-        !self.locations.is_empty()
     }
 
     pub(super) fn take_scope(
@@ -104,15 +131,102 @@ impl<'g> Residence<'g> {
         component: &[ResultComponent<'g>],
         budget: &mut Budget,
     ) -> Work<()> {
+        self.store(root, component, Content::Result(occurrence), budget)
+    }
+
+    pub(super) fn store(
+        &mut self,
+        root: Root<'g>,
+        component: &[ResultComponent<'g>],
+        content: Content<'g>,
+        budget: &mut Budget,
+    ) -> Work<()> {
         budget.reserve(1 + component.len())?;
         self.locations.push((
             root,
             Located {
-                occurrence,
+                content,
                 component: component.to_vec(),
             },
         ));
         Ok(())
+    }
+
+    pub(super) fn test(
+        &self,
+        root: Root<'g>,
+        component: &[ResultComponent<'g>],
+        tag: &Constructor<'g>,
+        budget: &mut Budget,
+    ) -> Work<Option<bool>> {
+        for (candidate, value) in &self.locations {
+            budget.step(1 + component.len())?;
+            if *candidate != root || value.component != component {
+                continue;
+            }
+            if let Content::Test(known, positive) = &value.content {
+                budget.step(tag_size(known) + tag_size(tag))?;
+                if known.as_ref() == tag {
+                    return Ok(Some(*positive));
+                }
+                if *positive {
+                    return Ok(Some(false));
+                }
+                if matches!(
+                    (known.as_ref(), tag),
+                    (Constructor::Boolean(_), Constructor::Boolean(_))
+                ) {
+                    return Ok(Some(true));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub(super) fn alias(
+        &self,
+        root: Root<'g>,
+        path: &[ResultComponent<'g>],
+        budget: &mut Budget,
+    ) -> Work<Option<Address<'g>>> {
+        for (candidate, value) in &self.locations {
+            budget.step(1 + path.len())?;
+            if *candidate == root
+                && value.component == path
+                && let Content::Alias(address) = &value.content
+            {
+                budget.reserve(address.1.len())?;
+                return Ok(Some(address.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    pub(super) fn aliases_under(
+        &self,
+        root: Root<'g>,
+        path: &[ResultComponent<'g>],
+        budget: &mut Budget,
+    ) -> Work<Vec<Address<'g>>> {
+        let mut result = Vec::new();
+        for (candidate, value) in &self.locations {
+            budget.step(1 + path.len() + value.component.len())?;
+            if *candidate != root {
+                continue;
+            }
+            let address = match &value.content {
+                Content::Alias(address) if value.component.starts_with(path) => address,
+                Content::PossibleAlias(address)
+                    if value.component.starts_with(path) || path.starts_with(&value.component) =>
+                {
+                    address
+                }
+                _ => continue,
+            };
+            budget.reserve(1 + address.1.len())?;
+            result.push(address.clone());
+        }
+        Ok(result)
     }
 
     pub(super) fn take(
@@ -169,7 +283,10 @@ impl<'g> Residence<'g> {
         let mut i = 0;
         while let Some((candidate, located)) = self.locations.get(i) {
             budget.step(1 + component.len())?;
-            if *candidate == root && located.component == component {
+            if *candidate == root
+                && located.component == component
+                && matches!(located.content, Content::Result(_))
+            {
                 self.locations.swap_remove(i);
             } else {
                 i += 1;
@@ -206,8 +323,11 @@ mod tests {
         let remaining = state.take(temp(2), &[], &mut budget).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].component, second);
-        assert_eq!(remaining[0].occurrence.origin, 1);
-        assert!(remaining[0].occurrence.component.is_empty());
+        let Content::Result(value) = &remaining[0].content else {
+            panic!()
+        };
+        assert_eq!(value.origin, 1);
+        assert!(value.component.is_empty());
     }
 
     #[test]
@@ -245,11 +365,13 @@ mod tests {
             .unwrap();
         let remaining = state.take(temp(2), &[], &mut budget).unwrap();
         assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].occurrence.origin, 7);
+        assert!(matches!(&remaining[0].content, Content::Result(value) if value.origin == 7));
         let discarded = state.take(temp(3), &[other], &mut budget).unwrap();
         assert_eq!(discarded.len(), 1);
         assert_eq!(discarded[0].component, vec![nested]);
-        assert_eq!(discarded[0].occurrence.component.as_ref(), &[field, nested]);
+        assert!(
+            matches!(&discarded[0].content, Content::Result(value) if value.component.as_ref() == [field, nested])
+        );
     }
 
     #[test]
