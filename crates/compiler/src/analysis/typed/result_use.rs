@@ -445,6 +445,7 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             NodeKind::IfStatement => self.conditional(node, state, false, depth + 1),
             NodeKind::While => self.while_loop(node, state, depth + 1),
+            NodeKind::For => self.owned_literal_iteration(node, state, depth + 1),
             NodeKind::Break | NodeKind::Continue => self.loop_jump(node, state),
             _ => {
                 self.pending(node, ResultUseBlocker::Control)?;
@@ -580,6 +581,19 @@ impl<'a, 'g> Check<'a, 'g> {
                     }
                     for state in &mut alternatives {
                         self.add_source(state, root, node, &[])?;
+                    }
+                    return Ok(alternatives);
+                }
+                DataExpression::List { elements, .. } => {
+                    let mut alternatives = self.singleton(state)?;
+                    for (i, &element) in elements.iter().enumerate() {
+                        alternatives = self.component(
+                            alternatives,
+                            element,
+                            root,
+                            &[ResultComponent::ListElement(i)],
+                            depth + 1,
+                        )?;
                     }
                     return Ok(alternatives);
                 }

@@ -47,9 +47,6 @@ impl<'r, 'g> Checker<'r, 'g> {
             if before == self.marks() {
                 self.defer(module, pattern, ScalarUnsupported::FamilySelection)?;
             }
-            if before == self.marks() {
-                self.defer(module, pattern, ScalarUnsupported::FamilySelection)?;
-            }
             self.pending_pattern(module, pattern, context)?;
         }
         let mut body = self.statement(module, block, depth + 1, context)?;
@@ -137,8 +134,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let [pattern, source, _] = module.syntax.nodes[node].children.as_slice() else {
             unreachable!()
         };
-        self.elab.reserve(1)?;
-        self.elab.reserve(1)?;
+        self.elab.reserve(2)?;
         Ok(Some(Iteration {
             source: *source,
             pattern: *pattern,

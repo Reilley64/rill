@@ -99,6 +99,65 @@ fn installed_result_discards_keep_original_storage_and_early_exit() {
 }
 
 #[test]
+fn installed_owned_iteration_retains_unyielded_result_on_break() {
+    installed(
+        "installed_owned_iteration_retains_unyielded_result_on_break",
+        |request| {
+            fs::write(
+                &request.entry,
+                "
+            import std::result::Result;
+            function first(): Result<bool> { return Result.Ok(true); }
+            function second(): Result<bool> { return Result.Ok(false); }
+            function stop(): void {
+                for (let item of [first(), second()]) { let _ = item; break; }
+            }
+        ",
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let app = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application)
+                    .unwrap();
+                let iteration = app
+                    .syntax
+                    .nodes
+                    .iter()
+                    .position(|n| n.kind == NodeKind::For)
+                    .unwrap();
+                assert!(matches!(
+                    report
+                        .bodies()
+                        .node(app, iteration)
+                        .unwrap()
+                        .map(|n| &n.kind),
+                    Some(NodeFactKind::Iteration(_))
+                ));
+                let uses = report.result_use().unwrap();
+                let witnesses = uses
+                    .discards()
+                    .iter()
+                    .filter(|witness| witness.origin.module.origin == Origin::Application)
+                    .collect::<Vec<_>>();
+                let [witness] = witnesses.as_slice() else {
+                    panic!("expected exactly one unyielded outcome");
+                };
+                assert_eq!(witness.origin.span.bytes(), b"second()");
+                assert_eq!(witness.discard.span.bytes(), b"break;");
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_result_default_is_canonical_without_an_error_binding() {
     installed(
         "installed_result_default_is_canonical_without_an_error_binding",
@@ -1066,6 +1125,7 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
         "error.rill",
         "format.rill",
         "collection.rill",
+        "iter.rill",
     ] {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();
     }

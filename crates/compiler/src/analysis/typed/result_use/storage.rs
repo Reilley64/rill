@@ -6,6 +6,7 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ResultComponent<'g> {
     TupleElement(usize),
+    ListElement(usize),
     Field(&'g DeclarationId),
     VariantPayload {
         variant: &'g DeclarationId,
