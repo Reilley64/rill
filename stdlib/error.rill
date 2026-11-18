@@ -1,4 +1,5 @@
 import std::format::show;
+import std::option::Option;
 export import std::result::{value, intoValue, formatError};
 
 export type Error = { private message: string };
@@ -14,6 +15,14 @@ export function error(message: string): Error {
 }
 
 export function display<E>(value: &E): string;
+export function origin<W>(value: &W): &SourceLocation;
+export function cause<W>(value: &W): Option<&Cause>;
+
+function readCauseOrigin(value: &Cause): &SourceLocation;
+function readNextCause(value: &Cause): Option<&Cause>;
+
+implement origin(value: &Cause): &SourceLocation { return readCauseOrigin(value); }
+implement cause(value: &Cause): Option<&Cause> { return readNextCause(value); }
 
 function renderLocation(value: &SourceLocation): string;
 function renderCause(value: &Cause): string;

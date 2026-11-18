@@ -37,22 +37,38 @@ pub(super) struct GuardOperand<'g> {
 
 impl<'r, 'g> Checker<'r, 'g> {
     pub(super) fn installed_bridge(&mut self, id: &DeclarationId) -> Work<bool> {
-        let renderers = self
+        let error = self
             .result
             .as_ref()
-            .and_then(|role| role.providers.as_ref())
-            .map(|providers| &providers.renderers);
-        self.elab
-            .step(self.native_ownership.len() + renderers.map_or(0, |r| r.len()))?;
+            .and_then(|role| role.providers.as_ref());
+        self.elab.step(
+            self.native_ownership.len()
+                + error.map_or(0, |p| p.renderers.len() + p.observers.len()),
+        )?;
         Ok(self.is_linked_bridge(id)
             || self.primitive_bridge(id).is_some()
-            || renderers
-                .is_some_and(|r| r.iter().flatten().any(|provider| provider.entry.id == *id))
+            || error.is_some_and(|providers| {
+                providers
+                    .renderers
+                    .iter()
+                    .chain(&providers.observers)
+                    .flatten()
+                    .any(|provider| provider.entry.id == *id)
+            })
             || self
                 .native_ownership
                 .iter()
                 .filter_map(|scope| scope.provider.as_ref())
                 .any(|provider| provider.entry.id == *id))
+    }
+
+    pub(super) fn is_error_observer(&self, id: &DeclarationId) -> bool {
+        self.result.is_some_and(|role| {
+            [role.origin, role.observe_cause]
+                .into_iter()
+                .flatten()
+                .any(|observer| observer.id == *id)
+        })
     }
 
     pub(super) fn guard_operand(&self, value: &ExpressionResult<'g>) -> Option<GuardOperand<'g>> {

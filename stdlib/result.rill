@@ -1,4 +1,4 @@
-import std::error::{Cause, Error, SourceLocation, display};
+import std::error::{Cause, Error, SourceLocation, cause, display, origin};
 import std::format::show;
 import std::option::Option;
 
@@ -34,6 +34,15 @@ export function value<E>(wrapped: &Err<E>): &E {
 
 export function intoValue<E>(wrapped: Err<E>): E {
     return wrapped.payload;
+}
+
+implement<E> origin(wrapped: &Err<E>): &SourceLocation { return &wrapped.site; }
+
+implement<E> cause(wrapped: &Err<E>): Option<&Cause> {
+    return match (&wrapped.retained) {
+        Option.Some(inner) => Option.Some(inner),
+        Option.None => Option.None,
+    };
 }
 
 export function isOk<T, E>(value: &Result<T, E>): bool {

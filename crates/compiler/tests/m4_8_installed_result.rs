@@ -560,7 +560,12 @@ fn installed_error_rendering_uses_the_checked_display_requirement() {
         |request| {
             fs::write(&request.entry, "
             import std::result::Err as Wrapped;
-            import std::error::{Cause, SourceLocation, display, formatError, formatCause, formatLocation};
+            import std::error::{Cause, SourceLocation, display, formatError, formatCause, formatLocation, origin, cause};
+            import std::option::Option;
+            function causeOf(value: &Wrapped<i32>): Option<&Cause> { return cause(value); }
+            function nested(value: &Cause): Option<&Cause> { return cause(value); }
+            function originOf(value: &Wrapped<i32>): &SourceLocation { return origin(value); }
+            function original(value: &Cause): &SourceLocation { return origin(value); }
             type Plain = { flag: bool; };
             function render<T>(value: &Wrapped<T>): string where display(T) {
                 return formatError<T>(value);
@@ -577,9 +582,8 @@ fn installed_error_rendering_uses_the_checked_display_requirement() {
                 })
                 .unwrap();
                 let report = analyze_typed(&graph, AnalysisLimits::default());
-                let bindings = report
-                    .error_providers()
-                    .unwrap()
+                let providers = report.error_providers().unwrap();
+                let bindings = providers
                     .renderers
                     .map(|binding| binding.unwrap().operation.rust_binding());
                 assert_eq!(
@@ -590,12 +594,25 @@ fn installed_error_rendering_uses_the_checked_display_requirement() {
                         "rill_error_storage::OwnedErr::format"
                     ]
                 );
+                assert_eq!(
+                    providers
+                        .observers
+                        .map(|binding| binding.unwrap().operation.rust_binding()),
+                    [
+                        "rill_error_storage::Cause::origin",
+                        "rill_error_storage::Cause::cause"
+                    ]
+                );
                 let app = graph
                     .modules()
                     .iter()
                     .find(|m| m.key.origin == Origin::Application)
                     .unwrap();
                 for (name, checked) in [
+                    ("causeOf", true),
+                    ("nested", true),
+                    ("originOf", true),
+                    ("original", true),
                     ("render", true),
                     ("renderCause", true),
                     ("renderLocation", true),

@@ -11,17 +11,20 @@ pub enum ErrorOperation {
     RenderLocation,
     RenderCause,
     RenderError,
+    ReadCauseOrigin,
+    ReadNextCause,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct ErrorProviders<'g> {
     pub constructor: &'g Declaration,
     pub storage_source: &'g std::path::Path,
-    pub renderers: [Option<ErrorRenderer<'g>>; 3],
+    pub renderers: [Option<ErrorBridge<'g>>; 3],
+    pub observers: [Option<ErrorBridge<'g>>; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct ErrorRenderer<'g> {
+pub struct ErrorBridge<'g> {
     pub operation: ErrorOperation,
     pub entry: &'g Declaration,
 }
@@ -35,6 +38,8 @@ impl ErrorOperation {
             Self::RenderLocation => "rill_error_storage::SourceLocation::format",
             Self::RenderCause => "rill_error_storage::Cause::format",
             Self::RenderError => "rill_error_storage::OwnedErr::format",
+            Self::ReadCauseOrigin => "rill_error_storage::Cause::origin",
+            Self::ReadNextCause => "rill_error_storage::Cause::cause",
         }
     }
 }
@@ -68,6 +73,8 @@ const fn bind_error_operations<
     let _: fn(&SourceLocation) -> String = SourceLocation::format;
     let _: fn(&Cause) -> String = Cause::format;
     let _: fn(&OwnedErr<E>, fn(&E) -> String) -> String = OwnedErr::format;
+    let _: fn(&Cause) -> &SourceLocation = Cause::origin;
+    let _: fn(&Cause) -> Option<&Cause> = Cause::cause;
     assert_sealed::<Error>();
     assert_sealed::<SourceLocation>();
     assert_sealed::<OwnedErr<()>>();
@@ -90,6 +97,8 @@ pub struct ResultRole<'g> {
     /// Value-namespace role, separate from the wrapper type and all providers.
     pub constructor: Option<&'g Declaration>,
     pub display: Option<&'g Declaration>,
+    pub origin: Option<&'g Declaration>,
+    pub observe_cause: Option<&'g Declaration>,
     /// Closed constructor accepts no ordinary registrations, for either arity.
     pub constructor_protected: bool,
     pub display_protection: Option<DisplayProtection<'g>>,
@@ -268,6 +277,26 @@ pub(in crate::analysis::typed) fn check_result<'g>(
             cause,
             message: error,
         });
+    let observation = ObservationTypes {
+        site,
+        cause,
+        option,
+    };
+    let observers = [
+        ("origin", ErrorOperation::ReadCauseOrigin),
+        ("cause", ErrorOperation::ReadNextCause),
+    ];
+    let mut observation_roles = [None; 2];
+    for (slot, (name, operation)) in observation_roles.iter_mut().zip(observers) {
+        if let Some(declaration) =
+            export(graph, error_module, Namespace::ValueFunction, name, budget)?
+            && let Some(result) = borrowed_family_output(inventory, declaration, budget)?
+            && observation.matches(operation, result)
+        {
+            *slot = Some(declaration);
+        }
+    }
+    let [origin, observe_cause] = observation_roles;
     let providers = if let Some((constructor, storage_source)) =
         constructor.zip(graph.error_storage_source())
     {
@@ -292,11 +321,26 @@ pub(in crate::analysis::typed) fn check_result<'g>(
                 ErrorOperation::RenderError,
             ),
         ]) {
-            *slot = renderer(
+            *slot = bridge(
                 inventory,
                 module,
                 (name, subject, operation),
                 display,
+                observation,
+                budget,
+            )?;
+        }
+        let mut observers = [None; 2];
+        for (slot, (name, operation)) in observers.iter_mut().zip([
+            ("readCauseOrigin", ErrorOperation::ReadCauseOrigin),
+            ("readNextCause", ErrorOperation::ReadNextCause),
+        ]) {
+            *slot = bridge(
+                inventory,
+                error_module,
+                (name, cause, operation),
+                display,
+                observation,
                 budget,
             )?;
         }
@@ -304,6 +348,7 @@ pub(in crate::analysis::typed) fn check_result<'g>(
             constructor,
             storage_source,
             renderers,
+            observers,
         })
     } else {
         None
@@ -321,19 +366,45 @@ pub(in crate::analysis::typed) fn check_result<'g>(
         constructor,
         constructor_protected,
         display,
+        origin,
+        observe_cause,
         display_protection,
         providers,
         representation,
     }))
 }
 
-fn renderer<'g>(
+#[derive(Clone, Copy)]
+struct ObservationTypes<'g> {
+    site: &'g Declaration,
+    cause: &'g Declaration,
+    option: OptionRole<'g>,
+}
+
+impl<'g> ObservationTypes<'g> {
+    fn matches(self, operation: ErrorOperation, result: &Type<'g>) -> bool {
+        fn borrowed(ty: &Type<'_>, declaration: &Declaration) -> bool {
+            matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                if matches!(arguments_of(referent, declaration), Some([])))
+        }
+        match operation {
+            ErrorOperation::ReadCauseOrigin => borrowed(result, self.site),
+            ErrorOperation::ReadNextCause => {
+                matches!(arguments_of(result, self.option.declaration), Some([ty]) if borrowed(ty, self.cause))
+            }
+            _ => false,
+        }
+    }
+}
+
+fn bridge<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     module: &'g Module,
     (name, owner, operation): (&str, &'g Declaration, ErrorOperation),
     display: Option<&'g Declaration>,
+    observation: ObservationTypes<'g>,
     budget: &mut Budget,
-) -> Work<Option<ErrorRenderer<'g>>> {
+) -> Work<Option<ErrorBridge<'g>>> {
     let mut entry = None;
     for declaration in &module.declarations {
         budget.step(1)?;
@@ -390,14 +461,20 @@ fn renderer<'g>(
                 })
                 && matches!(requirement.arguments.as_slice(), [Some(ty)] if binder_is(ty, e))
         }
-        (ErrorOperation::RenderCause | ErrorOperation::RenderLocation, [], [], []) => true,
+        (_, [], [], []) => true,
         _ => false,
     };
-    if !schema || !matches!(result.as_ref(), TypeTerm::Primitive(ty) if ty.name() == "string") {
+    let output = match operation {
+        ErrorOperation::ReadCauseOrigin | ErrorOperation::ReadNextCause => {
+            observation.matches(operation, result)
+        }
+        _ => matches!(result.as_ref(), TypeTerm::Primitive(ty) if ty.name() == "string"),
+    };
+    if !schema || !output {
         return Ok(None);
     }
     budget.reserve(1)?;
-    Ok(Some(ErrorRenderer { operation, entry }))
+    Ok(Some(ErrorBridge { operation, entry }))
 }
 
 fn display_matches(
@@ -405,6 +482,15 @@ fn display_matches(
     candidate: &Declaration,
     budget: &mut Budget,
 ) -> Work<bool> {
+    Ok(borrowed_family_output(inventory, candidate, budget)?
+        .is_some_and(|ty| matches!(ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")))
+}
+
+fn borrowed_family_output<'a, 'g>(
+    inventory: &'a OrdinaryAnalysis<'g>,
+    candidate: &Declaration,
+    budget: &mut Budget,
+) -> Work<Option<&'a Type<'g>>> {
     budget.step(3)?;
     if candidate.id.kind != DeclarationKind::Family
         || inventory.declaration_unusable(&candidate.id)
@@ -413,19 +499,20 @@ fn display_matches(
             .get(&candidate.id)
             .is_some_and(|header| header.defaults.is_empty() && header.requirements.is_empty())
     {
-        return Ok(false);
+        return Ok(None);
     }
     let Some(family) = inventory.captured_family(&candidate.id) else {
-        return Ok(false);
+        return Ok(None);
     };
     let (DeclarationShape::Function { parameters, result }, [e]) =
         (&family.header.shape, family.header.binders.as_slice())
     else {
-        return Ok(false);
+        return Ok(None);
     };
     Ok(
-        matches!(parameters.as_slice(), [payload] if matches!(payload.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if binder_is(referent, e)))
-            && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "string"),
+        matches!(parameters.as_slice(), [payload] if matches!(payload.ty.as_ref(),
+        TypeTerm::Reference { mutable: false, referent } if binder_is(referent, e)))
+        .then_some(result),
     )
 }
 

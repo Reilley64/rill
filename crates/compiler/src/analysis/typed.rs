@@ -20,7 +20,7 @@ pub use collections::{
 };
 pub(super) use core::PrimitiveCore;
 pub use core::{
-    DisplayProtection, ErrorOperation, ErrorProviders, ErrorRenderer, ErrorRepresentation,
+    DisplayProtection, ErrorBridge, ErrorOperation, ErrorProviders, ErrorRepresentation,
     OptionRole, PrimitiveBinding, PrimitiveCoverage, PrimitiveOverlap, PrimitiveProtection,
     PrimitiveProvider, PrimitiveRole, ResultRole,
 };

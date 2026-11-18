@@ -10,8 +10,7 @@ mod result;
 mod scalar;
 pub(super) use result::check_result;
 pub use result::{
-    DisplayProtection, ErrorOperation, ErrorProviders, ErrorRenderer, ErrorRepresentation,
-    ResultRole,
+    DisplayProtection, ErrorBridge, ErrorOperation, ErrorProviders, ErrorRepresentation, ResultRole,
 };
 pub(in crate::analysis) use scalar::PrimitiveCore;
 pub(super) use scalar::check_show;
