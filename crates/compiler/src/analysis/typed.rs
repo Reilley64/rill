@@ -304,6 +304,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             .check(
                 &inventory,
                 core.option,
+                &core.primitives,
                 &mut budget,
                 &mut collection_overlaps,
             )

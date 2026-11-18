@@ -1,6 +1,8 @@
 //! Capture-bound admission of the linked List operations; no native ABI.
 use super::*;
-use crate::analysis::ordinary::{Compatibility, FamilyFacts, Placement, patterns};
+use crate::analysis::ordinary::{
+    Compatibility, FamilyFacts, Placement, RequirementTarget, patterns,
+};
 use crate::analysis::{Declaration, DeclarationFacts, DeclarationShape, Type, TypeTerm};
 use crate::loader::{DeclarationId, Module, Namespace};
 use rill_collection::{List, ListIter, ListIterMut, OwnedListIter};
@@ -11,7 +13,7 @@ pub(in crate::analysis) struct CollectionCore<'g> {
     pub list: Option<ListRole<'g>>,
     pub iteration: Option<IterationCore<'g>>,
     iterators: [Option<ListRole<'g>>; 3],
-    pub protection: [Option<CollectionProtection<'g>>; 8],
+    pub protection: [Option<CollectionProtection<'g>>; OPERATIONS.len()],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -21,7 +23,7 @@ pub(in crate::analysis) struct IterationCore<'g> {
 }
 
 // Fixed scopes for the delivered List backing. No closure over other collection families.
-const OPERATIONS: [(CollectionOperation, &str, &str); 8] = {
+const OPERATIONS: [(CollectionOperation, &str, &str); 13] = {
     use CollectionOperation::*;
     use ListTraversal::*;
     [
@@ -65,6 +67,23 @@ const OPERATIONS: [(CollectionOperation, &str, &str); 8] = {
             "advanceExclusive",
             "{\n    return advanceExclusive(iterator);\n}",
         ),
+        (CopyList, "copyList", "{\n    return copyList(value);\n}"),
+        (DisposeList, "disposeList", "{\n    disposeList(value);\n}"),
+        (
+            DisposeIterator(Owned),
+            "disposeOwned",
+            "{\n    disposeOwned(value);\n}",
+        ),
+        (
+            DisposeIterator(Shared),
+            "disposeShared",
+            "{\n    disposeShared(value);\n}",
+        ),
+        (
+            DisposeIterator(Exclusive),
+            "disposeExclusive",
+            "{\n    disposeExclusive(value);\n}",
+        ),
     ]
 };
 
@@ -73,6 +92,7 @@ impl<'g> CollectionCore<'g> {
         &mut self,
         inventory: &OrdinaryAnalysis<'g>,
         option: Option<OptionRole<'g>>,
+        prelude: &core::PrimitiveCore<'g>,
         budget: &mut Budget,
         overlaps: &mut Vec<CollectionOverlap<'g>>,
     ) -> Work<()> {
@@ -92,30 +112,38 @@ impl<'g> CollectionCore<'g> {
                 *slot = opaque_role(inventory, module, name, budget)?;
             }
         }
-        let (Some(list), Some(option)) = (self.list, option) else {
-            return Ok(());
-        };
+        let option = option.map(|role| role.declaration);
         for (index, (operation, entry, wrapper)) in OPERATIONS.into_iter().enumerate() {
             let (module, owner, result_owner) = match operation {
-                Get | First => (collection, Some(list), Some(option.declaration)),
+                Get | First => (collection, self.list, option),
                 Iterate(kind) => (
                     iter,
-                    Some(list),
+                    self.list,
                     self.iterators[kind as usize].map(|role| role.declaration),
                 ),
-                Next(kind) => (
-                    iter,
-                    self.iterators[kind as usize],
-                    Some(option.declaration),
+                Next(kind) => (iter, self.iterators[kind as usize], option),
+                CopyList => (
+                    collection,
+                    self.list,
+                    self.list.map(|role| role.declaration),
                 ),
+                DisposeList => (collection, self.list, None),
+                DisposeIterator(kind) => (iter, self.iterators[kind as usize], None),
             };
-            let (Some(module), Some(owner), Some(result_owner)) = (module, owner, result_owner)
-            else {
+            let (Some(module), Some(owner)) = (module, owner) else {
                 continue;
             };
-            if let Some(family) =
-                check_family(inventory, module, operation, option.declaration, budget)?
-            {
+            let family = match operation {
+                CopyList => prelude.copy,
+                DisposeList | DisposeIterator(_) => prelude.dispose,
+                _ => match (option, result_owner) {
+                    (Some(option), Some(_)) => {
+                        check_family(inventory, module, operation, option, budget)?
+                    }
+                    _ => None,
+                },
+            };
+            if let Some(family) = family {
                 let scope = OperationScope {
                     family,
                     owner: owner.declaration,
@@ -202,6 +230,18 @@ impl<'g> CollectionCore<'g> {
         })
     }
 
+    pub fn lifecycle_scope(
+        &self,
+        family: &DeclarationId,
+        subject: &Type<'g>,
+    ) -> Option<CollectionProtection<'g>> {
+        self.protection.iter().copied().flatten().find(|scope| {
+            scope.operation.is_lifecycle()
+                && scope.family.id == *family
+                && application(subject, scope.owner).is_some()
+        })
+    }
+
     pub fn is_iteration_family(&self, id: &DeclarationId) -> bool {
         self.iteration
             .is_some_and(|role| role.iterate.id == *id || role.next.id == *id)
@@ -219,6 +259,17 @@ impl<'g> CollectionCore<'g> {
         self.protection.iter().flatten().any(|region| {
             region.operation == CollectionOperation::Iterate(ListTraversal::Owned)
                 && region.bridge.is_some_and(|bridge| bridge.id == *id)
+        })
+    }
+
+    pub fn is_disposal_bridge(&self, id: &DeclarationId) -> bool {
+        self.protection.iter().flatten().any(|region| {
+            matches!(
+                region.operation,
+                CollectionOperation::DisposeList | CollectionOperation::DisposeIterator(_)
+            ) && region
+                .provider
+                .is_some_and(|provider| provider.bridge.id == *id)
         })
     }
 
@@ -284,14 +335,25 @@ pub enum CollectionOperation {
     First,
     Iterate(ListTraversal),
     Next(ListTraversal),
+    CopyList,
+    DisposeList,
+    DisposeIterator(ListTraversal),
 }
 
 impl CollectionOperation {
+    pub(in crate::analysis) fn is_lifecycle(self) -> bool {
+        matches!(
+            self,
+            Self::CopyList | Self::DisposeList | Self::DisposeIterator(_)
+        )
+    }
+
     fn access(self) -> Option<bool> {
         match self {
-            Self::Get | Self::First => Some(false),
+            Self::Get | Self::First | Self::CopyList => Some(false),
             Self::Iterate(kind) => kind.access(),
             Self::Next(_) => Some(true),
+            Self::DisposeList | Self::DisposeIterator(_) => None,
         }
     }
 
@@ -306,6 +368,11 @@ impl CollectionOperation {
             Self::Next(Owned) => "rill_collection::OwnedListIter::next",
             Self::Next(Shared) => "rill_collection::ListIter::next",
             Self::Next(Exclusive) => "rill_collection::ListIterMut::advance",
+            Self::CopyList => "rill_collection::List::copy_with",
+            Self::DisposeList => "rill_collection::List::dispose_with",
+            Self::DisposeIterator(Owned) => "rill_collection::OwnedListIter::dispose_with",
+            Self::DisposeIterator(Shared) => "std::mem::drop::<rill_collection::ListIter>",
+            Self::DisposeIterator(Exclusive) => "std::mem::drop::<rill_collection::ListIterMut>",
         }
     }
 }
@@ -316,8 +383,9 @@ pub struct CollectionProvider<'g> {
     pub bridge: &'g Declaration,
 }
 
-/// Only the region identified by the operation and canonical input owner is
-/// closed. No assertion is made about disjoint List-external input regions.
+/// Clearance is scoped to the operation and canonical input owner. For copy
+/// and disposal, a contender that could displace the standard route remains
+/// pending; provider admission does not add a protected action.
 #[derive(Clone, Copy, Debug)]
 pub struct CollectionProtection<'g> {
     pub family: &'g Declaration,
@@ -361,7 +429,7 @@ struct OperationScope<'g> {
     family: &'g Declaration,
     owner: &'g Declaration,
     operation: CollectionOperation,
-    result_owner: &'g Declaration,
+    result_owner: Option<&'g Declaration>,
     entry: &'static str,
     wrapper: &'static str,
 }
@@ -390,23 +458,28 @@ fn check_operation<'g>(
     } else {
         scope
     };
-    let Some(bridge) = private_bridge(inventory, module, scope.entry, budget)?
-        .filter(|header| operation_schema(header, &bridge_shape))
-        .map(|header| header.declaration)
-    else {
+    let Some(bridge) = bridge_header(inventory, module, scope.entry, budget)? else {
         return Ok(record);
     };
+    if !operation_schema(inventory, bridge, &bridge_shape, budget)? {
+        return Ok(record);
+    }
+    let bridge = bridge.declaration;
     record.bridge = Some(bridge);
     let family = inventory.captured_family(&scope.family.id).unwrap();
+    let placement = if scope.operation.is_lifecycle() {
+        Placement::ParameterOwner(&scope.owner.id)
+    } else {
+        Placement::FamilyModule
+    };
     for body in &family.implementations {
         budget.step(1)?;
         if body.source.declaration.module != module.key
-            || body.placement != Placement::FamilyModule
+            || body.placement != placement
             || body.compatibility != Compatibility::Compatible
             || body.alternatives.is_empty()
             || module.syntax.nodes[body.source.body_node].span.bytes() != scope.wrapper.as_bytes()
-            || !plain_header(inventory, body.header.declaration, budget)?
-            || !operation_schema(&body.header, &scope)
+            || !operation_schema(inventory, &body.header, &scope, budget)?
         {
             continue;
         }
@@ -456,6 +529,13 @@ fn check_region<'g>(
             && !(patterns::included(region, &body.alternatives, budget)?
                 && !patterns::included(&body.alternatives, region, budget)?)
         {
+            // A possible replacement does not erase the standard provider.
+            // The collection lifecycle contracts do not specify that such a
+            // replacement is a protected violation. Leave its clearance open.
+            if record.operation.is_lifecycle() {
+                complete = false;
+                continue;
+            }
             budget.reserve(1)?;
             overlaps.push(CollectionOverlap {
                 family: &record.family.id,
@@ -474,12 +554,32 @@ fn check_region<'g>(
     })
 }
 
-fn operation_schema(header: &DeclarationFacts<'_>, scope: &OperationScope<'_>) -> bool {
+fn operation_schema(
+    inventory: &OrdinaryAnalysis<'_>,
+    header: &DeclarationFacts<'_>,
+    scope: &OperationScope<'_>,
+    budget: &mut Budget,
+) -> Work<bool> {
     use CollectionOperation::*;
+    budget.step(2)?;
+    let Some(metadata) = inventory.headers().get(&header.declaration.id) else {
+        return Ok(false);
+    };
+    if inventory.declaration_unusable(&header.declaration.id) || !metadata.defaults.is_empty() {
+        return Ok(false);
+    }
     let (DeclarationShape::Function { parameters, result }, [binder]) =
         (&header.shape, header.binders.as_slice())
     else {
-        return false;
+        return Ok(false);
+    };
+    let requirements = match (scope.operation, metadata.requirements.as_slice()) {
+        (CopyList, [requirement]) => {
+            requirement.target == Some(RequirementTarget::Family(&scope.family.id))
+                && matches!(requirement.arguments.as_slice(), [Some(ty)] if parameter(ty, binder.declaration))
+        }
+        (CopyList, _) => false,
+        (_, requirements) => requirements.is_empty(),
     };
     let source = match parameters.as_slice() {
         [source, key]
@@ -489,19 +589,24 @@ fn operation_schema(header: &DeclarationFacts<'_>, scope: &OperationScope<'_>) -
             source
         }
         [source] if scope.operation != Get => source,
-        _ => return false,
+        _ => return Ok(false),
     };
     let result_access = match scope.operation {
         Get | First => Some(false),
-        Iterate(_) => None,
         Next(kind) => kind.access(),
+        _ => None,
     };
-    through_access(&source.ty, scope.operation.access())
-        .and_then(|ty| application(ty, scope.owner))
-        .is_some_and(|ty| parameter(ty, binder.declaration))
-        && application(result, scope.result_owner)
+    let output = match scope.result_owner {
+        Some(owner) => application(result, owner)
             .and_then(|ty| through_access(ty, result_access))
-            .is_some_and(|ty| parameter(ty, binder.declaration))
+            .is_some_and(|ty| parameter(ty, binder.declaration)),
+        None => matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void"),
+    };
+    Ok(requirements
+        && output
+        && through_access(&source.ty, scope.operation.access())
+            .and_then(|ty| application(ty, scope.owner))
+            .is_some_and(|ty| parameter(ty, binder.declaration)))
 }
 
 fn check_family<'g>(
@@ -517,6 +622,7 @@ fn check_family<'g>(
         First => "first",
         Iterate(_) => "iterate",
         Next(_) => "next",
+        _ => unreachable!("checked separately against the prelude"),
     };
     let Some(declaration) = core::export(
         inventory.graph(),
@@ -637,6 +743,8 @@ const fn bind_borrowed_advances<'source, T: 'source>() {
     let _: fn(&mut ListIter<'source, T>) -> Option<&'source T> = ListIter::next;
     let _: for<'advance> fn(&'advance mut ListIterMut<'source, T>) -> Option<&'advance mut T> =
         ListIterMut::advance;
+    let _: fn(ListIter<'source, T>) = std::mem::drop;
+    let _: fn(ListIterMut<'source, T>) = std::mem::drop;
 }
 const _: () = bind_list_operations::<()>();
 
@@ -659,6 +767,18 @@ pub(super) fn private_bridge<'a, 'g>(
     name: &str,
     budget: &mut Budget,
 ) -> Work<Option<&'a crate::analysis::DeclarationFacts<'g>>> {
+    let Some(header) = bridge_header(inventory, module, name, budget)? else {
+        return Ok(None);
+    };
+    Ok(plain_header(inventory, header.declaration, budget)?.then_some(header))
+}
+
+fn bridge_header<'a, 'g>(
+    inventory: &'a OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    name: &str,
+    budget: &mut Budget,
+) -> Work<Option<&'a DeclarationFacts<'g>>> {
     for decl in &module.declarations {
         budget.step(1)?;
         if decl.scope.is_none()
@@ -672,7 +792,7 @@ pub(super) fn private_bridge<'a, 'g>(
                     return Ok(None);
                 }
             }
-            return Ok(plain_header(inventory, decl, budget)?.then_some(&family.header));
+            return Ok(Some(&family.header));
         }
     }
     Ok(None)

@@ -55,8 +55,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(role) = self.primitives.and_then(|p| p.prelude(call.callee)) else {
             return false;
         };
+        let supported = |ty: &Type<'g>| {
+            primitive_name(ty).is_some()
+                || self.collections.lifecycle_scope(call.callee, ty).is_some()
+        };
         if let Some(written) = call.substitution.first() {
-            return primitive_name(&written.argument).is_some();
+            return supported(&written.argument);
         }
         let Some(ty) = call
             .arguments
@@ -66,10 +70,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             return true;
         };
         match (role, ty.as_ref()) {
-            (PrimitiveRole::Copy, TypeTerm::Reference { referent, .. }) => {
-                primitive_name(referent).is_some()
-            }
-            _ => primitive_name(ty).is_some(),
+            (PrimitiveRole::Copy, TypeTerm::Reference { referent, .. }) => supported(referent),
+            _ => supported(ty),
         }
     }
 

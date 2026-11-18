@@ -76,13 +76,19 @@ impl InstalledProfile {
                     path: "collection.rill",
                     triggered_by: |kind| matches!(kind, NodeKind::Bracket | NodeKind::Index),
                     dependencies: &[("option", "option.rill")],
-                    registrations: &[("collection.rill", &["get", "first"])],
+                    registrations: &[
+                        ("collection.rill", &["get", "first"]),
+                        ("core.rill", &["copy", "dispose"]),
+                    ],
                 },
                 MetadataEdge {
                     path: "iter.rill",
                     triggered_by: |kind| kind == NodeKind::For,
                     dependencies: &[("option", "option.rill"), ("collection", "collection.rill")],
-                    registrations: &[("iter.rill", &["iterate", "next"])],
+                    registrations: &[
+                        ("iter.rill", &["iterate", "next"]),
+                        ("core.rill", &["dispose"]),
+                    ],
                 },
                 MetadataEdge {
                     path: "format.rill",

@@ -18,6 +18,20 @@ function advanceShared<T>(iterator: &mut ListIter<T>): Option<&T>;
 function intoExclusive<T>(source: &mut List<T>): ListIterMut<T>;
 function advanceExclusive<T>(iterator: &mut ListIterMut<T>): Option<&mut T>;
 
+function disposeOwned<T>(value: OwnedListIter<T>): void;
+function disposeShared<T>(value: ListIter<T>): void;
+function disposeExclusive<T>(value: ListIterMut<T>): void;
+
+implement<T> dispose(value: OwnedListIter<T>): void {
+    disposeOwned(value);
+}
+implement<T> dispose(value: ListIter<T>): void {
+    disposeShared(value);
+}
+implement<T> dispose(value: ListIterMut<T>): void {
+    disposeExclusive(value);
+}
+
 implement<T> iterate<List<T>, OwnedListIter<T>>(source: List<T>): OwnedListIter<T> {
     return intoOwned(source);
 }

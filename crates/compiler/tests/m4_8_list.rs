@@ -584,6 +584,7 @@ fn installed_list() {
                 Some(NodeFactKind::Iteration(_))
             ));
         }
+        check_copy_and_dispose(&request);
         check_authority(&root);
         return;
     }
@@ -623,6 +624,196 @@ fn installed_list() {
     );
 }
 
+fn check_copy_and_dispose(request: &InstalledRequest) {
+    use compiler::analysis::scalars::data::DataExpression;
+    use compiler::analysis::typed::{CollectionOperation::*, ListTraversal::*, OwnershipCoverage};
+
+    fs::write(&request.entry, "
+        import std::core::{copy as duplicate, dispose as release};
+        import std::collection::{List as Items};
+        import std::iter::{OwnedListIter, ListIter, ListIterMut};
+        function duplicateItems(xs: &Items<Items<i32>>): Items<Items<i32>> { return duplicate(xs); }
+        function generic<T>(xs: &Items<T>): Items<T> where duplicate(T) { return duplicate(xs); }
+        function whole<T>(xs: &Items<T>): Items<T> where duplicate(Items<T>) { return duplicate(xs); }
+        function releaseAll<T>(xs: Items<T>, owned: OwnedListIter<T>, shared: ListIter<T>, exclusive: ListIterMut<T>): void {
+            release(xs);
+            release(owned);
+            release(shared);
+            release(exclusive);
+        }
+    ").unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert!(
+            report.bodies().findings().is_empty(),
+            "{:?}",
+            report.bodies().findings()
+        );
+        let app = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.origin == Origin::Application)
+            .unwrap();
+        for declaration in app.declarations.iter().filter(|d| {
+            matches!(
+                d.name.as_deref(),
+                Some("duplicateItems" | "generic" | "whole" | "releaseAll")
+            )
+        }) {
+            assert!(
+                report
+                    .bodies()
+                    .body(app, BodyOwner::Declaration(&declaration.id))
+                    .unwrap()
+                    .is_some(),
+                "{:?}: {:?}",
+                declaration.name,
+                report.bodies().obligations()
+            );
+        }
+        for (source, operation, family) in [
+            ("duplicate(xs)", CopyList, &graph.prelude().copy),
+            ("release(xs)", DisposeList, &graph.prelude().dispose),
+            (
+                "release(owned)",
+                DisposeIterator(Owned),
+                &graph.prelude().dispose,
+            ),
+            (
+                "release(shared)",
+                DisposeIterator(Shared),
+                &graph.prelude().dispose,
+            ),
+            (
+                "release(exclusive)",
+                DisposeIterator(Exclusive),
+                &graph.prelude().dispose,
+            ),
+        ] {
+            let region = report
+                .collection_protection()
+                .find(|p| p.operation == operation)
+                .unwrap();
+            let provider = region.provider.unwrap();
+            assert_eq!(&region.family.id, family);
+            assert_eq!(region.coverage, OwnershipCoverage::Clear);
+            assert_eq!(provider.bridge.id.module, region.owner.id.module);
+            assert!(graph.implementations().iter().any(|body| {
+                body.declaration == provider.implementation.id && body.family == *family
+            }));
+            let call = app
+                .syntax
+                .nodes
+                .iter()
+                .position(|node| node.span.bytes() == source.as_bytes())
+                .unwrap();
+            let NodeFactKind::Expression(fact) =
+                &report.bodies().node(app, call).unwrap().unwrap().kind
+            else {
+                panic!("expected a checked call: {source}");
+            };
+            let Some(DataExpression::CanonicalCall(goal)) = &fact.data else {
+                panic!("missing canonical evidence: {source}");
+            };
+            let goal = report.bodies().goal(goal).unwrap();
+            assert!(goal.premise.is_none());
+            assert_eq!(
+                *goal.selection.as_ref().unwrap().implementation,
+                provider.implementation.id
+            );
+        }
+    }
+
+    fs::write(
+        &request.entry,
+        "
+        import std::collection::{List as Items};
+        import std::iter::OwnedListIter;
+        type List<T> = { value: T };
+        function missing<T>(xs: &Items<T>): Items<T> { return copy(xs); }
+        function notSpecified(xs: &OwnedListIter<i32>): OwnedListIter<i32> { return copy(xs); }
+        function namesake(xs: &List<i32>): List<i32> { return copy(xs); }
+    ",
+    )
+    .unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert_eq!(
+            report
+                .bodies()
+                .findings()
+                .iter()
+                .map(|f| (f.kind, f.site.span.bytes()))
+                .collect::<Vec<_>>(),
+            [(
+                ScalarFindingKind::MissingRequirement,
+                b"copy(xs)".as_slice()
+            )]
+        );
+        assert_eq!(
+            report
+                .bodies()
+                .obligations()
+                .iter()
+                .filter(|o| o.reason == ScalarUnsupported::FamilySelection
+                    && o.site.module.origin == Origin::Application
+                    && o.site.span.bytes() == b"copy(xs)")
+                .count(),
+            2
+        );
+    }
+
+    fs::write(
+        &request.entry,
+        "
+        import std::collection::{List as Items};
+        type Key = { value: i32 };
+        implement copy(value: &Items<Key>): Items<Key> { while (true) {} }
+        function competing(xs: &Items<Key>): Items<Key> { return copy(xs); }
+        function independent(xs: Items<Key>): void { dispose(xs); }
+    ",
+    )
+    .unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let region = report
+            .collection_protection()
+            .find(|p| p.operation == CopyList)
+            .unwrap();
+        assert!(region.provider.is_some());
+        assert_eq!(region.coverage, OwnershipCoverage::Pending);
+        assert!(report.collection_overlaps().is_empty());
+        assert!(
+            report
+                .bodies()
+                .obligations()
+                .iter()
+                .any(|o| o.reason == ScalarUnsupported::CoreProtection
+                    && o.site.span.bytes() == b"copy(xs)")
+        );
+        let dispose = report
+            .collection_protection()
+            .find(|p| p.operation == DisposeList)
+            .unwrap();
+        assert_eq!(dispose.coverage, OwnershipCoverage::Clear);
+    }
+}
+
 fn check_authority(root: &std::path::Path) {
     let entry = root.join("app/authority.rill");
     let request = InstalledRequest {
@@ -657,6 +848,7 @@ fn check_authority(root: &std::path::Path) {
     .unwrap();
     let untrusted = analyze_typed(&graph, AnalysisLimits::default());
     assert!(untrusted.list_role().is_none() && untrusted.list_lookup_bridge().is_none());
+    assert!(untrusted.collection_protection().next().is_none());
     assert!(
         untrusted
             .bodies()

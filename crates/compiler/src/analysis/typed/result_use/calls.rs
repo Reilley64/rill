@@ -17,7 +17,10 @@ impl<'a, 'g> Check<'a, 'g> {
         let settled = value.ordinary_context.is_none();
         let checked = settled && self.checked.contains(call.callee);
         let observer = settled && Some(call.callee) == self.core.outcome_observer;
-        let dispose = settled && *call.callee == self.inventory.graph().prelude().dispose;
+        self.budget.step(self.core.collections.protection.len())?;
+        let dispose = settled
+            && (*call.callee == self.inventory.graph().prelude().dispose
+                || self.core.collections.is_disposal_bridge(call.callee));
         let mut states = self.singleton(state)?;
         for argument in call.argument_evaluation_order() {
             states = self.stage_argument(argument, states, depth + 1)?;

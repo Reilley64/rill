@@ -452,6 +452,48 @@ fn unclassified_generic_storage_can_be_forwarded_or_acknowledged_parametrically(
     );
 }
 
+#[test]
+fn disposing_list_storage_does_not_observe_result_elements() {
+    installed_with(
+        "disposing_list_storage_does_not_observe_result_elements",
+        "
+        import std::core::{dispose as release};
+        import std::collection::List;
+        import std::iter::iterate;
+        import std::result::Result;
+        function make(): Result<bool> { return Result.Ok(true); }
+        function disposeList(): void {
+            let values = [make()];
+            release(iterate(&values));
+            release(values);
+        }
+        ",
+        &[("make()", None)],
+        |report| {
+            let discard = report
+                .result_use()
+                .unwrap()
+                .discards()
+                .iter()
+                .find(|w| w.origin.module.origin == Origin::Application)
+                .unwrap();
+            assert_eq!(discard.discard.span.bytes(), b"release(values)");
+            use compiler::analysis::typed::ResultUseBlocker;
+            let pending = report.result_use().unwrap().pending();
+            for path in ["collection.rill", "iter.rill"] {
+                assert!(
+                    pending.iter().any(|p| p.site.module.path == path
+                        && p.blocker == ResultUseBlocker::Containment)
+                );
+                assert!(
+                    !pending.iter().any(|p| p.site.module.path == path
+                        && p.blocker == ResultUseBlocker::CallBoundary)
+                );
+            }
+        },
+    );
+}
+
 fn installed(test: &str, source: &str, expected: &[(&str, Option<&str>)]) {
     installed_with(test, source, expected, |_| {});
 }

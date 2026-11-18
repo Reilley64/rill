@@ -42,7 +42,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             .as_ref()
             .and_then(|role| role.providers.as_ref());
         self.elab.step(
-            self.native_ownership.len()
+            self.collections.protection.len()
+                + self.native_ownership.len()
                 + error.map_or(0, |p| p.renderers.len() + p.observers.len()),
         )?;
         Ok(self.is_linked_bridge(id)

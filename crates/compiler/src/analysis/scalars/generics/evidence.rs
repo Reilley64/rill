@@ -272,12 +272,20 @@ impl<'r, 'g> Checker<'r, 'g> {
                 None
             }
             RequirementTarget::Family(id) => match &judgment {
+                GoalJudgment::Requirement { arguments, .. }
+                    if matches!(arguments.as_slice(), [subject]
+                        if self.rigid_copy(id, subject) || self.collections
+                            .lifecycle_scope(id, subject).and_then(|scope| scope.winner()).is_some()) =>
+                {
+                    None
+                }
                 GoalJudgment::Determine { inputs, .. }
                     if self.collections.is_iteration_family(id)
                         || self
                             .collection_scope(id, inputs)
                             .and_then(|scope| scope.winner())
-                            .is_some() =>
+                            .is_some()
+                        || self.rigid_copy_input(id, inputs) =>
                 {
                     None
                 }
@@ -1062,6 +1070,18 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
     }
 
+    fn rigid_copy(&self, id: &DeclarationId, subject: &Type<'g>) -> bool {
+        self.primitives
+            .is_some_and(|p| p.copy.is_some_and(|copy| copy.id == *id))
+            && matches!(subject.as_ref(), TypeTerm::Parameter { .. })
+    }
+
+    fn rigid_copy_input(&self, id: &DeclarationId, inputs: &[Type<'g>]) -> bool {
+        matches!(inputs, [input] if matches!(input.as_ref(), TypeTerm::Reference {
+            mutable: false, referent
+        } if self.rigid_copy(id, referent)))
+    }
+
     fn expand_determination(&mut self, goal: usize) -> Work<GoalState> {
         self.elab
             .reserve(self.evidence.goals[goal].judgment.key_len())?;
@@ -1078,11 +1098,21 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let prelude = self.input.graph.prelude();
         let family = self.evidence_family(id)?.unwrap();
-        if *id == prelude.copy || *id == prelude.dispose {
+        let collection = self.collection_scope(id, &inputs);
+        if collection.is_none() && (*id == prelude.copy || *id == prelude.dispose) {
             let Some((implementation, subject)) = self
                 .primitives
                 .and_then(|core| core.winner_for_inputs(id, &inputs))
             else {
+                // Only explicit evidence can discharge a rigid element copy.
+                if self.rigid_copy_input(id, &inputs) {
+                    if let Some(state) =
+                        self.assumption_output(goal, &family.header, &inputs, &filters)?
+                    {
+                        return Ok(state);
+                    }
+                    return Ok(GoalState::Unresolved(GoalBlocker::MissingAssumption));
+                }
                 return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
             };
             for filter in &filters {
@@ -1104,13 +1134,19 @@ impl<'r, 'g> Checker<'r, 'g> {
             );
         }
         let mut required = None;
-        if let Some(scope) = self.collection_scope(id, &inputs) {
+        if let Some(scope) = collection {
+            if scope.provider.is_none() {
+                return Ok(GoalState::Unresolved(GoalBlocker::UnavailableProvider));
+            }
             required = scope.winner();
             if required.is_none() {
                 return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
             }
         }
-        if required.is_none()
+        if (required.is_none()
+            || collection.is_some_and(|scope| {
+                scope.operation == crate::analysis::typed::CollectionOperation::CopyList
+            }))
             && let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)?
         {
             return Ok(state);
@@ -1124,7 +1160,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         let selection = if let Some(selection) = self.evidence.goals[goal].selection.take() {
             selection
         } else {
-            match self.select_goal_contract(id, &inputs, &filters)? {
+            let lifecycle = collection.is_some_and(|scope| scope.operation.is_lifecycle());
+            match self.select_goal_contract(id, &inputs, &filters, lifecycle)? {
                 GoalChoice::Blocked => {
                     return Ok(GoalState::Unresolved(GoalBlocker::InputSelection));
                 }
@@ -1257,13 +1294,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         family: &'g DeclarationId,
         inputs: &[Type<'g>],
         filters: &[Substitution<'g>],
+        admitted_lifecycle: bool,
     ) -> Work<GoalChoice<'g>> {
         let mut budget = declarations::Budget {
             limits: self.elab.limits,
             statistics: self.elab.statistics,
         };
         let selected = (|| {
-            let admitted = self.ordinary_scalar_role(family).is_some();
+            let admitted = admitted_lifecycle || self.ordinary_scalar_role(family).is_some();
             let inventory = self.input.ordinary.unwrap();
             let facts = if admitted {
                 ordinary::source::admitted_family(inventory, family, &mut budget)?

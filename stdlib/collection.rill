@@ -8,6 +8,18 @@ export type List<T> = { private storage: ListStorage; }
 export function get<C, Q, R>(source: C, key: Q): Option<R>;
 export function first<C, R>(source: C): Option<R>;
 
+// Copy uses the selected element operation. Disposal uses normal element cleanup.
+function copyList<T>(value: &List<T>): List<T> where copy(T);
+function disposeList<T>(value: List<T>): void;
+
+implement<T> copy(value: &List<T>): List<T> where copy(T) {
+    return copyList(value);
+}
+
+implement<T> dispose(value: List<T>): void {
+    disposeList(value);
+}
+
 // Private bridge to the linked List<T>::get operation.
 function lookupList<T>(source: &List<T>, index: u64): Option<&T>;
 
