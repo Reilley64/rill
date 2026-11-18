@@ -85,11 +85,12 @@ type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), &'a NodeFacts<'g>>;
 type Alternatives<'g> = Vec<Residence<'g>>;
 
 #[derive(Clone, Copy)]
-pub(super) struct Inputs<'g> {
+pub(super) struct Inputs<'a, 'g> {
     pub result: Container<'g>,
     pub option: Option<Container<'g>>,
     pub opaque_cause: Option<&'g DeclarationId>,
-    pub opaque_list: Option<&'g DeclarationId>,
+    pub collections: super::CollectionCore<'g>,
+    pub native: &'a super::ownership::Report<'g>,
     pub outcome_observer: Option<&'g DeclarationId>,
 }
 
@@ -103,7 +104,7 @@ pub(super) struct Container<'g> {
 pub(super) fn check<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     bodies: &GenericReport<'g>,
-    core: Inputs<'g>,
+    core: Inputs<'_, 'g>,
     budget: &mut Budget,
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
@@ -188,7 +189,7 @@ struct Check<'a, 'g> {
     implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
     module: &'g Module,
     scopes: BTreeMap<&'g DeclarationId, Option<usize>>,
-    core: Inputs<'g>,
+    core: Inputs<'a, 'g>,
     budget: &'a mut Budget,
     report: &'a mut ResultUseReport<'g>,
     loops: Vec<LoopExits<'g>>,

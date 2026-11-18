@@ -306,6 +306,40 @@ fn typed_arrow_entries_check_parameters_without_assuming_a_capture_layout() {
 }
 
 #[test]
+fn collection_representations_distinguish_retained_outcomes_from_borrowed_storage() {
+    installed_with(
+        "collection_representations_distinguish_retained_outcomes_from_borrowed_storage",
+        "
+        import std::collection::List;
+        import std::iter::{OwnedListIter, ListIter, ListIterMut};
+        import std::result::Result;
+        function check(
+            scalars: List<i32>,
+            remaining: OwnedListIter<Result<bool>>,
+            shared: ListIter<Result<bool>>,
+            exclusive: ListIterMut<Result<bool>>,
+        ): void {}
+        ",
+        &[],
+        |report| {
+            use compiler::analysis::typed::ResultUseBlocker;
+            let pending: Vec<_> = report
+                .result_use()
+                .unwrap()
+                .pending()
+                .iter()
+                .filter(|p| {
+                    p.site.module.origin == Origin::Application
+                        && p.blocker == ResultUseBlocker::Containment
+                })
+                .map(|p| p.site.span.bytes())
+                .collect();
+            assert_eq!(pending, [b"remaining: OwnedListIter<Result<bool>>"]);
+        },
+    );
+}
+
+#[test]
 fn conditional_iteration_does_not_prove_a_yield_or_a_retained_discard() {
     installed_with(
         "conditional_iteration_does_not_prove_a_yield_or_a_retained_discard",

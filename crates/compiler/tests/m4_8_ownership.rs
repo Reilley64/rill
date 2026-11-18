@@ -242,6 +242,7 @@ fn combined_installed_capture(request: &InstalledRequest) {
         function retainType(value: &Counted<i32>): Counted<i32> { return copy(value); }
         function releaseType(value: Counted<i32>): void { dispose(value); }
         function borrowType(input: &[Counted<i32>]): &Counted<i32> { let [item] = input; return item; }
+        function dropsCounted(scalar: Counted<i32>, retained: Counted<Outcome<bool>>): void {}
         let startup = convertAndShow(5u8);
         let _ = isOk(&startup);
         expect isOk(&convertAndShow(6u8));
@@ -258,7 +259,15 @@ fn combined_installed_capture(request: &InstalledRequest) {
         assert!(report.option_role().is_some());
         assert!(report.result_role().is_some());
         assert!(report.error_storage_source().is_some());
-        assert!(report.result_use().is_some());
+        let uses = report.result_use().unwrap();
+        let holds_payload = |span: &[u8]| {
+            uses.pending().iter().any(|pending| {
+                pending.site.span.bytes() == span
+                    && pending.blocker == compiler::analysis::typed::ResultUseBlocker::Containment
+            })
+        };
+        assert!(holds_payload(b"retained: Counted<Outcome<bool>>"));
+        assert!(!holds_payload(b"scalar: Counted<i32>"));
         assert!(report.show_role().is_some());
         assert!(report.into_role().is_some());
         let list = report.list_role().expect("original List role");

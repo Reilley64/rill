@@ -112,6 +112,15 @@ fn installed_owned_iteration_retains_unyielded_result_on_break() {
             function stop(): void {
                 for (let item of [first(), second()]) { let _ = item; break; }
             }
+            function leave(): void {
+                for (let item of [first(), second()]) { let _ = item; return; }
+            }
+            function drain(): void {
+                for (let [item, _] of [[first(), second()], [second(), first()]]) {
+                    let _ = item;
+                    continue;
+                }
+            }
         ",
             )
             .unwrap();
@@ -147,11 +156,19 @@ fn installed_owned_iteration_retains_unyielded_result_on_break() {
                     .iter()
                     .filter(|witness| witness.origin.module.origin == Origin::Application)
                     .collect::<Vec<_>>();
-                let [witness] = witnesses.as_slice() else {
-                    panic!("expected exactly one unyielded outcome");
-                };
-                assert_eq!(witness.origin.span.bytes(), b"second()");
-                assert_eq!(witness.discard.span.bytes(), b"break;");
+                assert_eq!(
+                    witnesses.len(),
+                    2,
+                    "expected one unyielded outcome per early exit"
+                );
+                for exit in [b"break;".as_slice(), b"return;"] {
+                    assert!(
+                        witnesses
+                            .iter()
+                            .any(|w| w.origin.span.bytes() == b"second()"
+                                && w.discard.span.bytes() == exit)
+                    );
+                }
             }
         },
     );

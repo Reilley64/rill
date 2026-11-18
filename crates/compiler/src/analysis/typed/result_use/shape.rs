@@ -36,6 +36,25 @@ impl<'a, 'g> Check<'a, 'g> {
         )
     }
 
+    // Opaque backing owns zero or more occurrences; the element type can
+    // rule out Result, but does not establish a count or a specific origin.
+    fn opaque_elements(
+        &mut self,
+        states: Alternatives<'g>,
+        element: &Type<'g>,
+        env: Option<&Arguments<'_, 'g>>,
+        seed: &mut Seed<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        let probe = self.singleton(Residence::default())?;
+        for state in self.shape(probe, element, env, seed, depth + 1)? {
+            if state.may_owe_result(self.budget)? {
+                return self.unknown_shape(states, seed);
+            }
+        }
+        Ok(states)
+    }
+
     fn shape(
         &mut self,
         mut states: Alternatives<'g>,
@@ -93,9 +112,37 @@ impl<'a, 'g> Check<'a, 'g> {
             TypeTerm::Nominal {
                 declaration,
                 arguments,
-            } if Some(*declaration) != self.core.opaque_cause
-                && Some(*declaration) != self.core.opaque_list =>
-            {
+            } if Some(*declaration) != self.core.opaque_cause => {
+                use crate::analysis::typed::CollectionStorage;
+                for repr in self.core.collections.representations() {
+                    self.budget.step(1)?;
+                    if repr.declaration.id == **declaration {
+                        return match (repr.storage, arguments.as_slice()) {
+                            (CollectionStorage::BorrowedList { .. }, [_]) => Ok(states),
+                            (_, [element]) => {
+                                self.opaque_elements(states, element, env, seed, depth)
+                            }
+                            _ => self.unknown_shape(states, seed),
+                        };
+                    }
+                }
+                for repr in &self.core.native.representations {
+                    self.budget.step(1)?;
+                    if repr.owner.id == **declaration {
+                        return match arguments.as_slice() {
+                            [payload] => self.opaque_elements(states, payload, env, seed, depth),
+                            _ => self.unknown_shape(states, seed),
+                        };
+                    }
+                }
+                for scope in &self.core.native.protection {
+                    self.budget.step(1)?;
+                    if scope.owner.id == **declaration {
+                        // The owner is validated, but its provider archive did not
+                        // establish the stored shape. Don't inspect the seal.
+                        return self.unknown_shape(states, seed);
+                    }
+                }
                 self.budget.step(1)?;
                 if *declaration == self.core.result.declaration {
                     for state in &mut states {

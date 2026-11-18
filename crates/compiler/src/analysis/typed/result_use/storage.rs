@@ -76,6 +76,16 @@ impl<'g> Residence<'g> {
         Ok(self.clone())
     }
 
+    pub(super) fn may_owe_result(&self, budget: &mut Budget) -> Work<bool> {
+        for (_, value) in &self.locations {
+            budget.step(1)?;
+            if matches!(value.content, Content::Result(_) | Content::Unclassified(_)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub(super) fn normalize(&mut self, budget: &mut Budget) -> Work<()> {
         let n = self.locations.len();
         let mut deepest = 1;

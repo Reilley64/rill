@@ -150,7 +150,7 @@ impl<'g> CollectionCore<'g> {
         self.protection.first()?.as_ref()?.bridge
     }
 
-    pub fn representations(&self) -> impl Iterator<Item = CollectionRepresentation<'g>> {
+    pub fn representations(&self) -> impl Iterator<Item = CollectionRepresentation<'g>> + use<'g> {
         let kinds = [
             CollectionStorage::Elements,
             CollectionStorage::UnyieldedElements,
