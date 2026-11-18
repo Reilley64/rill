@@ -795,7 +795,8 @@ fn check_copy_and_dispose(request: &InstalledRequest) {
             .collection_protection()
             .find(|p| p.operation == CopyList)
             .unwrap();
-        assert!(region.provider.is_some());
+        let provider = region.provider.unwrap();
+        assert_eq!(Some(provider.artifact), report.list_operations_artifact());
         assert_eq!(region.coverage, OwnershipCoverage::Pending);
         assert!(report.collection_overlaps().is_empty());
         assert!(
@@ -849,6 +850,8 @@ fn check_authority(root: &std::path::Path) {
     let untrusted = analyze_typed(&graph, AnalysisLimits::default());
     assert!(untrusted.list_role().is_none() && untrusted.list_lookup_bridge().is_none());
     assert!(untrusted.collection_protection().next().is_none());
+    assert!(untrusted.list_operations_artifact().is_none());
+    assert!(untrusted.collection_representations().next().is_none());
     assert!(
         untrusted
             .bodies()
@@ -884,7 +887,43 @@ fn check_authority(root: &std::path::Path) {
             .iter()
             .any(|obligation| obligation.reason == ScalarUnsupported::CoreAdmission)
     );
+    let other_capture = missing.list_operations_artifact().unwrap();
+    assert_eq!(other_capture.context(), &absent.id());
+    assert_eq!(missing.collection_representations().count(), 1);
     fs::rename(&temporary, &iter).unwrap();
+
+    let test = loader::load_installed(InstalledRequest {
+        test_mode: true,
+        ..request.clone()
+    })
+    .unwrap();
+    let executable = root.join("bin/list-probe").canonicalize().unwrap();
+    let moved = executable.with_extension("saved");
+    fs::rename(&executable, &moved).unwrap();
+    for graph in [&retained, &test] {
+        let report = analyze_typed(graph, AnalysisLimits::default());
+        let linked = report.list_operations_artifact().unwrap();
+        assert_eq!(linked.context(), &graph.id());
+        assert_eq!(linked.executable(), executable);
+        assert_eq!(other_capture.executable(), executable);
+        assert_ne!(other_capture, linked);
+        let providers: Vec<_> = report.collection_protection().collect();
+        assert_eq!(providers.len(), 13);
+        assert!(
+            providers
+                .iter()
+                .all(|p| p.provider.unwrap().artifact == linked)
+        );
+        let representations: Vec<_> = report.collection_representations().collect();
+        assert_eq!(representations.len(), 4);
+        let storage = representations[0].artifact;
+        assert_eq!(storage.context(), &graph.id());
+        assert_eq!(storage.executable(), executable);
+        assert_ne!(storage, linked);
+        assert!(representations.iter().all(|r| r.artifact == storage));
+    }
+    fs::rename(moved, &executable).unwrap();
+
     fs::write(iter, "// not the pinned bytes\n").unwrap();
     assert_eq!(
         loader::load_installed(request).unwrap_err().kind,

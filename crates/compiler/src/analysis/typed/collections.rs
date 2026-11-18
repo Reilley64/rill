@@ -1,18 +1,18 @@
 //! Capture-bound admission of the linked List operations; no native ABI.
 use super::*;
 use crate::analysis::ordinary::{
-    Compatibility, FamilyFacts, Placement, RequirementTarget, patterns,
+    Compatibility, FamilyFacts, ImplementationFacts, Placement, RequirementTarget, patterns,
 };
 use crate::analysis::{Declaration, DeclarationFacts, DeclarationShape, Type, TypeTerm};
-use crate::loader::{DeclarationId, Module, Namespace};
-use rill_collection::{List, ListIter, ListIterMut, OwnedListIter};
-use std::ops::{Index, IndexMut};
+use crate::loader::{CollectionArtifact, DeclarationId, Module, Namespace};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(in crate::analysis) struct CollectionCore<'g> {
     pub list: Option<ListRole<'g>>,
     pub iteration: Option<IterationCore<'g>>,
     iterators: [Option<ListRole<'g>>; 3],
+    provider_artifact: Option<CollectionArtifact<'g>>,
+    representation_artifact: Option<CollectionArtifact<'g>>,
     pub protection: [Option<CollectionProtection<'g>>; OPERATIONS.len()],
 }
 
@@ -90,9 +90,8 @@ const OPERATIONS: [(CollectionOperation, &str, &str); 13] = {
 impl<'g> CollectionCore<'g> {
     pub(super) fn providers_complete(&self, budget: &mut Budget) -> Work<bool> {
         budget.step(self.protection.len())?;
-        // The validated List role also binds construction and index directly
-        // to the linked storage operations, outside the ordinary families.
-        Ok(self.list.is_some()
+        // Construction and projection are linked directly, outside ordinary families.
+        Ok(self.list_operations_artifact().is_some()
             && self
                 .protection
                 .iter()
@@ -117,6 +116,10 @@ impl<'g> CollectionCore<'g> {
     ) -> Work<()> {
         use CollectionOperation::*;
         let graph = inventory.graph();
+        if let Some((provider, representation)) = graph.collection_artifacts() {
+            self.provider_artifact = Some(provider);
+            self.representation_artifact = Some(representation);
+        }
         let collection = pinned_module(graph, "collection.rill", budget)?;
         let iter = pinned_module(graph, "iter.rill", budget)?;
         if let Some(module) = collection {
@@ -171,8 +174,14 @@ impl<'g> CollectionCore<'g> {
                     entry,
                     wrapper,
                 };
-                self.protection[index] =
-                    Some(check_operation(inventory, module, scope, budget, overlaps)?);
+                self.protection[index] = Some(check_operation(
+                    inventory,
+                    module,
+                    scope,
+                    self.provider_artifact,
+                    budget,
+                    overlaps,
+                )?);
             }
         }
         if let (Some(iterate), Some(next)) = (
@@ -197,7 +206,12 @@ impl<'g> CollectionCore<'g> {
         self.protection.first()?.as_ref()?.bridge
     }
 
+    pub fn list_operations_artifact(&self) -> Option<CollectionArtifact<'g>> {
+        self.list.and(self.provider_artifact)
+    }
+
     pub fn representations(&self) -> impl Iterator<Item = CollectionRepresentation<'g>> + use<'g> {
+        let artifact = self.representation_artifact;
         let kinds = [
             CollectionStorage::Elements,
             CollectionStorage::UnyieldedElements,
@@ -212,11 +226,13 @@ impl<'g> CollectionCore<'g> {
         ]
         .into_iter()
         .zip(kinds)
-        .filter_map(|(role, storage)| {
-            role.map(|role| CollectionRepresentation {
+        .filter_map(move |(role, storage)| {
+            let role = role?;
+            Some(CollectionRepresentation {
                 declaration: role.declaration,
                 element: role.element,
                 storage,
+                artifact: artifact?,
             })
         })
     }
@@ -314,6 +330,7 @@ pub struct CollectionRepresentation<'g> {
     /// Substitution mapping for the actual element type (binder position zero).
     pub element: &'g Declaration,
     pub storage: CollectionStorage,
+    pub artifact: CollectionArtifact<'g>,
 }
 
 impl CollectionStorage {
@@ -400,6 +417,7 @@ impl CollectionOperation {
 pub struct CollectionProvider<'g> {
     pub implementation: &'g Declaration,
     pub bridge: &'g Declaration,
+    pub artifact: CollectionArtifact<'g>,
 }
 
 /// Clearance is scoped to the operation and canonical input owner. For copy
@@ -457,6 +475,7 @@ fn check_operation<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     module: &'g Module,
     scope: OperationScope<'g>,
+    artifact: Option<CollectionArtifact<'g>>,
     budget: &mut Budget,
     overlaps: &mut Vec<CollectionOverlap<'g>>,
 ) -> Work<CollectionProtection<'g>> {
@@ -502,18 +521,12 @@ fn check_operation<'g>(
         {
             continue;
         }
-        record.provider = Some(CollectionProvider {
+        record.provider = artifact.map(|artifact| CollectionProvider {
             implementation: body.header.declaration,
             bridge,
+            artifact,
         });
-        record.coverage = check_region(
-            inventory,
-            family,
-            &body.alternatives,
-            record,
-            budget,
-            overlaps,
-        )?;
+        record.coverage = check_region(inventory, family, body, record, budget, overlaps)?;
         break;
     }
     Ok(record)
@@ -522,12 +535,12 @@ fn check_operation<'g>(
 fn check_region<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     family: &FamilyFacts<'g>,
-    region: &[patterns::InputKey<'g>],
+    wrapper: &ImplementationFacts<'g>,
     record: CollectionProtection<'g>,
     budget: &mut Budget,
     overlaps: &mut Vec<CollectionOverlap<'g>>,
 ) -> Work<OwnershipCoverage> {
-    let admitted = record.provider.unwrap().implementation;
+    let region = &wrapper.alternatives;
     let mut captured = 0;
     for body in inventory.graph().implementations() {
         budget.step(1)?;
@@ -537,7 +550,7 @@ fn check_region<'g>(
     let before = overlaps.len();
     for body in &family.implementations {
         budget.step(1)?;
-        if body.header.declaration.id == admitted.id {
+        if body.header.declaration.id == wrapper.header.declaration.id {
             continue;
         }
         if body.alternatives.is_empty() {
@@ -738,34 +751,6 @@ impl<'g> ListRole<'g> {
         }
     }
 }
-
-// Check these bindings for *every* T, not merely a concrete test element. The
-// compiler and its installed probe link the same Rust implementation. These are
-// compiler operations, not authority for an installed native ABI or Rill layout.
-const fn bind_list_operations<T>() {
-    let _: fn(Vec<T>) -> List<T> = List::from_elements;
-    let _: fn(&List<T>, u64) -> &T = List::index;
-    let _: fn(&mut List<T>, u64) -> &mut T = List::index_mut;
-    let _: fn(&List<T>, u64) -> Option<&T> = List::get;
-    type CopyElement<T> = fn(&T) -> T;
-    let _: fn(&List<T>, CopyElement<T>) -> List<T> = List::copy_with;
-    let _: fn(List<T>, fn(T)) = List::dispose_with;
-    let _: fn(OwnedListIter<T>, fn(T)) = OwnedListIter::dispose_with;
-    let _: fn(List<T>) -> OwnedListIter<T> = List::into_owned_iter;
-    let _: fn(&mut OwnedListIter<T>) -> Option<T> = OwnedListIter::next;
-    let _: for<'a> fn(&'a List<T>) -> ListIter<'a, T> = List::iter;
-    let _: for<'a> fn(&'a mut List<T>) -> ListIterMut<'a, T> = List::iter_mut;
-    bind_borrowed_advances::<T>();
-}
-
-const fn bind_borrowed_advances<'source, T: 'source>() {
-    let _: fn(&mut ListIter<'source, T>) -> Option<&'source T> = ListIter::next;
-    let _: for<'advance> fn(&'advance mut ListIterMut<'source, T>) -> Option<&'advance mut T> =
-        ListIterMut::advance;
-    let _: fn(ListIter<'source, T>) = std::mem::drop;
-    let _: fn(ListIterMut<'source, T>) = std::mem::drop;
-}
-const _: () = bind_list_operations::<()>();
 
 fn plain_header(
     inventory: &OrdinaryAnalysis<'_>,

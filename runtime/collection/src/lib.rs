@@ -1,6 +1,9 @@
 //! Rust backing for first-party List operations; no Rill ABI.
 use std::ops::{Index, IndexMut};
 
+#[doc(hidden)]
+pub mod link;
+
 pub struct List<T>(Vec<T>);
 
 impl<T> List<T> {

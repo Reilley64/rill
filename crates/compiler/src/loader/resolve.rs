@@ -30,7 +30,7 @@ struct Engine {
 pub(super) fn load(
     request: Request,
     installed: Option<InstalledProfile>,
-    prefix: Option<&Path>,
+    executable: Option<PathBuf>,
 ) -> Result<Graph> {
     let mut engine = Engine {
         id: GraphId(Arc::new(())),
@@ -45,6 +45,14 @@ pub(super) fn load(
         installed,
         error_storage: None,
     };
+    let executable = executable.filter(|_| installed.is_some());
+    if let Some(path) = &executable {
+        engine.host.charge(path.as_os_str().len() + 2)?;
+    }
+    let prefix = executable
+        .as_deref()
+        .and_then(Path::parent)
+        .and_then(Path::parent);
     match engine.run(prefix) {
         Ok((bindings, implementations, prelude, ownership_archive)) => Ok(Graph {
             id: engine.id,
@@ -58,6 +66,7 @@ pub(super) fn load(
             installed,
             error_storage: engine.error_storage,
             ownership_archive,
+            collection_links: executable.map(installed::CollectionLinks::capture),
         }),
         Err(mut error) => {
             error.findings.append(&mut engine.findings);

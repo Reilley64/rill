@@ -2,6 +2,10 @@
 use super::*;
 use std::path::Path;
 
+mod collection;
+pub use collection::CollectionArtifact;
+pub(super) use collection::CollectionLinks;
+
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 pub(super) const OWNERSHIP_ARCHIVE: Option<&[u8]> =
     Some(include_bytes!(env!("RILL_OWNERSHIP_ARCHIVE")));
@@ -215,6 +219,6 @@ pub fn load_installed(input: InstalledRequest) -> Result<Graph> {
             limits: input.limits,
         },
         profile,
-        Some(prefix),
+        Some(executable),
     )
 }

@@ -12,7 +12,7 @@ mod installed;
 mod resolve;
 use filesystem::Host;
 use installed::InstalledProfile;
-pub use installed::{InstalledRequest, load_installed};
+pub use installed::{CollectionArtifact, InstalledRequest, load_installed};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Origin {
@@ -330,9 +330,16 @@ pub struct Graph {
     installed: Option<InstalledProfile>,
     error_storage: Option<(PathBuf, Vec<u8>)>,
     ownership_archive: Option<PathBuf>,
+    collection_links: Option<installed::CollectionLinks>,
 }
 
 impl Graph {
+    pub(crate) fn collection_artifacts(
+        &self,
+    ) -> Option<(CollectionArtifact<'_>, CollectionArtifact<'_>)> {
+        Some(self.collection_links.as_ref()?.artifacts(&self.id))
+    }
+
     pub(crate) fn ownership_archive(&self) -> Option<&std::path::Path> {
         self.ownership_archive.as_deref()
     }

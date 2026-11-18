@@ -243,9 +243,14 @@ impl<'g> TypedReport<'g> {
         self.result_use.as_ref()
     }
 
-    /// List designation validated against the linked construction and projection contract.
+    /// Pinned List designation, separate from operation and storage evidence.
     pub fn list_role(&self) -> Option<ListRole<'g>> {
         self.collections.list
+    }
+
+    /// Artifact for the direct List construction and projection operations.
+    pub fn list_operations_artifact(&self) -> Option<crate::loader::CollectionArtifact<'g>> {
+        self.collections.list_operations_artifact()
     }
 
     /// The private `get` implementation bridge, not a selected ordinary winner.
