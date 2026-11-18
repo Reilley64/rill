@@ -218,7 +218,7 @@ Compare complete pair matching sets, preserving all shared-variable relationship
 
 The correlation in `(Wrapped<T>,Box<T>)` is narrower than independent `(Wrapped<A>,Box<B>)` parameters. Crossed source/destination restrictions can remain incomparable. A narrower destination does not compensate for a wider source.
 
-Protected identity has its separate exact-equality gate below. Do not let source variant admission turn it into implicit parent promotion. The finite subsumption/intersection procedure still needs formal completion with RFCs 0004/0005.
+Protected identity has its separate exact-equality gate below. Do not let source variant admission turn it into implicit parent promotion. The [proposed M4.7 procedure](#proposed-m47-conversion-checking-procedure) defines the finite comparison with RFCs 0004 and 0005.
 
 <a id="proposed-requirement-applicability-and-selection"></a>
 
@@ -246,7 +246,7 @@ For fully established obligations, a disproved specific candidate can leave a ge
 
 Generic assumptions can supply explicit justified evidence. An active recursive goal cannot prove itself merely by appearing again. Type-growing searches or exhausted resources must report incomplete checking, not fabricated negative evidence.
 
-Exact cycle/nonmonotonic applicability procedures remain in-scope authoring work. This policy does not impose a new recursion rule on runtime bodies or intrinsic structural property derivation. An incomplete proof cannot clear readiness.
+The [proposed M4.7 procedure](#proposed-m47-conversion-checking-procedure) defines when incomplete evidence blocks selection. It does not change runtime recursion or intrinsic structural property derivation. An incomplete proof cannot clear readiness.
 
 <a id="proposed-determination-of-fallible-outputs"></a>
 
@@ -266,7 +266,7 @@ An output route can remain symbolic for generic endpoints. It need not normalize
 
 Reject an output schema such as arbitrary E with only display(E) evidence. Preserve schemas that relate E to a nested canonical tryInto output. Neither requires a public associated type or new projection syntax.
 
-Complete determination, equality and mutually dependent evidence judgments still need formal rules. A functional-output claim alone is not a terminating solver or soundness proof.
+The [proposed M4.7 procedure](#proposed-m47-conversion-checking-procedure) specifies bounded determination and equality. It does not prove termination without limits or establish soundness.
 
 ### Selected-error evidence in generic code
 
@@ -299,6 +299,69 @@ Identity returns the input under normal move/implicit-copy/reference rules. It d
 There is no universal fallible identity or automatic infallible-to-fallible adapter. Non-numeric tryInto identity needs its own permitted registration and determined E. Standard numeric safe/identity fallible entries retain Result and ConversionError.
 
 An explicit into registration supplies no tryInto relation automatically, or vice versa. No uninhabited universal conversion error is introduced. These families do not change ordinary arithmetic, rounding or literal validity.
+
+### Proposed M4.7 conversion checking procedure
+
+This procedure applies the [confirmed policies](#confirmed-policies) to bounded static analysis. The [M4.7 checkpoint](../implementation-plan.md#m47-design-checkpoint) defines the public interfaces and approval. It does not admit a standard family, check ownership or change ordinary selection.
+
+#### Inventory and protection
+
+Start with the captured family attachment and signature equations. Use the canonical declaration, not the name used by an implementation or requirement. Use the [RFC 0002 metadata boundary](0002-modules-and-program-loading.md#proposed-m46-requirement-metadata-boundary). Hidden signature dependencies do not create bindings. Do not discover source outside the capture.
+
+Require the written destination argument at registration. Complete the source and error arguments by exact signature equations. The infallible result equals To. The fallible result uses the designated Result declaration with exact arguments To and E. A differently bound type with the same spelling does not qualify. Do not use default arguments or the body to complete these equations.
+
+Collect a body once by its captured identity. Keep the sites and routes for its destination, parameter, result and requirements. Compare the unexpanded pair patterns with variables numbered by first occurrence across both endpoints. Keep E and requirements out of that key. Report R0310 for duplicate keys and R0312 for failed [endpoint permission](#endpoint-placement-permission), independently of use.
+
+Separate family role, Result role, provider identity and protection clearance. An admitted role requires the corresponding actual contract. A conditional analysis can designate captured standard export bindings under an explicit hypothesis. Check their actual declaration identities and applicable signatures. Keep the hypothesis on every derived finding and judgment. A designation, spelling, path, origin or shape grants no admission. Do not reuse ordinary keys or ordinary placement findings under this hypothesis.
+
+Intersect each untrusted pair set with the canonical numeric endpoint domain in both families. Use the primitive identities in the capture and the [RFC 0006 numeric rules](0006-numbers-strings-and-primitive-operations.md#protected-numeric-conversions-and-explicit-arithmetic-helpers). Protect the entire domain, including pairs without an infallible provider. Do not infer provider availability from the protection test.
+
+For infallible identity, compare the two declared endpoint terms under the same binder numbering. Terms that are equal for every exact substitution declare an identity. Reject an untrusted explicit identity or numeric overlap with R0311. A distinct generic pair can still intersect the identity domain. For an established equal pair, use the admitted protected identity before testing requirements of those generic pairs. If its admission is pending, do not select a user body on that pair. A conflicting source filter cannot bypass identity. A variant does not pass the identity gate for its parent. No such general gate exists for the fallible family.
+
+#### Pair relations and source context
+
+Use [RFC 0004's finite vector relations](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) on two columns in destination, source order. The destination contributes one exact pattern. Expand only fixed outer source admissions under RFCs 0004 and 0005. These include owned variants, shared variant references and permitted callable mode weakening. Do not expand inside a container, through a mutable reference or at a variable marker.
+
+Match the exact destination first. Keep those bindings in the same frame when matching the source. As proposed for M4.7, a variable at a source position retains exact capture even if the destination has bound it. For example, `Wrapped<E>` does not make `Wrapped<T> <- T` match a source `E.Tag`. A written fixed parent source can admit `E.Tag`. This keeps prebound variables consistent with ordinary prebound input variables without widening the destination equation.
+
+Compute inclusion and occurs-checked intersection on the complete alternatives. Keep the original key and set when considering a particular call. Equal sets do not create precedence. Matrix entries about partial shapes or unperformed comparisons are unknown, not disjoint. Assign a separate witness to each permitted source admission.
+
+In a direct call, establish To from a written argument or an immediate unique concrete receiving type. For fallible calls, read only the success term of the designated Result. An explicit target can name a rigid body parameter. Do not solve To with requirements, call results, later uses, defaults or available pairs. Compare other result expectations after selection.
+
+Type the value expression once with the shared checker. Only an explicit source argument can supply a conversion-specific source context. Preserve its actual type and any admission separately. As proposed, the explicit source argument filters the retained declared From term by exact equality. It does not retag an independently typed source or redefine the set used for specificity. Use the actual endpoints at the protected identity gate. A bare never value supplies no endpoint. No candidate contributes a literal width or callback context.
+
+For a function value, use explicit arguments or immediate callable context to establish the endpoints. Use the same selection and selected-output equality as a call. Compare the formed descriptor against the receiving callable contract under RFC 0004. Do not infer callable variance from a call's source admission. Keep its actual selected parameter and access facts.
+
+#### Error determination and requirements
+
+For a fallible registration, mark the implementation binders fixed by the endpoint patterns. Fixed constructors need no inference. For each declared canonical fallible requirement, record which binders its endpoints read and which its error term could determine. When both endpoints are determined, record a route keyed by those endpoints and mark the exact error term's binders. Repeat until no new binder is marked. Keep the prerequisite route for each mark. Do not use requirements of other families or assume an output from a recursive route with no established key.
+
+This check proves availability of a route, not proof that its required pair exists. Reject a settled schema with an error binder that has no route. Treat unclassified identities or unavailable clauses that could supply a route as pending. A fixed error constructor may contain determined parameters. Multiple routes do not license inequality. Keep all clauses as obligations and compare their outputs by exact equations at use.
+
+Check every supported implementation body with rigid binders and its written assumptions, even when no call selects it. Retain invalid and incomplete bodies independently of application selection. Body inspection does not determine a signature or make a requirement applicable.
+
+For each matching registration, use a fresh frame with the endpoint substitution. Drain ready exact equations and requirement goals. Issue a child determination goal when a declared fallible requirement has established endpoints. Its key omits the requested E. Compare the child's result with the clause after selection. A determined error can fill a flexible slot or check an existing term, including under fixed constructors. Keep blocked writes pending; neither a caller's E nor a display requirement can make one ready.
+
+Include declaration-wide and candidate requirements. An established false conjunct disproves applicability even if an unrelated conjunct remains pending. An unproved, blocked or cyclic conjunct does not disprove anything. A candidate is proved applicable only after its required evidence and complete signature, including E if fallible, settle. An unresolved candidate retains every relevant reason. Requested root E never seeds this pass.
+
+#### Selection and symbolic evidence
+
+From proved candidates, keep those not strictly dominated by another proved candidate. Ignore a still-unresolved matching candidate for completion only if a proved candidate strictly dominates it. An unknown match or comparison that can change the outcome remains a blocker. If a potentially maximal unresolved candidate remains, report incomplete selection. Otherwise zero proved candidates means absence; one maximal candidate means selection; more than one means ambiguity. Absence and ambiguity require a complete relevant inventory. Resource exhaustion does not justify a completed result.
+
+Use frozen caller assumptions, not the candidate's obligations, as proof inputs. A rigid conversion use needs an exact assumed relation or a uniform proof. An assumption names both endpoints and, when fallible, its exact E. It records a relation, not a selected implementation. Conflicting exact assumptions cannot supply an output. For a uniform proof, require coverage of the whole requested domain and evidence valid on that domain. Exclude every competing intersection or prove strict dominance over it wherever it can apply. Do not treat one visible fallback as coverage against later specialization. A uniform proof must also account for the protected identity gate.
+
+Use distinct determine and agreement judgments. Determine uses the canonical family and both established endpoints, with any explicit source filter. Check a caller's requested error against the independently determined E. An assumption on an unfiltered relation cannot justify a filtered request unless the matching domains agree. Unresolved or unequal outputs never trigger another selection. Emit R0313 only on a settled error inequality; retain both source sites. An exact assumed relation can preserve rigid E without normalizing an overridable nested fallback.
+
+Reuse [RFC 0004's proof worklist](0004-functions-overloads-and-generic-requirements.md#proof-worklist-and-completion). Key judgments by capture, role and protection premises, assumptions, ordered terms and applicable filters. A repeated active determination is unresolved, even if a dependent agreement requests a different error. Resume dependencies when independent facts settle, without accepting an active cycle as proof or negative evidence. Treat growth and charged exhaustion as resource limits. Retain selection dependencies, output routes, equalities and cycle witnesses without a checked receipt for a pending call.
+
+#### Completion and validation
+
+Use the existing work, entry and depth limits for the shared engine. Charge inventory, temporary alternatives, term comparisons, substitutions, dependency edges and report records before growth. Count failed alternatives and blocked work. Keep ResourceLimit distinct and ahead of Incomplete and SourceRejected. Reject cross-capture identities as InvalidRequest.
+
+Use R0303 for settled ambiguity and R0314 for settled absence after endpoints are established. Missing literal context follows the scalar rules. Keep registration determinacy and evidence blockers distinct from absence. An invalid registration stays a collection failure. Do not silently drop it to make a family appear coherent. A hypothetical verdict is not a source diagnostic or a canonical proof. Missing role, Result or identity-provider admission is not a negative fact. A checked body still requires all applicable typed prerequisites.
+
+Before Rust, compare a finite pair model to independent ground enumeration. Include correlation, exact capture, fixed admission and identity. Compare applicability to enumeration of assignments to unresolved candidates in bounded cases. Check output-route scheduling against least closure, including blocked and cyclic cases. A counterexample returns to design review. Model or compiler assertions do not execute Rill.
+
 
 ### Function values, ownership and effects
 
@@ -554,9 +617,7 @@ These approvals do not accept future unwritten rules or complete checking proced
 
 ### Remaining in-scope authoring work
 
-Complete finite matching/subsumption/intersection and permitted source-admission judgments with the type/function owners. Preserve declared keys separately from source value admission and selected call signatures.
-
-Complete recursive requirement applicability, output determination/equality and specialization-dependent symbolic evidence. Resolve cycles/type-growing obligations without unfounded success or unsupported negative assumptions.
+Review and approve the [proposed M4.7 procedure](#proposed-m47-conversion-checking-procedure) before model and compiler work. The procedure covers finite pair comparison, source admission, bounded applicability and symbolic selected outputs. It does not supply actual core admission or runtime validation.
 
 Complete implementation-binder/contextual inference, function-value adapters and caller/selected-signature ownership routes. Validate mandatory protected standard actions, actual core metadata dependencies and nested success/error escapes.
 

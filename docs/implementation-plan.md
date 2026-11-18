@@ -857,6 +857,55 @@ Direct compiler tests must load real M3 source fixtures and query actual inferre
 
 Run `mise run test:compiler`, `mise run test`, `mise run check` and `mise run build:scaffold`. Run `check:ci` only if workflows change. Keep documentation checks, review scopes, model execution, compiler assertions and product execution separate. No M4.6 model, compiler or Rill execution has occurred at this checkpoint.
 
+## M4.7 design checkpoint
+
+[M4.7 #64](https://github.com/Reilley64/rill/issues/64) follows the [M4.6 completion record](../crates/compiler/tests/m4-6-acceptance.md#completion-increment) at `392d8428a81109b1dc4ed0ad8e60fd4738054522`. All eight slices remain in [draft PR #58](https://github.com/Reilley64/rill/pull/58). The [three confirmed conversion policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6918885645) do not approve these new procedures or accept RFC 0009.
+
+### Owning procedure and scope
+
+[RFC 0009](rfcs/0009-user-implementable-conversions.md#proposed-m47-conversion-checking-procedure) owns pair collection, endpoint permission, exact destination matching, conversion applicability, selected-error determination and exact equality. It uses the finite pattern and bounded evidence procedures of [RFC 0004](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure). RFC 0005 still owns variant and reference relationships. RFC 0006 owns the numeric domain and core pair catalogue. RFC 0008 owns closed Err, propagation and causal wrapping.
+
+Extend the shared typed checker. Use loaded M3 bodies, declaration IDs, syntax, spans and routes without resolving imports again. Use M4.1/M4.2 canonical terms and M4.5/M4.6 signature equations, pattern comparison and evidence. Do not treat conditional ordinary keys as conversion keys. Do not let a conversion role hypothesis strengthen the ordinary view. No change to ordinary placement, ranking, requirement checks or no-fallback behavior.
+
+M4.8 still owns actual role, provider and protection admission and integrated core and result-use checks. M4.7 checks the structural protection rules and reports where real admission is needed. No invented std source, trusted provider or catalogue establishes a positive conversion. The procedure grants no access, move, borrow, storage or execution permission.
+
+### Proposed public interfaces
+
+Names describe the interface, not final Rust spelling. A role hypothesis is an explicit, report-wide premise. It names captured family identities and, for fallible analysis, a captured Result identity. Use actual M3 binding and signature evidence to check their proposed roles. The caller cannot designate a trusted provider or assert a requirement result. Keep the unfinished admission visible even when all structural comparisons settle.
+
+| Interface | Catches | Does not establish |
+| --- | --- | --- |
+| Conversion analysis over one captured typed analysis context and limits; query family and registration facts | Canonical alias/body deduplication, pair keys, shape, placement, protection conflicts, and error-determination routes. Returns independent body findings and explicit blockers. | Source visibility not in the capture, trusted core admission, or body validity inferred from selection. |
+| Query an established pair in that report, with optional exact source filter and separate E demand | Whole-pair matching, applicable and unresolved candidates, ordering witnesses, selected signature, required protected identity, and output agreement. Use canonical terms belonging to the same capture. | Literal or endpoint inference, injected proof assumptions, or a checked call from a type-vector comparison. |
+| Query original call and function-value nodes, body status and checker-issued evidence goals | Independent endpoint contexts, actual source and admission, selection or symbolic relation, exact E, provenance and blocked dependencies. | A resolver, an alternate expression checker, a proof of ownership or a runtime adapter. |
+
+Return `InvalidRequest` for foreign identities, structurally invalid queries and cross-report goals. Distinguish no fact from a partial fact. Give resource exhaustion precedence over incomplete and rejected outcomes. Known independent facts may survive exhaustion. Conditional results and findings carry their premise, including when work stops early.
+
+### Decisions requested before model or Rust
+
+| Choice | Proposal and consequence |
+| --- | --- |
+| V1. Identity, registration and protection | Use actual captured canonical identities. Approve distinct conditional interfaces for unadmitted roles. Require the written target and exact header equations. Normalize both endpoints with one binder numbering. Check unused registration bodies and reject duplicate, unauthorized and protected overlap under their applicable premises. Use actual endpoint equality for protected infallible identity. |
+| V2. Pair matching and context | Approve exact destination and M4.5 fixed-outer source admissions only. A binder fixed by To remains an exact variable at the source. For example, with `Wrapped<E>` as To, `Wrapped<T> <- T` does not admit `E.Tag`; a written fixed `E` source can. Allow explicit From to supply context and filter the declared source term, not retag an already typed source. A `Parent` destination and an actual `Parent.Tag` source do not enter protected identity even with a written `Parent` source filter. The alternative is to allow a destination-bound source variable to gain the admission of its substituted type. That changes the pair sets and needs a different finite comparison procedure. |
+| V3. Applicability and selected E | Approve three-state applicability, registration-time reachability of error terms, frozen evidence inputs and bounded pair-keyed determination. A failed requirement can exclude a conversion candidate; unresolved potentially maximal candidates block success. Caller E, including expected Result E, only checks an independently determined output. Keep a rigid relation separate from a selected body. No fallback after E mismatch. |
+| V4. Seams and validation | Approve the public interfaces and their completion limits. Compare against an independent finite model before public-interface TDD. Use actual loaded captures and label hypothesized roles. Run required mise tasks, get independent final Standards and Spec reviews, and publish exact verification evidence in PR #58. |
+
+### Planned checks
+
+These are expected contrasts, not results.
+
+| Counterexample to prevent | Planned model or public assertion |
+| --- | --- |
+| Aliases or different errors create new registrations; permission leaks through a nested local type. | Compare two true routes to the same declaration and distinct duplicate bodies. Check reference-peeled outer owners, a local wrapper, foreign box with a local argument, and a local error alone. Keep same-spelled application families ordinary. |
+| Matching widens a target, breaks correlation or ranks an expected error. | Compare correlated and crossed pairs to bounded ground enumeration. Cover fixed source variant admission and exact target variant checks. Try the prebound-variable case and an explicit source filter. A wrong expected or explicit E retains the same winner. |
+| A lone candidate chooses To or width, or implicit identity supplies an adapter. | Compare suffixed and unsuffixed sources, immediate and absent target context, a placed explicit source argument, and named function values. Check exact identity versus variant/parent pairs, generic identity intersections, numeric gaps and no universal fallible identity. |
+| Unknown evidence counts as failure or prevents every winner. | Enumerate small proved/disproved/unresolved frontiers. Cover disproved specific candidates, a pending dominator or tie, a dominated pending candidate and settled ambiguity. Include incomplete inventories and charged exhaustion. |
+| Display or expected E invents output; a cycle proves itself. | Check registration routes with an independent seed, nested selected errors, competing exact routes and unseeded cycles. Query mismatch after normal selection. Reject a caller-chosen schema even when its body never returns. Compare growth limits to repeated-pair cycles. |
+| A symbolic body normalizes an overridable fallback, or hypothetical facts escape. | Check exact symbolic assumptions and concrete specialization with distinct errors. Preserve missing roles and dependencies in source and issued goals. Reject foreign identities and check that exhaustion cannot publish a checked or unconditional negative outcome. |
+
+Before Rust, model pair relations, frontier selection and output-route closure against independent bounded oracles. Before publication, run `mise run test:compiler`, `mise run test`, `mise run check` and `mise run build:scaffold`. Run `check:ci` only for workflow changes. Preserve earlier evidence and separate document checks, model results, compiler assertions and Rill execution. Full RFC status remains Draft.
+
+
 ## Completion record
 
 The following M1 statement belongs to the original planning baseline. M1/M2 later merged as recorded above; M3 evidence is separate.
