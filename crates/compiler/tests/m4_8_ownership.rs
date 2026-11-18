@@ -112,6 +112,7 @@ fn installed_ownership_requires_the_built_archive() {
         closed_roles_without_native_providers(&root, &request);
         complete_provider_and_protection_scope(&request);
         installed_receipts(&request);
+        installed_ordinary_family(&request);
 
         let facade = root.join("lib/rill/std/std.rill");
         let bytes = fs::read(&facade).unwrap();
@@ -842,7 +843,7 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
             short.completion(),
             compiler::analysis::typed::TypedCompletion::ResourceLimit
         );
-        assert!(short.core_blockers().contains(&CoreBlocker::Roles));
+        assert!(!short.core_blockers().contains(&CoreBlocker::Roles));
 
         let source_only = loader::load(graph.request().clone()).unwrap();
         assert!(
@@ -1146,6 +1147,279 @@ fn installed_receipts(request: &InstalledRequest) {
         );
     }
     fs::write(checks, SUPPORT).unwrap();
+}
+
+fn installed_ordinary_family(request: &InstalledRequest) {
+    use compiler::analysis::TypeTerm;
+    use compiler::analysis::scalars::generics::GoalState;
+    use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarUnsupported};
+    use compiler::loader::DeclarationKind;
+    const MAIN: &str = include_str!("../../../tests/installed/typed/main.rill");
+    const FAMILY: &str = "
+        export function chooseOne<T>(value: &T): bool;
+        implement<U> chooseOne(value: &U): bool { return true; }
+        function usesOrdinary(value: i32): bool { return chooseOne(&value); }
+        export function relay<T>(value: T): T;
+        implement<V> relay(value: V): V { return value; }
+    ";
+    let entry = request.entry.with_file_name("ordinary_main.rill");
+    let ordinary = request.entry.with_file_name("ordinary.rill");
+    fs::write(&ordinary, FAMILY).unwrap();
+    for test_mode in [false, true] {
+        let request = InstalledRequest {
+            entry: entry.clone(),
+            test_mode,
+            ..request.clone()
+        };
+        fs::write(&entry, format!("
+            import ordinary::{{chooseOne as pick, relay}};
+            {MAIN}
+            function probeOrdinary(value: i32): bool {{ return pick(&value); }}
+            function produce<T, U = bool>(value: &T): U;
+            implement<A, B> produce(value: &A): B where noBorrow(B) {{ while (true) {{}} }}
+            function probeDefault(value: i32): bool {{ let produced = produce(&value); return produced; }}
+            function directRelay(value: Result<bool>.Ok): Result<bool>.Ok {{ return relay(value); }}
+            function valueRelay(value: Result<bool>.Ok): Result<bool>.Ok {{
+                let held: (Result<bool>.Ok) => Result<bool>.Ok = relay;
+                return held(value);
+            }}
+        ")).unwrap();
+        let graph = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let obligations: Vec<_> = report
+            .bodies()
+            .obligations()
+            .iter()
+            .map(|o| (o.reason, o.site.span.bytes()))
+            .collect();
+        let pending: Vec<_> = report
+            .result_use()
+            .unwrap()
+            .pending()
+            .iter()
+            .map(|p| (p.blocker, p.site.span.bytes()))
+            .collect();
+        let receipt = report.receipt().unwrap_or_else(|| {
+            panic!(
+                "mode={test_mode}: {:?}; {:?}; {obligations:?}; {pending:?}",
+                report.completion(),
+                report.core_blockers()
+            )
+        });
+        let app = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.path == "ordinary_main.rill")
+            .unwrap();
+        let node = app
+            .syntax
+            .nodes
+            .iter()
+            .position(|n| n.span.bytes() == b"pick(&value)")
+            .unwrap();
+        let call = report.bodies().ordinary_call(app, node).unwrap().unwrap();
+        assert!(call.checked && call.premise.is_none());
+        let fact = report.bodies().node(app, node).unwrap().unwrap();
+        let NodeFactKind::Expression(value) = &fact.kind else {
+            panic!("expected call")
+        };
+        let call = value.call.as_ref().unwrap();
+        let selection = call.selection.as_ref().expect("actual ordinary winner");
+        assert_eq!(call.callee.module.path, "ordinary.rill");
+        assert_eq!(call.bindings[0].name, "pick");
+        assert_eq!(selection.implementation.module, call.callee.module);
+        assert_eq!(
+            selection.implementation.kind,
+            DeclarationKind::Implementation
+        );
+        let [family_arg] = call.substitution.as_slice() else {
+            panic!("family substitution")
+        };
+        let [body_arg] = selection.substitution.as_slice() else {
+            panic!("body substitution")
+        };
+        assert_ne!(family_arg.binder, body_arg.binder);
+        assert!(matches!(body_arg.argument.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"));
+        let owner = graph
+            .modules()
+            .iter()
+            .find(|m| m.key == selection.implementation.module)
+            .unwrap();
+        assert!(
+            report
+                .bodies()
+                .body(owner, BodyOwner::Declaration(selection.implementation))
+                .unwrap()
+                .is_some()
+        );
+        let produce = app
+            .syntax
+            .nodes
+            .iter()
+            .position(|n| n.span.bytes() == b"produce(&value)")
+            .unwrap();
+        let NodeFactKind::Expression(value) =
+            &report.bodies().node(app, produce).unwrap().unwrap().kind
+        else {
+            panic!("expected call")
+        };
+        let call = value.call.as_ref().unwrap();
+        assert_eq!(call.defaults.len(), 1);
+        assert_eq!(call.selection.as_ref().unwrap().substitution.len(), 2);
+        let value = app
+            .syntax
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.span.bytes() == b"relay")
+            .find_map(|(id, _)| {
+                report
+                    .bodies()
+                    .node(app, id)
+                    .unwrap()
+                    .and_then(|n| n.callable.as_ref()?.function_value.as_ref())
+            })
+            .expect("formed family value");
+        assert_eq!(value.declaration.kind, DeclarationKind::Family);
+        let target = value.selection.as_ref().unwrap();
+        assert_eq!(target.implementation.kind, DeclarationKind::Implementation);
+        assert_ne!(target.substitution[0].binder, value.substitution[0].binder);
+
+        let exact = AnalysisLimits {
+            max_work: receipt.statistics().work,
+            max_entries: receipt.statistics().entries,
+            max_depth: receipt.statistics().max_depth,
+        };
+        assert!(analyze_typed(&graph, exact).receipt().is_some());
+        for short in [
+            AnalysisLimits {
+                max_work: exact.max_work - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_entries: exact.max_entries - 1,
+                ..exact
+            },
+        ] {
+            assert_eq!(
+                analyze_typed(&graph, short).completion(),
+                TypedCompletion::ResourceLimit
+            );
+        }
+
+        fs::write(
+            &entry,
+            "import ordinary::chooseOne as pick; expect pick(&true);",
+        )
+        .unwrap();
+        let partial = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&partial, AnalysisLimits::default());
+        assert!(report.core_blockers().contains(&CoreBlocker::Roles));
+        assert!(
+            report
+                .bodies()
+                .obligations()
+                .iter()
+                .any(|o| o.reason == ScalarUnsupported::FamilySelection
+                    && o.site.span.bytes() == b"pick(&true)")
+        );
+        assert!(report.receipt().is_none());
+
+        fs::write(
+            &entry,
+            format!(
+                "
+            {MAIN}
+            function checkPattern<T>(value: &T): bool;
+            implement<T> checkPattern(value: &T): bool {{ return true; }}
+            implement checkPattern(value: &i32): bool where noBorrow(&i32) {{ return true; }}
+            expect checkPattern(&1i32);
+        "
+            ),
+        )
+        .unwrap();
+        let graph = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let app = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.path == "ordinary_main.rill")
+            .unwrap();
+        let node = app
+            .syntax
+            .nodes
+            .iter()
+            .position(|n| n.span.bytes() == b"checkPattern(&1i32)")
+            .unwrap();
+        let call = report.bodies().ordinary_call(app, node).unwrap().unwrap();
+        let proof = report.bodies().goal(call.goal.as_ref().unwrap()).unwrap();
+        assert_eq!(proof.state, GoalState::Disproved);
+        let winner = proof.selection.as_ref().unwrap().implementation;
+        assert!(
+            app.declarations
+                .iter()
+                .any(|d| d.id == *winner && d.span.bytes().starts_with(b"implement checkPattern"))
+        );
+        assert!(report.bodies().node(app, node).unwrap().is_none());
+        assert!(
+            report
+                .bodies()
+                .findings()
+                .iter()
+                .any(|f| f.site.node == node && f.kind.code() == Some("R0302"))
+        );
+        assert_eq!(report.completion(), TypedCompletion::SourceRejected);
+
+        fs::write(
+            &entry,
+            format!(
+                "
+            {MAIN}
+            function repeated<T>(value: &T): bool;
+            implement<A> repeated(value: &A): bool {{ return true; }}
+            implement<B> repeated(value: &B): bool {{ return false; }}
+        "
+            ),
+        )
+        .unwrap();
+        let graph = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert_eq!(report.completion(), TypedCompletion::SourceRejected);
+        assert!(
+            report
+                .bodies()
+                .findings()
+                .iter()
+                .any(|f| f.kind.code() == Some("R0304"))
+        );
+
+        fs::write(
+            &entry,
+            format!(
+                "
+            import std::core::copy as protectedCopy;
+            {MAIN}
+            function blocked(value: &Shared<i32>): Shared<i32> {{
+                let held: (&Shared<i32>) => Shared<i32> = protectedCopy;
+                return held(value);
+            }}
+        "
+            ),
+        )
+        .unwrap();
+        let graph = loader::load_installed(request).unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert!(!report.core_blockers().contains(&CoreBlocker::Roles));
+        assert!(
+            report
+                .bodies()
+                .obligations()
+                .iter()
+                .any(|o| o.reason == ScalarUnsupported::FamilySelection
+                    && o.site.span.bytes() == b"protectedCopy")
+        );
+        assert!(report.receipt().is_none());
+    }
 }
 
 fn partial_collection(request: &InstalledRequest) {

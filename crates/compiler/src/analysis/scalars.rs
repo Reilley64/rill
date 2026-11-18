@@ -108,7 +108,7 @@ pub struct ExpressionFacts<'g> {
     pub expected: Option<Type<'g>>,
     pub literal: Option<LiteralEvidence<'g>>,
     pub binding: Option<&'g DeclarationId>,
-    pub call: Option<CallFacts<'g>>,
+    pub call: Option<Box<CallFacts<'g>>>,
     pub ordinary_context: Option<ordinary::InputPremise>,
     pub place: Place,
     pub boolean: Option<BooleanSet>,
@@ -130,6 +130,8 @@ pub struct CallFacts<'g> {
     pub callee: &'g DeclarationId,
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
+    /// The selected ordinary body and its own binder substitution, when proved.
+    pub selection: Option<generics::GoalSelection<'g>>,
     pub arguments: Vec<NodeId>,
     pub defaults: Vec<DefaultArgumentUse<'g>>,
     pub pipe_input: Option<NodeId>,
@@ -202,6 +204,10 @@ pub enum ScalarFindingKind {
     InvalidTarget,
     MissingValue,
     MissingRequirement,
+    NoApplicableImplementation,
+    AmbiguousImplementation,
+    DuplicateImplementation,
+    UnauthorizedImplementation,
     MissingConversionPair,
     ConversionErrorMismatch,
     AmbiguousConversionPair,
@@ -227,10 +233,12 @@ impl ScalarFindingKind {
             Self::LiteralRange => Some("R0002"),
             Self::NumericContext => Some("R0003"),
             Self::MissingValue => Some("R0400"),
+            Self::NoApplicableImplementation => Some("R0300"),
             Self::MissingRequirement => Some("R0302"),
             Self::MissingConversionPair | Self::ProtectedNumericGap => Some("R0314"),
             Self::ConversionErrorMismatch => Some("R0313"),
-            Self::AmbiguousConversionPair => Some("R0303"),
+            Self::AmbiguousImplementation | Self::AmbiguousConversionPair => Some("R0303"),
+            Self::DuplicateImplementation => Some("R0304"),
             Self::PrivateValue => Some("R0401"),
             Self::StartupCapture => Some("R0502"),
             Self::ExpectationBoolean => Some("R0101"),
@@ -490,6 +498,7 @@ struct Checker<'r, 'g> {
     installed_conversions: Option<&'r super::typed::ConversionCore<'g>>,
     collections: CollectionCore<'g>,
     native_ownership: &'r [super::typed::OwnershipProtection<'g>],
+    ordinary_scope: Option<super::typed::ApplicationOrdinaryScope>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
@@ -525,6 +534,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             installed_conversions: None,
             collections: Default::default(),
             native_ownership: &[],
+            ordinary_scope: None,
             data_depth: 0,
             evidence: generics::Evidence::default(),
             conversions: None,
@@ -1759,6 +1769,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 callee: &declaration.id,
                 bindings,
                 substitution,
+                selection: None,
                 arguments,
                 defaults: Vec::new(),
                 pipe_input: None,
@@ -2673,12 +2684,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else {
                     inference.data.remove(&node).map(|p| p.fact)
                 };
-                let mut call = inference.calls.remove(&node).map(|c| c.fact);
-                if let Some(call) = &mut call
-                    && let Some(substitution) = self.checked_ordinary_substitution(module, node)?
-                {
-                    call.substitution = substitution;
-                }
+                let call = if let Some(mut call) = inference.calls.remove(&node).map(|c| c.fact) {
+                    self.record_checked_ordinary_call(module, node, &mut call)?;
+                    self.elab.reserve(1)?;
+                    Some(Box::new(call))
+                } else {
+                    None
+                };
                 let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),

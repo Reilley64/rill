@@ -181,13 +181,19 @@ impl<'a, 'g> Check<'a, 'g> {
                 depth,
             );
         }
-        if !self.checked.contains(call.callee) {
+        let (target, substitution) = call
+            .selection
+            .as_ref()
+            .map_or((call.callee, call.substitution.as_slice()), |selected| {
+                (selected.implementation, selected.substitution.as_slice())
+            });
+        if !self.checked.contains(target) {
             return Ok(false);
         }
-        if self.proving_callable {
+        if self.proving_callable || call.selection.is_some() {
             for argument in &call.arguments {
                 if state.owes_under(Root::Temporary(*argument), self.budget)? {
-                    return self.prove_named(call.callee, &call.substitution, depth);
+                    return self.prove_named(target, substitution, depth);
                 }
             }
         }
@@ -240,8 +246,11 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(false);
         };
         if let Some(named) = &callable.function_value {
-            return Ok(!unknown_environment
-                && self.prove_named(named.declaration, &named.substitution, depth + 1)?);
+            let (target, substitution) = named.selection.as_ref().map_or(
+                (named.declaration, named.substitution.as_slice()),
+                |selected| (selected.implementation, selected.substitution.as_slice()),
+            );
+            return Ok(!unknown_environment && self.prove_named(target, substitution, depth + 1)?);
         }
         let Some(arrow) = callable
             .arrow

@@ -737,14 +737,14 @@ fn a_fallible_source_result_can_fill_a_waiting_exact_equation_only_conditionally
         .unwrap();
     assert_eq!(
         ordinary.premise,
-        compiler::analysis::ordinary::InputPremise::HypotheticalOrdinaryAndConversionRoles
+        Some(compiler::analysis::ordinary::InputPremise::HypotheticalOrdinaryAndConversionRoles)
     );
     assert_eq!(
         report
             .goal(ordinary.goal.as_ref().unwrap())
             .unwrap()
             .premise,
-        Some(ordinary.premise)
+        ordinary.premise
     );
     let wrong = report
         .conversion_use(module, node_with(module, b"tryInto(false)"))
@@ -1061,7 +1061,7 @@ fn a_conversion_error_can_determine_a_standalone_requirement_output() {
         .unwrap();
     assert_eq!(
         family.premise,
-        compiler::analysis::ordinary::InputPremise::HypotheticalOrdinaryAndConversionRoles
+        Some(compiler::analysis::ordinary::InputPremise::HypotheticalOrdinaryAndConversionRoles)
     );
     let root = report.goal(family.goal.as_ref().unwrap()).unwrap();
     let result = &root.output.as_ref().unwrap().result;

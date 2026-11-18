@@ -20,6 +20,7 @@ pub use collections::{
     CollectionRepresentation, CollectionStorage, ListRole, ListTraversal,
 };
 pub use completion::TypedCompletion;
+pub(in crate::analysis) use core::ApplicationOrdinaryScope;
 pub(super) use core::PrimitiveCore;
 pub use core::{
     DisplayProtection, ErrorBridge, ErrorOperation, ErrorProviders, ErrorRepresentation,
@@ -347,6 +348,13 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
                 &mut budget,
             )
             .is_err();
+    let roles_complete = if authority_exhausted {
+        Ok(false)
+    } else {
+        core::roles_complete(&inventory, &core, &collections, &ownership, &mut budget)
+    };
+    let ordinary_scope = matches!(roles_complete, Ok(true))
+        .then(|| core::ApplicationOrdinaryScope::from_closed_roles(graph));
     let bodies = analyze_integrated_bodies(
         &inventory,
         budget,
@@ -358,7 +366,8 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             conversions: Some(&core.conversions),
             collections,
             native_ownership: &ownership.protection,
-            exhausted: authority_exhausted,
+            ordinary_scope,
+            exhausted: authority_exhausted || roles_complete.is_err(),
         },
     );
     let mut budget = Budget {
@@ -432,23 +441,12 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     {
         completion = ScalarFailureKind::ResourceLimit;
     }
-    let roles_complete = if completion == ScalarFailureKind::ResourceLimit {
-        false
-    } else {
-        match core::roles_complete(&inventory, &core, &collections, &ownership, &mut budget) {
-            Ok(complete) => complete,
-            Err(()) => {
-                completion = ScalarFailureKind::ResourceLimit;
-                false
-            }
-        }
-    };
     let representation_complete = core.result.is_some_and(|r| r.representation.is_some())
         && core.conversions.bytes_representation().is_some()
         && collections.representations().count() == 4
         && ownership.representations_complete();
     let core_blockers = [
-        (!roles_complete, CoreBlocker::Roles),
+        (!matches!(roles_complete, Ok(true)), CoreBlocker::Roles),
         (!core_inventories.providers, CoreBlocker::Providers),
         (!core_inventories.protection, CoreBlocker::Protection),
         (!representation_complete, CoreBlocker::Representation),

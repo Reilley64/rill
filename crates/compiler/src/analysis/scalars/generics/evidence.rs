@@ -71,7 +71,7 @@ pub enum GoalVerdict {
     Disproved,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GoalSelection<'g> {
     pub implementation: &'g DeclarationId,
     pub alternative: usize,
@@ -265,7 +265,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             RequirementTarget::Family(id) if self.conversion_family(id).is_some() => {
                 Some(InputPremise::HypotheticalConversionRole)
             }
-            RequirementTarget::Family(id) if self.ordinary_scalar_role(id).is_some() => None,
+            RequirementTarget::Family(id)
+                if self.has_application_ordinary_scope(id)
+                    || self.ordinary_scalar_role(id).is_some() =>
+            {
+                None
+            }
             RequirementTarget::Family(id) if self.clear_primitive_goal(id, &judgment) => None,
             RequirementTarget::Family(id)
                 if self.is_error_display(id) || self.is_error_observer(id) =>
@@ -444,10 +449,31 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(substitutions) = &body.substitution else {
             return Ok(None);
         };
+        let application_ordinary = self.has_application_ordinary_scope(&source.family);
         if body.placement == ordinary::Placement::OutsideOwners
             && self.conversion_family(&source.family).is_none()
         {
-            return Ok(None);
+            if !application_ordinary {
+                return Ok(None);
+            }
+            self.finding(
+                module,
+                source.signature_node,
+                ScalarFindingKind::UnauthorizedImplementation,
+            )?;
+        }
+        if application_ordinary {
+            for group in &family.duplicate_keys {
+                self.elab.step(1 + group.len())?;
+                if group.contains(&&declaration.id) {
+                    self.finding(
+                        module,
+                        source.signature_node,
+                        ScalarFindingKind::DuplicateImplementation,
+                    )?;
+                    break;
+                }
+            }
         }
         self.add_body_assumptions(module, source.body_node, &source.family, substitutions)?;
         self.add_body_assumptions(module, source.body_node, &source.declaration, &[])?;
@@ -471,7 +497,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .all(|issue| issue.declaration != &declaration.id);
         }
         let admitted = conversion
-            || (self.ordinary_scalar_role(&source.family).is_some()
+            || (application_ordinary
+                || self.ordinary_scalar_role(&source.family).is_some()
                 || self.is_error_display(&source.family)
                 || self.is_error_observer(&source.family)
                 || self.collections.is_iteration_family(&source.family)
@@ -959,7 +986,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
     }
 
-    fn family_substitutions(
+    pub(super) fn family_substitutions(
         &mut self,
         header: &DeclarationFacts<'g>,
         arguments: &[Type<'g>],
@@ -1150,6 +1177,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             }))
             && let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)?
         {
+            // The assumed contract does not prove a concrete dispatch target.
+            if self.has_application_ordinary_scope(id) {
+                self.evidence.goals[goal].selection = None;
+            }
             return Ok(state);
         }
         if let (Some(role), Some(primitives)) = (self.ordinary_scalar_role(id), self.primitives) {
@@ -1359,7 +1390,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             statistics: self.elab.statistics,
         };
         let selected = (|| {
-            let admitted = admitted_role || self.ordinary_scalar_role(family).is_some();
+            let admitted = admitted_role
+                || self.has_application_ordinary_scope(family)
+                || self.ordinary_scalar_role(family).is_some();
             let inventory = self.input.ordinary.unwrap();
             let facts = if admitted {
                 ordinary::source::admitted_family(inventory, family, &mut budget)?
@@ -1564,6 +1597,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             unreachable!()
         };
         let (site, source) = (original.site, original.source);
+        let premise = original.premise;
         self.elab.reserve(original.routes.len())?;
         let routes = original.routes.clone();
         let id = self.issue_goal(
@@ -1577,6 +1611,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             &routes,
             false,
         )?;
+        if self.has_application_ordinary_scope(family)
+            && let Some(premise) = premise
+        {
+            self.add_goal_premise(&id, premise);
+        }
         self.evidence.goals[id.index].selection = Some(selection);
         self.solve_goal(&id)?;
         Ok(id)
@@ -1622,10 +1661,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 state = GoalState::Unresolved(GoalBlocker::UnavailableRequirement);
                 continue;
             };
-            if matches!(
-                self.evidence.goals[goal].judgment,
-                GoalJudgment::Instantiate { .. }
-            ) {
+            if let GoalJudgment::Instantiate { family, .. } = self.evidence.goals[goal].judgment
+                && !self.has_application_ordinary_scope(family)
+            {
                 self.add_goal_premise(&child, InputPremise::HypotheticalOrdinaryRole);
             }
             self.link_goal(goal, child)?;

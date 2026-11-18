@@ -297,7 +297,10 @@ fn ordinary_source_context_needs_all_viable_alternatives_to_agree() {
     let (open, _) = calls.next().unwrap();
     let (fixed, _) = calls.next().unwrap();
     let partial = report.ordinary_call(module, open).unwrap().unwrap();
-    assert_eq!(partial.premise, InputPremise::HypotheticalOrdinaryRole);
+    assert_eq!(
+        partial.premise,
+        Some(InputPremise::HypotheticalOrdinaryRole)
+    );
     assert_eq!(partial.candidates.len(), 2);
     assert!(partial.inputs[1].is_none());
     assert_eq!(partial.outcome, None);
@@ -415,7 +418,7 @@ fn borrowed_pattern_projects_callback_input_before_inferring_selected_output() {
     assert!(context.result.is_none());
     let arrow = report.arrow(module, context.argument).unwrap().unwrap();
     assert_eq!(arrow.parameters.first(), context.parameters[0].as_ref());
-    assert_eq!(arrow.premise, Some(call.premise));
+    assert_eq!(arrow.premise, call.premise);
     let specialized = graph
         .implementations()
         .iter()

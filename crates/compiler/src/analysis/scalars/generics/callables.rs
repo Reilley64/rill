@@ -31,6 +31,8 @@ pub struct InvocationFacts<'g> {
 #[derive(Debug)]
 pub struct FunctionValueFacts<'g> {
     pub declaration: &'g DeclarationId,
+    /// Exact ordinary implementation when the value was formed from a family.
+    pub selection: Option<GoalSelection<'g>>,
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
     pub defaults: Vec<DefaultArgumentUse<'g>>,
@@ -157,6 +159,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 node,
                 FunctionValueFacts {
                     declaration: &declaration.id,
+                    selection: None,
                     bindings,
                     substitution,
                     defaults: Vec::new(),

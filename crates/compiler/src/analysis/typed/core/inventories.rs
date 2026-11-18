@@ -1,6 +1,7 @@
-//! Closure of the pinned A2 catalogues, not admission for arbitrary ordinary calls.
+//! Closure of the pinned role and protection catalogues.
 use super::*;
 use crate::analysis::ordinary::{Compatibility, Placement, source};
+use crate::loader::{DeclarationId, GraphId, Origin};
 use crate::parser::NodeKind;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -8,6 +9,24 @@ pub(in crate::analysis::typed) struct InventoryCompleteness {
     pub providers: bool,
     pub protection: bool,
     pub protected_violation: bool,
+}
+
+/// Empty required-winner and prohibition sets for application-defined families
+/// in one closed installed capture. The pinned catalogue keys all protected
+/// actions by their canonical standard family, including actions on app types.
+#[derive(Clone)]
+pub(in crate::analysis) struct ApplicationOrdinaryScope(GraphId);
+
+impl ApplicationOrdinaryScope {
+    pub(in crate::analysis::typed) fn from_closed_roles(graph: &Graph) -> Self {
+        Self(graph.id())
+    }
+
+    pub(in crate::analysis) fn contains(&self, family: &DeclarationId) -> bool {
+        family.context == self.0
+            && family.kind == DeclarationKind::Family
+            && family.module.origin == Origin::Application
+    }
 }
 
 pub(in crate::analysis::typed) fn check_inventories(

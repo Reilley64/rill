@@ -191,6 +191,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 inference.slots.get_mut(&node).unwrap().function_value =
                     Some(Arc::new(FunctionValueFacts {
                         declaration: written.declaration,
+                        selection: None,
                         bindings: written.bindings.clone(),
                         substitution,
                         defaults: Vec::new(),

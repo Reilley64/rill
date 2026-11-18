@@ -1,4 +1,4 @@
-//! Conditional context and selection for ordinary families. No role admission.
+//! Shared context, selection and evidence for ordinary family uses.
 use super::*;
 use declarations::Budget;
 use ordinary::source::{self, SourceCandidate};
@@ -34,10 +34,9 @@ pub enum OutputAgreement<'g> {
 pub struct OrdinaryCall<'g> {
     pub site: Site<'g>,
     pub family: &'g DeclarationId,
-    /// Whether the output was promoted from comparison to a checked call.
     pub checked: bool,
-    /// Premise of the structural comparison. See the goal for actual admission.
-    pub premise: InputPremise,
+    /// A premise retained by the comparison or its dependent evidence.
+    pub premise: Option<InputPremise>,
     pub routes: Vec<&'g Binding>,
     pub inputs: Vec<Option<Type<'g>>>,
     pub receiving: Vec<Option<Type<'g>>>,
@@ -116,8 +115,18 @@ fn parameter<'a, 'g>(candidate: &'a SourceCandidate<'_, 'g>, column: usize) -> &
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
-    fn ordinary_use_premise(&self) -> InputPremise {
-        self.arrow_premise.map_or(PREMISE, |p| p.combine(PREMISE))
+    pub(super) fn has_application_ordinary_scope(&self, family: &DeclarationId) -> bool {
+        self.ordinary_scope
+            .as_ref()
+            .is_some_and(|scope| scope.contains(family))
+    }
+
+    fn ordinary_use_premise(&self, family: &DeclarationId) -> Option<InputPremise> {
+        if self.has_application_ordinary_scope(family) {
+            self.arrow_premise
+        } else {
+            Some(self.arrow_premise.map_or(PREMISE, |p| p.combine(PREMISE)))
+        }
     }
 
     pub(in crate::analysis::scalars) fn ordinary_call_step(
@@ -240,8 +249,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             if inference.slots[&leaf].ty.is_some() || inference.slots[&leaf].blocked {
                 continue;
             }
-            inference.slots.get_mut(&leaf).unwrap().ordinary_context =
-                Some(self.ordinary_use_premise());
+            if let Some(premise) = self.ordinary_use_premise(call.fact.callee) {
+                let slot = inference.slots.get_mut(&leaf).unwrap();
+                slot.ordinary_context = Some(
+                    slot.ordinary_context
+                        .map_or(premise, |p| p.combine(premise)),
+                );
+            }
             self.elab.reserve(context.parameters.len())?;
             self.project_callable_context(
                 inference,
@@ -278,12 +292,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     if proven_context && self.arrow_premise.is_none() {
                         self.establish(inference, argument, ty, true)?;
                     } else {
-                        self.conditional_context(
-                            inference,
-                            argument,
-                            ty,
-                            self.ordinary_use_premise(),
-                        )?;
+                        self.ordinary_context(inference, argument, ty, call.fact.callee)?;
                     }
                 }
             }
@@ -300,7 +309,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.establish(inference, node, result, false)?;
             return Ok(false);
         }
-        let output = if consistent {
+        let (output, use_premise) = if consistent {
             let prior = self.arrow_premise;
             let scope = match inputs.as_slice() {
                 [source] => self.collections.scope(call.fact.callee, &[source.as_ref()]),
@@ -309,21 +318,30 @@ impl<'r, 'g> Checker<'r, 'g> {
                     .scope(call.fact.callee, &[source.as_ref(), key.as_ref()]),
                 _ => None,
             };
-            if scope.and_then(|scope| scope.winner()).is_some() {
-                // A settled provider cannot clear premises used to type its operands.
-                for argument in &call.fact.arguments {
-                    self.elab.step(1)?;
-                    if let Some(premise) = inference.slots[argument].ordinary_context {
-                        self.arrow_premise =
-                            Some(self.arrow_premise.map_or(premise, |p| p.combine(premise)));
+            let result = (|| {
+                if self.has_application_ordinary_scope(call.fact.callee)
+                    || scope.and_then(|scope| scope.winner()).is_some()
+                {
+                    // Admission of the callee cannot settle premises of its operands.
+                    for operand in call.fact.arguments.iter().copied().chain([node]) {
+                        self.elab.step(1)?;
+                        if let Some(premise) = inference.slots[&operand].ordinary_context {
+                            self.arrow_premise =
+                                Some(self.arrow_premise.map_or(premise, |p| p.combine(premise)));
+                        }
                     }
                 }
-            }
-            let result = self.conditional_output(inference, node, &call, &inputs, &viable, outcome);
+                let output =
+                    self.conditional_output(inference, node, &call, &inputs, &viable, outcome)?;
+                Ok((output, self.ordinary_use_premise(call.fact.callee)))
+            })();
             self.arrow_premise = prior;
             result?
         } else {
-            ConditionalOutput::default()
+            (
+                ConditionalOutput::default(),
+                self.ordinary_use_premise(call.fact.callee),
+            )
         };
         self.elab.reserve(
             1 + call.fact.bindings.len()
@@ -333,31 +351,50 @@ impl<'r, 'g> Checker<'r, 'g> {
         )?;
         let mut defaults = call.fact.defaults.clone();
         defaults.extend(output.defaults);
-        let premise = [&output.goal, &output.instantiation].into_iter().fold(
-            self.ordinary_use_premise(),
-            |p, id| {
-                id.as_ref()
-                    .and_then(|id| self.evidence.get(id).ok()?.premise)
-                    .map_or(p, |b| p.combine(b))
-            },
-        );
+        let proof = output
+            .instantiation
+            .as_ref()
+            .or(output.goal.as_ref())
+            .map(|id| self.evidence.get(id).unwrap());
+        let mut premise = use_premise;
         let mut checked = false;
-        if let Some(id) = &output.goal {
-            let proof = self.evidence.get(id).unwrap();
-            if proof.state == GoalState::Proved
-                && proof.premise.is_none()
-                && let Some(ty) = &output.ty
-            {
-                match &output.agreement {
-                    OutputAgreement::Agrees => {
-                        checked = true;
+        if let Some(proof) = proof {
+            for id in output.goal.iter().chain(&output.instantiation) {
+                if let Some(p) = self.evidence.get(id).unwrap().premise {
+                    premise = Some(premise.map_or(p, |a| a.combine(p)));
+                }
+            }
+            let actual_scope = self.has_application_ordinary_scope(call.fact.callee);
+            if proof.premise.is_none() && (!actual_scope || premise.is_none()) {
+                match (proof.state, &output.agreement, &output.ty) {
+                    (GoalState::Proved, OutputAgreement::Agrees, Some(ty)) => {
                         self.establish(inference, node, ty.clone(), false)?;
+                        checked =
+                            inference.slots[&node].ty.is_some() && !inference.slots[&node].blocked;
                     }
-                    OutputAgreement::Disagrees { actual, required } => {
+                    (GoalState::Proved, OutputAgreement::Disagrees { actual, required }, _) => {
                         self.mismatch(module, node, actual, required)?;
                         inference.slots.get_mut(&node).unwrap().blocked = true;
                     }
-                    OutputAgreement::NotDetermined => (),
+                    (
+                        GoalState::Disproved
+                        | GoalState::Unresolved(GoalBlocker::MissingAssumption),
+                        _,
+                        _,
+                    ) if actual_scope => {
+                        let finding = match outcome {
+                            Some(HypotheticalOutcome::NoMatch) => {
+                                ScalarFindingKind::NoApplicableImplementation
+                            }
+                            Some(HypotheticalOutcome::Ambiguous) => {
+                                ScalarFindingKind::AmbiguousImplementation
+                            }
+                            _ => ScalarFindingKind::MissingRequirement,
+                        };
+                        self.finding(module, node, finding)?;
+                        inference.slots.get_mut(&node).unwrap().blocked = true;
+                    }
+                    _ => (),
                 }
             }
         }
@@ -466,7 +503,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         inputs: &[Option<Type<'g>>],
         budget: &mut Budget,
     ) -> Work<Comparison<'r, 'g>> {
-        let family = match source::family(self.input.ordinary.unwrap(), call.fact.callee, budget)? {
+        let inventory = self.input.ordinary.unwrap();
+        let id = call.fact.callee;
+        let family = if self.has_application_ordinary_scope(id) {
+            source::admitted_family(inventory, id, budget)?
+        } else {
+            source::family(inventory, id, budget)?
+        };
+        let family = match family {
             Ok(family) => family,
             Err(blocker) => {
                 return Ok(Comparison {
@@ -681,8 +725,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             if !committed {
                 self.elab.reserve(1)?;
                 inference.ordinary_tuples.insert(node);
-                inference.slots.get_mut(&node).unwrap().ordinary_context =
-                    Some(self.ordinary_use_premise());
+                if let Some(premise) = self.ordinary_use_premise(call.fact.callee) {
+                    let slot = inference.slots.get_mut(&node).unwrap();
+                    slot.ordinary_context = Some(
+                        slot.ordinary_context
+                            .map_or(premise, |p| p.combine(premise)),
+                    );
+                }
                 self.enqueue(inference, node)?;
             }
             let count = syntax.children.len();
@@ -700,12 +749,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
             }
             if written.is_some_and(|a| a != count) || (projected && viable.is_empty()) {
-                self.conditional_finding(
-                    module,
-                    node,
-                    ScalarFindingKind::Arity,
-                    self.ordinary_use_premise(),
-                )?;
+                if let Some(premise) = self.ordinary_use_premise(call.fact.callee) {
+                    self.conditional_finding(module, node, ScalarFindingKind::Arity, premise)?;
+                } else {
+                    self.finding(module, node, ScalarFindingKind::Arity)?;
+                }
                 inference.slots.get_mut(&node).unwrap().blocked = true;
                 return Ok(None);
             }
@@ -735,7 +783,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.agreed_path_receiving(viable, path)?
             };
             if let Some(ty) = context {
-                self.conditional_context(inference, path.node, ty, self.ordinary_use_premise())?;
+                self.ordinary_context(inference, path.node, ty, call.fact.callee)?;
             }
         }
         Ok(Some(leaves))
@@ -1199,6 +1247,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 required,
                 None,
             )?;
+            let formed = self.has_application_ordinary_scope(written.declaration)
+                && self.form_ordinary_value(inference, node, written, &goal, &output)?;
             self.elab.reserve(1)?;
             self.ordinary_values.insert(
                 (&inference.module.key, node),
@@ -1208,6 +1258,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                     output_agreement: output.agreement,
                 },
             );
+            if formed {
+                return Ok(true);
+            }
         }
         self.elab.reserve(written.bindings.len())?;
         self.deferred_declaration(
@@ -1218,6 +1271,67 @@ impl<'r, 'g> Checker<'r, 'g> {
             written.bindings.clone(),
         )?;
         inference.slots.get_mut(&node).unwrap().blocked = true;
+        Ok(true)
+    }
+
+    fn form_ordinary_value(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        written: &FunctionValueFacts<'g>,
+        goal: &GoalId,
+        output: &ConditionalOutput<'g>,
+    ) -> Work<bool> {
+        let determination = self.evidence.get(goal).unwrap();
+        let proof = self
+            .evidence
+            .get(output.instantiation.as_ref().unwrap_or(goal))
+            .unwrap();
+        if !matches!(output.agreement, OutputAgreement::Agrees)
+            || inference.slots[&node].ordinary_context.is_some()
+            || proof.state != GoalState::Proved
+            || proof.premise.is_some()
+            || determination.premise.is_some()
+        {
+            return Ok(false);
+        }
+        let Some(selection) = &proof.selection else {
+            return Ok(false);
+        };
+        let result = proof.output.as_ref().unwrap();
+        let GoalJudgment::Determine { inputs, .. } = &determination.judgment else {
+            unreachable!()
+        };
+        self.elab.reserve(
+            2 + inputs.len()
+                + selection.substitution.len()
+                + written.bindings.len()
+                + output.defaults.len()
+                + result.arguments.len(),
+        )?;
+        let ty = Arc::new(TypeTerm::Callable {
+            mode: InvocationMode::ReadOnly,
+            parameters: inputs.clone(),
+            result: result.result.clone(),
+        });
+        let selection = selection.clone();
+        let arguments = result.arguments.clone();
+        let family = self
+            .input
+            .ordinary
+            .unwrap()
+            .captured_family(written.declaration)
+            .unwrap();
+        let substitution = self.family_substitutions(&family.header, &arguments)?;
+        self.establish(inference, node, ty, false)?;
+        inference.slots.get_mut(&node).unwrap().function_value =
+            Some(Arc::new(FunctionValueFacts {
+                declaration: written.declaration,
+                selection: Some(selection),
+                bindings: written.bindings.clone(),
+                substitution,
+                defaults: output.defaults.clone(),
+            }));
         Ok(true)
     }
 
@@ -1246,6 +1360,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             });
         }
         Ok(OutputAgreement::Agrees)
+    }
+
+    fn ordinary_context(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        ty: Type<'g>,
+        family: &DeclarationId,
+    ) -> Work<()> {
+        if let Some(premise) = self.ordinary_use_premise(family) {
+            self.conditional_context(inference, node, ty, premise)
+        } else {
+            self.establish(inference, node, ty, true)
+        }
     }
 
     pub(super) fn conditional_context(
@@ -1336,25 +1464,32 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
-    pub(in crate::analysis::scalars) fn checked_ordinary_substitution(
+    pub(in crate::analysis::scalars) fn record_checked_ordinary_call(
         &mut self,
         module: &'g Module,
         node: NodeId,
-    ) -> Work<Option<Vec<Substitution<'g>>>> {
+        facts: &mut CallFacts<'g>,
+    ) -> Work<()> {
         let Some(call) = self
             .ordinary_calls
             .get(&(&module.key, node))
             .filter(|call| call.checked)
         else {
-            return Ok(None);
+            return Ok(());
         };
-        let output = self
+        let proof = self
             .evidence
-            .get(call.goal.as_ref().unwrap())
-            .unwrap()
-            .output
-            .as_ref()
+            .get(call.instantiation.as_ref().or(call.goal.as_ref()).unwrap())
             .unwrap();
+        if self.has_application_ordinary_scope(call.family) {
+            self.elab.reserve(call.defaults.len())?;
+            facts.defaults = call.defaults.clone();
+            if let Some(selection) = &proof.selection {
+                self.elab.reserve(1 + selection.substitution.len())?;
+                facts.selection = Some(selection.clone());
+            }
+        }
+        let output = proof.output.as_ref().unwrap();
         let family = self
             .input
             .ordinary
@@ -1362,19 +1497,18 @@ impl<'r, 'g> Checker<'r, 'g> {
             .captured_family(call.family)
             .unwrap();
         self.elab.reserve(output.arguments.len())?;
-        Ok(Some(
-            family
-                .header
-                .binders
-                .iter()
-                .zip(&output.arguments)
-                .map(|(binder, ty)| Substitution {
-                    binder: &binder.declaration.id,
-                    position: binder.position,
-                    argument: ty.clone(),
-                })
-                .collect(),
-        ))
+        facts.substitution = family
+            .header
+            .binders
+            .iter()
+            .zip(&output.arguments)
+            .map(|(binder, ty)| Substitution {
+                binder: &binder.declaration.id,
+                position: binder.position,
+                argument: ty.clone(),
+            })
+            .collect();
+        Ok(())
     }
 
     pub(in crate::analysis::scalars) fn defer_ordinary_calls(
@@ -1399,7 +1533,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                                     self.evidence.get(id).unwrap().state == GoalState::Proved
                                 })
                     })
-                || (self.is_canonical_scalar_family(call.fact.callee)
+                || ((self.is_canonical_scalar_family(call.fact.callee)
+                    || self.has_application_ordinary_scope(call.fact.callee))
                     && inference.slots[&node].blocked)
             {
                 continue;
