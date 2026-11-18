@@ -140,7 +140,7 @@ The [disposer tests](m5/disposers.rs) require installed typed receipts in both m
 | `triesEscape`, `triesInvalid`, `liveFieldLoan` | Reject consuming the active outer value after a local move, rereading a moved field inside a reached disposer, and leaving a still-live field borrow at cleanup. No MIR is published. |
 | `protectedCleanup`, one-short work | A `LockGuard` wrapper does not get successful cleanup from an empty custom body. The protected payload remains incomplete. An exhausted query does not expose a partial disposer graph. |
 
-Explicit custom-disposer dispatch, replacement of the whole active outer value, non-primitive and protected payloads, partial construction interrupts, and cancellation remain outside this slice. The [explicit-call preflight](https://github.com/Reilley64/rill/issues/72#issuecomment-6983412457) had no M4 typed receipt for the aliased call. The [retained-destination typed blocker](https://github.com/Reilley64/rill/issues/69#issuecomment-6982582460) does not block these normal-edge checks.
+Explicit custom-disposer dispatch, replacement of the whole active outer value, non-primitive and protected payloads, partial construction interrupts, and cancellation remain outside this slice. The [aliased call](https://github.com/Reilley64/rill/issues/72#issuecomment-6983412457) and a separate [direct canonical call](https://github.com/Reilley64/rill/issues/72#issuecomment-6985417571) both stopped at `FamilySelection` and `TypedInput`, with no M4 typed receipt. The [retained-destination typed blocker](https://github.com/Reilley64/rill/issues/69#issuecomment-6982582460) does not block these normal-edge checks.
 
 ### Disposer review and verification
 
@@ -168,7 +168,11 @@ The installed probe `tuples::fixed_tuple_places_preserve_initialization_and_orde
 
 `mise run test:compiler` passed 428 tests and `mise run test` passed 444 at the exact code revision above. `mise run check`, `mise run build:scaffold`, and `git diff --check` also passed on macOS AArch64 with a fresh short `TMPDIR` under `/tmp`. The staged M4 replay still issued both receipts. The separate `let [left, _, right] = value;` preflight also issued both receipts. That preflight has no M5 pattern or cleanup result.
 
-Independent Standards and Spec review requests for `9dda758778e874262c93e9c4fc6fcc25d237afcb...ef2493630f5302a7e41a48570e1fdc0fab8c5e2c` failed with provider HTTP 429. Both reviews remain required. No workflow changed; `check:ci` was not run. No Rill code ran. Product, runtime and client acceptance remain unavailable; LLVM and provider ABI acceptance were not run.
+The first independent Standards and Spec requests hit HTTP 429. Fresh independent reviews of `9dda758778e874262c93e9c4fc6fcc25d237afcb...ef2493630f5302a7e41a48570e1fdc0fab8c5e2c` completed. Standards fixes at `8275dec2363af7586928c9c142b01a13c306837e` check the construction order along terminators, exact and one-short budgets, the selected temporary element's export, and a rejected escape through a direct call. They share construction and call admission across the supported aggregates.
+
+Spec fixes at `dadeb497705f94ed41ee001a58f4465309137749` cover fixed tuple projections in bindings and assignments. The assignment installs the replacement before cleaning the remaining temporary elements. Flat tuple results can retain the conservative input source union at their root. Reference extraction keeps that union and rejects local escape. Moving an element while a whole-tuple loan remains live rejects; fresh element loans remain incomplete. All four local gates and the staged M4 replay passed at `dadeb49` (430 compiler tests and 446 workspace tests). The reviews covered the candidate, not the fixes.
+
+No workflow changed; `check:ci` was not run. No Rill code ran. Product, runtime and client acceptance remain unavailable; LLVM and provider ABI acceptance were not run.
 
 ## Irrefutable owned tuple bindings
 
@@ -194,6 +198,26 @@ At `694aab5`, `mise run test:compiler` passed 429 tests and `mise run test` pass
 All four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44345742575) passed at the earlier publication `95639ebffce69b3911cf2eb553970b92d3f3e35e`. The [native acceptance profiles](https://github.com/Reilley64/rill/actions/runs/44345742930) failed on the unavailable `test:runtime` entry point. Those jobs do not establish runtime acceptance.
 
 Separate installed preflights for an owned record pattern, a borrowed tuple pattern and an `Option` propagation exit issued both M4 receipts. This increment does not claim an ownership result for those cases. Guard commitment, nested patterns, iterators and cancellation remain open. No workflow changed; `check:ci` was not run. No Rill program ran.
+
+## Owned `Option<bool>` propagation
+
+[#76](https://github.com/Reilley64/rill/issues/76) uses the checked postfix fact in a name or wildcard `let` initializer. [RFC 0008](../../../docs/rfcs/0008-errors-propagation-and-caused-by-wrapping.md#postfix-propagation-and-normal-return) describes the `Some` continuation and normal `None` return. [#29](https://github.com/Reilley64/rill/issues/29) preserves existing postfix Option behavior. The [scoped cleanup approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379) governs what each exit still owes.
+
+Only the admitted canonical Option with a bool payload is supported. The checker proves no matching outer disposer for the parent or either variant. It evaluates the operand once and uses the M4 target and feasible edges. The failure arm exports canonical `None` through ordinary return cleanup. The success arm copies the bool into the binding and keeps the enclosing scope alive. This does not admit `Result`, infix wrapping, borrowed payloads, general nested propagation, or cancellation.
+
+`propagation::option_postfix_returns_through_initialized_cleanup` went from `Incomplete` to the following results in both installed modes at `aac491657060040f8859f7798c74d2c03a536951`:
+
+| Cases | Observed compiler and MIR obligations |
+| --- | --- |
+| `paths` | Call the operand once per path. On `None`, clean the local owner and the second parameter only if it was not already disposed. On `Some`, supply the bool, execute the later explicit disposal, and return `Some`. |
+| `certainFailure`, `certainSuccess` | Lower only the edge allowed by the known variant. On known failure, skip later work and clean the still-owned parameter. |
+| `rejected`, `ownedPayload` | Reusing a moved owner on the success edge rejects with `R0200`. An unsupported `Option<string>` input remains incomplete. Neither publishes MIR. |
+
+`mise run test:compiler` passed 430 tests and `mise run test` passed 446 at `aac4916`. `mise run check`, `mise run build:scaffold` and the whitespace check passed. The staged M4 replay issued typed receipts in both modes. All local runs used macOS AArch64 and a short `TMPDIR`.
+
+Standards and Spec independently reviewed `aac4916` against `50a4aa5644d360fe3d24d176815c957f7bc882f2`. Standards fixes at `0c4303eae63e40b3f8991c35a860437660fd9653` tie the constructed value to export before cleanup along one path, bound test traversal, add exact and one-short budget checks, and reuse one successful disposal proof per body. Spec fixes at `d0d3ead622e644851af500a79e221d59a73e408d` skip the typed but infeasible suffix after a known `None`, admit direct calls with canonical bool Option variant operands or results, and lower grouped name and discard bindings. The `certainFailure` regression first returned `Incomplete` and now checks cleanup with an unreachable unsupported expression in its suffix. Both installed modes pass the new probes. The reviews covered the candidate, not the fixes.
+
+No workflow changed; `check:ci` was not run. No Rill program ran.
 
 ## Open acceptance obligations
 
