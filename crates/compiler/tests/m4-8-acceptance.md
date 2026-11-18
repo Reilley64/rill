@@ -47,3 +47,11 @@ The worktree has no shipped core implementation or validated toolchain authority
 The compiler has no source-level Result-use solver. Canonical Option, Result, Err, List, formatting and iterator checks still need admitted contracts. Exact propagation, including through a pipe, is pending. Aggregate cases that depend on custom disposal or protection also remain pending. A partial report cannot issue a typed-stage receipt.
 
 The tests did not execute a Rill program. No full M4 or RFC acceptance, ownership permission, runtime, hosted runner, LLVM or product result follows. RFC 0001 remains Accepted at its recorded snapshot; RFCs 0002 through 0010 remain Draft. Workflows did not change, so `check:ci` was not run.
+
+## Pending match and guard checks
+
+Standards and Spec independently reviewed `5b10326e9ffc6dd638287f2fe3714c22a22e3aff` against `3c7e9bb0664ecb866630fbc1f349e333aef57ac5`. The code diff has SHA-256 `d257fcb306ceb6a7659f230ed43206bce094c954b7292280ae8703fe512c063e`. This review excluded the separate authority proposal. Standards found no documented violations and suggested sharing guard decoding. Spec identified a false numeric-context diagnostic, lost binder and variant facts, and missed guard fallthrough when a blocked read occurs only in a dead branch.
+
+Three public regressions reproduced the problems. The corrections check written arms when coverage is pending. They defer missing receiving context, keep known sibling binder types and variant views, and derive guard fallthrough from reachable flow. The partial report does not publish unsettled match coverage or arm reachability.
+
+The corrected code at `d6e76d91e649d3d834f246a14812bbb87eadd90b` passed the four mise gates locally. `test:compiler` passed 368 tests including 18 M4.8 tests, and `test` passed 376. `check` verified 1,817 documentation destinations with no errors. The correction diff has SHA-256 `8b4e034a763e75008e0faff15801ca68f7fb5fd3847a22b2eb15eb76e66ffd9f`. The corrections were not independently re-reviewed. The [A1 through A3 authority checkpoint](../../../docs/implementation-plan.md#m48-completion-checkpoint-first-party-core-authority) is unchanged. No installed core test or Rill execution ran.
