@@ -215,6 +215,13 @@ impl<'g> CollectionCore<'g> {
         })
     }
 
+    pub fn forwards_list_to_owned_iterator(&self, id: &DeclarationId) -> bool {
+        self.protection.iter().flatten().any(|region| {
+            region.operation == CollectionOperation::Iterate(ListTraversal::Owned)
+                && region.bridge.is_some_and(|bridge| bridge.id == *id)
+        })
+    }
+
     pub fn is_bridge(&self, id: &DeclarationId) -> bool {
         self.protection
             .iter()

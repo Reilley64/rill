@@ -357,6 +357,15 @@ fn collection_representations_distinguish_retained_outcomes_from_borrowed_storag
                 .map(|p| p.site.span.bytes())
                 .collect();
             assert_eq!(pending, [b"remaining: OwnedListIter<Result<bool>>"]);
+            assert!(
+                !report
+                    .result_use()
+                    .unwrap()
+                    .pending()
+                    .iter()
+                    .any(|p| p.site.module.path == "iter.rill"
+                        && p.site.span.bytes() == b"intoOwned(source)")
+            );
         },
     );
 }

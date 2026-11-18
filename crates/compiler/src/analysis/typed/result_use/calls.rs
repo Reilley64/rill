@@ -22,6 +22,26 @@ impl<'a, 'g> Check<'a, 'g> {
         for argument in call.argument_evaluation_order() {
             states = self.stage_argument(argument, states, depth + 1)?;
         }
+        self.budget.step(self.core.collections.protection.len())?;
+        if settled
+            && let [argument] = call.arguments.as_slice()
+            && self
+                .core
+                .collections
+                .forwards_list_to_owned_iterator(call.callee)
+        {
+            // This backing operation changes the owner, not the element residences.
+            for state in &mut states {
+                self.move_value(
+                    state,
+                    Root::Temporary(*argument),
+                    &[],
+                    Root::Temporary(node),
+                    &[],
+                )?;
+            }
+            return Ok(states);
+        }
         for state in &mut states {
             self.finish_call(
                 node,
