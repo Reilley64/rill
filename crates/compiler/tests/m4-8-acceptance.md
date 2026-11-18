@@ -40,7 +40,7 @@ Code revision [`853af9a64e11da1555cbae8fc0096221885ee039`](https://github.com/Re
 | Python models | 55 passed, including six M4.8 tests. |
 | Formatting, LLVM-free Clippy, dependency tree and diff | Passed. The compiler dependency tree contained only `compiler`. |
 
-## Remaining obligations
+## Remaining obligations at `853af9a`
 
 The [installed Option checks](#installed-option-checks) verify a limited set of first-party sources. The complete installed bundle, provider and protection inventories, opaque representations and real numeric conversion providers are unverified. Captured paths, selectors and fixtures cannot supply that evidence.
 
@@ -90,4 +90,36 @@ The correction at `7490ce4ae063ae1bbe77e7347f1799f0e9bd6f02` has diff SHA-256 `c
 | Python models | 55 passed. |
 | Rust formatting, LLVM-free Clippy, dependency tree, and diff | Passed. The compiler dependency tree contains only `compiler`. |
 
-The installed test results are static checks. No Rill program ran. Native artifacts, complete inventories, and positive typed-stage receipts in both modes remain NotChecked.
+The installed test results are static checks. No Rill program ran. At that revision, native artifacts, complete inventories, and positive typed-stage receipts in both modes remained NotChecked.
+
+## Integrated installed core slices
+
+The combined macOS AArch64 probe in [`m4_8_ownership.rs`](m4_8_ownership.rs) stages pinned standard-library sources, the build-produced ownership archive, and the error-storage source. It starts from a different working directory and uses `load_installed` and `analyze_typed` in both load modes. In a single capture, it checks a body that builds a List, converts and formats an element, and returns a Result. It also checks entry startup and an expectation, and observes independent role and provider facts. **The report is `Incomplete` in both modes.** The probe does not stage the production executable or implement a distribution recipe.
+
+| Slice | Verified evidence | Still pending |
+| --- | --- | --- |
+| Option, Result and Err | Canonical roles and aliases, Result's default Error, owned and borrowed guard bindings, exact-E propagation and propagating pipes. The Rust storage suite checks owned heterogeneous causes and iterative release of a deep chain. | Checked Err construction and infix wrapping with selected display and retention evidence; lowered representation and provider closure. |
+| Result use | The source pass emits R0103 with origin and residence for tested discards, including renames, tuple siblings and early propagation exits. Simple dead-branch expressions are checked separately. A simple immutable borrow passed to `isOk` leaves an unrelated sibling's obligation intact. | General aliases, guard and match commitment, lexical entry to unreachable regions, opaque containment and unyielded iterator elements. |
+| List and iteration | Linked Rust storage tests exercise non-copying values and borrowed access. The checker records List construction and exact-`u64` index projections. `get`, `iterate` and `next` retain conditional selections. | Protection clearance, completed iteration binding and flow, and representation and copy/dispose contracts. |
+| Formatting and conversions | Pinned primitive formatting and numeric infallible `into`/`from` check selected operations and distinguish protected numeric gaps from missing providers. | Exact-E fallible conversions, remaining parsing and encoding pairs, general dispatch and formatting, and missing comparison providers. |
+| Native ownership actions | Installed tests verify a build-produced archive for selected shared-owner, mutex guard and channel endpoint actions. They distinguish a provider from protection clearance, reject overlapping replacements, and retain captured facts after an archive change. | Complete inventories, native retention for the remaining contracts, and source-level calls that require those inventories. |
+
+### Independent review and verification
+
+Standards and Spec reviewed `5edc2d4da82a9032ea1116674fb4060e4224ce5e` against `522b86b2046bf19751fa4fa2b8bb3706382eb8c8`. The binary diff SHA-256 is `48e097a8574f3697e0edd131a25f4e28cd168beccfb8f0a4759f560107892686`.
+
+- **Standards:** Moved host error-storage tests to their runtime crate and corrected the documented test scope. The review also suggested sharing role classification, artifact capture and probe setup; those consolidations were not needed for the tested corrections.
+- **Spec:** Regressions cover pending opaque List containment, an independent sibling beside an immutable alias, a dead branch with a discarded Result call, a noncanonical operand when both roles are known, and a refutable guard with an error name. The corrections preserve missing evidence instead of using the empty List source shape, and reject the proved invalid forms. General alias and dead-source flow remain partial.
+
+The locally verified correction is `c5703e7ee78c74ca584a6d79fe5c915c7e318de5`. Its binary diff from the reviewed revision has SHA-256 `ec812c70a7d3fc3800a0077fc6563949d9e008f53735b762aa49c1d23a7d7832`. The combined probe and corrections were not independently re-reviewed.
+
+| Check | Result on macOS 27.0.1 AArch64 |
+| --- | --- |
+| `mise run test:compiler` | 388 passed. |
+| `mise run test` | 402 passed, including four collection and two error-storage host tests. |
+| `mise run check` | Passed; 1,826 documentation destinations and zero errors at the code revision. Includes formatting and LLVM-free Clippy. |
+| `mise run build:scaffold` | Passed. |
+| Python models | 55 passed. |
+| LLVM-free compiler dependency tree and diff | Passed. The compiler depends only on the linked collection crate. |
+
+A2 still needs closed role, provider, protection and representation inventories. A3 still needs a complete staged distribution and positive typed-stage receipts in both modes. No Rill execution, ownership permission, native ABI acceptance, hosted result, full M4 acceptance or RFC status change follows from these checks.
