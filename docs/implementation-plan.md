@@ -1035,7 +1035,7 @@ Standards and Spec independently reviewed `38942a0c5ed522d61e832de66b52e50f92ecd
 
 The owner [approved A1 through A3](https://github.com/Reilley64/rill/issues/65#issuecomment-6971033745) at `3c7e9bb0664ecb866630fbc1f349e333aef57ac5` before implementation. The [installed Option checks](../crates/compiler/tests/m4-8-acceptance.md#installed-option-checks) record the first increment. The [integrated installed checks](../crates/compiler/tests/m4-8-acceptance.md#integrated-installed-core-slices) record the later partial publication. Both load modes reported `Incomplete` at that revision.
 
-The [installed typed receipt checks](../crates/compiler/tests/m4-8-acceptance.md#installed-typed-receipts) record the subsequent A3 verification. The staged `aarch64-apple-darwin` profile with empty options issues a receipt in both modes. This is static compiler evidence only. Keep #65 and #56 open and PR #58 draft until the owner decides otherwise.
+The [verified closeout revision](../crates/compiler/tests/m4-8-acceptance.md#verified-closeout-revision) records the A3 checks of the expanded entry. The staged `aarch64-apple-darwin` profile with empty options issues a receipt in both modes. This is static compiler evidence only. Keep #65 and #56 open and PR #58 draft until the owner decides otherwise.
 
 ## Completion record
 
