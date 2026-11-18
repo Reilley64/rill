@@ -149,3 +149,24 @@ At `78e8c224f426a7e582c3f97b4f529c5b1478be0c`, the staged entry checks List copy
 At `c04daa86b285359b15be98f2c19017fdf4d4b29e`, the five Option and Result combinators explicitly acknowledge the callback only when the selected branch does not invoke it. The installed regression failed before the change at `apply: F`. It now passes in both modes and still requires a blocker at each invocation without Result-use evidence. The complete installed capture closes the role inventory. The role check does not depend on the native archive. Source-only and partial captures keep the role blocker, as does exhaustion before the inventory check finishes.
 
 The staged runner exits 1. Both modes report `Incomplete`, with provider, protection and representation inventories still open. Each mode has 11 Result-use blockers: five callback invocations, four native release boundaries, and two generic collection disposal sites. Neither issues a typed receipt. All four local mise gates pass, with 419 compiler tests, 435 workspace tests, and no errors across 1,830 checked documentation destinations. The 55 model tests pass. The code diff from `2f3c63d39865b868e92fc89f561f2aa95ef49eb5` has SHA-256 `c8ccaf06234664223aad8a8e903eca83e8c4418a5f74d1588e8d982e309b1f34`. It has not had independent Standards or Spec review. No Rill execution, native ABI or hosted acceptance follows.
+
+## Installed typed receipts
+
+The checker closes the four inventories separately. It checks loaded declarations, bodies, startup and expectations before issuing a capture-bound receipt. The Result-use check proves the generic callback and release summaries from their checked bodies and actual installed bindings. It requires the corresponding evidence at concrete calls. Unproved storage or erased callable environments stay pending. Disposal does not acknowledge a Result.
+
+At `661163e552c4c781b47df7e238413c9e19adcc1d`, the [production-layout command](../../../docs/development.md#future-installed-toolchain) stages the locked build and runs from outside the checkout. The target is macOS AArch64 with empty options. `rill --version` prints `0.1.0-dev`.
+
+| Installed case | Normal mode | Test mode |
+| --- | --- | --- |
+| Complete staged entry | `Checked`, typed receipt | `Checked`, typed receipt |
+| Unused body discards a known `Result.Ok` | `SourceRejected`, R0103 | `SourceRejected`, R0103 |
+| Imported expectation has integer type | `SourceRejected`, R0101 | `SourceRejected`, R0101 |
+| Delivered native ownership archive is missing | `Incomplete` | `Incomplete` |
+| Retained first-party source differs from its pin | `InvalidRequest` | `InvalidRequest` |
+| One unit less than the exact analysis work, installed Rust test | `ResourceLimit` | `ResourceLimit` |
+
+The staged runner exits 0 for the complete entry and 1 for each staged negative case. A receipt leaves ownership and execution unperformed. The installed Rust tests also check source-only non-admission, one-short limits and exact-budget completion on the same capture. M4 does not change RFC status or establish runtime, native ABI, LLVM, product command, editor or release acceptance.
+
+At the code revision above, `mise run test:compiler` passed 421 tests and `mise run test` passed 437 workspace tests. `mise run check` and `mise run build:scaffold` passed. The 55 Python model tests passed. The documentation checker found no errors across 1,830 destinations. The compiler tree is LLVM-free and links `rill-collection` and `rill-error-storage`. No new hosted checks ran at this revision.
+
+The runner source moved from `crates/compiler/examples/m4_8_installed.rs` to [`tests/installed/typed/runner.rs`](../../../tests/installed/typed/runner.rs). The Cargo example target and staging command are unchanged. The packaging list supplies files to the stager and installed tests. It does not grant loader authority.

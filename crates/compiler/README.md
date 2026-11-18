@@ -255,10 +255,10 @@ A proved false requirement can exclude a conversion candidate. Pending requireme
 
 The [M4.7 verification record](tests/m4-7-acceptance.md) lists the tests, review findings and exact revisions. Hypothetical outcomes establish no core admission, checked conversion, or permission. M4.8 owns actual admission and integrated typing.
 
-## M4.8 bounded typed analysis
+## M4.8 integrated typed analysis
 
-`analysis::typed::analyze_typed` checks one M3 graph under one accumulated limit. Query `inventory` for captured declarations and conditional comparisons, `bodies` for local body and expression facts, and `public_interface_findings` for private origins in exposed types and requirements. `not_performed` lists stages not reached or outside the increment; leaving a stage off that list does not mean it passed.
+`analysis::typed::analyze_typed` checks one immutable M3 graph under one cumulative limit. The report retains declaration and body facts, public interface findings, the four core inventory statuses, and source-level Result-use witnesses or blockers.
 
-`loader::load_installed` derives the standard root from the running executable under `<prefix>/bin/`. For `aarch64-apple-darwin` with no options, the compiler verifies its pinned prelude and `Option` sources against the captured bytes. The typed report can expose the admitted `Option` schema and the checked `isSome` provider. The shared checker types postfix `?` on an owned canonical `Option` and records the success and early-return alternatives. The source-only `loader::load` cannot supply these facts, even with identical sources.
+`loader::load_installed` derives the standard root from the running executable under `<prefix>/bin/`. For `aarch64-apple-darwin` with no options, it verifies the pinned first-party inputs in the capture. The source-only `loader::load` cannot attach that authority, even with identical bytes.
 
-The report has no typed-stage receipt. `core_blockers` lists remaining evidence for roles, providers, protection and representations. The compiler has no source-level Result-use solver. See the [M4.8 verification record](tests/m4-8-acceptance.md) for the finite model, installed tests and remaining obligations.
+`TypedReport::receipt` returns a receipt only when `completion` is `Checked`. The receipt identifies the capture and reports the work charged to the analysis budget. A receipt leaves `Ownership` and `Execution` unperformed. An incomplete, rejected or exhausted report retains partial facts and returns no receipt. See the [M4.8 verification record](tests/m4-8-acceptance.md) for the bounded profile and staged checks.

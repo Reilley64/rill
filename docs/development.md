@@ -159,6 +159,6 @@ mise exec -- python tools/stage_typed_installation.py "$work/prefix"
   ./prefix/bin/m4_8_installed "$repo/tests/installed/typed/main.rill")
 ```
 
-The staging script takes the executable, runner and ownership archive from one locked Cargo build. It copies the listed first-party sources and runtime inputs into a new prefix. The runner loads and analyzes the entry in both modes. It currently reports `Incomplete` and exits nonzero: the staged inputs and probe do not establish complete inventories, a typed-stage receipt, Rill execution or an ABI.
+The staging script takes the executable, runner and ownership archive from one locked Cargo build. It copies the listed first-party sources and runtime inputs into a new prefix. The runner loads and analyzes the entry in both modes. It exits 0 only when both modes issue a typed receipt. The [M4.8 verification record](../crates/compiler/tests/m4-8-acceptance.md) records the installed outcomes separately from the scaffold checks. Neither check runs Rill or validates an ABI.
 
 For language and library rules, use the [contract index](README.md#contracts) rather than this guide. Production/formal backend acceptance remains [#28](https://github.com/Reilley64/rill/issues/28); complete OpenIDEA client delivery remains [#42](https://github.com/Reilley64/rill/issues/42). The scaffold neither closes those gates nor changes the existing Rill source examples or recorded evidence.

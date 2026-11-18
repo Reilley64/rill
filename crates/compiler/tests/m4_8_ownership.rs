@@ -171,25 +171,7 @@ fn installed_ownership_requires_the_built_archive() {
     let executable = root.join("bin/m48-ownership-probe");
     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
-    for module in [
-        "std.rill",
-        "core.rill",
-        "shared.rill",
-        "mutex.rill",
-        "channel.rill",
-        "option.rill",
-        "result.rill",
-        "error.rill",
-        "collection.rill",
-        "iter.rill",
-        "format.rill",
-        "convert.rill",
-        "compare.rill",
-        "number.rill",
-        "char.rill",
-        "bytes.rill",
-        "string.rill",
-    ] {
+    for module in include_str!("../../../tests/installed/typed/stdlib-sources.txt").lines() {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();
     }
     fs::copy(env!("RILL_OWNERSHIP_ARCHIVE"), root.join(ARCHIVE)).unwrap();
