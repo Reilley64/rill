@@ -1342,6 +1342,64 @@ fn installed_into_value_acknowledges_cause_but_not_the_returned_payload() {
     );
 }
 
+#[test]
+fn installed_combinators_acknowledge_skipped_callbacks_only() {
+    use compiler::analysis::typed::ResultUseBlocker;
+
+    installed(
+        "installed_combinators_acknowledge_skipped_callbacks_only",
+        |request| {
+            fs::write(&request.entry, "import std::result::Result;").unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                let uses = report.result_use().unwrap();
+                for (path, count) in [("option.rill", 2), ("result.rill", 3)] {
+                    let module = graph.modules().iter().find(|m| m.key.path == path).unwrap();
+                    let mut checked = 0;
+                    for helper in module.declarations.iter().filter(|d| {
+                        d.id.kind == loader::DeclarationKind::Function
+                            && matches!(d.name.as_deref(), Some("map" | "mapErr" | "andThen"))
+                    }) {
+                        checked += 1;
+                        assert!(
+                            report
+                                .bodies()
+                                .body(module, BodyOwner::Declaration(&helper.id))
+                                .unwrap()
+                                .is_some(),
+                            "{} was not checked",
+                            helper.name.as_deref().unwrap()
+                        );
+                        let span = &module.syntax.nodes[helper.node].span;
+                        let mut pending = uses.pending().iter().filter(|p| {
+                            p.site.module == &module.key
+                                && (span.start()..span.end()).contains(&p.site.span.start())
+                        });
+                        let invocation = pending
+                            .next()
+                            .expect("unchecked invocation remains pending");
+                        assert_eq!(invocation.blocker, ResultUseBlocker::CallBoundary);
+                        assert!(invocation.site.span.bytes().starts_with(b"apply("));
+                        if let Some(other) = pending.next() {
+                            panic!(
+                                "unexpected {:?} at {}",
+                                other.blocker,
+                                String::from_utf8_lossy(other.site.span.bytes())
+                            );
+                        }
+                    }
+                    assert_eq!(checked, count);
+                }
+            }
+        },
+    );
+}
+
 fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
     if let Some(root) = std::env::var_os("RILL_RESULT_PROBE_ROOT") {
         check(InstalledRequest {

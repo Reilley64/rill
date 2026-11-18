@@ -20,16 +20,22 @@ export function asMut<T>(value: &mut Option<T>): Option<&mut T> {
 
 export function map<T, U, F>(value: Option<T>, apply: F): Option<U>
 where callableOnce(F, [T], U) {
-    return match (value) {
-        Option.Some(element) => Option.Some(apply(element)),
-        Option.None => Option.None,
+    match (value) {
+        Option.Some(element) => { return Option.Some(apply(element)); },
+        Option.None => {
+            let _ = apply;
+            return Option.None;
+        },
     };
 }
 
 export function andThen<T, U, F>(value: Option<T>, apply: F): Option<U>
 where callableOnce(F, [T], Option<U>) {
-    return match (value) {
-        Option.Some(element) => apply(element),
-        Option.None => Option.None,
+    match (value) {
+        Option.Some(element) => { return apply(element); },
+        Option.None => {
+            let _ = apply;
+            return Option.None;
+        },
     };
 }

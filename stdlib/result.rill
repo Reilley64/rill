@@ -67,28 +67,39 @@ export function err<T, E>(value: &Result<T, E>): Option<&Err<E>> {
 
 export function map<T, U, E, F>(value: Result<T, E>, apply: F): Result<U, E>
 where callableOnce(F, [T], U) {
-    return match (value) {
-        Result.Ok(element) => Result.Ok(apply(element)),
-        Result.Err(failure) => Result.Err(failure),
+    match (value) {
+        Result.Ok(element) => { return Result.Ok(apply(element)); },
+        Result.Err(failure) => {
+            let _ = apply;
+            return Result.Err(failure);
+        },
     };
 }
 
 export function mapErr<T, E, D, F>(value: Result<T, E>, apply: F): Result<T, D>
 where callableOnce(F, [E], D), display(D) {
-    return match (value) {
-        Result.Ok(element) => Result.Ok(element),
-        Result.Err(failure) => Result.Err(Err {
-            payload: apply(failure.payload),
-            site: failure.site,
-            retained: failure.retained,
-        }),
+    match (value) {
+        Result.Ok(element) => {
+            let _ = apply;
+            return Result.Ok(element);
+        },
+        Result.Err(failure) => {
+            return Result.Err(Err {
+                payload: apply(failure.payload),
+                site: failure.site,
+                retained: failure.retained,
+            });
+        },
     };
 }
 
 export function andThen<T, U, E, F>(value: Result<T, E>, apply: F): Result<U, E>
 where callableOnce(F, [T], Result<U, E>) {
-    return match (value) {
-        Result.Ok(element) => apply(element),
-        Result.Err(failure) => Result.Err(failure),
+    match (value) {
+        Result.Ok(element) => { return apply(element); },
+        Result.Err(failure) => {
+            let _ = apply;
+            return Result.Err(failure);
+        },
     };
 }
