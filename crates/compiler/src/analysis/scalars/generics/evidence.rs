@@ -434,6 +434,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         call: &PreparedCall<'g>,
         substitutions: &[Substitution<'g>],
+        checked_conversion_outputs: bool,
     ) -> Work<bool> {
         let module = inference.module;
         let owner = call.fact.callee;
@@ -448,6 +449,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut rejected = false;
         for requirement in &header.requirements {
             self.elab.step(1)?;
+            if checked_conversion_outputs && self.fallible_conversion(requirement.target) {
+                continue;
+            }
             let Some(judgment) = self.requirement_term(requirement, substitutions)? else {
                 unresolved = true;
                 continue;
@@ -462,12 +466,16 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             let origin = self.arrow_subject(inference, call, requirement)?;
             let fact = &mut self.evidence.goals[goal.index];
-            fact.premise = fact
-                .premise
-                .or(origin.as_ref().and_then(|arrow| arrow.premise));
+            if let Some(premise) = origin.as_ref().and_then(|arrow| arrow.premise) {
+                fact.premise = Some(fact.premise.map_or(premise, |p| p.combine(premise)));
+            }
             fact.arrow_origin = origin;
             match self.solve_goal(&goal)? {
                 GoalState::Proved => (),
+                _ if self.arrow_premise.is_some_and(|p| p.has_conversion())
+                    && matches!(requirement.target, Some(RequirementTarget::Predicate(_)))
+                    && self.evidence.get(&goal).unwrap().hypothetical
+                        == Some(GoalVerdict::Proved) => {}
                 GoalState::Disproved | GoalState::Unresolved(GoalBlocker::MissingAssumption)
                     if self.evidence.goals[goal.index].premise.is_none() =>
                 {
@@ -758,7 +766,12 @@ impl<'r, 'g> Checker<'r, 'g> {
 
     fn enter_goal(&mut self, goal: usize, stack: &mut Vec<Frame>, completed: &[usize]) -> Work<()> {
         self.elab.step(1)?;
+        let conversion_relation = matches!(self.evidence.goals[goal].judgment,
+            GoalJudgment::Requirement { target: RequirementTarget::Family(id), .. } if self.conversion_family(id).is_some());
         for index in 0..self.evidence.goals[goal].assumptions.len() {
+            if conversion_relation {
+                break;
+            } // Check the pair and conflict before using a relation.
             self.elab.step(1)?;
             let assumption = self.evidence.goals[goal].assumptions[index].clone();
             if self.same_goal(assumption.index, goal, true)? {
@@ -898,7 +911,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         arguments: Vec<Type<'g>>,
     ) -> Work<GoalState> {
         let header = &self.evidence_family(family)?.unwrap().header;
-        let (inputs, filters) = if self.conversion_family(family).is_some() {
+        let (inputs, filters) = if let Some(conversion) = self.conversion_family(family) {
+            if arguments.len() < 2 || !conversion.issues.is_empty() {
+                return Ok(GoalState::Unresolved(GoalBlocker::ConversionPair(
+                    crate::analysis::conversions::PairBlocker::Registration,
+                )));
+            }
             self.elab.reserve(2)?;
             (arguments[..2].to_vec(), Vec::new())
         } else {
@@ -1346,8 +1364,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.evidence.goals[goal].judgment,
                 GoalJudgment::Instantiate { .. }
             ) {
-                self.evidence.goals[child.index].premise =
-                    Some(InputPremise::HypotheticalOrdinaryRole);
+                self.add_goal_premise(&child, InputPremise::HypotheticalOrdinaryRole);
             }
             self.link_goal(goal, child)?;
         }
@@ -1413,6 +1430,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             actual_site,
         )?;
         Ok(Some(agrees))
+    }
+
+    pub(super) fn add_goal_premise(&mut self, goal: &GoalId, premise: InputPremise) {
+        let fact = &mut self.evidence.goals[goal.index];
+        fact.premise = Some(fact.premise.map_or(premise, |p| p.combine(premise)));
     }
 
     pub(super) fn record_conversion_equality(

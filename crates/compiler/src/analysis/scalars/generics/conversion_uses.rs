@@ -1,6 +1,8 @@
 //! Use established endpoints from the shared expression worklist, never from candidates.
 use super::*;
-use crate::analysis::conversions::{ErrorAgreement, PairOutcome, RoleHypothesis};
+use crate::analysis::conversions::{
+    ErrorAgreement, PairBlocker, PairOutcome, RoleHypothesis, pairs,
+};
 use ordinary::{InputPremise, shape};
 
 const PREMISE: InputPremise = InputPremise::HypotheticalConversionRole;
@@ -17,6 +19,7 @@ pub struct ConversionUse<'g> {
     pub source_filter: Option<Type<'g>>,
     pub goal: Option<GoalId>,
     pub outcome: Option<PairOutcome<'g>>,
+    pub blockers: Vec<PairBlocker>,
     pub selected_parameter: Option<Type<'g>>,
     pub selected_result: Option<Type<'g>>,
     pub error_agreement: ErrorAgreement<'g>,
@@ -30,6 +33,7 @@ struct UseContext<'a, 'g> {
     family: &'g DeclarationId,
     routes: &'a [&'g Binding],
     written: &'a [Substitution<'g>],
+    premise: Option<InputPremise>,
     source: Option<Type<'g>>,
     result: Option<Type<'g>>,
     receiving_callable: Option<Type<'g>>,
@@ -54,7 +58,6 @@ impl<'r, 'g> Checker<'r, 'g> {
             && inference.slots[&argument].ty.is_none()
             && inference.slots[&argument].expected.is_none()
         {
-            self.retain_conversion_premise(PREMISE);
             self.conditional_context(inference, argument, filter.argument.clone(), PREMISE)?;
         }
         let source = argument
@@ -66,6 +69,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                 family: call.fact.callee,
                 routes: &call.fact.bindings,
                 written: &call.fact.substitution,
+                premise: match (
+                    inference.slots[&node].ordinary_context,
+                    argument.and_then(|argument| inference.slots[&argument].ordinary_context),
+                ) {
+                    (Some(a), Some(b)) => Some(a.combine(b)),
+                    (a, b) => a.or(b),
+                },
                 source,
                 result: inference.slots[&node].expected.clone(),
                 receiving_callable: None,
@@ -114,6 +124,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 family: written.declaration,
                 routes: &written.bindings,
                 written: &written.substitution,
+                premise: inference.slots[&node].ordinary_context,
                 source: source.or_else(|| written.substitution.get(1).map(|s| s.argument.clone())),
                 result,
                 receiving_callable: expected,
@@ -145,15 +156,25 @@ impl<'r, 'g> Checker<'r, 'g> {
         if self.conversions.is_none() {
             return Ok(());
         }
-        self.elab
-            .reserve(inference.calls.len() + inference.function_values.len())?;
+        for &node in &inference.conversion_clause_calls {
+            self.elab.step(1)?;
+            let slot = inference.slots.get_mut(&node).unwrap();
+            if slot.ty.is_none() {
+                slot.blocked = true;
+            }
+        }
+        let count = inference.calls.len() + inference.function_values.len();
+        self.elab.step(count)?;
+        self.elab.reserve(count)?;
         let calls: Vec<_> = inference
             .calls
             .iter()
             .filter_map(|(&node, c)| self.conversion_family(c.fact.callee).map(|_| node))
             .collect();
         for node in calls {
-            self.conversion_call_step(inference, node, true)?;
+            self.with_node_premise(inference, node, |checker, inference| {
+                checker.conversion_call_step(inference, node, true)
+            })?;
         }
         let values: Vec<_> = inference
             .function_values
@@ -162,7 +183,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             .collect();
         for node in values {
             let written = inference.function_values.remove(&node).unwrap();
-            self.conversion_value_step(inference, node, &written, true)?;
+            self.with_node_premise(inference, node, |checker, inference| {
+                checker.conversion_value_step(inference, node, &written, true)
+            })?;
         }
         Ok(())
     }
@@ -174,14 +197,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         ty: Type<'g>,
         premise: InputPremise,
     ) -> Work<()> {
-        // Keep provisional equations within this expression. Do not export a
-        // binding, checked node or receipt from a role hypothesis.
-        self.retain_conversion_premise(premise);
+        // Send the type to waiting equations without qualifying unrelated siblings.
+        self.mark_conversion_dependency(inference, node, premise, true)?;
         self.establish(inference, node, ty, false)
-    }
-
-    fn retain_conversion_premise(&mut self, premise: InputPremise) {
-        self.arrow_premise = Some(self.arrow_premise.map_or(premise, |p| p.combine(premise)));
     }
 
     fn conversion_use(
@@ -194,6 +212,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             family,
             routes,
             written,
+            premise,
             source,
             result,
             receiving_callable,
@@ -202,7 +221,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let role = self.conversion_family(family).unwrap().premise;
         let (_, result_role) = role.bindings();
         let fallible = result_role.is_some();
-        let expected_result = match (result_role, result.as_deref()) {
+        let (expected_result, required_error) = match (result_role, result.as_deref()) {
             (
                 Some(binding),
                 Some(TypeTerm::Nominal {
@@ -210,10 +229,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                     arguments,
                 }),
             ) if matches!(&binding.target, Target::Declaration(id) if id == *declaration) => {
-                arguments.first()
+                (arguments.first(), arguments.get(1))
             }
-            (None, _) => result.as_ref(),
-            _ => None,
+            (None, _) => (result.as_ref(), None),
+            _ => (None, None),
         };
         let destination = if let Some(written) = written.first() {
             Some(written.argument.clone())
@@ -230,7 +249,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         self.elab.reserve(routes.len())?;
         let source_filter = written.get(1).map(|s| s.argument.clone());
-        let premise = self.arrow_premise.map_or(PREMISE, |p| p.combine(PREMISE));
+        let premise = [self.arrow_premise, premise]
+            .into_iter()
+            .flatten()
+            .fold(PREMISE, InputPremise::combine);
+        let role_blockers = pairs::role_blockers(role);
+        self.elab.reserve(role_blockers.len() + 1)?;
         let mut facts = ConversionUse {
             site,
             family,
@@ -242,14 +266,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             source_filter,
             goal: None,
             outcome: None,
+            blockers: role_blockers.to_vec(),
             selected_parameter: None,
             selected_result: None,
-            error_agreement: ErrorAgreement::NotRequested,
+            error_agreement: if required_error.is_some() || (fallible && written.get(2).is_some()) {
+                ErrorAgreement::NotDetermined
+            } else {
+                ErrorAgreement::NotRequested
+            },
             result_agreement: None,
             descriptor: None,
             descriptor_agreement: None,
         };
         let (Some(to), Some(from)) = (&facts.destination, &facts.actual_source) else {
+            facts.blockers.push(PairBlocker::EndpointContext);
             return Ok(Some(facts));
         };
         let origin = self.evidence_module(&family.module)?;
@@ -273,10 +303,16 @@ impl<'r, 'g> Checker<'r, 'g> {
             routes,
             None,
         )?;
+        self.add_goal_premise(&goal, premise);
         self.solve_goal(&goal)?;
         let proof = self.evidence.get(&goal).unwrap();
         facts.premise = proof.premise.unwrap_or(PREMISE);
         facts.outcome = proof.conversion_outcome;
+        if let GoalState::Unresolved(GoalBlocker::ConversionPair(reason)) = proof.state {
+            facts.blockers.push(reason);
+        } else if matches!(facts.outcome, Some(PairOutcome::RequiredIdentity { .. })) {
+            facts.blockers.push(PairBlocker::RequiredIdentityProvider);
+        }
         facts.goal = Some(goal.clone());
         let Some(output) = &proof.output else {
             return Ok(Some(facts));
@@ -287,11 +323,11 @@ impl<'r, 'g> Checker<'r, 'g> {
         facts.selected_result = Some(result_ty.clone());
         if fallible {
             let actual = output.arguments[2].clone();
-            let required = written.get(2).map(|s| &s.argument).into_iter().chain(result.as_ref().and_then(|result| {
-                if let TypeTerm::Nominal { declaration, arguments } = result.as_ref()
-                    && matches!(&result_role.unwrap().target, Target::Declaration(id) if id == *declaration)
-                { arguments.get(1) } else { None }
-            }));
+            let required = written
+                .get(2)
+                .map(|s| &s.argument)
+                .into_iter()
+                .chain(required_error);
             for ty in required {
                 if self.record_conversion_equality(
                     &goal,
@@ -301,7 +337,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     site,
                     actual_site,
                 )? {
-                    if matches!(facts.error_agreement, ErrorAgreement::NotRequested) {
+                    if matches!(facts.error_agreement, ErrorAgreement::NotDetermined) {
                         facts.error_agreement = ErrorAgreement::Agrees;
                     }
                 } else {

@@ -8,6 +8,33 @@ pub(super) struct OutputEquation<'g> {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
+    fn requirement_inputs(&mut self, family: &ordinary::FamilyFacts<'g>) -> Work<Vec<bool>> {
+        let id = &family.header.declaration.id;
+        if let Some(role) = self.conversion_family(id) {
+            let fallible = matches!(
+                role.premise,
+                crate::analysis::conversions::RoleHypothesis::Fallible { .. }
+            );
+            let count = if fallible { 3 } else { 2 };
+            if family.header.binders.len() != count {
+                return Ok(Vec::new());
+            }
+            self.elab.reserve(count)?;
+            let mut inputs = vec![true, true];
+            if fallible {
+                inputs.push(false);
+            }
+            return Ok(inputs);
+        }
+        let mut budget = declarations::Budget {
+            limits: self.elab.limits,
+            statistics: self.elab.statistics,
+        };
+        let positions = ordinary::source::input_positions(family, &mut budget);
+        self.elab.statistics = budget.statistics;
+        positions
+    }
+
     pub(in crate::analysis::scalars::generics) fn pending_output_slots(
         &mut self,
         contracts: &[(&DeclarationId, &[Substitution<'g>])],
@@ -30,13 +57,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         let Some(family) = self.evidence_family(target)? else {
                             return Ok(None);
                         };
-                        let mut budget = declarations::Budget {
-                            limits: self.elab.limits,
-                            statistics: self.elab.statistics,
-                        };
-                        let positions = ordinary::source::input_positions(family, &mut budget);
-                        self.elab.statistics = budget.statistics;
-                        positions?
+                        self.requirement_inputs(family)?
                     }
                     RequirementTarget::Predicate(id)
                         if matches!(Predicate::of(id), Predicate::Callable(_)) =>
@@ -169,13 +190,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if target_facts.header.binders.len() != requirement.arguments.len() {
                     continue;
                 }
-                let mut budget = declarations::Budget {
-                    limits: self.elab.limits,
-                    statistics: self.elab.statistics,
-                };
-                let positions = ordinary::source::input_positions(target_facts, &mut budget);
-                self.elab.statistics = budget.statistics;
-                let positions = positions?;
+                let positions = self.requirement_inputs(target_facts)?;
+                if positions.len() != requirement.arguments.len() {
+                    continue;
+                }
                 self.elab
                     .reserve(positions.len().checked_mul(2).ok_or(())?)?;
                 let mut filters = Vec::new();
@@ -205,15 +223,24 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if !ready || outputs.is_empty() {
                     continue;
                 }
-                let DeclarationShape::Function { parameters, .. } = &target_facts.header.shape
-                else {
-                    unreachable!()
+                let (inputs, filters) = if self.conversion_family(target).is_some() {
+                    self.elab.reserve(filters.len())?;
+                    (
+                        filters.into_iter().map(|s| s.argument).collect(),
+                        Vec::new(),
+                    )
+                } else {
+                    let DeclarationShape::Function { parameters, .. } = &target_facts.header.shape
+                    else {
+                        unreachable!()
+                    };
+                    self.elab.reserve(parameters.len())?;
+                    let inputs = parameters
+                        .iter()
+                        .map(|p| self.substitute(&p.ty, &filters, 1))
+                        .collect::<Work<Vec<_>>>()?;
+                    (inputs, filters)
                 };
-                self.elab.reserve(parameters.len())?;
-                let inputs = parameters
-                    .iter()
-                    .map(|p| self.substitute(&p.ty, &filters, 1))
-                    .collect::<Work<Vec<_>>>()?;
                 let site = self.evidence.goals[goal].site;
                 let child = self.issue_determination(
                     GoalJudgment::Determine {

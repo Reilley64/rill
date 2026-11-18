@@ -299,7 +299,13 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
     limits: AnalysisLimits,
 ) -> GenericReport<'g> {
     let graph = input.graph();
-    let extended = ordinary::extend_nominal_types(input, limits);
+    let mut budget = declarations::Budget {
+        limits,
+        statistics: Statistics::default(),
+    };
+    let extension = ordinary::extend_nominal_types(input, &mut budget);
+    let preflight_exhausted = extension.is_err();
+    let extended = extension.ok().flatten();
     let input = extended.as_ref().unwrap_or(input);
     let types = input.type_facts();
     let mut checker = Checker::new(
@@ -311,9 +317,12 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
         limits,
         true,
     );
-    if extended.is_some() || input.completion() == Completion::ResourceLimit {
-        checker.elab.statistics = input.statistics();
-    }
+    checker.elab.statistics =
+        if input.completion() == Completion::ResourceLimit && extended.is_none() {
+            input.statistics()
+        } else {
+            budget.statistics
+        };
     checker.conversions = conversions.map(|r| &r.families);
     let mut declaration_issues = Vec::new();
     let exhausted = (|| -> Work<()> {
@@ -327,7 +336,8 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
             checker.elab.reserve(1 + extra)?;
             declaration_issues.push(issue.clone());
         }
-        if input.completion() == Completion::ResourceLimit
+        if preflight_exhausted
+            || input.completion() == Completion::ResourceLimit
             || conversions.is_some_and(|r| r.completion() == Completion::ResourceLimit)
         {
             return Err(());

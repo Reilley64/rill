@@ -589,31 +589,41 @@ impl<'g> OrdinaryAnalysis<'g> {
 /// Analyze an actual M3 capture. M3 does not carry core role/protection admission.
 /// Results remain partial, never a checked ordinary collection or source call.
 pub fn analyze_ordinary(graph: &Graph, limits: AnalysisLimits) -> OrdinaryAnalysis<'_> {
-    analyze_ordinary_types(graph, limits, false)
+    analyze_ordinary_types(graph, limits, Statistics::default(), false)
 }
 
 // Complete M4.6 nominal type uses on the same immutable graph. This
 // does not take defaults for a family argument or an implementation equation.
 pub(super) fn extend_nominal_types<'g>(
     input: &OrdinaryAnalysis<'g>,
-    limits: AnalysisLimits,
-) -> Option<OrdinaryAnalysis<'g>> {
-    (input.completion() != Completion::ResourceLimit
-        && input.type_facts().obligations().any(|o| {
-            matches!(
-                o.reason,
-                Unsupported::GenericDefault | Unsupported::NeedsTypeArguments
-            )
-        }))
-    .then(|| analyze_ordinary_types(input.graph(), limits, true))
+    budget: &mut Budget,
+) -> Work<Option<OrdinaryAnalysis<'g>>> {
+    if input.completion() == Completion::ResourceLimit {
+        return Ok(None);
+    }
+    for obligation in input.type_facts().obligations() {
+        budget.step(1)?;
+        if matches!(
+            obligation.reason,
+            Unsupported::GenericDefault | Unsupported::NeedsTypeArguments
+        ) {
+            let extended =
+                analyze_ordinary_types(input.graph(), budget.limits, budget.statistics, true);
+            budget.statistics = extended.statistics();
+            return Ok(Some(extended));
+        }
+    }
+    Ok(None)
 }
 
-pub(super) fn analyze_ordinary_types(
+fn analyze_ordinary_types(
     graph: &Graph,
     limits: AnalysisLimits,
+    statistics: Statistics,
     complete_defaults: bool,
 ) -> OrdinaryAnalysis<'_> {
     let mut analyzer = Analyzer::new(graph, limits, complete_defaults);
+    analyzer.statistics = statistics;
     let mut headers = BTreeMap::new();
     let elaborated = analyzer.analyze(Some(&mut headers)).is_ok();
     let mut report = OrdinaryAnalysis {

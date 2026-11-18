@@ -1,7 +1,8 @@
 //! Conversion pair applicability and output equations in the shared proof worklist.
 use super::*;
 use crate::analysis::conversions::{
-    Applicability, ConversionFamily, PairBlocker, PairMatch, PairOutcome, RoleHypothesis, pairs,
+    Applicability, ConversionFamily, PairBlocker, PairMatch, PairOutcome, PairSignature,
+    RoleHypothesis, pairs,
 };
 use ordinary::patterns;
 
@@ -59,6 +60,151 @@ struct CandidateWork<'r, 'g> {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
+    pub(in crate::analysis::scalars::generics) fn fallible_conversion(
+        &self,
+        target: Option<RequirementTarget<'g>>,
+    ) -> bool {
+        matches!(target, Some(RequirementTarget::Family(id)) if matches!(self.conversion_family(id).map(|role| role.premise), Some(RoleHypothesis::Fallible { .. })))
+    }
+
+    pub(in crate::analysis::scalars::generics) fn pending_conversion_outputs(
+        &mut self,
+        owner: &DeclarationId,
+        binders: &[Binder<'g>],
+        slots: &[Option<Type<'g>>],
+    ) -> Work<BTreeSet<usize>> {
+        let mut pending = BTreeSet::new();
+        if self.conversions.is_some()
+            && let Some(metadata) = self.input.ordinary.unwrap().headers().get(owner)
+        {
+            for clause in &metadata.requirements {
+                self.elab.step(1)?;
+                if self.fallible_conversion(clause.target)
+                    && let [_, _, Some(error)] = clause.arguments.as_slice()
+                {
+                    self.open_slots(error, binders, slots, &mut pending, 1)?;
+                }
+            }
+        }
+        Ok(pending)
+    }
+
+    /// A standalone call has no overload determination of its own. Its ready
+    /// conversion clauses issue pair goals and use their exact output equations.
+    pub(in crate::analysis::scalars::generics) fn apply_conversion_outputs(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        owner: &DeclarationId,
+        binders: &[Binder<'g>],
+        slots: &mut [Option<Type<'g>>],
+    ) -> Work<Option<bool>> {
+        if self.conversions.is_none() {
+            return Ok(None);
+        }
+        let Some(metadata) = self.input.ordinary.unwrap().headers().get(owner) else {
+            return Ok(None);
+        };
+        let module = inference.module;
+        let mut relevant = false;
+        loop {
+            let mut progressed = false;
+            let mut settled = true;
+            for clause in &metadata.requirements {
+                self.elab.step(1)?;
+                if !self.fallible_conversion(clause.target) {
+                    continue;
+                }
+                relevant = true;
+                let Some(RequirementTarget::Family(family)) = clause.target else {
+                    unreachable!()
+                };
+                let [Some(to), Some(from), Some(expected_error)] = clause.arguments.as_slice()
+                else {
+                    settled = false;
+                    continue;
+                };
+                if !self.closed(to, binders, &|i| slots[i].is_some(), 1)?
+                    || !self.closed(from, binders, &|i| slots[i].is_some(), 1)?
+                {
+                    settled = false;
+                    continue;
+                }
+                let key = (node, clause.node);
+                let goal = if let Some(prior) = inference.conversion_requirements.get(&key) {
+                    prior.clone()
+                } else {
+                    let substitution = self.slot_substitutions(binders, slots)?;
+                    self.elab.reserve(3)?;
+                    let inputs = vec![
+                        self.substitute(to, &substitution, 1)?,
+                        self.substitute(from, &substitution, 1)?,
+                    ];
+                    let site = Self::site(module, node);
+                    let origin = self.evidence_module(&owner.module)?;
+                    let goal = self.issue_determination(
+                        GoalJudgment::Determine {
+                            family,
+                            inputs,
+                            filters: Vec::new(),
+                        },
+                        site,
+                        Self::site(origin, clause.node),
+                        &clause.routes,
+                        None,
+                    )?;
+                    self.solve_goal(&goal)?;
+                    inference.conversion_requirements.insert(key, goal.clone());
+                    goal
+                };
+                let proof = self.evidence.get(&goal).unwrap();
+                let Some(output) = &proof.output else {
+                    settled = false;
+                    continue;
+                };
+                let actual = output.arguments[2].clone();
+                let actual_site = output.site;
+                let origin = proof.source;
+                let premise = proof.premise.expect("conditional conversion output");
+                let record = proof.equalities.is_empty();
+                let already_bound =
+                    self.closed(expected_error, binders, &|i| slots[i].is_some(), 1)?;
+                self.elab.reserve(slots.len())?;
+                let mut proposed = slots.to_vec();
+                let agrees =
+                    self.input_equation(expected_error, &actual, binders, &mut proposed, &[], 1)?;
+                if agrees {
+                    slots.clone_from_slice(&proposed);
+                    progressed |= !already_bound;
+                    self.mark_conversion_dependency(inference, node, premise, true)?;
+                    self.arrow_premise =
+                        Some(self.arrow_premise.map_or(premise, |p| p.combine(premise)));
+                } else {
+                    settled = false;
+                }
+                if record {
+                    let substitution = self.slot_substitutions(binders, slots)?;
+                    let requested = self.substitute(expected_error, &substitution, 1)?;
+                    self.goal_equality(
+                        goal.index,
+                        Some(2),
+                        requested,
+                        actual,
+                        origin,
+                        actual_site,
+                    )?;
+                }
+            }
+            if relevant && !inference.conversion_clause_calls.contains(&node) {
+                self.elab.reserve(1)?;
+                inference.conversion_clause_calls.insert(node);
+            }
+            if !progressed {
+                return Ok(relevant.then_some(settled));
+            }
+        }
+    }
+
     pub(in crate::analysis::scalars) fn conversion_family(
         &self,
         id: &DeclarationId,
@@ -130,14 +276,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         candidate: &mut PairMatch<'g>,
     ) -> Work<Option<GoalId>> {
         let binders = &work.body.header.binders;
-        if let Some((id, filter)) = work.waiting.take() {
+        if let Some((id, expected_error)) = work.waiting.take() {
             let facts = self.evidence.get(&id).unwrap();
             match (facts.hypothetical, facts.state) {
                 (Some(GoalVerdict::Disproved), _) | (_, GoalState::Disproved) => {
                     work.disproved = true
                 }
                 (Some(GoalVerdict::Proved), _) | (_, GoalState::Proved) => {
-                    if let Some(expected) = filter {
+                    if let Some(expected) = expected_error {
                         if let Some(actual) = facts
                             .output
                             .as_ref()
@@ -304,15 +450,25 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.step(work.taken.len())?;
         if work.disproved {
             candidate.applicability = Applicability::Disproved;
-        } else if !work.pending && work.taken.iter().all(|taken| *taken) {
+        } else if candidate.covers && !work.pending && work.taken.iter().all(|taken| *taken) {
             self.elab.step(work.slots.len())?;
             if work.slots.iter().any(Option::is_none) {
                 return Ok(());
             }
             let substitution = self.conversion_substitution(&work)?;
+            let DeclarationShape::Function { parameters, result } = &work.body.header.shape else {
+                unreachable!()
+            };
+            let parameter = self.substitute(&parameters[0].ty, &substitution, 1)?;
+            let result = self.substitute(result, &substitution, 1)?;
             if let Some(slot) = work.body.substitution.as_ref().unwrap().get(2) {
                 candidate.error = Some(self.substitute(&slot.argument, &substitution, 1)?);
             }
+            candidate.signature = Some(PairSignature {
+                site: work.site,
+                parameter,
+                result,
+            });
             candidate.substitution = substitution;
             candidate.applicability = Applicability::Proved;
         }
@@ -342,39 +498,33 @@ impl<'r, 'g> Checker<'r, 'g> {
         let pair = patterns::PairDomain::new(inputs.iter(), filter, &mut budget);
         self.elab.statistics = budget.statistics;
         let pair = pair?;
-        let symbolic = self.conversion_symbolic(destination, 1)?
-            || self.conversion_symbolic(source, 1)?
-            || if let Some(ty) = filter {
-                self.conversion_symbolic(ty, 1)?
-            } else {
-                false
-            };
-        if infallible && self.same(destination, source)? {
-            let filter_conflict = if let Some(filter) = filter {
-                !self.same(source, filter)?
-            } else {
-                false
-            };
-            if symbolic && filter_conflict {
-                return Ok(blocked(PairBlocker::PotentialProtectedPair));
-            }
-            self.evidence.goals[goal].conversion_outcome =
-                Some(PairOutcome::RequiredIdentity { filter_conflict });
-            return Ok(if filter_conflict {
-                GoalState::Disproved
-            } else {
-                blocked(PairBlocker::RequiredIdentityProvider)
-            });
-        }
-        if numeric(destination) && numeric(source) {
-            return Ok(
-                if infallible && !pairs::numeric_infallible(destination, source) {
+        let mut budget = self.conversion_budget();
+        let protected =
+            pairs::protected_pair(family.premise, destination, source, &pair, &mut budget);
+        self.elab.statistics = budget.statistics;
+        if let Some(protected) = protected? {
+            return Ok(match protected {
+                pairs::ProtectedPair::Identity { filter_conflict } => {
+                    if pair.symbolic() && filter_conflict {
+                        blocked(PairBlocker::PotentialProtectedPair)
+                    } else {
+                        self.evidence.goals[goal].conversion_outcome =
+                            Some(PairOutcome::RequiredIdentity { filter_conflict });
+                        if filter_conflict {
+                            GoalState::Disproved
+                        } else {
+                            blocked(PairBlocker::RequiredIdentityProvider)
+                        }
+                    }
+                }
+                pairs::ProtectedPair::NumericGap => {
                     self.evidence.goals[goal].conversion_outcome = Some(PairOutcome::NumericGap);
                     GoalState::Disproved
-                } else {
+                }
+                pairs::ProtectedPair::NumericProvider => {
                     blocked(PairBlocker::RequiredNumericProvider)
-                },
-            );
+                }
+            });
         }
         let maybe_numeric =
             |ty: &Type<'_>| numeric(ty) || matches!(ty.as_ref(), TypeTerm::Parameter { .. });
@@ -408,20 +558,15 @@ impl<'r, 'g> Checker<'r, 'g> {
         let complete = complete?;
         self.elab.reserve(matches.len() * 2 + 1)?;
         let mut candidates = Vec::with_capacity(matches.len());
-        let mut settled = Vec::new();
         for m in matches.into_iter().rev() {
-            if m.covers {
-                let work = self.conversion_candidate(family, &m)?;
-                candidates.push((m, work));
-            } else {
-                settled.push(m);
-            }
+            let work = self.conversion_candidate(family, &m)?;
+            candidates.push((m, work));
         }
         let work = ConversionWork {
             family,
             complete,
             candidates,
-            settled,
+            settled: Vec::new(),
         };
         Ok(self
             .advance_conversion_goal(goal, work)?
@@ -558,29 +703,21 @@ impl<'r, 'g> Checker<'r, 'g> {
             .into_iter()
             .find(|c| c.implementation == winner)
             .unwrap();
-        let stage = self.conversion_candidate(work.family, &candidate)?;
-        let body = stage.body;
-        let bindings = body.substitution.as_deref().unwrap();
-        self.elab.reserve(bindings.len())?;
-        let mut arguments = Vec::with_capacity(bindings.len());
-        for binding in bindings {
-            arguments.push(self.substitute(&binding.argument, &candidate.substitution, 1)?);
-        }
-        let DeclarationShape::Function { result, .. } = &body.header.shape else {
-            unreachable!()
-        };
-        let result = self.substitute(result, &candidate.substitution, 1)?;
+        let signature = candidate.signature.unwrap();
         let facts = &mut self.evidence.goals[goal];
-        facts.conversion_outcome = ranked;
-        facts.conversion_parameter = arguments.get(1).cloned();
         let GoalJudgment::Determine { inputs, .. } = &facts.judgment else {
             unreachable!()
         };
-        arguments[1] = inputs[1].clone();
+        self.elab
+            .reserve(inputs.len() + usize::from(candidate.error.is_some()))?;
+        let mut arguments = inputs.clone();
+        arguments.extend(candidate.error);
+        facts.conversion_outcome = ranked;
+        facts.conversion_parameter = Some(signature.parameter);
         facts.output = Some(GoalOutput {
             arguments,
-            result,
-            site: stage.site,
+            result: signature.result,
+            site: signature.site,
         });
         facts.selection = Some(GoalSelection {
             implementation: winner,

@@ -403,6 +403,8 @@ struct Inference<'g> {
     queue: VecDeque<NodeId>,
     calls: BTreeMap<NodeId, PreparedCall<'g>>,
     calls_waiting_for_result: BTreeSet<NodeId>,
+    conversion_requirements: BTreeMap<(NodeId, NodeId), generics::GoalId>,
+    conversion_clause_calls: BTreeSet<NodeId>,
     arrows: BTreeMap<NodeId, ArrowHead<'g>>,
     function_values: BTreeMap<NodeId, FunctionValueFacts<'g>>,
     callable_contexts: BTreeMap<NodeId, Arc<CallableContext<'g>>>,
@@ -630,6 +632,52 @@ impl<'r, 'g> Checker<'r, 'g> {
         inference.queue.push_back(node);
         Ok(())
     }
+    fn with_node_premise<T>(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        check: impl FnOnce(&mut Self, &mut Inference<'g>) -> Work<T>,
+    ) -> Work<T> {
+        let prior = self.arrow_premise;
+        self.arrow_premise = self.node_premise(&inference.slots[&node]);
+        let result = check(self, inference);
+        self.arrow_premise = prior;
+        result
+    }
+
+    fn node_premise(&self, slot: &Slot<'g>) -> Option<ordinary::InputPremise> {
+        let premise = slot.ordinary_context.filter(|p| p.has_conversion());
+        match (self.arrow_premise, premise) {
+            (Some(a), Some(b)) => Some(a.combine(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    fn mark_conversion_dependency(
+        &mut self,
+        inference: &mut Inference<'g>,
+        mut node: NodeId,
+        premise: ordinary::InputPremise,
+        ancestors: bool,
+    ) -> Work<()> {
+        loop {
+            self.elab.step(1)?;
+            let slot = inference.slots.get_mut(&node).unwrap();
+            slot.ordinary_context = Some(
+                slot.ordinary_context
+                    .map_or(premise, |p| p.combine(premise)),
+            );
+            if !ancestors {
+                break;
+            }
+            let Some(&parent) = inference.parents.get(&node) else {
+                break;
+            };
+            node = parent;
+        }
+        Ok(())
+    }
+
     fn establish(
         &mut self,
         inference: &mut Inference<'g>,
@@ -646,10 +694,16 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         if let Some(previous) = previous {
             if !self.same(previous, &ty)? && primitive_name(&ty) != Some("never") {
+                if let Some(premise) = self.arrow_premise.filter(|p| p.has_conversion()) {
+                    self.mark_conversion_dependency(inference, node, premise, false)?;
+                }
                 self.finding(inference.module, node, ScalarFindingKind::TypeMismatch)?;
                 inference.slots.get_mut(&node).unwrap().blocked = true;
             }
             return Ok(());
+        }
+        if let Some(premise) = self.arrow_premise.filter(|p| p.has_conversion()) {
+            self.mark_conversion_dependency(inference, node, premise, !expected)?;
         }
         let slot = inference.slots.get_mut(&node).unwrap();
         let target = if expected {
@@ -1571,6 +1625,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             queue: VecDeque::new(),
             calls: BTreeMap::new(),
             calls_waiting_for_result: BTreeSet::new(),
+            conversion_requirements: BTreeMap::new(),
+            conversion_clause_calls: BTreeSet::new(),
             arrows: BTreeMap::new(),
             function_values: BTreeMap::new(),
             callable_contexts: BTreeMap::new(),
@@ -1786,6 +1842,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     continue;
                 }
                 let syntax = &module.syntax.nodes[node];
+                let premise = self.arrow_premise;
+                self.arrow_premise = self.node_premise(&slot);
                 match syntax.kind {
                     NodeKind::Field if self.data => {
                         if inference.data_nodes.contains(&node) {
@@ -1877,6 +1935,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                     _ => (),
                 }
+                self.arrow_premise = premise;
             }
             if self.input.ordinary.is_some()
                 && (self.advance_function_values(&mut inference, false)?
@@ -1908,7 +1967,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 break;
             }
             for node in pending {
-                self.match_step(&mut inference, node, context)?;
+                self.with_node_premise(&mut inference, node, |checker, inference| {
+                    checker.match_step(inference, node, context)
+                })?;
             }
         }
         for &node in &inference.pending_invocations {
@@ -2109,7 +2170,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut result = None;
         for (&node, slot) in &inference.slots {
             self.elab.step(1)?;
-            if self.conversions.is_some() && self.conversion_uses.contains_key(&(&module.key, node))
+            if self.conversions.is_some()
+                && (self.conversion_uses.contains_key(&(&module.key, node))
+                    || inference.conversion_clause_calls.contains(&node))
             {
                 self.defer(module, node, ScalarUnsupported::ConversionAdmission)?;
             }

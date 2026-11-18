@@ -160,18 +160,22 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             }
             if fact.declaration.kind == DeclarationKind::Family {
-                let formed = if self.conversion_family(fact.declaration).is_some() {
-                    self.conversion_value_step(inference, node, &fact, false)?
-                } else {
-                    self.ordinary_value_step(inference, node, &fact)?
-                };
+                let formed = self.with_node_premise(inference, node, |checker, inference| {
+                    if checker.conversion_family(fact.declaration).is_some() {
+                        checker.conversion_value_step(inference, node, &fact, false)
+                    } else {
+                        checker.ordinary_value_step(inference, node, &fact)
+                    }
+                })?;
                 if formed {
                     return Ok(true);
                 }
                 inference.function_values.insert(node, fact);
                 continue;
             }
-            if self.function_value_step(inference, node, &mut fact, permit_defaults)? {
+            if self.with_node_premise(inference, node, |checker, inference| {
+                checker.function_value_step(inference, node, &mut fact, permit_defaults)
+            })? {
                 if !inference.slots[&node].blocked {
                     self.elab.reserve(1)?;
                     inference.slots.get_mut(&node).unwrap().function_value = Some(Arc::new(fact));

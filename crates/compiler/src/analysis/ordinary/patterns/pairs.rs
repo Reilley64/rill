@@ -32,6 +32,14 @@ impl<'g> PairDomain<'g> {
         })
     }
 
+    pub(in crate::analysis) fn symbolic(&self) -> bool {
+        !self.rigids.is_empty()
+    }
+
+    pub(in crate::analysis) fn exact_endpoints(&self, budget: &mut Budget) -> Work<bool> {
+        self.domain.equal_pair_endpoints(budget)
+    }
+
     fn columns(&self) -> usize {
         2 + usize::from(self.filtered)
     }
@@ -69,32 +77,25 @@ impl<'g> PairDomain<'g> {
         binders: &[Binder<'g>],
         budget: &mut Budget,
     ) -> Work<Option<PairProjection<'g>>> {
-        let mut partial = None;
+        let mut partial: Option<PairProjection<'g>> = None;
         for (alternative, pattern) in alternatives.iter().enumerate() {
             budget.step(1)?;
             let pattern = self.append_filter(pattern, key, true, budget)?;
             let Some(solved) = unify(&pattern, &self.domain, budget)? else {
                 continue;
             };
-            if !match_vector(
+            let covers = match_vector(
                 &pattern.nodes,
                 &self.domain.nodes,
                 &mut BTreeMap::new(),
                 budget,
-            )? {
-                partial.get_or_insert(PairProjection {
-                    alternative,
-                    covers: false,
-                    substitution: Vec::new(),
-                });
-                continue;
-            }
+            )?;
             let mut substitution = Vec::new();
             for (binder, variable) in binders.iter().zip(variables) {
                 budget.step(1)?;
-                if let Some(site) = variable.and_then(|i| solved.get(&(false, i))) {
-                    let argument = materialize(*site, &solved, &self.rigids, budget, 1)?
-                        .expect("covering bindings contain only observed terms");
+                if let Some(site) = variable.and_then(|i| solved.get(&(false, i)))
+                    && let Some(argument) = materialize(*site, &solved, &self.rigids, budget, 1)?
+                {
                     budget.reserve(1)?;
                     substitution.push(Substitution {
                         binder: &binder.declaration.id,
@@ -103,11 +104,37 @@ impl<'g> PairDomain<'g> {
                     });
                 }
             }
-            return Ok(Some(PairProjection {
+            let observed = PairProjection {
                 alternative,
-                covers: true,
+                covers,
                 substitution,
-            }));
+            };
+            if covers {
+                return Ok(Some(observed));
+            }
+            if let Some(prior) = &mut partial {
+                // Only use substitutions on which every intersecting
+                // alternative agrees when disproving a partial match.
+                let mut common = Vec::new();
+                for binding in prior.substitution.drain(..) {
+                    budget.step(observed.substitution.len())?;
+                    if let Some(other) = observed
+                        .substitution
+                        .iter()
+                        .find(|b| b.position == binding.position)
+                    {
+                        let left = ground(std::iter::once(&binding.argument), budget)?;
+                        let right = ground(std::iter::once(&other.argument), budget)?;
+                        if left.same(&right, budget)? {
+                            budget.reserve(1)?;
+                            common.push(binding);
+                        }
+                    }
+                }
+                prior.substitution = common;
+            } else {
+                partial = Some(observed);
+            }
         }
         Ok(partial)
     }

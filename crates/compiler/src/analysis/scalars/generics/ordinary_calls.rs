@@ -113,6 +113,10 @@ fn parameter<'a, 'g>(candidate: &'a SourceCandidate<'_, 'g>, column: usize) -> &
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
+    fn ordinary_use_premise(&self) -> InputPremise {
+        self.arrow_premise.map_or(PREMISE, |p| p.combine(PREMISE))
+    }
+
     pub(in crate::analysis::scalars) fn ordinary_call_step(
         &mut self,
         inference: &mut Inference<'g>,
@@ -227,7 +231,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             if inference.slots[&leaf].ty.is_some() || inference.slots[&leaf].blocked {
                 continue;
             }
-            inference.slots.get_mut(&leaf).unwrap().ordinary_context = Some(PREMISE);
+            inference.slots.get_mut(&leaf).unwrap().ordinary_context =
+                Some(self.ordinary_use_premise());
             self.elab.reserve(context.parameters.len())?;
             self.project_callable_context(
                 inference,
@@ -255,7 +260,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             if let Some(ty) = context.clone() {
                 let leaf = self.source_leaf(module, call.fact.arguments[i])?;
                 if !inference.ordinary_tuples.contains(&leaf) {
-                    self.conditional_context(inference, call.fact.arguments[i], ty, PREMISE)?;
+                    self.conditional_context(
+                        inference,
+                        call.fact.arguments[i],
+                        ty,
+                        self.ordinary_use_premise(),
+                    )?;
                 }
             }
         }
@@ -272,12 +282,20 @@ impl<'r, 'g> Checker<'r, 'g> {
         )?;
         let mut defaults = call.fact.defaults.clone();
         defaults.extend(output.defaults);
+        let premise = [&output.goal, &output.instantiation].into_iter().fold(
+            self.ordinary_use_premise(),
+            |p, id| {
+                id.as_ref()
+                    .and_then(|id| self.evidence.get(id).ok()?.premise)
+                    .map_or(p, |b| p.combine(b))
+            },
+        );
         self.ordinary_calls.insert(
             (&module.key, node),
             OrdinaryCall {
                 site: Self::site(module, node),
                 family: call.fact.callee,
-                premise: PREMISE,
+                premise,
                 routes: call.fact.bindings.clone(),
                 inputs,
                 receiving,
@@ -528,7 +546,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             if !committed {
                 self.elab.reserve(1)?;
                 inference.ordinary_tuples.insert(node);
-                inference.slots.get_mut(&node).unwrap().ordinary_context = Some(PREMISE);
+                inference.slots.get_mut(&node).unwrap().ordinary_context =
+                    Some(self.ordinary_use_premise());
                 self.enqueue(inference, node)?;
             }
             let count = syntax.children.len();
@@ -546,7 +565,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
             }
             if written.is_some_and(|a| a != count) || (projected && viable.is_empty()) {
-                self.conditional_finding(module, node, ScalarFindingKind::Arity, PREMISE)?;
+                self.conditional_finding(
+                    module,
+                    node,
+                    ScalarFindingKind::Arity,
+                    self.ordinary_use_premise(),
+                )?;
                 inference.slots.get_mut(&node).unwrap().blocked = true;
                 return Ok(None);
             }
@@ -576,7 +600,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.agreed_path_receiving(viable, path)?
             };
             if let Some(ty) = context {
-                self.conditional_context(inference, path.node, ty, PREMISE)?;
+                self.conditional_context(inference, path.node, ty, self.ordinary_use_premise())?;
             }
         }
         Ok(Some(leaves))

@@ -25,6 +25,7 @@ pub enum PairBlocker {
     FamilyRole,
     ResultRole,
     Protection,
+    Representation,
     RequiredIdentityProvider,
     RequiredNumericProvider,
     PotentialProtectedPair,
@@ -49,7 +50,15 @@ pub struct PairMatch<'g> {
     pub substitution: Vec<Substitution<'g>>,
     pub applicability: Applicability,
     pub requirements: Vec<GoalId>,
+    pub signature: Option<PairSignature<'g>>,
     pub error: Option<Type<'g>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PairSignature<'g> {
+    pub site: scalars::Site<'g>,
+    pub parameter: Type<'g>,
+    pub result: Type<'g>,
 }
 
 #[derive(Debug)]
@@ -72,6 +81,7 @@ pub struct PairReport<'g> {
     pub blockers: Vec<PairBlocker>,
     pub matches: Vec<PairMatch<'g>>,
     pub comparisons: Vec<ordinary::Comparison<'g>>,
+    pub selected_signature: Option<PairSignature<'g>>,
     pub selected_error: Option<Type<'g>>,
     pub error_agreement: ErrorAgreement<'g>,
     pub statistics: Statistics,
@@ -102,6 +112,7 @@ impl<'g> ConversionReport<'_, 'g> {
             blockers: Vec::new(),
             matches: Vec::new(),
             comparisons: Vec::new(),
+            selected_signature: None,
             selected_error: None,
             error_agreement: if request.expected_error.is_some() {
                 ErrorAgreement::NotDetermined
@@ -121,6 +132,7 @@ impl<'g> ConversionReport<'_, 'g> {
                 output.completion = ordinary::Completion::ResourceLimit;
                 output.outcome = None;
                 output.selected_error = None;
+                output.selected_signature = None;
             }
         }
         output.statistics = budget.statistics;
@@ -140,20 +152,20 @@ impl<'g> ConversionReport<'_, 'g> {
         {
             return Ok(Err(QueryError::InvalidRequest));
         }
-        let types = [request.destination, request.source]
+        let endpoints = [request.destination, request.source]
             .into_iter()
-            .chain(request.source_filter)
-            .chain(request.expected_error);
-        let shape = selection::validate(graph, types, budget)?;
-        if shape == RequestShape::Invalid {
+            .chain(request.source_filter);
+        let shape = selection::validate(graph, endpoints, budget)?;
+        let error = selection::validate(graph, request.expected_error.into_iter(), budget)?;
+        if shape == RequestShape::Invalid || error == RequestShape::Invalid {
             return Ok(Err(QueryError::InvalidRequest));
         }
         if self.completion == ordinary::Completion::ResourceLimit {
             return Err(());
         }
-        budget.reserve(1)?;
-        output.blockers.push(PairBlocker::FamilyRole);
         let Some(family) = self.families.get(id) else {
+            budget.reserve(1)?;
+            output.blockers.push(PairBlocker::FamilyRole);
             return Ok(Ok(()));
         };
         output.premise = Some(family.premise);
@@ -161,12 +173,9 @@ impl<'g> ConversionReport<'_, 'g> {
         if infallible && request.expected_error.is_some() {
             return Ok(Err(QueryError::InvalidRequest));
         }
-        if !infallible {
-            budget.reserve(1)?;
-            output.blockers.push(PairBlocker::ResultRole);
-        }
-        budget.reserve(1)?;
-        output.blockers.push(PairBlocker::Protection);
+        let blockers = role_blockers(family.premise);
+        budget.reserve(blockers.len())?;
+        output.blockers.extend_from_slice(blockers);
         if shape != RequestShape::Ground {
             budget.reserve(1)?;
             output.blockers.push(PairBlocker::EndpointContext);
@@ -182,19 +191,27 @@ impl<'g> ConversionReport<'_, 'g> {
             request.source_filter,
             budget,
         )?;
-        if infallible && pair.identity_intersects(budget)? {
-            let filter_conflict = !pair.identity_filter_agrees(budget)?;
-            budget.reserve(1)?;
-            output.blockers.push(PairBlocker::RequiredIdentityProvider);
-            output.outcome = Some(PairOutcome::RequiredIdentity { filter_conflict });
-            return Ok(Ok(()));
-        }
-        if scalars::numeric(request.destination) && scalars::numeric(request.source) {
-            if infallible && !numeric_infallible(request.destination, request.source) {
-                output.outcome = Some(PairOutcome::NumericGap);
-            } else {
+        if let Some(protected) = protected_pair(
+            family.premise,
+            request.destination,
+            request.source,
+            &pair,
+            budget,
+        )? {
+            let blocker = match protected {
+                ProtectedPair::Identity { filter_conflict } => {
+                    output.outcome = Some(PairOutcome::RequiredIdentity { filter_conflict });
+                    Some(PairBlocker::RequiredIdentityProvider)
+                }
+                ProtectedPair::NumericGap => {
+                    output.outcome = Some(PairOutcome::NumericGap);
+                    None
+                }
+                ProtectedPair::NumericProvider => Some(PairBlocker::RequiredNumericProvider),
+            };
+            if let Some(blocker) = blocker {
                 budget.reserve(1)?;
-                output.blockers.push(PairBlocker::RequiredNumericProvider);
+                output.blockers.push(blocker);
             }
             return Ok(Ok(()));
         }
@@ -221,13 +238,57 @@ impl<'g> ConversionReport<'_, 'g> {
                 }
                 output.selected_error = Some(error.clone());
             }
+            output.selected_signature = candidate.signature.clone();
         }
         Ok(Ok(()))
     }
 }
 
+pub(in crate::analysis) fn role_blockers(role: RoleHypothesis<'_>) -> &'static [PairBlocker] {
+    match role {
+        RoleHypothesis::Infallible(_) => &[PairBlocker::FamilyRole, PairBlocker::Protection],
+        RoleHypothesis::Fallible { .. } => &[
+            PairBlocker::FamilyRole,
+            PairBlocker::ResultRole,
+            PairBlocker::Protection,
+            PairBlocker::Representation,
+        ],
+    }
+}
+
+pub(in crate::analysis) enum ProtectedPair {
+    Identity { filter_conflict: bool },
+    NumericProvider,
+    NumericGap,
+}
+
+pub(in crate::analysis) fn protected_pair<'g>(
+    role: RoleHypothesis<'g>,
+    destination: &Type<'g>,
+    source: &Type<'g>,
+    pair: &patterns::PairDomain<'g>,
+    budget: &mut Budget,
+) -> Work<Option<ProtectedPair>> {
+    let infallible = matches!(role, RoleHypothesis::Infallible(_));
+    if infallible && pair.exact_endpoints(budget)? {
+        return Ok(Some(ProtectedPair::Identity {
+            filter_conflict: !pair.identity_filter_agrees(budget)?,
+        }));
+    }
+    if scalars::numeric(destination) && scalars::numeric(source) {
+        return Ok(Some(
+            if infallible && !numeric_infallible(destination, source) {
+                ProtectedPair::NumericGap
+            } else {
+                ProtectedPair::NumericProvider
+            },
+        ));
+    }
+    Ok(None)
+}
+
 // Numeric protection uses complete base ranges, not literal values.
-pub(in crate::analysis) fn numeric_infallible(destination: &Type<'_>, source: &Type<'_>) -> bool {
+fn numeric_infallible(destination: &Type<'_>, source: &Type<'_>) -> bool {
     fn integer(ty: &Type<'_>) -> Option<(bool, u16)> {
         let TypeTerm::Primitive(id) = ty.as_ref() else {
             unreachable!("numeric endpoint")
@@ -290,6 +351,7 @@ pub(in crate::analysis) fn find_matches<'g>(
             substitution: projected.substitution,
             applicability: Applicability::Unresolved,
             requirements: Vec::new(),
+            signature: None,
             error: None,
         });
     }

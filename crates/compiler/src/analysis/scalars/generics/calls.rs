@@ -31,11 +31,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             {
                 continue;
             }
-            let advanced = if inference.calls[&node].family {
-                self.ordinary_call_step(inference, node, true)?
-            } else {
-                self.infer_standalone_call(inference, node, true)?
-            };
+            let advanced = self.with_node_premise(inference, node, |checker, inference| {
+                if inference.calls[&node].family {
+                    checker.ordinary_call_step(inference, node, true)
+                } else {
+                    checker.infer_standalone_call(inference, node, true)
+                }
+            })?;
             if advanced {
                 return Ok(true);
             }
@@ -67,15 +69,28 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(false);
         }
         self.apply_callable_equations(&[(call.fact.callee, &[])], binders, &mut slots)?;
+        let pending = self.pending_conversion_outputs(call.fact.callee, binders, &slots)?;
         if let Some(expected) = &inference.slots[&node].expected
             && !self.closed(&call.result, binders, &|i| slots[i].is_some(), 1)?
         {
             self.elab.reserve(slots.len())?;
             let mut constrained = slots.clone();
-            if self.input_equation(&call.result, expected, binders, &mut constrained, &[], 1)? {
+            if pending.is_empty() {
+                if self.input_equation(&call.result, expected, binders, &mut constrained, &[], 1)? {
+                    slots = constrained;
+                }
+            } else if self.free_output_equation(
+                &call.result,
+                expected,
+                binders,
+                &mut constrained,
+                &pending,
+            )? {
                 slots = constrained;
             }
         }
+        let conversion_requirements =
+            self.apply_conversion_outputs(inference, node, call.fact.callee, binders, &mut slots)?;
         let mut subs = self.slot_substitutions(binders, &slots)?;
         let applied = defaults_ready
             && self.try_call_default(inference, node, &mut call, binders, &slots, &subs, None)?;
@@ -95,7 +110,18 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .iter()
                 .all(|a| inference.slots[a].ty.is_some())
         {
-            if !self.check_call_requirements(inference, node, &call, &subs)? {
+            if conversion_requirements == Some(false) {
+                self.defer(module, node, ScalarUnsupported::Requirements)?;
+                inference.slots.get_mut(&node).unwrap().blocked = true;
+                return Ok(false);
+            }
+            if !self.check_call_requirements(
+                inference,
+                node,
+                &call,
+                &subs,
+                conversion_requirements.is_some(),
+            )? {
                 inference.slots.get_mut(&node).unwrap().blocked = true;
                 return Ok(false);
             }
@@ -127,6 +153,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(false);
         };
         inference.calls_waiting_for_result.remove(&node);
+        let pending = if call.family {
+            BTreeSet::new()
+        } else {
+            self.pending_conversion_outputs(call.fact.callee, binders, slots)?
+        };
         let mut producers = Vec::new();
         for (pattern, &argument) in call.parameters.iter().zip(&call.fact.arguments) {
             self.source_producers(
@@ -151,7 +182,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         let necessary = self.necessary_reads(&producers, slots, &defaulted)?;
         for (binder, value) in binders.iter().zip(slots) {
             self.elab.step(header.defaults.len() + 1)?;
-            if value.is_some() || input_positions.is_some_and(|p| !p[binder.position]) {
+            if value.is_some()
+                || pending.contains(&binder.position)
+                || input_positions.is_some_and(|p| !p[binder.position])
+            {
                 continue;
             }
             let Some(default) = header
@@ -192,7 +226,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             let mut result_slots = BTreeSet::new();
             self.open_slots(&call.result, binders, slots, &mut result_slots, 1)?;
             for position in result_slots {
-                if defaulted.contains(&position) {
+                if defaulted.contains(&position) || pending.contains(&position) {
                     continue;
                 }
                 if self.default_is_ready(position, &producers, &necessary)? {

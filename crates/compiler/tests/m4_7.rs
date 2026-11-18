@@ -341,8 +341,9 @@ fn a_disproved_specific_candidate_leaves_the_general_pair_applicable() {
          type Target = {};
          type Wrap<T> = { value: T };
          type Observed = { goal: Target; actual: Wrap<&bool>; unrelated: bool };
+         function unrelated<E>(value: E): void {}
          implement<T> tryInto<Target>(value: Wrap<T>): Result<Target,i32> { while (true) {} }
-         implement tryInto<Target>(value: Wrap<&bool>): Result<Target,bool> where noBorrow(&bool) { while (true) {} }",
+         implement tryInto<Target>(value: Wrap<&bool>): Result<Target,bool> where missing(bool), noBorrow(&bool) { while (true) {} }",
     );
     fixture.write(
         "std/convert.rill",
@@ -385,6 +386,15 @@ fn a_disproved_specific_candidate_leaves_the_general_pair_applicable() {
     );
     assert_eq!(pair.matches[0].applicability, Applicability::Proved);
     assert_eq!(pair.matches[1].applicability, Applicability::Disproved);
+    let signature = pair
+        .selected_signature
+        .as_ref()
+        .expect("selected, fully substituted signature");
+    assert_eq!(
+        signature.site.span.bytes(),
+        b"implement<T> tryInto<Target>(value: Wrap<T>): Result<Target,i32>"
+    );
+    assert_eq!(signature.parameter, fields[1].ty);
     let goal = pair.goal(&pair.matches[1].requirements[0]).unwrap();
     use compiler::analysis::generics::{GoalBlocker, GoalState, GoalVerdict};
     assert_eq!(
@@ -405,6 +415,29 @@ fn a_disproved_specific_candidate_leaves_the_general_pair_applicable() {
         matches!(actual.as_ref(), compiler::analysis::TypeTerm::Primitive(p) if p.name() == "i32")
     );
     assert_eq!(required, fields[2].ty);
+    let rigid = ordinary
+        .type_facts()
+        .declarations()
+        .find(|d| d.declaration.name.as_deref() == Some("unrelated"))
+        .unwrap();
+    let DeclarationShape::Function { parameters, .. } = &rigid.shape else {
+        panic!("function")
+    };
+    let compare_rigid = report
+        .query_pair(
+            id,
+            PairRequest {
+                expected_error: Some(&parameters[0].ty),
+                ..request
+            },
+            limits,
+        )
+        .unwrap();
+    assert_eq!(compare_rigid.outcome, pair.outcome);
+    assert!(matches!(
+        compare_rigid.error_agreement,
+        ErrorAgreement::Disagrees { .. }
+    ));
     assert_eq!(pair.completion, Completion::Incomplete);
 }
 
@@ -469,12 +502,16 @@ fn a_selected_nested_pair_determines_error_and_a_cycle_cannot_guess_it() {
          type Outer = {};
          type Inner = {};
          type Cycle = {};
-         type Observed = { outer: Outer; input: string; desired: bool; cycle: Cycle };
+         type Growth = {};
+         type Box<T> = { value: T };
+         type Observed = { outer: Outer; input: string; desired: bool; cycle: Cycle; growth: Growth; boxed: Box<bool> };
          implement tryInto<Inner>(value: bool): Result<Inner,i32> { while (true) {} }
          implement<E> tryInto<Outer>(value: string): Result<Outer,E>
              where tryInto(Inner,bool,E) { while (true) {} }
          implement<E> tryInto<Cycle>(value: string): Result<Cycle,E>
-             where tryInto(Cycle,string,E) { while (true) {} }",
+             where tryInto(Cycle,string,E) { while (true) {} }
+         implement<T,E> tryInto<Growth>(value: Box<T>): Result<Growth,E>
+             where tryInto(Growth,Box<Box<T>>,E) { while (true) {} }",
     );
     fixture.write(
         "std/convert.rill",
@@ -537,6 +574,21 @@ fn a_selected_nested_pair_determines_error_and_a_cycle_cannot_guess_it() {
     assert!(cycle.outcome.is_none() && cycle.selected_error.is_none());
     assert_eq!(cycle.matches[0].applicability, Applicability::Unresolved);
     assert!(cycle.goals().iter().any(|g| !g.cycle.is_empty()));
+    request.destination = &fields[4].ty;
+    request.source = &fields[5].ty;
+    let growing = report
+        .query_pair(
+            id,
+            request,
+            AnalysisLimits {
+                max_depth: 9,
+                ..limits
+            },
+        )
+        .unwrap();
+    assert_eq!(growing.completion, Completion::ResourceLimit);
+    assert!(growing.outcome.is_none() && growing.selected_error.is_none());
+    assert!(growing.goals().iter().all(|g| g.cycle.is_empty()));
 }
 
 fn node_with(module: &compiler::loader::Module, bytes: &[u8]) -> usize {
@@ -633,7 +685,10 @@ fn a_fallible_source_result_can_fill_a_waiting_exact_equation_only_conditionally
          type Target = {};
          implement tryInto<Target>(value: bool): Result<Target,i32> { while (true) {} }
          function keep<D,E>(value: Result<D,E>): Result<D,E> { return value; }
+         function consume<T>(value: T): T;
+         implement<T> consume(value: T): T { return value; }
          function inferred(): void { let v = keep(tryInto<Target>(true)); }
+         function ordinary(): void { let v = consume(tryInto<Target>(true)); }
          function mismatch(): Result<Target,bool> { return tryInto(false); }",
     );
     fixture.write(
@@ -675,6 +730,22 @@ fn a_fallible_source_result_can_fill_a_waiting_exact_equation_only_conditionally
     assert!(
         matches!(call.substitution[1].argument.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
     );
+    let ordinary_node = node_with(module, b"consume(tryInto<Target>(true))");
+    let ordinary = report
+        .ordinary_call(module, ordinary_node)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ordinary.premise,
+        compiler::analysis::ordinary::InputPremise::HypotheticalOrdinaryAndConversionRoles
+    );
+    assert_eq!(
+        report
+            .goal(ordinary.goal.as_ref().unwrap())
+            .unwrap()
+            .premise,
+        Some(ordinary.premise)
+    );
     let wrong = report
         .conversion_use(module, node_with(module, b"tryInto(false)"))
         .unwrap()
@@ -695,6 +766,7 @@ fn symbolic_selection_needs_uniform_output_or_an_exact_assumption() {
          import std::result::Result;
          type Outer = {};
          type Inner = {};
+         type Stable = {};
          type Box<T> = { value: T };
          implement<T> tryInto<Inner>(value: Box<T>): Result<Inner,i32> { while (true) {} }
          implement tryInto<Inner>(value: Box<bool>): Result<Inner,bool> { while (true) {} }
@@ -703,6 +775,9 @@ fn symbolic_selection_needs_uniform_output_or_an_exact_assumption() {
          function open<T>(value: Box<T>): void { let x = tryInto<Outer>(value); }
          function assumed<T,E>(value: Box<T>): void where tryInto(Inner,Box<T>,E) { let x = tryInto<Outer,Box<T>>(value); }
          function conflicting<T>(value: Box<T>): void where tryInto(Inner,Box<T>,i32), tryInto(Inner,Box<T>,bool) { let x = tryInto<Inner>(value); }
+         implement<T> tryInto<Stable>(value: Box<T>): Result<Stable,i32> { while (true) {} }
+         implement tryInto<Stable>(value: Box<bool>): Result<Stable,bool> where noBorrow(&bool) { while (true) {} }
+         function stable<T>(value: Box<T>): void { let x = tryInto<Stable>(value); }
          function concrete(value: Box<bool>): void { let x = tryInto<Outer>(value); }",
     );
     fixture.write(
@@ -773,6 +848,14 @@ fn symbolic_selection_needs_uniform_output_or_an_exact_assumption() {
         "a relation does not select a body"
     );
     assert!(!nested.dependencies.is_empty());
+    let stable = uses
+        .iter()
+        .find(|u| u.site.span.bytes() == b"tryInto<Stable>(value)")
+        .unwrap();
+    assert_eq!(
+        stable.outcome,
+        Some(PairOutcome::Winner(&graph.implementations()[3].declaration))
+    );
     let conflicting = uses
         .iter()
         .find(|u| u.site.span.bytes() == b"tryInto<Inner>(value)")
@@ -844,6 +927,180 @@ fn filter_equivalence_is_per_candidate_not_by_union() {
         filtered.error_agreement,
         ErrorAgreement::Disagrees { .. }
     ));
+}
+
+#[test]
+fn invalid_conversion_role_and_exhausted_inventory_do_not_supply_evidence() {
+    use compiler::analysis::generics::{GoalBlocker, GoalState};
+    let fixture = Fixture::new(
+        "import std::convert::into;
+         function need(x: bool): bool where into(bool) { return x; }
+         function test(): bool { return need(true); }",
+    );
+    fixture.write("std/convert.rill", "export function into<T>(value: T): T;");
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let binding = standard_export(&graph, "into");
+    let role = RoleHypothesis::Infallible(binding);
+    let inventory = analyze_conversions(&ordinary, &[role], limits).unwrap();
+    let Target::Declaration(id) = &binding.target else {
+        panic!("captured family")
+    };
+    assert_eq!(
+        inventory.family(id).unwrap().unwrap().issues[0].kind,
+        RegistrationIssueKind::FamilySignature
+    );
+    let report = inventory.bodies(limits);
+    assert!(
+        report
+            .goals()
+            .iter()
+            .any(|g| g.site.span.bytes() == b"need(true)"
+                && matches!(
+                    g.state,
+                    GoalState::Unresolved(GoalBlocker::ConversionPair(_))
+                )
+                && g.hypothetical.is_none())
+    );
+    let exhausted = analyze_conversions(
+        &ordinary,
+        &[],
+        AnalysisLimits {
+            max_work: 0,
+            ..limits
+        },
+    )
+    .unwrap();
+    assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+}
+
+#[test]
+fn a_conversion_error_can_determine_a_standalone_requirement_output() {
+    use compiler::analysis::TypeTerm;
+    use compiler::analysis::scalars::NodeFactKind;
+    let fixture = Fixture::new(
+        "import std::convert::tryInto;
+         import std::result::Result;
+         type Target = {};
+         implement tryInto<Target>(value: bool): Result<Target,i32> { while (true) {} }
+         function adapt<D,S,E = bool>(value: S): Result<D,E> where tryInto(D,S,E) { while (true) {} }
+         function family<S,E>(value: S): Result<Target,E> where tryInto(Target,S,E);
+         implement<S,E> family(value: S): Result<Target,E> { while (true) {} }
+         function run(): void {
+             let v = adapt<Target>(true);
+             let w = family(true);
+             let wrong = adapt<Target,bool,bool>(false);
+         }",
+    );
+    fixture.write(
+        "std/convert.rill",
+        "import result::Result; export function tryInto<To,From,E>(value: From): Result<To,E>;",
+    );
+    fixture.write(
+        "std/result.rill",
+        "export enum Result<T,E> { Ok(T), Err(E) }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let inventory = analyze_conversions(
+        &ordinary,
+        &[RoleHypothesis::Fallible {
+            family: standard_export(&graph, "tryInto"),
+            result: standard_export(&graph, "Result"),
+        }],
+        limits,
+    )
+    .unwrap();
+    let report = inventory.bodies(limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.origin == Origin::Application)
+        .unwrap();
+    let node = node_with(module, b"adapt<Target>(true)");
+    assert!(report.node(module, node).unwrap().is_none());
+    let conditional = report
+        .conditional_conversion_node(module, node)
+        .unwrap()
+        .unwrap();
+    let NodeFactKind::Expression(facts) = &conditional.kind else {
+        panic!("call")
+    };
+    let call = facts.call.as_ref().unwrap();
+    assert!(call.defaults.is_empty());
+    assert!(
+        matches!(call.substitution[2].argument.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+    );
+    assert_eq!(
+        report
+            .goals()
+            .iter()
+            .filter(|g| g.site.node == node && g.output.is_some())
+            .count(),
+        1
+    );
+    let wrong = node_with(module, b"adapt<Target,bool,bool>(false)");
+    assert!(report.node(module, wrong).unwrap().is_none());
+    assert!(
+        report
+            .conditional_conversion_node(module, wrong)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        report
+            .goals()
+            .iter()
+            .any(|g| g.site.node == wrong && g.equalities.iter().any(|e| !e.agrees))
+    );
+    let family = report
+        .ordinary_call(module, node_with(module, b"family(true)"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        family.premise,
+        compiler::analysis::ordinary::InputPremise::HypotheticalOrdinaryAndConversionRoles
+    );
+    let root = report.goal(family.goal.as_ref().unwrap()).unwrap();
+    let result = &root.output.as_ref().unwrap().result;
+    assert!(
+        matches!(result.as_ref(), TypeTerm::Nominal { arguments, .. }
+        if matches!(arguments[1].as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+    );
+}
+
+#[test]
+fn independent_arithmetic_errors_do_not_inherit_a_sibling_conversion_premise() {
+    let fixture = Fixture::new(
+        "import std::convert::into;
+         type Target = {};
+         implement into<Target>(value: bool): Target { return Target {}; }
+         function run(): void { let v: [Target,u8] = [into<Target,bool>(false), 1u8 + false]; }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let inventory = analyze_conversions(
+        &ordinary,
+        &[RoleHypothesis::Infallible(standard_export(&graph, "into"))],
+        limits,
+    )
+    .unwrap();
+    let report = inventory.bodies(limits);
+    assert!(
+        report
+            .findings()
+            .iter()
+            .any(|f| f.site.span.bytes() == b"1u8 + false")
+    );
+    assert!(
+        !report
+            .conditional_findings()
+            .iter()
+            .any(|f| f.finding.site.span.bytes() == b"1u8 + false")
+    );
 }
 
 #[test]

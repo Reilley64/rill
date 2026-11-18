@@ -9,6 +9,7 @@ pub(in crate::analysis) mod pairs;
 pub use output::{DeterminationRoute, OutputDetermination};
 pub use pairs::{
     Applicability, ErrorAgreement, PairBlocker, PairMatch, PairOutcome, PairReport, PairRequest,
+    PairSignature,
 };
 pub use scalars::generics::ConversionUse;
 
@@ -98,6 +99,18 @@ impl<'g> ConversionReport<'_, 'g> {
 
     pub fn statistics(&self) -> Statistics {
         self.statistics
+    }
+
+    /// Canonical annotation terms and source-binding routes used by this inventory.
+    pub fn type_facts(&self) -> &PartialFacts<'g> {
+        self.input().type_facts()
+    }
+
+    pub fn header_metadata(
+        &self,
+        id: &DeclarationId,
+    ) -> Result<Option<&ordinary::HeaderMetadata<'g>>, QueryError> {
+        self.input().header_metadata(id)
     }
 
     pub fn family(&self, id: &DeclarationId) -> Result<Option<&ConversionFamily<'g>>, QueryError> {
@@ -341,20 +354,24 @@ pub fn analyze_conversions<'r, 'g>(
         return Err(QueryError::InvalidRequest);
     }
     let graph = input.graph();
-    let extended = ordinary::extend_nominal_types(input, limits);
+    let mut budget = Budget {
+        limits,
+        statistics: Statistics::default(),
+    };
+    let extension = ordinary::extend_nominal_types(input, &mut budget);
+    let exhausted = extension.is_err();
+    let extended = extension.ok().flatten();
     let complete = extended.as_ref().unwrap_or(input);
     let mut report = ConversionReport {
         input,
         extended: None,
         families: BTreeMap::new(),
-        completion: complete.completion(),
+        completion: if exhausted {
+            ordinary::Completion::ResourceLimit
+        } else {
+            complete.completion()
+        },
         statistics: Statistics::default(),
-    };
-    let mut budget = Budget {
-        limits,
-        statistics: extended
-            .as_ref()
-            .map_or(Statistics::default(), OrdinaryAnalysis::statistics),
     };
     for &premise in roles {
         let (binding, result) = premise.bindings();
@@ -364,6 +381,9 @@ pub fn analyze_conversions<'r, 'g>(
         }
         if let Some(result) = result {
             validate_export(graph, result, DeclarationKind::Enum)?;
+        }
+        if exhausted {
+            continue;
         }
         let count = graph
             .bindings()
