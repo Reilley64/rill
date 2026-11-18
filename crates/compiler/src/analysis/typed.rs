@@ -73,7 +73,7 @@ pub struct TypedReport<'g> {
 /// Evidence of the integrated typed checkpoint for this immutable capture.
 #[derive(Debug)]
 pub struct TypedReceipt<'a, 'g> {
-    report: &'a TypedReport<'g>,
+    pub(super) report: &'a TypedReport<'g>,
 }
 
 impl TypedReceipt<'_, '_> {

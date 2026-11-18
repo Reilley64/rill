@@ -110,12 +110,30 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 state.observe(*owner, path, self.budget)?;
             }
-            let mutable_reference = self.expression_facts(argument)?.is_some_and(|value| {
-                matches!(value.ty.as_ref(), TypeTerm::Reference { mutable: true, .. })
-            });
+            let mutable_referent =
+                self.expression_facts(argument)?
+                    .and_then(|value| match value.ty.as_ref() {
+                        TypeTerm::Reference {
+                            mutable: true,
+                            referent,
+                        } => Some(referent.as_ref()),
+                        _ => None,
+                    });
             for address @ (owner, _) in referents {
-                if observer && exact.is_none() || mutable_reference && !observer {
-                    self.forget_address(state, &address, argument)?;
+                if observer && exact.is_none() || mutable_referent.is_some() && !observer {
+                    if matches!(mutable_referent, Some(TypeTerm::Primitive(_))) {
+                        // A call may change a saved Boolean refinement. A
+                        // possible address may still cover other components.
+                        let affected = state.take(address.0, &address.1, self.budget)?;
+                        self.budget.step(affected.len())?;
+                        if affected.iter().any(|entry| {
+                            !matches!(&entry.content, Content::Test(tag, _) if matches!(tag.as_ref(), Constructor::Boolean(_)))
+                        }) {
+                            self.pending(argument, ResultUseBlocker::Storage)?;
+                        }
+                    } else {
+                        self.forget_address(state, &address, argument)?;
+                    }
                 } else if !observer && borrows_can_escape {
                     state.store(
                         Root::Temporary(node),
