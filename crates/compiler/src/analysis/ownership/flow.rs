@@ -20,7 +20,7 @@ struct Held {
     disposal_started_at: Option<NodeId>,
     stored_at: Option<NodeId>,
     /// Exact local descriptor reached by an admitted exclusive access value.
-    retained_access: Option<Slot>,
+    exact_target: Option<Slot>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -194,7 +194,7 @@ fn conflict(
         if let State::Initialized(held) = &state[holder] {
             // A live alias can still read the target's current contents, not
             // only the contents present when its access was acquired.
-            let contents = if let Some(target) = held.retained_access {
+            let contents = if let Some(target) = held.exact_target {
                 budget.step(1)?;
                 match &state[target] {
                     State::Initialized(value) => value.loans.as_ref(),
@@ -780,7 +780,7 @@ pub(super) fn run<'g>(
                         },
                         budget,
                     )?;
-                    visit_loans(&state, slots[from].storage(from), budget, |loan, budget| {
+                    let mut include = |loan: Loan, budget: &mut Budget| {
                         insert_loan(
                             &mut loans,
                             Loan {
@@ -793,10 +793,15 @@ pub(super) fn run<'g>(
                             },
                             budget,
                         )
-                    })?;
+                    };
+                    visit_loans(&state, slots[from].storage(from), budget, &mut include)?;
+                    budget.step(1)?;
+                    if let Some(target) = initialized(&state[from], node)?.exact_target {
+                        visit_loans(&state, slots[target].storage(target), budget, &mut include)?;
+                    }
                     state[into] = State::Initialized(Held {
                         loans: loan_set(loans, budget)?,
-                        retained_access: retained_target.then_some(from),
+                        exact_target: retained_target.then_some(from),
                         ..Held::default()
                     });
                     Operation::Borrow {
@@ -848,11 +853,7 @@ pub(super) fn run<'g>(
                     };
                     state[into] = State::Initialized(Held {
                         loans,
-                        retained_access: if exclusive {
-                            held.retained_access
-                        } else {
-                            None
-                        },
+                        exact_target: if exclusive { held.exact_target } else { None },
                         ..Held::default()
                     });
                     Operation::Reborrow {
@@ -898,8 +899,9 @@ pub(super) fn run<'g>(
                                 descriptor,
                                 argument,
                             } => {
+                                budget.step(2)?;
                                 let held = initialized(&state[argument], node)?;
-                                let target = held.retained_access.ok_or(Stop::Pending(node))?;
+                                let target = held.exact_target.ok_or(Stop::Pending(node))?;
                                 initialized(&state[target], node)?;
                                 (
                                     descriptor,

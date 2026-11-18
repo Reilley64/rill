@@ -4,6 +4,7 @@ use crate::analysis::MemberType;
 use crate::analysis::ordinary::{self, HypotheticalOutcome};
 use crate::analysis::scalars::data::{
     Access, Construction, DataExpression, PathProjection, PatternFacts, PatternProjection,
+    PlacePath,
 };
 use crate::analysis::scalars::generics::callables::CaptureForm;
 use crate::analysis::scalars::{ExpressionFacts, PropagationTarget};
@@ -364,6 +365,11 @@ impl<'a, 'g> Build<'a, 'g> {
 
     fn place(&mut self, node: NodeId) -> ResultOf<Slot> {
         let path = self.value(node)?.path.as_ref().ok_or(Stop::Pending(node))?;
+        self.resolve_place(node, path)
+    }
+
+    fn resolve_place(&mut self, node: NodeId, path: &PlacePath<'g>) -> ResultOf<Slot> {
+        self.budget.step(1)?;
         let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
         match path.projections.as_slice() {
             [] => Ok(root),
@@ -1319,13 +1325,10 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return Err(Stop::Pending(target));
         }
-        self.budget.step(1)?;
-        let root = *self.locals.get(path.root).ok_or(Stop::Pending(target))?;
-        let place = match path.projections.as_slice() {
-            [] => root,
-            [PathProjection::Field(id)] => self.field(target, root, id)?,
-            _ => return Err(Stop::Pending(target)),
-        };
+        if !matches!(path.projections.as_slice(), [] | [PathProjection::Field(_)]) {
+            return Err(Stop::Pending(target));
+        }
+        let place = self.resolve_place(target, path)?;
         Ok(CallDestination {
             storage: CallStorage::Local(place),
             input: args[input],

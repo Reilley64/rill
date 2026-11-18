@@ -628,22 +628,56 @@ fn direct_calls_retain_sources_in_named_record_fields() {
                     .mir()
                     .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
                 let ops = linear(mir, mir.entry);
-                let access = ops.iter().position(|op| matches!(op, Operation::Borrow { source, exclusive: true, .. }
-                    if source.root.span.bytes() == b"holder" && source.field().is_some_and(|f| f.name.as_deref() == Some("value"))))
+                let field = &field_named(module, "value").id;
+                let (access, borrowed) = ops
+                    .iter()
+                    .enumerate()
+                    .find_map(|(at, op)| match op {
+                        Operation::Borrow {
+                            source,
+                            exclusive: true,
+                            ..
+                        } if source.field().is_some_and(|f| &f.id == field) => Some((at, source)),
+                        _ => None,
+                    })
                     .expect("exclusive field storage borrow");
-                let invoke = ops.iter().position(|op| matches!(op, Operation::CallRetaining {
-                    callee, destination: RetainedPlace::Local(destination), ..
-                } if *callee == role && destination.root.span.bytes() == b"holder" && destination.field().is_some_and(|f| f.name.as_deref() == Some("value"))))
+                let (invoke, destination, input) = ops
+                    .iter()
+                    .enumerate()
+                    .find_map(|(at, op)| match op {
+                        Operation::CallRetaining {
+                            callee,
+                            destination: RetainedPlace::Local(destination),
+                            input,
+                        } if *callee == role => Some((at, destination, input)),
+                        _ => None,
+                    })
                     .expect("retention on the same field");
+                assert_eq!(borrowed.root.node, destination.root.node);
+                assert_eq!(destination.field().map(|f| &f.id), Some(field));
                 assert!(access < invoke);
-                if name == "readSibling" {
-                    assert!(
-                        ops[access + 1..invoke]
-                            .iter()
-                            .any(|op| matches!(op, Operation::Copy { from, .. }
-                        if from.field().is_some_and(|f| f.name.as_deref() == Some("sibling"))))
-                    );
-                }
+                let staged = ops[access + 1..invoke]
+                    .iter()
+                    .find_map(|op| match op {
+                        Operation::Copy {
+                            from,
+                            into: Some(into),
+                        } if name == "readSibling"
+                            && from
+                                .field()
+                                .is_some_and(|f| f.id == field_named(module, "sibling").id) =>
+                        {
+                            Some(into)
+                        }
+                        Operation::Borrow {
+                            holder,
+                            exclusive: false,
+                            ..
+                        } if name != "readSibling" => Some(holder),
+                        _ => None,
+                    })
+                    .expect("stage the shared input after the exclusive field borrow");
+                assert_eq!(staged.root.node, input.root.node);
                 assert!(
                     matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
                     if text.field().is_some_and(|f| f.name.as_deref() == Some("text")))
@@ -753,6 +787,16 @@ fn exclusive_aliases_retain_sources_in_the_proved_target() {
                 remember(access, seed);
                 return value;
             }
+            function viewOfAlias(seed: &bool): bool {
+                let mut out = seed;
+                let access = &mut out;
+                let mut flag = true;
+                remember(access, &flag);
+                let view = &access;
+                let value = readBool(&mut flag);
+                let _ = view;
+                return value;
+            }
             function incomingMoved(slot: &mut &bool, seed: &bool): void {
                 let access = slot;
                 remember(access, seed);
@@ -787,35 +831,47 @@ fn exclusive_aliases_retain_sources_in_the_proved_target() {
                     .filter(|op| {
                         matches!(
                             op,
-                            Operation::Reborrow { .. } | Operation::CallRetaining { .. }
+                            Operation::Borrow { .. }
+                                | Operation::Reborrow { .. }
+                                | Operation::CallRetaining { .. }
                         )
                     })
                     .collect();
                 let [
+                    Operation::Borrow {
+                        source: borrowed,
+                        exclusive: true,
+                        ..
+                    },
                     Operation::Reborrow {
                         parent,
                         exclusive: true,
                         ..
                     },
+                    Operation::Borrow {
+                        holder: staged,
+                        exclusive: false,
+                        ..
+                    },
                     Operation::CallRetaining {
                         callee,
                         destination: RetainedPlace::ThroughAlias { descriptor, target },
-                        ..
+                        input,
                     },
                 ] = events.as_slice()
                 else {
-                    panic!("expected exact reborrow and retained call: {events:?}")
+                    panic!("expected exact borrow, reborrow and retained call: {events:?}")
                 };
                 assert_eq!(*callee, role);
                 assert_eq!(parent.root.node, descriptor.root.node);
                 assert_eq!(descriptor.root.span.bytes(), descriptor_name);
                 assert_eq!(target.root.span.bytes(), target_name);
+                assert_eq!(target.root.node, borrowed.root.node);
+                assert_eq!(staged.root.node, input.root.node);
                 if name == "field" {
-                    assert!(
-                        target
-                            .field()
-                            .is_some_and(|f| f.name.as_deref() == Some("value"))
-                    );
+                    let field = &field_named(module, "value").id;
+                    assert_eq!(target.field().map(|f| &f.id), Some(field));
+                    assert_eq!(borrowed.field().map(|f| &f.id), Some(field));
                     assert!(
                         matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
                         if text.field().is_some_and(|f| f.name.as_deref() == Some("text")))
@@ -831,6 +887,7 @@ fn exclusive_aliases_retain_sources_in_the_proved_target() {
                 ("expiresAtTarget", "R0203", b"&mut inner".as_slice()),
                 ("expiresThroughAlias", "R0203", b"&flag".as_slice()),
                 ("conflictsThroughAlias", "R0201", b"&flag".as_slice()),
+                ("viewOfAlias", "R0201", b"&flag".as_slice()),
             ] {
                 let bad = lower(name);
                 assert_eq!(bad.completion(), Completion::SourceRejected, "{name}");
@@ -898,6 +955,14 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
             }
         },
     );
+}
+
+fn field_named<'g>(module: &'g loader::Module, name: &str) -> &'g loader::Declaration {
+    module
+        .declarations
+        .iter()
+        .find(|d| d.id.kind == loader::DeclarationKind::Field && d.name.as_deref() == Some(name))
+        .unwrap()
 }
 
 fn writes_on_path<'g>(mir: &Mir<'g>) -> Vec<(Place<'g>, Place<'g>)> {
