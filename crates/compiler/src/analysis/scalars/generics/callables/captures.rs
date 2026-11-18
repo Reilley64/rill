@@ -53,6 +53,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         arrow: NodeId,
         first_fact: usize,
     ) -> Work<(Option<InvocationMode>, Vec<CaptureFact<'g>>)> {
+        let copying = self.copy_inputs();
         let span = &module.syntax.nodes[arrow].span;
         let body = module.syntax.nodes[arrow].children[1];
         let local = |path: &data::PlacePath<'g>| {
@@ -96,7 +97,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 }
                                 _ => Self::capture_demand(
                                     &mut self.elab,
-                                    self.integrated,
+                                    copying,
                                     Demand::Value,
                                     &capture.ty,
                                     capture.access,
@@ -152,7 +153,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     } else {
                         Self::capture_demand(
                             &mut self.elab,
-                            self.integrated,
+                            copying,
                             use_,
                             &place.ty,
                             place.access,
@@ -349,7 +350,7 @@ impl<'r, 'g> Checker<'r, 'g> {
 
     fn capture_demand(
         elab: &mut Analyzer<'g>,
-        integrated: bool,
+        copying: Option<copying::Inputs<'r, 'g>>,
         use_: Demand,
         ty: &Type<'g>,
         access: data::Access,
@@ -359,7 +360,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             Demand::Mutate => Some(InvocationMode::Mutable),
             Demand::Invoke(mode) => Some(mode),
             Demand::Pending => None,
-            Demand::Value => match implicit_copy(elab, ty, integrated, 1)? {
+            Demand::Value => match implicit_copy(elab, copying, ty)? {
                 Some(true) => Some(InvocationMode::ReadOnly),
                 Some(false) if access == data::Access::Owned => Some(InvocationMode::Once),
                 _ => None,

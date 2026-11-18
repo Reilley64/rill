@@ -383,7 +383,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         let bound = if access == Access::Owned {
             Some(ty.clone())
         } else {
-            match implicit_copy(&mut self.elab, ty, self.integrated, 1)? {
+            let copying = self.copy_inputs();
+            match implicit_copy(&mut self.elab, copying, ty)? {
                 Some(true) => Some(ty.clone()),
                 Some(false) => {
                     self.elab.reserve(1)?;

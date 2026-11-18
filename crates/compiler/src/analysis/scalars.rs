@@ -4,8 +4,10 @@ use crate::lexer::{LiteralMode, NumberForm, Token, TokenKind};
 use declarations::DeclarationReceipt;
 use std::collections::{BTreeSet, VecDeque};
 
+mod copying;
 mod core;
 pub mod data;
+use copying::implicit_copy;
 mod formatting;
 pub mod generics;
 mod iteration;
@@ -3418,44 +3420,6 @@ fn simple_name(module: &Module, node: NodeId) -> Option<NodeId> {
     }
     let qualified = &module.syntax.nodes[path.children[0]];
     (qualified.children.len() == 1).then_some(qualified.children[0])
-}
-fn implicit_copy(
-    elab: &mut Analyzer<'_>,
-    ty: &Type<'_>,
-    integrated: bool,
-    depth: usize,
-) -> Work<Option<bool>> {
-    let leaf = implicit_copy_leaf(ty);
-    if !integrated {
-        return Ok(leaf);
-    }
-    elab.step(1)?;
-    if depth > elab.limits.max_depth.min(64) {
-        return Err(());
-    }
-    elab.statistics.max_depth = elab.statistics.max_depth.max(depth);
-    if leaf.is_some() {
-        return Ok(leaf);
-    }
-    // One established non-copying component suffices to disprove copying.
-    // An otherwise eligible aggregate still needs the actual action inventory.
-    if let TypeTerm::Tuple(elements) = ty.as_ref() {
-        for element in elements {
-            if implicit_copy(elab, element, integrated, depth + 1)? == Some(false) {
-                return Ok(Some(false));
-            }
-        }
-    }
-    Ok(None)
-}
-
-fn implicit_copy_leaf(ty: &Type<'_>) -> Option<bool> {
-    match ty.as_ref() {
-        TypeTerm::Primitive(p) => Some(p.name() != "string"),
-        TypeTerm::Reference { mutable, .. } => Some(!mutable),
-        TypeTerm::Parameter { .. } => Some(false),
-        _ => None,
-    }
 }
 fn integer(ty: &Type<'_>) -> bool {
     matches!(

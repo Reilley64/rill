@@ -236,6 +236,7 @@ fn combined_installed_capture(request: &InstalledRequest) {
         function iterateAll(xs: List<i32>): void { for (let _ of xs) { continue; } }
         function retainType(value: &Counted<i32>): Counted<i32> { return copy(value); }
         function releaseType(value: Counted<i32>): void { dispose(value); }
+        function borrowType(input: &[Counted<i32>]): &Counted<i32> { let [item] = input; return item; }
         let startup = convertAndShow(5u8);
         let _ = isOk(&startup);
         expect isOk(&convertAndShow(6u8));
@@ -307,7 +308,7 @@ fn combined_installed_capture(request: &InstalledRequest) {
                 .iter()
                 .any(|module| module.key.path == "iter.rill")
         );
-        for name in ["retainType", "releaseType"] {
+        for name in ["retainType", "releaseType", "borrowType"] {
             let declaration = app
                 .declarations
                 .iter()

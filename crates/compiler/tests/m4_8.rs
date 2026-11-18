@@ -553,6 +553,59 @@ fn aggregate_noncopying_field_can_settle_borrowed_binder_and_capture_demand() {
 }
 
 #[test]
+fn borrowed_binders_and_captures_classify_substituted_noncopying_nominals() {
+    let fixture = Fixture::new(
+        "type Box<T> = { element: T; }\n\
+         enum Choice<T> { Item(Box<T>), Empty }\n\
+         function borrowed(input: &[Box<string>]): &Box<string> { let [item] = input; return item; }\n\
+         function variant(input: &[Choice<string>.Item]): &Choice<string>.Item { let [item] = input; return item; }\n\
+         function pending(input: &[Choice<string>.Empty]): &Choice<string>.Empty { let [item] = input; return item; }\n\
+         let owned: Box<string> = Box { element: \"text\" }; let callable = () => owned;",
+    );
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    assert!(report.bodies().findings().is_empty());
+    assert!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::ImplicitCopy)
+    );
+    for (name, checked) in [("borrowed", true), ("variant", true), ("pending", false)] {
+        let declaration = module
+            .declarations
+            .iter()
+            .find(|d| d.name.as_deref() == Some(name))
+            .unwrap();
+        assert_eq!(
+            report
+                .bodies()
+                .body(module, BodyOwner::Declaration(&declaration.id))
+                .unwrap()
+                .is_some(),
+            checked,
+            "{name}"
+        );
+    }
+    let arrow = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Arrow)
+        .unwrap();
+    assert_eq!(
+        report.bodies().arrow(module, arrow).unwrap().unwrap().mode,
+        Some(InvocationMode::Once)
+    );
+}
+
+#[test]
 fn invalid_nominal_blocks_its_members_without_stopping_independent_source() {
     let fixture = Fixture::new(
         "import helper; type Broken = { value: bool; value: i32 }; function useBroken(x: Broken): bool { return x.value; } let x = Broken { value: true }; let bad: bool = 1i32;",
