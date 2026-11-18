@@ -15,33 +15,32 @@ fn main() -> ExitCode {
     };
     for test_mode in [false, true] {
         let mode = if test_mode { "test" } else { "normal" };
-        let graph =
-            match loader::load_installed(InstalledRequest {
-                entry: entry.clone(),
-                target: "aarch64-apple-darwin".into(),
-                options: Default::default(),
-                limits: Limits::default(),
-                test_mode,
-            }) {
-                Ok(graph) => graph,
-                Err(failure) => {
+        let graph = match loader::load_installed(InstalledRequest {
+            entry: entry.clone(),
+            target: "aarch64-apple-darwin".into(),
+            options: Default::default(),
+            limits: Limits::default(),
+            test_mode,
+        }) {
+            Ok(graph) => graph,
+            Err(failure) => {
+                eprintln!(
+                    "{mode}: installed capture failed: {:?}: {}",
+                    failure.kind, failure.message
+                );
+                for finding in failure.findings {
                     eprintln!(
-                        "{mode}: installed capture failed: {:?}: {}",
-                        failure.kind, failure.message
+                        "  {}: {} ({})",
+                        finding.code.unwrap_or("source"),
+                        finding.message,
+                        finding.span.as_ref().map_or_else(String::new, |span| {
+                            String::from_utf8_lossy(span.bytes()).into_owned()
+                        }),
                     );
-                    for finding in failure.findings {
-                        eprintln!(
-                            "  {}: {} ({})",
-                            finding.code.unwrap_or("source"),
-                            finding.message,
-                            finding.span.as_ref().map_or_else(String::new, |span| {
-                                String::from_utf8_lossy(span.bytes()).into_owned()
-                            }),
-                        );
-                    }
-                    continue;
                 }
-            };
+                continue;
+            }
+        };
         let report = analyze_typed(&graph, AnalysisLimits::default());
         eprintln!(
             "{mode}: {:?}; core blockers: {:?}",
