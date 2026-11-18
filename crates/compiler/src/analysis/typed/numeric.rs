@@ -23,6 +23,13 @@ pub(in crate::analysis) struct ConversionCore<'g> {
 }
 
 impl<'g> ConversionCore<'g> {
+    pub(super) fn roles_complete(&self) -> bool {
+        self.into.is_some()
+            && self.try_into.is_some()
+            && self.numeric_error.is_some()
+            && self.bytes.is_some()
+    }
+
     pub(super) fn check(
         &mut self,
         inventory: &OrdinaryAnalysis<'g>,

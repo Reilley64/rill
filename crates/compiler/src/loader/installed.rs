@@ -133,57 +133,37 @@ impl InstalledProfile {
     }
 
     pub(super) fn source(self, path: &str) -> Option<&'static [u8]> {
-        match (self, path) {
-            (Self::DarwinArm64, "std.rill") => Some(include_bytes!("../../../../stdlib/std.rill")),
-            (Self::DarwinArm64, "core.rill") => {
-                Some(include_bytes!("../../../../stdlib/core.rill"))
-            }
-            (Self::DarwinArm64, "convert.rill") => {
-                Some(include_bytes!("../../../../stdlib/convert.rill"))
-            }
-            (Self::DarwinArm64, "number.rill") => {
-                Some(include_bytes!("../../../../stdlib/number.rill"))
-            }
-            (Self::DarwinArm64, "char.rill") => {
-                Some(include_bytes!("../../../../stdlib/char.rill"))
-            }
-            (Self::DarwinArm64, "bytes.rill") => {
-                Some(include_bytes!("../../../../stdlib/bytes.rill"))
-            }
-            (Self::DarwinArm64, "string.rill") => {
-                Some(include_bytes!("../../../../stdlib/string.rill"))
-            }
-            (Self::DarwinArm64, "format.rill") => {
-                Some(include_bytes!("../../../../stdlib/format.rill"))
-            }
-            (Self::DarwinArm64, "compare.rill") => {
-                Some(include_bytes!("../../../../stdlib/compare.rill"))
-            }
-            (Self::DarwinArm64, "option.rill") => {
-                Some(include_bytes!("../../../../stdlib/option.rill"))
-            }
-            (Self::DarwinArm64, "result.rill") => {
-                Some(include_bytes!("../../../../stdlib/result.rill"))
-            }
-            (Self::DarwinArm64, "error.rill") => {
-                Some(include_bytes!("../../../../stdlib/error.rill"))
-            }
-            (Self::DarwinArm64, "shared.rill") => {
-                Some(include_bytes!("../../../../stdlib/shared.rill"))
-            }
-            (Self::DarwinArm64, "mutex.rill") => {
-                Some(include_bytes!("../../../../stdlib/mutex.rill"))
-            }
-            (Self::DarwinArm64, "channel.rill") => {
-                Some(include_bytes!("../../../../stdlib/channel.rill"))
-            }
-            (Self::DarwinArm64, "collection.rill") => {
-                Some(include_bytes!("../../../../stdlib/collection.rill"))
-            }
-            (Self::DarwinArm64, "iter.rill") => {
-                Some(include_bytes!("../../../../stdlib/iter.rill"))
-            }
-            _ => None,
+        self.sources()
+            .iter()
+            .find_map(|&(key, bytes)| (path == key).then_some(bytes))
+    }
+
+    pub(super) fn sources(self) -> &'static [(&'static str, &'static [u8])] {
+        macro_rules! pins {
+            ($($name:literal),* $(,)?) => {
+                &[$(($name, include_bytes!(concat!("../../../../stdlib/", $name)))),*]
+            };
+        }
+        match self {
+            Self::DarwinArm64 => pins![
+                "std.rill",
+                "core.rill",
+                "convert.rill",
+                "number.rill",
+                "char.rill",
+                "bytes.rill",
+                "string.rill",
+                "format.rill",
+                "compare.rill",
+                "option.rill",
+                "result.rill",
+                "error.rill",
+                "shared.rill",
+                "mutex.rill",
+                "channel.rill",
+                "collection.rill",
+                "iter.rill",
+            ],
         }
     }
 }

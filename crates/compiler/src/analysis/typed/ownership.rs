@@ -116,6 +116,13 @@ pub(super) struct Report<'g> {
     pub(super) protection: Vec<OwnershipProtection<'g>>,
     pub(super) overlaps: Vec<OwnershipOverlap<'g>>,
     pub(super) representations: Vec<NativeRepresentation<'g>>,
+    validated_owners: usize,
+}
+
+impl Report<'_> {
+    pub(super) fn roles_complete(&self) -> bool {
+        self.validated_owners == OWNERS.len()
+    }
 }
 
 struct Owner(
@@ -208,6 +215,7 @@ pub(super) fn check<'g>(
                 }) {
                 continue;
             }
+            report.validated_owners += 1;
             if let Some(artifact) = graph.ownership_archive() {
                 budget.reserve(1)?;
                 report.representations.push(NativeRepresentation {

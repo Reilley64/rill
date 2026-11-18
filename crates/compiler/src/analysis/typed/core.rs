@@ -37,6 +37,79 @@ pub(super) struct InstalledCore<'g> {
     pub(super) conversions: numeric::ConversionCore<'g>,
 }
 
+/// Check the full installed role inventory without validating provider availability.
+/// A partial capture still retains all individually validated roles.
+pub(super) fn roles_complete(
+    inventory: &OrdinaryAnalysis<'_>,
+    core: &InstalledCore<'_>,
+    collections: &CollectionCore<'_>,
+    ownership: &ownership::Report<'_>,
+    budget: &mut Budget,
+) -> Work<bool> {
+    let graph = inventory.graph();
+    let (Some(keys), Some(option), Some(result), Some(list), Some(copy), Some(dispose)) = (
+        graph.installed_source_keys(),
+        core.option,
+        core.result,
+        collections.list,
+        core.primitives.copy,
+        core.primitives.dispose,
+    ) else {
+        return Ok(false);
+    };
+    let Some(constructor) = result.constructor else {
+        return Ok(false);
+    };
+    if core.show.is_none()
+        || core.primitives.equality.is_none()
+        || result.display.is_none()
+        || result.origin.is_none()
+        || result.observe_cause.is_none()
+        || !core.conversions.roles_complete()
+        || !ownership.roles_complete()
+        || collections.protection.iter().any(Option::is_none)
+    {
+        return Ok(false);
+    }
+    for key in keys {
+        if pinned_module(graph, key, budget)?.is_none() {
+            return Ok(false);
+        }
+    }
+    let facade = pinned_module(graph, "std.rill", budget)?.unwrap();
+    use Namespace::{TypeModule, ValueFunction};
+    for (name, ns, expected) in [
+        ("copy", ValueFunction, copy),
+        ("dispose", ValueFunction, dispose),
+        ("List", TypeModule, list.declaration),
+        ("Option", TypeModule, option.declaration),
+        ("Result", TypeModule, result.declaration),
+        ("Err", TypeModule, result.wrapper),
+        ("Err", ValueFunction, constructor),
+        ("Error", TypeModule, result.default_error),
+    ] {
+        let mut seen = false;
+        for binding in graph.bindings() {
+            budget.step(1)?;
+            if binding.module == facade.key
+                && binding.name == name
+                && binding.namespace == ns
+                && binding.public
+            {
+                if seen || !matches!(&binding.target, Target::Declaration(id) if *id == expected.id)
+                {
+                    return Ok(false);
+                }
+                seen = true;
+            }
+        }
+        if !seen {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 pub(super) fn export<'g>(
     graph: &'g Graph,
     module: &'g Module,

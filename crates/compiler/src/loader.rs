@@ -347,6 +347,11 @@ impl Graph {
                 .is_some()
     }
 
+    /// The source keys in the selected installed profile, not a discovery request.
+    pub(crate) fn installed_source_keys(&self) -> Option<impl Iterator<Item = &'static str>> {
+        Some(self.installed?.sources().iter().map(|&(key, _)| key))
+    }
+
     pub(crate) fn error_storage_source(&self) -> Option<&std::path::Path> {
         self.error_storage.as_ref().map(|(path, _)| path.as_path())
     }

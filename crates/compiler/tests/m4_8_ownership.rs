@@ -59,6 +59,7 @@ fn installed_ownership_requires_the_built_archive() {
                     .core_blockers()
                     .contains(&CoreBlocker::Representation)
             );
+            assert!(report.core_blockers().contains(&CoreBlocker::Roles));
             let [overlap] = report.ownership_overlaps() else {
                 panic!(
                     "expected only the nested-payload replacement: {:?}",
@@ -106,6 +107,7 @@ fn installed_ownership_requires_the_built_archive() {
         missing_evidence(&root, &request);
         partial_collection(&request);
         combined_installed_capture(&request);
+        closed_roles_without_native_providers(&root, &request);
 
         let facade = root.join("lib/rill/std/std.rill");
         let bytes = fs::read(&facade).unwrap();
@@ -513,6 +515,76 @@ fn missing_evidence(root: &Path, request: &InstalledRequest) {
         "even identical source bytes have no authority"
     );
     assert!(report.ownership_overlaps().is_empty());
+}
+
+fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest) {
+    fs::write(
+        &request.entry,
+        "
+        import std::{List, Result};
+        import std::bytes::Bytes;
+        import std::shared::Shared;
+        import std::mutex::LockGuard;
+        import std::channel::{Sender, Receiver};
+        import std::iter::iterate;
+        import std::convert::into;
+        ",
+    )
+    .unwrap();
+    let archive = root.join(ARCHIVE);
+    let saved = archive.with_extension("saved");
+    fs::rename(&archive, &saved).unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert_eq!(
+            report.core_blockers(),
+            &[
+                CoreBlocker::Providers,
+                CoreBlocker::Protection,
+                CoreBlocker::Representation
+            ]
+        );
+        assert!(report.native_representations().is_empty());
+        assert!(
+            report
+                .ownership_protection()
+                .iter()
+                .all(|p| p.provider.is_none())
+        );
+        let exact = AnalysisLimits {
+            max_work: report.statistics().work,
+            ..AnalysisLimits::default()
+        };
+        assert_eq!(
+            analyze_typed(&graph, exact).core_blockers(),
+            report.core_blockers()
+        );
+        let short = analyze_typed(
+            &graph,
+            AnalysisLimits {
+                max_work: exact.max_work - 1,
+                ..exact
+            },
+        );
+        assert_eq!(
+            short.completion(),
+            compiler::analysis::scalars::ScalarFailureKind::ResourceLimit
+        );
+        assert!(short.core_blockers().contains(&CoreBlocker::Roles));
+
+        let source_only = loader::load(graph.request().clone()).unwrap();
+        assert!(
+            analyze_typed(&source_only, AnalysisLimits::default())
+                .core_blockers()
+                .contains(&CoreBlocker::Roles)
+        );
+    }
+    fs::rename(&saved, &archive).unwrap();
 }
 
 fn partial_collection(request: &InstalledRequest) {

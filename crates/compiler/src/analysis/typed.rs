@@ -60,6 +60,7 @@ pub struct TypedReport<'g> {
     collections: CollectionCore<'g>,
     collection_overlaps: Vec<CollectionOverlap<'g>>,
     completion: ScalarFailureKind,
+    roles_complete: bool,
     statistics: Statistics,
     not_performed: Vec<Stage>,
     result_use: Option<ResultUseReport<'g>>,
@@ -242,12 +243,17 @@ impl<'g> TypedReport<'g> {
     }
 
     pub fn core_blockers(&self) -> &'static [CoreBlocker] {
-        &[
+        const BLOCKERS: &[CoreBlocker] = &[
             CoreBlocker::Roles,
             CoreBlocker::Providers,
             CoreBlocker::Protection,
             CoreBlocker::Representation,
-        ]
+        ];
+        if self.roles_complete {
+            &BLOCKERS[1..]
+        } else {
+            BLOCKERS
+        }
     }
 
     /// Collected headers and hypothetical input comparisons. Not admission.
@@ -385,6 +391,17 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     } else {
         None
     };
+    let roles_complete = if completion == ScalarFailureKind::ResourceLimit {
+        false
+    } else {
+        match core::roles_complete(&inventory, &core, &collections, &ownership, &mut budget) {
+            Ok(complete) => complete,
+            Err(()) => {
+                completion = ScalarFailureKind::ResourceLimit;
+                false
+            }
+        }
+    };
     let mut not_performed = vec![Stage::Ownership, Stage::Execution];
     if result_use.is_none() {
         not_performed.push(Stage::ResultUse);
@@ -424,6 +441,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         collections,
         collection_overlaps,
         completion,
+        roles_complete,
         statistics: budget.statistics,
         not_performed,
         result_use,
