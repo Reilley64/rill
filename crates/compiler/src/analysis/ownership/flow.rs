@@ -58,7 +58,7 @@ impl Edges {
 // operation can observe a borrowed value: droppable slots contain only strings.
 fn liveness(
     slots: &[Local<'_>],
-    code: &[Instruction],
+    code: &[Instruction<'_>],
     calls: &[Call<'_>],
     cleanups: &[Vec<Slot>],
     budget: &mut Budget,
@@ -94,6 +94,9 @@ fn liveness(
             }
             Action::FormClosure { capture, into, .. } => (Some(capture), Some(into)),
             Action::Call(index) => (None, calls[index].into),
+            Action::TestOption { operand, .. } => (Some(operand), None),
+            Action::CopyOptionPayload { operand, into } => (Some(operand), Some(into)),
+            Action::ConstructOption { payload, into, .. } => (payload, Some(into)),
         };
         let cleaned = match instruction.action {
             Action::Cleanup(index) => cleanups[index].as_slice(),
@@ -633,6 +636,37 @@ pub(super) fn run<'g>(
                             from: local(from),
                             into: into.map(local),
                         }
+                    }
+                }
+                Action::TestOption { operand, some } => {
+                    initialized(&state[operand], node)?;
+                    Operation::TestOption {
+                        operand: local(operand),
+                        some,
+                    }
+                }
+                Action::CopyOptionPayload { operand, into } => {
+                    initialized(&state[operand], node)?;
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::CopyOptionPayload {
+                        operand: local(operand),
+                        into: local(into),
+                    }
+                }
+                Action::ConstructOption {
+                    variant,
+                    payload,
+                    into,
+                } => {
+                    if let Some(payload) = payload {
+                        initialized(&state[payload], node)?;
+                        state[payload] = State::Vacant;
+                    }
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::ConstructOption {
+                        variant,
+                        payload: payload.map(local),
+                        into: local(into),
                     }
                 }
                 Action::ForbiddenBorrowedMove(slot) => {

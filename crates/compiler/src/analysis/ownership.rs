@@ -156,6 +156,20 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
+    /// Select the Some edge of an admitted Option operand.
+    TestOption {
+        operand: Place<'g>,
+        some: &'g DeclarationId,
+    },
+    CopyOptionPayload {
+        operand: Place<'g>,
+        into: Place<'g>,
+    },
+    ConstructOption {
+        variant: &'g DeclarationId,
+        payload: Option<Place<'g>>,
+        into: Place<'g>,
+    },
     Dispose {
         callee: &'g DeclarationId,
         operand: Place<'g>,
@@ -365,7 +379,7 @@ fn lower<'g>(
     budget: &mut Budget,
 ) -> ResultOf<Mir<'g>> {
     let entry_site = header.declaration.node;
-    let DeclarationShape::Function { parameters, .. } = &header.shape else {
+    let DeclarationShape::Function { parameters, result } = &header.shape else {
         return Err(Stop::Pending(entry_site));
     };
     let Some(&body) = module.syntax.nodes[entry_site].children.get(1) else {
@@ -381,6 +395,7 @@ fn lower<'g>(
         calls: Vec::new(),
         cleanups: Vec::new(),
         dispose: typed.dispose_role().map(|d| &d.id),
+        returning: (&header.declaration.id, result),
         budget,
     };
     for fact in typed.bodies().typed_nodes() {
@@ -506,7 +521,7 @@ impl<'g> Local<'g> {
 }
 
 #[derive(Clone, Copy)]
-enum Action {
+enum Action<'g> {
     None,
     Init(Slot),
     Read {
@@ -530,6 +545,19 @@ enum Action {
         into: Option<Slot>,
     },
     Call(usize),
+    TestOption {
+        operand: Slot,
+        some: &'g DeclarationId,
+    },
+    CopyOptionPayload {
+        operand: Slot,
+        into: Slot,
+    },
+    ConstructOption {
+        variant: &'g DeclarationId,
+        payload: Option<Slot>,
+        into: Slot,
+    },
     FormClosure {
         capture: Slot,
         into: Slot,
@@ -557,9 +585,9 @@ enum Edges {
 }
 
 #[derive(Clone, Copy)]
-struct Instruction {
+struct Instruction<'g> {
     node: NodeId,
-    action: Action,
+    action: Action<'g>,
     edges: Edges,
 }
 
@@ -581,10 +609,11 @@ struct Build<'a, 'g> {
     facts: BTreeMap<NodeId, &'a NodeFacts<'g>>,
     locals: BTreeMap<&'g DeclarationId, Slot>,
     slots: Vec<Local<'g>>,
-    code: Vec<Instruction>,
+    code: Vec<Instruction<'g>>,
     calls: Vec<Call<'g>>,
     cleanups: Vec<Vec<Slot>>,
     dispose: Option<&'g DeclarationId>,
+    returning: (&'g DeclarationId, &'a Type<'g>),
     budget: &'a mut Budget,
 }
 

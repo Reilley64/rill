@@ -62,7 +62,7 @@ fn active_disposer_cleans_only_remaining_fields() {
             implement release(value: Protected): void { }
             function protectedCleanup(value: Protected): void { }
         "#,
-        |_, module, receipt| {
+        |_, module, receipt, _| {
             let lower = |name| {
                 let decl = module
                     .declarations

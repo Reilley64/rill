@@ -6,7 +6,7 @@ use compiler::analysis::AnalysisLimits;
 use compiler::analysis::ownership::{
     Cleanup as Obligation, Completion, Mir, Operation, Terminator, lower_body,
 };
-use compiler::analysis::typed::{TypedReceipt, analyze_typed};
+use compiler::analysis::typed::{TypedReceipt, TypedReport, analyze_typed};
 use compiler::loader::{self, InstalledRequest, Origin};
 use std::{
     fs,
@@ -20,6 +20,8 @@ mod disposers;
 mod field_routes;
 #[path = "m5/patterns.rs"]
 mod patterns;
+#[path = "m5/propagation.rs"]
+mod propagation;
 #[path = "m5/records.rs"]
 mod records;
 mod support;
@@ -185,7 +187,7 @@ fn ownership_from_installed_source() {
                 return recursive(true);
             }
         "#,
-        |request, module, receipt| {
+        |request, module, receipt, _| {
             let lower = |name| {
                 let id = &module
                     .declarations
@@ -409,7 +411,12 @@ fn ownership_from_installed_source() {
 fn probe(
     test: &str,
     source: &str,
-    mut verify: impl for<'g> FnMut(&InstalledRequest, &'g loader::Module, &TypedReceipt<'_, 'g>),
+    mut verify: impl for<'g> FnMut(
+        &InstalledRequest,
+        &'g loader::Module,
+        &TypedReceipt<'_, 'g>,
+        &TypedReport<'g>,
+    ),
 ) {
     const IMPORTS: &str = r#"
             import std::{List, Result, Err};
@@ -462,7 +469,7 @@ fn probe(
                 .find(|m| m.key.origin == Origin::Application)
                 .unwrap();
 
-            verify(&request, module, &receipt);
+            verify(&request, module, &receipt, &typed);
         }
     });
 }

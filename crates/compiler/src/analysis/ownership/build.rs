@@ -2,13 +2,15 @@
 use super::*;
 use crate::analysis::MemberType;
 use crate::analysis::ordinary::{self, HypotheticalOutcome};
-use crate::analysis::scalars::ExpressionFacts;
 use crate::analysis::scalars::data::{
-    Access, DataExpression, PathProjection, PatternFacts, PatternProjection,
+    Access, Construction, DataExpression, PathProjection, PatternFacts, PatternProjection,
 };
 use crate::analysis::scalars::generics::callables::CaptureForm;
+use crate::analysis::scalars::{ExpressionFacts, PropagationTarget};
+use crate::analysis::typed::OptionRole;
 use crate::loader::Origin;
 use crate::parser::NodeKind;
+use std::sync::Arc;
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(p) if p.name() == "string")
@@ -69,6 +71,12 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             TypeTerm::Reference { mutable, .. } => (*mutable, false),
             TypeTerm::Callable { .. } => (true, false),
+            TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
+                if let Some(role) = self.bool_option_role(ty) =>
+            {
+                self.prove_option_no_disposer(node, ty, role)?;
+                (false, false)
+            }
             TypeTerm::Nominal { .. } => {
                 let fields = self.record_fields(node, ty)?;
                 let disposer = self.outer_disposer(node, ty)?;
@@ -108,6 +116,56 @@ impl<'a, 'g> Build<'a, 'g> {
             drops,
         });
         Ok(slot)
+    }
+
+    fn bool_option_role(&self, ty: &TypeTerm<'g>) -> Option<OptionRole<'g>> {
+        let role = *self.typed.option_role()?;
+        let parent = match ty {
+            TypeTerm::Variant {
+                parent,
+                declaration,
+            } if *declaration == &role.some.id || *declaration == &role.none.id => parent,
+            other => other,
+        };
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = parent
+        else {
+            return None;
+        };
+        let [payload] = arguments.as_slice() else {
+            return None;
+        };
+        (*declaration == &role.declaration.id
+            && matches!(payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+        .then_some(role)
+    }
+
+    fn prove_option_no_disposer(
+        &mut self,
+        node: NodeId,
+        ty: &Type<'g>,
+        role: OptionRole<'g>,
+    ) -> ResultOf<()> {
+        let parent = match ty.as_ref() {
+            TypeTerm::Variant { parent, .. } => parent,
+            _ => ty,
+        };
+        if self.outer_disposer(node, parent)?.is_some() {
+            return Err(Stop::Pending(node));
+        }
+        for variant in [role.some, role.none] {
+            self.budget.reserve(1)?;
+            let ty = Arc::new(TypeTerm::Variant {
+                parent: parent.clone(),
+                declaration: &variant.id,
+            });
+            if self.outer_disposer(node, &ty)?.is_some() {
+                return Err(Stop::Pending(node));
+            }
+        }
+        Ok(())
     }
 
     fn aggregate<'t>(
@@ -267,7 +325,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
-    pub(super) fn emit(&mut self, node: NodeId, action: Action, edges: Edges) -> ResultOf<Pc> {
+    pub(super) fn emit(&mut self, node: NodeId, action: Action<'g>, edges: Edges) -> ResultOf<Pc> {
         self.budget.reserve(1)?;
         let pc = self.code.len();
         self.code.push(Instruction {
@@ -329,7 +387,23 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::Binding { .. } => {
                 let value = *children.last().unwrap();
-                match self.binding(node)? {
+                let binding = self.binding(node)?;
+                let initializer = self.ungroup(value)?;
+                if self.module.syntax.nodes[initializer].kind == NodeKind::Propagate {
+                    let into = match binding {
+                        Binding::Discard => None,
+                        Binding::Name(declaration, _) => Some(self.locals[declaration]),
+                        _ => return Err(Stop::Pending(node)),
+                    };
+                    return self.propagate_option(
+                        initializer,
+                        into,
+                        next,
+                        exits.returning,
+                        depth + 1,
+                    );
+                }
+                match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
                     Binding::Name(declaration, _) => {
                         let slot = self.locals[declaration];
@@ -538,6 +612,121 @@ impl<'a, 'g> Build<'a, 'g> {
         self.expression(source, Some(scratch), tail, depth)
     }
 
+    fn propagate_option(
+        &mut self,
+        node: NodeId,
+        into: Option<Slot>,
+        next: Pc,
+        return_cleanup: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let source = self.module.syntax.nodes[node].children[0];
+        let operand = self.value(source)?;
+        let role = self
+            .bool_option_role(&operand.ty)
+            .ok_or(Stop::Pending(node))?;
+        let (id, result) = self.returning;
+        let Some(DataExpression::Propagation(exit)) = &self.value(node)?.data else {
+            return Err(Stop::Pending(node));
+        };
+        if operand.access != Access::Owned
+            || self.bool_option_role(result).is_none()
+            || !matches!(exit.target, PropagationTarget::Callable(target) if target == id)
+            || exit.success != &role.some.id
+            || exit.failure != &role.none.id
+            || exit.error.is_some()
+        {
+            return Err(Stop::Pending(node));
+        }
+        let scratch = self.slot(source, &operand.ty)?;
+        let success = if exit.can_continue {
+            let end = self.emit(node, Action::End(scratch), Edges::Next(next))?;
+            Some(if let Some(into) = into {
+                self.emit(
+                    node,
+                    Action::CopyOptionPayload {
+                        operand: scratch,
+                        into,
+                    },
+                    Edges::Next(end),
+                )?
+            } else {
+                end
+            })
+        } else {
+            None
+        };
+        let failure = if exit.can_return {
+            let output = self.slot(node, result)?;
+            let export = self.emit(node, Action::Export(output), Edges::Next(return_cleanup))?;
+            let empty = self.emit(
+                node,
+                Action::ConstructOption {
+                    variant: &role.none.id,
+                    payload: None,
+                    into: output,
+                },
+                Edges::Next(export),
+            )?;
+            Some(self.emit(node, Action::End(scratch), Edges::Next(empty))?)
+        } else {
+            None
+        };
+        let split = match (success, failure) {
+            (Some(yes), Some(no)) => self.emit(
+                node,
+                Action::TestOption {
+                    operand: scratch,
+                    some: &role.some.id,
+                },
+                Edges::Branch { yes, no },
+            )?,
+            (Some(edge), None) | (None, Some(edge)) => edge,
+            (None, None) => return Err(Stop::Pending(node)),
+        };
+        self.expression(source, Some(scratch), split, depth)
+    }
+
+    fn construct_option(
+        &mut self,
+        node: NodeId,
+        data: &Construction<'g>,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let role = self.bool_option_role(&data.ty).ok_or(Stop::Pending(node))?;
+        let TypeTerm::Variant { declaration, .. } = data.ty.as_ref() else {
+            return Err(Stop::Pending(node));
+        };
+        match data.arguments.as_slice() {
+            [] if *declaration == &role.none.id => self.emit(
+                node,
+                Action::ConstructOption {
+                    variant: declaration,
+                    payload: None,
+                    into,
+                },
+                Edges::Next(next),
+            ),
+            [value] if *declaration == &role.some.id => {
+                let ty = self.value(*value)?.ty.clone();
+                let payload = self.slot(*value, &ty)?;
+                let construct = self.emit(
+                    node,
+                    Action::ConstructOption {
+                        variant: declaration,
+                        payload: Some(payload),
+                        into,
+                    },
+                    Edges::Next(next),
+                )?;
+                self.expression(*value, Some(payload), construct, depth)
+            }
+            _ => Err(Stop::Pending(node)),
+        }
+    }
+
     fn discard(
         &mut self,
         statement: NodeId,
@@ -602,6 +791,17 @@ impl<'a, 'g> Build<'a, 'g> {
             || !flow.continues.is_empty()
         {
             return Err(Stop::Pending(node));
+        }
+        if let Some(DataExpression::Construction(data)) = &facts.data
+            && self.bool_option_role(&data.ty).is_some()
+        {
+            return self.construct_option(
+                node,
+                data,
+                into.ok_or(Stop::Pending(node))?,
+                next,
+                depth + 1,
+            );
         }
         if projection(facts).is_some() {
             let action = if facts.access != Access::Owned && owns_text(&facts.ty) {
