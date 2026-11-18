@@ -31,25 +31,69 @@ fn caller_owned_descriptor_cannot_retain_body_local_sources() {
             }
         "#,
         |_, module, receipt| {
-            let lower = |name| {
+            let check = |name, limits| {
                 let decl = module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap();
-                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+                lower_body(receipt, module, &decl.id, limits).unwrap()
             };
+            let lower = |name| check(name, AnalysisLimits::default());
             let remembered = lower("remember");
             let mir = remembered
                 .mir()
                 .unwrap_or_else(|| panic!("remember: {:?}", remembered.completion()));
-            let writes = writes_on_path(mir);
-            assert!(matches!(writes.as_slice(), [(target, value)]
-                if target.root.span.bytes() == b"slot: &mut &bool" && value.root.span.bytes() == b"input"));
-            assert!(
-                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
-                if text.root.span.bytes() == b"text: string")
-            );
+            let trace: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. }
+                            | Operation::InstallThrough { .. }
+                            | Operation::Cleanup(_)
+                    )
+                })
+                .collect();
+            let [
+                Operation::Copy {
+                    from,
+                    into: Some(staged),
+                },
+                Operation::InstallThrough {
+                    descriptor,
+                    incoming,
+                },
+                Operation::Cleanup(cleanup),
+            ] = trace.as_slice()
+            else {
+                panic!("expected stage, store, and cleanup on one path: {trace:?}");
+            };
+            assert_eq!(from.root.span.bytes(), b"input: &bool");
+            assert_eq!(staged.root.node, incoming.root.node);
+            assert_eq!(descriptor.root.span.bytes(), b"slot: &mut &bool");
+            assert!(cleanup.iter().any(|op| matches!(op, Obligation::Drop(text) if text.root.span.bytes() == b"text: string")));
+
+            let limits = AnalysisLimits {
+                max_work: remembered.statistics().work,
+                max_entries: remembered.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("remember", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("remember", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
 
             let restored = lower("restored");
             let mir = restored
@@ -80,22 +124,14 @@ fn caller_owned_descriptor_cannot_retain_body_local_sources() {
 }
 
 fn writes_on_path<'g>(mir: &Mir<'g>) -> Vec<(Place<'g>, Place<'g>)> {
-    let mut writes = Vec::new();
-    let mut pc = mir.entry;
-    for _ in 0..mir.blocks.len() {
-        let block = &mir.blocks[pc];
-        if let Operation::InstallThrough {
-            descriptor,
-            incoming,
-        } = block.operation
-        {
-            writes.push((descriptor, incoming));
-        }
-        match block.terminator {
-            Terminator::Goto(next) => pc = next,
-            Terminator::Return => return writes,
-            other => panic!("expected straight-line MIR, got {other:?}"),
-        }
-    }
-    panic!("path did not return");
+    linear(mir, mir.entry)
+        .into_iter()
+        .filter_map(|op| match *op {
+            Operation::InstallThrough {
+                descriptor,
+                incoming,
+            } => Some((descriptor, incoming)),
+            _ => None,
+        })
+        .collect()
 }

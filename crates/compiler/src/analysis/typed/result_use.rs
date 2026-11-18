@@ -8,7 +8,7 @@ use crate::analysis::scalars::{
 };
 use crate::analysis::{
     Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
-    Type, TypeTerm, retained_bool_slot,
+    Type, TypeTerm, retained_bool_contents_type,
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
@@ -622,7 +622,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     && self.module.syntax.nodes[left].kind == NodeKind::Prefix("*")
                     && self
                         .expression_facts(self.module.syntax.nodes[left].children[0])?
-                        .is_some_and(|value| retained_bool_slot(&value.ty).is_some());
+                        .is_some_and(|value| retained_bool_contents_type(&value.ty).is_some());
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
                     let incoming = state.take(Root::Temporary(right), &[], self.budget)?;

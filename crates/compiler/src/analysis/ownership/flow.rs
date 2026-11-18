@@ -77,34 +77,37 @@ fn liveness(
     while let Some(pc) = pending.pop_front() {
         budget.step(1)?;
         let instruction = code[pc];
+        let use_one = |used, killed| ([used, None], killed);
         let (used, killed) = match instruction.action {
-            Action::None | Action::Cleanup(_) => (None, None),
-            Action::Init(slot) | Action::End(slot) => (None, Some(slot)),
+            Action::None | Action::Cleanup(_) => use_one(None, None),
+            Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
             Action::Read { from, into } | Action::Dereference { from, into } => {
-                (Some(slots[from].carried_loan_root(from)), into)
+                use_one(Some(slots[from].carried_loan_root(from)), into)
             }
-            Action::ForbiddenBorrowedMove(slot) => (Some(slot), None),
-            Action::Borrow { from, into, .. } => (Some(from), Some(into)),
+            Action::ForbiddenBorrowedMove(slot) => use_one(Some(slot), None),
+            Action::Borrow { from, into, .. } => use_one(Some(from), Some(into)),
             Action::Reborrow { parent, into, .. } => {
-                (Some(slots[parent].carried_loan_root(parent)), Some(into))
+                use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
-            Action::Dispose(slot) | Action::Export(slot) => (Some(slot), Some(slot)),
+            Action::Dispose(slot) | Action::Export(slot) => use_one(Some(slot), Some(slot)),
             Action::Displace { target, incoming } | Action::Install { target, incoming } => {
-                (Some(incoming), Some(target))
+                use_one(Some(incoming), Some(target))
             }
-            Action::FormClosure { capture, into, .. } => (Some(capture), Some(into)),
-            Action::Call(index) => (None, calls[index].into),
+            Action::FormClosure { capture, into, .. } => use_one(Some(capture), Some(into)),
+            Action::Call(index) => use_one(None, calls[index].into),
             Action::InstallThrough {
                 descriptor,
                 contents,
-                ..
-            } => (Some(descriptor), Some(contents)),
-            Action::CheckRetained(contents) => (Some(contents), None),
-            Action::TestVariant { operand, .. } => (Some(operand), None),
-            Action::CopyOptionPayload { operand, into } => (Some(operand), Some(into)),
-            Action::ConstructVariant { payload, into, .. } => (payload, Some(into)),
-            Action::TakeResultSuccess { operand, into } => (Some(operand), into),
-            Action::ForwardResultFailure { operand, into, .. } => (Some(operand), Some(into)),
+                incoming,
+            } => ([Some(descriptor), Some(incoming)], Some(contents)),
+            Action::CheckRetained(contents) => use_one(Some(contents), None),
+            Action::TestVariant { operand, .. } => use_one(Some(operand), None),
+            Action::CopyOptionPayload { operand, into } => use_one(Some(operand), Some(into)),
+            Action::ConstructVariant { payload, into, .. } => use_one(payload, Some(into)),
+            Action::TakeResultSuccess { operand, into } => use_one(Some(operand), into),
+            Action::ForwardResultFailure { operand, into, .. } => {
+                use_one(Some(operand), Some(into))
+            }
         };
         let cleaned = match instruction.action {
             Action::Cleanup(index) => cleanups[index].as_slice(),
@@ -141,11 +144,7 @@ fn liveness(
             Action::Call(index) => calls[index].args.as_slice(),
             _ => &[],
         };
-        let incoming = match instruction.action {
-            Action::InstallThrough { incoming, .. } => Some(incoming),
-            _ => None,
-        };
-        for slot in used.into_iter().chain(incoming).chain(args.iter().copied()) {
+        for slot in used.into_iter().flatten().chain(args.iter().copied()) {
             for member in slots[slot].storage(slot) {
                 budget.step(1)?;
                 if !live[pc].contains(&member) {

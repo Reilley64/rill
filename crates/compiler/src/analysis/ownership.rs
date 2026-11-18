@@ -5,7 +5,7 @@ use super::scalars::{NodeFactKind, NodeFacts, Site};
 use super::typed::{TypedReceipt, TypedReport};
 use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
-    TypeTerm, retained_bool_slot,
+    TypeTerm, retained_bool_contents_type,
 };
 use crate::loader::{Declaration, DeclarationId, DeclarationKind};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -436,7 +436,7 @@ fn lower<'g>(
             &parameter.ty,
         )?;
         params.push(slot);
-        if let Some(ty) = retained_bool_slot(&parameter.ty) {
+        if let Some(ty) = retained_bool_contents_type(&parameter.ty) {
             let contents = build.slot(parameter.declaration.node, ty)?;
             build.budget.reserve(1)?;
             build.retained.insert(slot, contents);

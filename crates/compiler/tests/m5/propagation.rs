@@ -415,20 +415,6 @@ fn assert_forward(
     });
 }
 
-fn linear<'a, 'g>(mir: &'a Mir<'g>, mut pc: usize) -> Vec<&'a Operation<'g>> {
-    let mut ops = Vec::new();
-    for _ in 0..mir.blocks.len() {
-        let block = &mir.blocks[pc];
-        ops.push(&block.operation);
-        match block.terminator {
-            Terminator::Goto(next) => pc = next,
-            Terminator::Return => return ops,
-            other => panic!("expected linear path, got {other:?}"),
-        }
-    }
-    panic!("path did not reach a return");
-}
-
 fn assert_return(
     ops: &[&Operation<'_>],
     expected: &loader::DeclarationId,

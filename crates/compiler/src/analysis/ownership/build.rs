@@ -506,9 +506,11 @@ impl<'a, 'g> Build<'a, 'g> {
             NodeKind::ExpressionStatement => self.discard(node, children[0], next, depth + 1),
             NodeKind::Assignment("=") => {
                 let (left, value) = (children[0], children[1]);
-                let target = &self.module.syntax.nodes[left];
-                if target.kind == NodeKind::Prefix("*") {
-                    let descriptor = self.place(target.children[0])?;
+                if let Some(path) = &self.value(left)?.path
+                    && path.projections.as_slice() == [PathProjection::Dereference]
+                {
+                    self.budget.step(2)?;
+                    let descriptor = *self.locals.get(path.root).ok_or(Stop::Pending(left))?;
                     let contents = *self.retained.get(&descriptor).ok_or(Stop::Pending(left))?;
                     let ty = self.value(value)?.ty.clone();
                     let incoming = self.slot(value, &ty)?;
