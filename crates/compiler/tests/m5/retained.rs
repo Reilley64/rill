@@ -953,6 +953,11 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                 relay(&mut out, &flag);
                 return *out;
             }
+            function chooses(first: &mut &bool, second: &mut &bool, input: &bool, choose: bool): void {
+                let mut access = first;
+                if (choose) { access = second; }
+                remember(access, input);
+            }
             function callerExpires(seed: &bool): bool {
                 let mut out = seed;
                 { let flag = true; relay(&mut out, &flag); }
@@ -1067,6 +1072,19 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
             }
             for place in [next_parent, next_desc] {
                 assert_eq!(moved.root.node, place.root.node);
+            }
+            let chosen = lower("chooses");
+            let mir = chosen
+                .mir()
+                .expect("the exact destination is preserved on each path");
+            let (yes, no) = branch_targets(mir);
+            for (edge, expected) in [
+                (yes, b"second: &mut &bool".as_slice()),
+                (no, b"first: &mut &bool".as_slice()),
+            ] {
+                assert!(linear(mir, edge).iter().any(|op| matches!(op,
+                    Operation::CallRetaining { callee, destination: RetainedPlace::ThroughParameterAlias { parameter, .. }, .. }
+                        if *callee == remember && parameter.root.span.bytes() == expected)));
             }
             let valid = lower("valid");
             let mir = valid
