@@ -142,6 +142,17 @@ The [disposer tests](m5/disposers.rs) require installed typed receipts in both m
 
 Explicit custom-disposer dispatch, replacement of the whole active outer value, non-primitive and protected payloads, partial construction interrupts, and cancellation remain outside this slice. The [explicit-call preflight](https://github.com/Reilley64/rill/issues/72#issuecomment-6983412457) had no M4 typed receipt for the aliased call. The [retained-destination typed blocker](https://github.com/Reilley64/rill/issues/69#issuecomment-6982582460) does not block these normal-edge checks.
 
+### Disposer review and verification
+
+Standards and Spec independently reviewed `14b5f574acd20f6032632ca948fca0c9a77215b8` against `d5bfb60849f3b801377556d005ac167303fa02ff`. The checked corrections are at `760434d54572615fb3f8b9a2bc975c468500f889`. The binary diff has SHA-256 `deab923bbf3d00adde08e7bb9c74e7692d05469d43673ba9e6195a5678c95b9c`. The corrections passed local checks and were not independently re-reviewed.
+
+- Standards: centralize boundary cleanup and outstanding-disposer classification. Carry the reached call kind into lowering. Name the active value's diagnostic origin. Record the actual results below. The first `check` also found an unnecessary closure in the worklist lookup; the corrected run passed.
+- Spec: prevent an inner alias from dropping fields before the disposer finishes. Stage remaining fields for the normal epilogue. Cover ordinary custom-record field replacement and cleanup after a borrow-free record-valued call. The source-to-MIR regressions verify all three.
+
+At `760434d` on macOS AArch64 with a short, fresh `TMPDIR` under `/tmp`, `mise run test:compiler` passed 427 tests and `mise run test` passed 443. `mise run check` and `mise run build:scaffold` passed. The documentation checker found no errors across 1,860 destinations. The staged M4 runner still issued typed receipts in both modes. The installed M5 tests ran in both load modes. The short path avoids the separately reproduced M3 budget failure above.
+
+Hosted checks for this revision were queued at recording time. No workflow changed, so `check:ci` was not run. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM and provider ABI acceptance were not run. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
