@@ -3,7 +3,8 @@
 
 use compiler::analysis::AnalysisLimits;
 use compiler::analysis::typed::{
-    CoreBlocker, NativeOwnershipAction, OwnershipCoverage, OwnershipRule, analyze_typed,
+    CoreBlocker, NativeOwnershipAction, OwnershipCoverage, OwnershipRule, TypedCompletion,
+    analyze_typed,
 };
 use compiler::loader::{
     self, FailureKind, InstalledRequest, Limits, Origin, Prelude, Request, Selector,
@@ -108,6 +109,7 @@ fn installed_ownership_requires_the_built_archive() {
         partial_collection(&request);
         combined_installed_capture(&request);
         closed_roles_without_native_providers(&root, &request);
+        installed_receipts(&request);
 
         let facade = root.join("lib/rill/std/std.rill");
         let bytes = fs::read(&facade).unwrap();
@@ -225,9 +227,7 @@ fn installed_ownership_requires_the_built_archive() {
 }
 
 fn combined_installed_capture(request: &InstalledRequest) {
-    use compiler::analysis::scalars::{
-        BodyOwner, NodeFactKind, ScalarFailureKind, data::DataExpression,
-    };
+    use compiler::analysis::scalars::{BodyOwner, NodeFactKind, data::DataExpression};
     use compiler::parser::NodeKind;
     fs::write(
         &request.entry,
@@ -297,7 +297,7 @@ fn combined_installed_capture(request: &InstalledRequest) {
                 report.bodies().obligations()
             );
         }
-        assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+        assert_eq!(report.completion(), TypedCompletion::Incomplete);
         let app = graph
             .modules()
             .iter()
@@ -579,7 +579,7 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
         );
         assert_eq!(
             short.completion(),
-            compiler::analysis::scalars::ScalarFailureKind::ResourceLimit
+            compiler::analysis::typed::TypedCompletion::ResourceLimit
         );
         assert!(short.core_blockers().contains(&CoreBlocker::Roles));
 
@@ -637,6 +637,93 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
                 .all(|w| w.origin.module.origin != Origin::Application)
         );
     }
+}
+
+fn installed_receipts(request: &InstalledRequest) {
+    use compiler::analysis::Stage;
+    const MAIN: &str = include_str!("../../../tests/installed/typed/main.rill");
+    const SUPPORT: &str = include_str!("../../../tests/installed/typed/checks.rill");
+
+    let checks = request.entry.with_file_name("checks.rill");
+    for test_mode in [false, true] {
+        let request = InstalledRequest {
+            test_mode,
+            ..request.clone()
+        };
+        fs::write(&request.entry, MAIN).unwrap();
+        fs::write(&checks, SUPPORT).unwrap();
+        let graph = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let receipt = report.receipt().unwrap_or_else(|| {
+            let pending: Vec<_> = report
+                .result_use()
+                .unwrap()
+                .pending()
+                .iter()
+                .map(|p| {
+                    (
+                        p.site.module.path.as_str(),
+                        p.blocker,
+                        String::from_utf8_lossy(p.site.span.bytes()),
+                    )
+                })
+                .collect();
+            panic!(
+                "no typed receipt: {:?} {:?}; Result use: {pending:?}",
+                report.completion(),
+                report.core_blockers()
+            );
+        });
+        assert_eq!(receipt.context(), graph.id());
+        assert_eq!(
+            receipt.not_performed(),
+            &[Stage::Ownership, Stage::Execution]
+        );
+        let statistics = receipt.statistics();
+        let exact = AnalysisLimits {
+            max_work: statistics.work,
+            max_entries: statistics.entries,
+            max_depth: statistics.max_depth,
+        };
+        assert!(analyze_typed(&graph, exact).receipt().is_some());
+        let short = analyze_typed(
+            &graph,
+            AnalysisLimits {
+                max_work: exact.max_work - 1,
+                ..exact
+            },
+        );
+        assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
+        assert!(short.receipt().is_none());
+
+        fs::write(
+            &request.entry,
+            format!("{MAIN}\nfunction unused(input: Result<bool>.Ok): void {{}}\n"),
+        )
+        .unwrap();
+        let rejected = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&rejected, AnalysisLimits::default());
+        assert_eq!(report.completion(), TypedCompletion::SourceRejected);
+        assert!(report.result_use().unwrap().discards().iter().any(|w| {
+            w.code() == "R0103" && w.origin.span.bytes() == b"input: Result<bool>.Ok"
+        }));
+        assert!(report.receipt().is_none());
+
+        fs::write(&request.entry, MAIN).unwrap();
+        fs::write(&checks, format!("{SUPPORT}\nexpect 1i32;\n")).unwrap();
+        let rejected = loader::load_installed(request).unwrap();
+        let report = analyze_typed(&rejected, AnalysisLimits::default());
+        assert_eq!(report.completion(), TypedCompletion::SourceRejected);
+        assert!(report.receipt().is_none());
+        assert!(
+            report
+                .bodies()
+                .findings()
+                .iter()
+                .any(|f| { f.site.module.path == "checks.rill" && f.kind.code() == Some("R0101") })
+        );
+    }
+    fs::write(checks, SUPPORT).unwrap();
 }
 
 fn partial_collection(request: &InstalledRequest) {
@@ -700,7 +787,7 @@ fn partial_collection(request: &InstalledRequest) {
         max_work: exact.max_work - 1,
         ..exact
     };
-    use compiler::analysis::scalars::ScalarFailureKind::{Incomplete, ResourceLimit};
+    use compiler::analysis::typed::TypedCompletion::{Incomplete, ResourceLimit};
     assert_eq!(analyze_typed(&graph, exact).completion(), Incomplete);
     assert_eq!(
         analyze_typed(&graph, first_short).completion(),

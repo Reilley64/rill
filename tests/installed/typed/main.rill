@@ -5,7 +5,8 @@ import std::error::formatError;
 import std::iter::iterate;
 import std::mutex::LockGuard;
 import std::number::ParseError;
-import std::result::isOk;
+import std::option::{Option, map as mapOption};
+import std::result::{isOk, map as mapResult};
 import std::shared::Shared;
 import checks::ready;
 
@@ -26,7 +27,20 @@ function listLifecycle(values: List<i32>): void {
 }
 
 function retain(source: &Shared<i32>): Shared<i32> { return copy(source); }
-function acceptsNative(lock: &LockGuard<i32>, sender: &Sender<i32>, receiver: &Receiver<i32>): void { }
+function releaseNative(counted: Shared<i32>, lock: LockGuard<i32>, tx: Sender<i32>, rx: Receiver<i32>): void {
+    dispose(counted);
+    dispose(lock);
+    dispose(tx);
+    dispose(rx);
+}
+
+function inspectMapped(value: Option<Result<bool>.Ok>): Option<bool> {
+    return mapOption(value, (item: Result<bool>.Ok) => isOk(&item));
+}
+
+function mapSuccess(value: Result<bool, i32>): Result<bool, i32> {
+    return mapResult(value, (item: bool) => !item);
+}
 
 function parse(input: &string): Result<i32, ParseError> { return tryInto<i32>(input); }
 function wrap(input: Result<bool, i32>): Result<bool, string> { return Result.Ok(input ? "outer"); }

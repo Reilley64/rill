@@ -1,9 +1,9 @@
 //! Installed primitive and formatting facts, not Rill execution.
 use compiler::analysis::scalars::data::DataExpression;
 use compiler::analysis::scalars::generics::{GoalJudgment, GoalState};
-use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFailureKind, ScalarFindingKind};
+use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFindingKind};
 use compiler::analysis::typed::{
-    Primitive, PrimitiveCoverage, PrimitiveOperation, PrimitiveRole, analyze_typed,
+    Primitive, PrimitiveCoverage, PrimitiveOperation, PrimitiveRole, TypedCompletion, analyze_typed,
 };
 use compiler::analysis::{AnalysisLimits, TypeTerm};
 use compiler::loader::{
@@ -91,7 +91,7 @@ fn primitive_copy_and_dispose(prefix: &Path, test_mode: bool) {
     ",
     );
     let report = analyze_typed(&graph, AnalysisLimits::default());
-    assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+    assert_eq!(report.completion(), TypedCompletion::Incomplete);
     let exact = AnalysisLimits {
         max_work: report.statistics().work,
         ..AnalysisLimits::default()
@@ -106,7 +106,7 @@ fn primitive_copy_and_dispose(prefix: &Path, test_mode: bool) {
     };
     assert_eq!(
         analyze_typed(&graph, short).completion(),
-        ScalarFailureKind::ResourceLimit
+        TypedCompletion::ResourceLimit
     );
     assert_eq!(report.primitive_protection().len(), 30);
     assert!(

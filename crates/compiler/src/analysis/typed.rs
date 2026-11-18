@@ -7,6 +7,7 @@ use super::scalars::ScalarFailureKind;
 use super::{AnalysisLimits, Graph, Stage, Statistics};
 
 mod collections;
+mod completion;
 mod core;
 mod interfaces;
 mod numeric;
@@ -18,6 +19,7 @@ pub use collections::{
     CollectionOperation, CollectionOverlap, CollectionProtection, CollectionProvider,
     CollectionRepresentation, CollectionStorage, ListRole, ListTraversal,
 };
+pub use completion::TypedCompletion;
 pub(super) use core::PrimitiveCore;
 pub use core::{
     DisplayProtection, ErrorBridge, ErrorOperation, ErrorProviders, ErrorRepresentation,
@@ -59,17 +61,41 @@ pub struct TypedReport<'g> {
     ownership: ownership::Report<'g>,
     collections: CollectionCore<'g>,
     collection_overlaps: Vec<CollectionOverlap<'g>>,
-    completion: ScalarFailureKind,
+    completion: TypedCompletion,
     core_blockers: Vec<CoreBlocker>,
     statistics: Statistics,
     not_performed: Vec<Stage>,
     result_use: Option<ResultUseReport<'g>>,
 }
 
+/// Evidence of the integrated typed checkpoint for this immutable capture.
+#[derive(Debug)]
+pub struct TypedReceipt<'a, 'g> {
+    report: &'a TypedReport<'g>,
+}
+
+impl TypedReceipt<'_, '_> {
+    pub fn context(&self) -> crate::loader::GraphId {
+        self.report.inventory.context()
+    }
+
+    pub fn not_performed(&self) -> &[Stage] {
+        self.report.not_performed()
+    }
+
+    pub fn statistics(&self) -> Statistics {
+        self.report.statistics()
+    }
+}
+
 impl<'g> TypedReport<'g> {
-    /// The remaining unchecked contracts still prevent a typed-stage receipt.
-    pub fn completion(&self) -> ScalarFailureKind {
+    pub fn completion(&self) -> TypedCompletion {
         self.completion
+    }
+
+    /// A partial report never grants a receipt, even when some bodies checked.
+    pub fn receipt(&self) -> Option<TypedReceipt<'_, 'g>> {
+        (self.completion == TypedCompletion::Checked).then_some(TypedReceipt { report: self })
     }
 
     pub fn statistics(&self) -> Statistics {
@@ -439,7 +465,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     if not_reached.len() == 3 {
         not_performed.extend([Stage::Inference, Stage::Coverage, Stage::Evidence]);
     }
-    TypedReport {
+    let mut report = TypedReport {
         inventory,
         bodies,
         public_interface_findings,
@@ -447,10 +473,19 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         ownership,
         collections,
         collection_overlaps,
-        completion,
+        completion: TypedCompletion::ResourceLimit,
         core_blockers,
         statistics: budget.statistics,
         not_performed,
         result_use,
+    };
+    if completion != ScalarFailureKind::ResourceLimit {
+        report.completion =
+            completion::finish(&report, &mut budget).unwrap_or(TypedCompletion::ResourceLimit);
+        report.statistics = budget.statistics;
+        if report.completion == TypedCompletion::Checked {
+            report.not_performed = vec![Stage::Ownership, Stage::Execution];
+        }
     }
+    report
 }

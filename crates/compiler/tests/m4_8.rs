@@ -1,9 +1,7 @@
 //! Bounded M4.8 checks over real M3 captures. Prelude selectors do not admit core providers.
 use compiler::analysis::data::{DataExpression, PathProjection};
-use compiler::analysis::scalars::{
-    BodyOwner, NodeFactKind, ScalarFailureKind, ScalarFindingKind, ScalarUnsupported,
-};
-use compiler::analysis::typed::{CoreBlocker, PublicInterfaceKind, analyze_typed};
+use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFindingKind, ScalarUnsupported};
+use compiler::analysis::typed::{CoreBlocker, PublicInterfaceKind, TypedCompletion, analyze_typed};
 use compiler::analysis::{AnalysisLimits, InvocationMode, QueryError, Stage, TypeTerm};
 use compiler::loader::{DeclarationKind, Graph, Limits, Prelude, Request, Selector, load};
 use compiler::parser::NodeKind;
@@ -328,7 +326,7 @@ fn resource_exhaustion_does_not_erase_independent_lexical_findings() {
             ..AnalysisLimits::default()
         },
     );
-    assert_eq!(limited.completion(), ScalarFailureKind::ResourceLimit);
+    assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
     assert!(limited.bodies().findings().iter().any(|f| f.kind == ScalarFindingKind::MissingValue && f.site.span.bytes() == b"missing"));
 }
 
@@ -393,7 +391,11 @@ fn integrated_limits_include_visibility_and_reject_foreign_nodes() {
         max_depth: complete_work.max_depth,
     };
     let report = analyze_typed(&graph, limits);
-    assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+    assert!(
+        report.receipt().is_none(),
+        "partial facts do not issue a receipt"
+    );
+    assert_eq!(report.completion(), TypedCompletion::Incomplete);
     assert_eq!(report.statistics(), complete_work);
     assert!(report.not_performed().contains(&Stage::ResultUse));
     assert_eq!(report.public_interface_findings().len(), 1);
@@ -408,7 +410,7 @@ fn integrated_limits_include_visibility_and_reject_foreign_nodes() {
         },
     ] {
         let limited = analyze_typed(&graph, short);
-        assert_eq!(limited.completion(), ScalarFailureKind::ResourceLimit);
+        assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
         assert!(limited.statistics().work <= short.max_work);
         assert!(limited.statistics().entries <= short.max_entries);
     }
@@ -694,7 +696,7 @@ fn both_modes_keep_independent_bodies_and_findings_without_core_admission() {
     for mode in [false, true] {
         let graph = fixture.load(mode);
         let report = analyze_typed(&graph, AnalysisLimits::default());
-        assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+        assert_eq!(report.completion(), TypedCompletion::Incomplete);
         assert_eq!(
             report.core_blockers(),
             [

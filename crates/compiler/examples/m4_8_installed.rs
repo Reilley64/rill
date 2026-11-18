@@ -13,6 +13,7 @@ fn main() -> ExitCode {
         eprintln!("usage: m4_8_installed <entry.rill>");
         return ExitCode::FAILURE;
     };
+    let mut accepted = true;
     for test_mode in [false, true] {
         let mode = if test_mode { "test" } else { "normal" };
         let graph = match loader::load_installed(InstalledRequest {
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
                         }),
                     );
                 }
+                accepted = false;
                 continue;
             }
         };
@@ -47,6 +49,14 @@ fn main() -> ExitCode {
             report.completion(),
             report.core_blockers()
         );
+        if let Some(receipt) = report.receipt() {
+            println!(
+                "{mode}: typed receipt; not performed: {:?}",
+                receipt.not_performed()
+            );
+        } else {
+            accepted = false;
+        }
         for finding in report.bodies().findings() {
             eprintln!(
                 "  {}:{}: {:?}",
@@ -82,6 +92,9 @@ fn main() -> ExitCode {
             }
         }
     }
-    // A partial report cannot grant a positive acceptance result.
-    ExitCode::FAILURE
+    if accepted {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }

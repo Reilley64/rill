@@ -1,6 +1,6 @@
 //! Installed Result checks use production sources and the actual installed entry point.
-use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFailureKind, Site};
-use compiler::analysis::typed::analyze_typed;
+use compiler::analysis::scalars::{BodyOwner, NodeFactKind, Site};
+use compiler::analysis::typed::{TypedCompletion, analyze_typed};
 use compiler::analysis::{AnalysisLimits, TypeTerm};
 use compiler::loader::{self, InstalledRequest, Limits, Origin};
 use compiler::parser::NodeKind;
@@ -194,7 +194,7 @@ fn installed_result_default_is_canonical_without_an_error_binding() {
                 })
                 .unwrap();
                 let report = analyze_typed(&graph, AnalysisLimits::default());
-                assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+                assert_eq!(report.completion(), TypedCompletion::Incomplete);
                 assert!(
                     report.bodies().findings().is_empty(),
                     "{:?}",
@@ -735,7 +735,7 @@ fn installed_capture_replays_its_error_storage_input() {
                     .core_blockers()
                     .contains(&compiler::analysis::typed::CoreBlocker::Representation)
             );
-            assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+            assert_eq!(report.completion(), TypedCompletion::Incomplete);
         },
     );
 }
@@ -848,7 +848,7 @@ fn installed_aliased_closed_err_constructs_with_context() {
                         }
                     )
                     .completion(),
-                    ScalarFailureKind::ResourceLimit
+                    TypedCompletion::ResourceLimit
                 );
                 let role = report.result_role().unwrap();
                 for (node, syntax) in app

@@ -2,10 +2,10 @@
 use compiler::analysis::conversions::{
     ErrorAgreement, PairBlocker, PairOutcome, RegistrationIssueKind,
 };
-use compiler::analysis::scalars::{BodyOwner, ScalarFailureKind};
+use compiler::analysis::scalars::BodyOwner;
 use compiler::analysis::typed::{
     ConversionProtection, ConversionProvider, DecimalParseError, NumericConversionError,
-    PrimitiveValue, analyze_typed, conversion_values,
+    PrimitiveValue, TypedCompletion, analyze_typed, conversion_values,
 };
 use compiler::analysis::{AnalysisLimits, QueryError, TypeTerm};
 use compiler::loader::{
@@ -649,7 +649,7 @@ fn authority(root: &Path, mode: bool) {
             .any(|m| m.key.origin == Origin::Standard && m.key.path == "bytes.rill")
     );
     let report = analyze_typed(&graph, AnalysisLimits::default());
-    assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+    assert_eq!(report.completion(), TypedCompletion::Incomplete);
     let stats = report.statistics();
     let exact = AnalysisLimits {
         max_work: stats.work,
@@ -658,7 +658,7 @@ fn authority(root: &Path, mode: bool) {
     };
     assert_eq!(
         analyze_typed(&graph, exact).completion(),
-        ScalarFailureKind::Incomplete
+        TypedCompletion::Incomplete
     );
     assert_eq!(
         analyze_typed(
@@ -669,7 +669,7 @@ fn authority(root: &Path, mode: bool) {
             }
         )
         .completion(),
-        ScalarFailureKind::ResourceLimit
+        TypedCompletion::ResourceLimit
     );
 
     let selector = |name: &str| Selector {
@@ -715,7 +715,7 @@ fn authority(root: &Path, mode: bool) {
     fs::rename(&hidden, &bytes).unwrap();
     assert!(partial.modules().iter().all(|m| m.key.path != "bytes.rill"));
     let report = analyze_typed(&partial, AnalysisLimits::default());
-    assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+    assert_eq!(report.completion(), TypedCompletion::Incomplete);
     let app = partial
         .modules()
         .iter()

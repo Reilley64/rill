@@ -410,8 +410,8 @@ fn conditional_iteration_does_not_prove_a_yield_or_a_retained_discard() {
         ",
         &[("make(false)", None)],
         |report| {
-            use compiler::analysis::{scalars::ScalarFailureKind, typed::ResultUseBlocker};
-            assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+            use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
+            assert_eq!(report.completion(), TypedCompletion::Incomplete);
             assert!(report.result_use().unwrap().pending().iter().any(|p| {
                 p.site.span.bytes().starts_with(b"for (let item of source)")
                     && matches!(

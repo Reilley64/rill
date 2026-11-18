@@ -1,10 +1,10 @@
 //! Exercises installed capture with production core sources and no trust override.
 use compiler::analysis::scalars::data::DataExpression;
 use compiler::analysis::scalars::{
-    BodyOwner, NodeFactKind, PropagationTarget, ScalarFailureKind, ScalarFindingKind,
-    ScalarUnsupported, generics::BodyCompletion,
+    BodyOwner, NodeFactKind, PropagationTarget, ScalarFindingKind, ScalarUnsupported,
+    generics::BodyCompletion,
 };
-use compiler::analysis::typed::{CoreBlocker, analyze_typed};
+use compiler::analysis::typed::{CoreBlocker, TypedCompletion, analyze_typed};
 use compiler::analysis::{AnalysisLimits, TypeTerm};
 use compiler::loader::{
     self, FailureKind, InstalledRequest, Limits, Origin, Prelude, Request, Selector,
@@ -119,7 +119,7 @@ fn installed_option(profile: &InstalledRequest) {
                 report.bodies().obligations()
             );
         }
-        assert_eq!(report.completion(), ScalarFailureKind::Incomplete);
+        assert_eq!(report.completion(), TypedCompletion::Incomplete);
         assert_eq!(
             report.core_blockers().len(),
             4,
@@ -216,7 +216,7 @@ fn installed_option(profile: &InstalledRequest) {
         };
         assert!(analyze_typed(&graph, at_role).option_role().is_some());
         let exhausted = analyze_typed(&graph, before_role);
-        assert_eq!(exhausted.completion(), ScalarFailureKind::ResourceLimit);
+        assert_eq!(exhausted.completion(), TypedCompletion::ResourceLimit);
         assert!(exhausted.option_role().is_none());
 
         let short = AnalysisLimits {
@@ -225,7 +225,7 @@ fn installed_option(profile: &InstalledRequest) {
         };
         assert_eq!(
             analyze_typed(&graph, short).completion(),
-            ScalarFailureKind::ResourceLimit
+            TypedCompletion::ResourceLimit
         );
     }
 }

@@ -335,7 +335,7 @@ fn installed_list() {
             };
             assert_eq!(
                 analyze_typed(&graph, short).completion(),
-                compiler::analysis::scalars::ScalarFailureKind::ResourceLimit
+                compiler::analysis::typed::TypedCompletion::ResourceLimit
             );
             for ((node, syntax), (name, borrow, transfer)) in loops.into_iter().zip([
                 ("OwnedListIter", None, NodeKind::Break),
