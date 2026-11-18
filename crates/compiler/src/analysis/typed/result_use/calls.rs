@@ -89,6 +89,12 @@ impl<'a, 'g> Check<'a, 'g> {
         (checked, observer, dispose): (bool, bool, bool),
     ) -> Work<()> {
         let borrows_can_escape = !matches!(value.ty.as_ref(), TypeTerm::Primitive(_));
+        self.budget.step(1)?;
+        let symbolic_parameter = self.release_parameters.get(&(&self.module.key, node));
+        let native_release = match &value.data {
+            Some(DataExpression::NativeOwnership(call)) => releases::release_blocker(call.action),
+            _ => None,
+        };
         for argument in arguments {
             let root = Root::Temporary(argument);
             let referents = state.aliases_under(root, &[], self.budget)?;
@@ -123,17 +129,28 @@ impl<'a, 'g> Check<'a, 'g> {
                     }
                 }
             }
-            let passed = state.take(root, &[], self.budget)?;
-            if dispose {
-                self.discard(passed, root, node, ResultDiscardKind::Expression)?;
-            } else if !checked {
-                self.budget.step(passed.len())?;
+            let mut passed = state.take(root, &[], self.budget)?;
+            self.budget.step(passed.len())?;
+            if let Some(parameter) = symbolic_parameter {
+                // Export the effect on the formal at its proved delegate.
+                // Other origins, including any concrete occurrence, stay live.
+                passed.retain(|value| value.content != Content::Unclassified(*parameter));
+            }
+            if let Some(blocker) = native_release {
                 if passed
                     .iter()
                     .any(|v| matches!(v.content, Content::Result(_) | Content::Unclassified(_)))
                 {
-                    self.pending(node, ResultUseBlocker::CallBoundary)?;
+                    self.pending(node, blocker)?;
                 }
+            } else if dispose {
+                self.discard(passed, root, node, ResultDiscardKind::Expression)?;
+            } else if !checked
+                && passed
+                    .iter()
+                    .any(|v| matches!(v.content, Content::Result(_) | Content::Unclassified(_)))
+            {
+                self.pending(node, ResultUseBlocker::CallBoundary)?;
             }
         }
         Ok(())

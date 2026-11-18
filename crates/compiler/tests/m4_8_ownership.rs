@@ -526,8 +526,14 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
         import std::shared::Shared;
         import std::mutex::LockGuard;
         import std::channel::{Sender, Receiver};
-        import std::iter::iterate;
+        import std::iter::{iterate, OwnedListIter};
         import std::convert::into;
+        function unresolvedGuard(lock: LockGuard<Result<bool>.Ok>): void { dispose(lock); }
+        function unresolvedCounted(counted: Shared<Result<bool>.Ok>): void { dispose(counted); }
+        function unresolvedSender(tx: Sender<Result<bool>.Ok>): void { dispose(tx); }
+        function unresolvedReceiver(rx: Receiver<Result<bool>.Ok>): void { dispose(rx); }
+        function unresolvedList(items: List<Result<bool>.Ok>): void { dispose(items); }
+        function unresolvedIter(items: OwnedListIter<Result<bool>.Ok>): void { dispose(items); }
         ",
     )
     .unwrap();
@@ -600,6 +606,36 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
         assert_eq!(report.native_representations().len(), 4);
         assert_eq!(report.collection_representations().count(), 4);
         assert!(report.error_representation().is_some());
+        let uses = report.result_use().unwrap();
+        let modules = [
+            "channel.rill",
+            "mutex.rill",
+            "shared.rill",
+            "collection.rill",
+            "iter.rill",
+        ];
+        for pending in uses.pending() {
+            assert!(
+                pending.site.module.origin != Origin::Standard
+                    || !modules.contains(&pending.site.module.path.as_str()),
+                "unexpected symbolic release blocker {:?} at {}: {}",
+                pending.blocker,
+                pending.site.module.path,
+                String::from_utf8_lossy(pending.site.span.bytes()),
+            );
+        }
+        assert_eq!(
+            uses.pending()
+                .iter()
+                .filter(|p| p.site.module.origin == Origin::Application)
+                .count(),
+            6
+        );
+        assert!(
+            uses.discards()
+                .iter()
+                .all(|w| w.origin.module.origin != Origin::Application)
+        );
     }
 }
 

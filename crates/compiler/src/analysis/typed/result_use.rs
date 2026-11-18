@@ -19,6 +19,7 @@ mod calls;
 mod control;
 mod loops;
 mod patterns;
+mod releases;
 mod shape;
 mod storage;
 mod values;
@@ -153,6 +154,14 @@ pub(super) fn check<'g>(
             }
         }
     }
+    let release_parameters = releases::check(
+        inventory,
+        core,
+        &nodes,
+        &checked,
+        &implementation_headers,
+        budget,
+    )?;
     for module in inventory.graph().modules() {
         budget.step(1)?;
         let mut scopes = BTreeMap::new();
@@ -166,6 +175,7 @@ pub(super) fn check<'g>(
             checked: &checked,
             variants: &variants,
             implementation_headers: &implementation_headers,
+            release_parameters: &release_parameters,
             module,
             scopes,
             core,
@@ -188,6 +198,7 @@ struct Check<'a, 'g> {
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
     implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
+    release_parameters: &'a releases::Parameters<'g>,
     module: &'g Module,
     scopes: BTreeMap<&'g DeclarationId, Option<usize>>,
     core: Inputs<'a, 'g>,

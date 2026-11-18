@@ -481,14 +481,13 @@ fn disposing_list_storage_does_not_observe_result_elements() {
             use compiler::analysis::typed::ResultUseBlocker;
             let pending = report.result_use().unwrap().pending();
             for path in ["collection.rill", "iter.rill"] {
-                assert!(
-                    pending.iter().any(|p| p.site.module.path == path
-                        && p.blocker == ResultUseBlocker::Containment)
-                );
-                assert!(
-                    !pending.iter().any(|p| p.site.module.path == path
-                        && p.blocker == ResultUseBlocker::CallBoundary)
-                );
+                assert!(!pending.iter().any(|p| {
+                    p.site.module.path == path
+                        && matches!(
+                            p.blocker,
+                            ResultUseBlocker::Containment | ResultUseBlocker::CallBoundary
+                        )
+                }));
             }
         },
     );
