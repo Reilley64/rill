@@ -1,5 +1,9 @@
-import std::{List, Result};
-import std::convert::into;
+import std::{List, Result, Err};
+import std::channel::{Receiver, Sender};
+import std::convert::{into, tryInto};
+import std::error::formatError;
+import std::mutex::LockGuard;
+import std::number::ParseError;
 import std::result::isOk;
 import std::shared::Shared;
 import checks::ready;
@@ -13,9 +17,15 @@ function visit(values: List<i32>): void {
     for (let _ of values) { continue; }
 }
 
-function acceptsShared(source: &Shared<i32>): void { }
+function retain(source: &Shared<i32>): Shared<i32> { return copy(source); }
+function acceptsNative(lock: &LockGuard<i32>, sender: &Sender<i32>, receiver: &Receiver<i32>): void { }
+
+function parse(input: &string): Result<i32, ParseError> { return tryInto<i32>(input); }
+function wrap(input: Result<bool, i32>): Result<bool, string> { return Result.Ok(input ? "outer"); }
+function render(input: &Err<i32>): string { return formatError<i32>(input); }
 
 let startup = convertAndShow(5u8);
 let _ = isOk(&startup);
+let _ = startup;
 expect ready();
-expect isOk(&convertAndShow(6u8));
+expect isOk(&Result.Ok(true));
