@@ -56,7 +56,18 @@ impl<'r, 'g> Checker<'r, 'g> {
         defaults_ready: bool,
     ) -> Work<bool> {
         let mut call = inference.calls.remove(&node).unwrap();
-        let signature = &self.input.facts.declarations[call.fact.callee];
+        let id = call.fact.callee;
+        let signature = if self.collections.is_bridge(id) {
+            &self
+                .input
+                .ordinary
+                .unwrap()
+                .captured_family(id)
+                .unwrap()
+                .header
+        } else {
+            &self.input.facts.declarations[id]
+        };
         let module = inference.module;
         if call.parameters.len() != call.fact.arguments.len() {
             inference.slots.get_mut(&node).unwrap().blocked = true;

@@ -1,5 +1,6 @@
 //! M4.4 data extensions over the existing scalar/control engine.
 use super::*;
+mod lists;
 mod matches;
 pub(super) mod nominal;
 mod patterns;
@@ -60,6 +61,15 @@ pub enum DataExpression<'g> {
         base: NodeId,
         selector: NodeId,
         component: usize,
+    },
+    List {
+        declaration: &'g DeclarationId,
+        elements: Vec<NodeId>,
+    },
+    ListIndex {
+        declaration: &'g DeclarationId,
+        base: NodeId,
+        selector: NodeId,
     },
     Match(Box<Match<'g>>),
     Propagation(Box<Propagation<'g>>),
@@ -212,7 +222,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                             self.finding(module, node, ScalarFindingKind::InsufficientContext)?;
                         }
                     } else {
-                        self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                        self.unresolved_list(inference, node)?;
                     }
                 } else if let Some(frame) = inference.nominals.get(&node) {
                     let inputs = self.nominal_inputs(frame)?;
@@ -451,7 +461,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             && matches!(&self.token(module, node)?.kind, TokenKind::Number(number) if number.suffix.is_none()))
     }
 
-    pub(super) fn tuple_index(
+    pub(super) fn aggregate_index(
         &mut self,
         inference: &mut Inference<'g>,
         node: NodeId,
@@ -480,11 +490,50 @@ impl<'r, 'g> Checker<'r, 'g> {
             };
             ty = referent.clone();
         }
+        if let Some(list) = self.collections.list
+            && let Some(element) = list.element(&ty)
+        {
+            let path = self.project_path(path.as_ref(), PathProjection::ListElement)?;
+            let selector_ty = self.primitive("u64")?;
+            if !inference.slots.contains_key(&selector) {
+                self.elab.reserve(2)?;
+                inference.parents.insert(selector, node);
+                inference.slots.insert(
+                    selector,
+                    Slot {
+                        ordinary_context: inference.slots[&node].ordinary_context,
+                        ..Slot::default()
+                    },
+                );
+            }
+            self.establish(inference, selector, selector_ty, true)?;
+            self.elab.reserve(3)?;
+            inference.data.insert(
+                node,
+                PreparedData {
+                    ty: element.clone(),
+                    flow: None,
+                    inputs: vec![base, selector],
+                    contexts: Vec::new(),
+                    fact: DataExpression::ListIndex {
+                        declaration: &list.declaration.id,
+                        base,
+                        selector,
+                    },
+                },
+            );
+            let slot = inference.slots.get_mut(&node).unwrap();
+            slot.place = place;
+            slot.access = access;
+            slot.path = path;
+            slot.read_only_projection = restricted || place == Place::ReadOnly;
+            return self.establish(inference, node, element, false);
+        }
         let TypeTerm::Tuple(elements) = ty.as_ref() else {
-            if matches!(
-                ty.as_ref(),
-                TypeTerm::Nominal { .. } | TypeTerm::Parameter { .. }
-            ) {
+            if matches!(ty.as_ref(), TypeTerm::Parameter { .. })
+                || (self.collections.list.is_none()
+                    && matches!(ty.as_ref(), TypeTerm::Nominal { .. }))
+            {
                 self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
             } else {
                 self.finding(module, node, ScalarFindingKind::TypeMismatch)?;

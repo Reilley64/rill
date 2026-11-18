@@ -6,12 +6,15 @@ use super::ordinary::{OrdinaryAnalysis, analyze_typed_inventory};
 use super::scalars::ScalarFailureKind;
 use super::{AnalysisLimits, Graph, Stage, Statistics};
 
+mod collections;
 mod core;
 mod interfaces;
 mod numeric;
 mod ownership;
 mod primitive;
 mod result_use;
+pub(in crate::analysis) use collections::CollectionCore;
+pub use collections::ListRole;
 pub(super) use core::IntoAdmission;
 pub use core::{OptionRole, ResultRole};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
@@ -41,6 +44,7 @@ pub struct TypedReport<'g> {
     public_interface_findings: Vec<PublicInterfaceFinding<'g>>,
     core: core::InstalledCore<'g>,
     ownership: ownership::Report<'g>,
+    collections: CollectionCore<'g>,
     completion: ScalarFailureKind,
     statistics: Statistics,
     not_performed: Vec<Stage>,
@@ -121,6 +125,16 @@ impl<'g> TypedReport<'g> {
         self.result_use.as_ref()
     }
 
+    /// List designation validated against the linked construction and projection contract.
+    pub fn list_role(&self) -> Option<ListRole<'g>> {
+        self.collections.list
+    }
+
+    /// The private `get` implementation bridge, not a selected ordinary winner.
+    pub fn list_lookup_bridge(&self) -> Option<&'g super::Declaration> {
+        self.collections.lookup
+    }
+
     pub fn core_blockers(&self) -> &'static [CoreBlocker] {
         &[
             CoreBlocker::Roles,
@@ -178,6 +192,11 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     let authority_exhausted = exhausted
         || result_roles.is_err()
         || ownership::check(&inventory, &mut budget, &mut ownership).is_err();
+    let mut collections = CollectionCore::default();
+    let authority_exhausted = authority_exhausted
+        || collections
+            .check(&inventory, core.option, &mut budget)
+            .is_err();
     let bodies = analyze_integrated_bodies(
         &inventory,
         budget,
@@ -186,6 +205,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             result: core.result,
             show: core.show,
             into: core.into.as_ref(),
+            collections,
             exhausted: authority_exhausted,
         },
     );
@@ -259,6 +279,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         public_interface_findings,
         core,
         ownership,
+        collections,
         completion,
         statistics: budget.statistics,
         not_performed,

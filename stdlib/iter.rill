@@ -1,0 +1,38 @@
+import std::collection::{List};
+import std::option::{Option};
+
+// These private slots seal brace construction, not the backing representation.
+enum IterationStorage {}
+export type OwnedListIter<T> = { private storage: IterationStorage; }
+export type ListIter<T> = { private storage: IterationStorage; }
+export type ListIterMut<T> = { private storage: IterationStorage; }
+
+export function iterate<C, I>(source: C): I;
+export function next<I, T>(iterator: &mut I): Option<T>;
+
+// Private bridges to the corresponding linked Rust storage operations.
+function intoOwned<T>(source: List<T>): OwnedListIter<T>;
+function advanceOwned<T>(iterator: &mut OwnedListIter<T>): Option<T>;
+function intoShared<T>(source: &List<T>): ListIter<T>;
+function advanceShared<T>(iterator: &mut ListIter<T>): Option<&T>;
+function intoExclusive<T>(source: &mut List<T>): ListIterMut<T>;
+function advanceExclusive<T>(iterator: &mut ListIterMut<T>): Option<&mut T>;
+
+implement<T> iterate<List<T>, OwnedListIter<T>>(source: List<T>): OwnedListIter<T> {
+    return intoOwned(source);
+}
+implement<T> next<OwnedListIter<T>, T>(iterator: &mut OwnedListIter<T>): Option<T> {
+    return advanceOwned(iterator);
+}
+implement<T> iterate<&List<T>, ListIter<T>>(source: &List<T>): ListIter<T> {
+    return intoShared(source);
+}
+implement<T> next<ListIter<T>, &T>(iterator: &mut ListIter<T>): Option<&T> {
+    return advanceShared(iterator);
+}
+implement<T> iterate<&mut List<T>, ListIterMut<T>>(source: &mut List<T>): ListIterMut<T> {
+    return intoExclusive(source);
+}
+implement<T> next<ListIterMut<T>, &mut T>(iterator: &mut ListIterMut<T>): Option<&mut T> {
+    return advanceExclusive(iterator);
+}

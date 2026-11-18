@@ -2,7 +2,7 @@ use super::collect::{self, Import};
 use super::filesystem::{self, Kind};
 use super::*;
 use crate::lexer::{LexStatus, lex};
-use crate::parser::{EntryPoint, NodeKind, parse};
+use crate::parser::{EntryPoint, parse};
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Component, Path};
 
@@ -608,41 +608,46 @@ impl Engine {
         let Some(profile) = self.installed else {
             return Ok(());
         };
-        let (mut question_mark, mut interpolation) = (false, false);
-        'sources: for module in self.modules.values() {
+        let root = self.roots[&Origin::Standard].clone();
+        let edges = profile.metadata();
+        let mut requested = BTreeSet::new();
+        for module in self.modules.values() {
             for node in &module.syntax.nodes {
-                self.host.charge(1)?;
-                question_mark |= matches!(
-                    node.kind,
-                    NodeKind::Propagate | NodeKind::Wrap | NodeKind::PipeStep { propagate: true }
-                );
-                interpolation |= node.kind == NodeKind::TemplateHole;
-                if question_mark && interpolation {
-                    break 'sources;
+                self.host.charge(edges.len())?;
+                for edge in edges {
+                    if (edge.triggered_by)(node.kind) {
+                        requested.insert(edge.path);
+                    }
                 }
             }
         }
-        if question_mark {
-            self.capture_metadata_sources(profile.question_mark_dependencies())?;
+        // The table lists dependencies before dependents. Walk it backwards
+        // to request the closure, then forwards to capture it.
+        for edge in edges.iter().rev() {
+            self.host.charge(1 + edge.dependencies.len())?;
+            if requested.contains(edge.path) {
+                requested.extend(edge.dependencies.iter().map(|(_, path)| *path));
+            }
         }
-        if interpolation {
-            self.capture_metadata_sources(profile.interpolation_dependencies())?;
-        }
-        Ok(())
-    }
-
-    fn capture_metadata_sources(&mut self, paths: &[&str]) -> Result<()> {
-        let root = self.roots[&Origin::Standard].clone();
-        for path in paths {
+        for edge in edges.iter().filter(|edge| requested.contains(edge.path)) {
             let key = ModuleKey {
                 origin: Origin::Standard,
-                path: (*path).into(),
+                path: edge.path.into(),
             };
             self.host.charge(1)?;
             if self.modules.contains_key(&key) {
                 continue; // An explicit source edge is already in the graph.
             }
-            let path = root.join(path);
+            self.host.charge(edge.dependencies.len())?;
+            if edge.dependencies.iter().any(|(_, path)| {
+                !self.modules.contains_key(&ModuleKey {
+                    origin: Origin::Standard,
+                    path: (*path).into(),
+                })
+            }) {
+                continue; // Keep unresolved metadata dependencies out of source resolution.
+            }
+            let path = root.join(edge.path);
             let Some(probe) = self.host.probe(&path, Some(&root))? else {
                 continue;
             };
@@ -656,25 +661,63 @@ impl Engine {
             let pending = self.pending.pop_front();
             debug_assert_eq!(pending.as_ref(), Some(&loaded));
             let module = self.modules.get_mut(&loaded).unwrap();
-            let imports = collect::collect(module, &mut self.host)?;
-            self.host.charge(module.declarations.len())?;
-            // This edge has no imports and admits no registrations. Do not let it
-            // change the source resolver's import, dispatch or execution roots.
-            if !imports.is_empty()
-                || module.declarations.iter().any(|d| {
-                    matches!(
-                        d.id.kind,
-                        DeclarationKind::Startup
-                            | DeclarationKind::Expectation
-                            | DeclarationKind::Implementation
-                    )
-                })
-            {
-                return Err(failure(
-                    FailureKind::InvalidRequest,
-                    "installed metadata exceeds its declared scope",
-                ));
+            let mut imports = collect::collect(module, &mut self.host)?;
+            for declaration in &module.declarations {
+                self.host.charge(1)?;
+                let in_scope = match declaration.id.kind {
+                    DeclarationKind::Startup | DeclarationKind::Expectation => false,
+                    DeclarationKind::Implementation => {
+                        self.host
+                            .charge(edge.families.len() + module.declarations.len())?;
+                        let signature = module.syntax.nodes[declaration.node].children[0];
+                        let name = collect::signature_name(&module.syntax, signature);
+                        edge.families.iter().any(|family| {
+                            module.syntax.nodes[name].span.bytes() == family.as_bytes()
+                        }) && module.declarations.iter().any(|d| {
+                            d.id.kind == DeclarationKind::Family
+                                && d.scope.is_none()
+                                && d.name.as_deref().is_some_and(|s| {
+                                    s.as_bytes() == module.syntax.nodes[name].span.bytes()
+                                })
+                        })
+                    }
+                    _ => true,
+                };
+                if !in_scope {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "installed metadata exceeds its declared scope",
+                    ));
+                }
             }
+            for import in &mut imports {
+                self.host.charge(1 + edge.dependencies.len())?;
+                let [root, module] = import.path.as_slice() else {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "undeclared installed metadata import",
+                    ));
+                };
+                let Some((_, path)) = edge
+                    .dependencies
+                    .iter()
+                    .find(|(name, _)| *name == module && root == "std" && !import.public)
+                else {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "undeclared installed metadata import",
+                    ));
+                };
+                import.starts.push((
+                    ModuleKey {
+                        origin: Origin::Standard,
+                        path: (*path).into(),
+                    },
+                    1,
+                ));
+                import.path.remove(0); // Same canonical source route as discovery of std::<module>.
+            }
+            self.imports.extend(imports);
         }
         Ok(())
     }

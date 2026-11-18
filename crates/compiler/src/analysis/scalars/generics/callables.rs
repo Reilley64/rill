@@ -397,7 +397,7 @@ impl<'r, 'g> Checker<'r, 'g> {
 
     // Syntactic wait only: the normal worklist still establishes the type and
     // diagnostics, without a speculative check of the body at another width.
-    pub(super) fn needs_numeric_width(
+    pub(in crate::analysis::scalars) fn needs_numeric_width(
         &mut self,
         module: &'g Module,
         node: NodeId,

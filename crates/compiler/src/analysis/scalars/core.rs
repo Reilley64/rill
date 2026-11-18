@@ -359,7 +359,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
-    fn pending_pattern(
+    pub(super) fn pending_pattern(
         &mut self,
         module: &'g Module,
         node: NodeId,
@@ -444,25 +444,5 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.pending_pattern(module, pattern, context)?;
         }
         Ok(flow)
-    }
-
-    pub(super) fn pending_iteration(
-        &mut self,
-        module: &'g Module,
-        node: NodeId,
-        depth: usize,
-        context: &mut Context<'r, 'g>,
-    ) -> Work<Flow> {
-        let children = &module.syntax.nodes[node].children;
-        let source = self.expression(module, children[1], None, context)?;
-        self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
-        self.elab.reserve(2)?;
-        context.scopes.push(BTreeMap::new());
-        context.loops.push(node);
-        self.pending_pattern(module, children[0], context)?;
-        self.statement(module, children[2], depth + 1, context)?;
-        context.loops.pop();
-        context.scopes.pop();
-        Ok(source.map_or_else(Flow::normal, |e| e.flow))
     }
 }

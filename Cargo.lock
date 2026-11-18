@@ -21,6 +21,9 @@ dependencies = [
 [[package]]
 name = "compiler"
 version = "0.1.0-dev"
+dependencies = [
+ "rill-collection",
+]
 
 [[package]]
 name = "ide"
@@ -35,3 +38,7 @@ version = "0.1.0-dev"
 dependencies = [
  "ide",
 ]
+
+[[package]]
+name = "rill-collection"
+version = "0.1.0-dev"

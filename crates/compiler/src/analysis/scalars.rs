@@ -8,6 +8,7 @@ mod core;
 pub mod data;
 mod formatting;
 pub mod generics;
+mod iteration;
 mod numeric_conversion;
 
 use generics::callables::{
@@ -118,6 +119,7 @@ pub struct ExpressionFacts<'g> {
 }
 pub use core::{Propagation, PropagationError, PropagationTarget};
 pub use formatting::FormattingCall;
+pub use iteration::Iteration;
 
 #[derive(Debug)]
 pub struct CallFacts<'g> {
@@ -150,6 +152,7 @@ pub struct BindingFacts<'g> {
 #[derive(Debug)]
 pub enum NodeFactKind<'g> {
     Statement,
+    Iteration(Iteration<'g>),
     Annotation(TypeUse<'g>),
     Expression(ExpressionFacts<'g>),
     Return {
@@ -248,6 +251,7 @@ pub enum ScalarUnsupported {
     Formatting,
     Requirements,
     CoreAdmission,
+    CoreProtection,
     ConversionAdmission,
     DeclarationPrerequisite,
     BindingType,
@@ -475,6 +479,7 @@ struct Checker<'r, 'g> {
     result: Option<super::typed::ResultRole<'g>>,
     show: Option<&'g Declaration>,
     installed_into: Option<&'r super::typed::IntoAdmission<'g>>,
+    collections: super::typed::CollectionCore<'g>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
@@ -507,6 +512,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             result: None,
             show: None,
             installed_into: None,
+            collections: Default::default(),
             data_depth: 0,
             evidence: generics::Evidence::default(),
             conversions: None,
@@ -1586,10 +1592,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(None);
         };
         let closed_error = self.closed_err(&declaration.id);
+        let bridge = self.collections.is_bridge(&declaration.id);
         let family = declaration.id.kind == DeclarationKind::Family
             && self.input.ordinary.is_some()
-            && !closed_error;
-        if declaration.id.kind != DeclarationKind::Function && !family && !closed_error {
+            && !closed_error
+            && !bridge;
+        if declaration.id.kind != DeclarationKind::Function && !family && !closed_error && !bridge {
             self.deferred_declaration(
                 module,
                 node,
@@ -1599,7 +1607,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             return Ok(None);
         }
-        let signature = if family || closed_error {
+        let signature = if family || closed_error || bridge {
             let Some(facts) = self
                 .input
                 .ordinary
@@ -2176,7 +2184,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         }
                     }
                     NodeKind::Index if self.integrated => {
-                        self.tuple_index(&mut inference, node, context)?;
+                        self.aggregate_index(&mut inference, node, context)?;
                     }
                     NodeKind::Construction if self.data => {
                         self.construction_step(&mut inference, node, context)?
@@ -2193,6 +2201,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                             }
                         } else {
                             self.tuple_step(&mut inference, node)?;
+                            if slot.expected.is_some() {
+                                self.list_step(&mut inference, node, false)?;
+                            }
                         }
                     }
                     NodeKind::Literal if slot.ty.is_none() => {
@@ -2307,6 +2318,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if self.input.ordinary.is_some()
                     && self.advance_arrows(&mut inference, context, true)?
                 {
+                    continue;
+                }
+                if self.advance_list_defaults(&mut inference)? {
                     continue;
                 }
                 break;
@@ -2966,7 +2980,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 flow = self.sequence(prefix, &right.map_or_else(Flow::normal, |e| e.flow))?;
             }
             NodeKind::For if self.integrated => {
-                flow = self.pending_iteration(module, node, depth, context)?;
+                flow = self.iteration_statement(module, node, depth, context)?;
             }
             NodeKind::Guard
                 if self.integrated

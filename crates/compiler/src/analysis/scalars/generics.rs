@@ -354,6 +354,7 @@ pub(in crate::analysis) struct IntegratedInputs<'r, 'g> {
     pub result: Option<crate::analysis::typed::ResultRole<'g>>,
     pub show: Option<&'g Declaration>,
     pub into: Option<&'r crate::analysis::typed::IntoAdmission<'g>>,
+    pub collections: crate::analysis::typed::CollectionCore<'g>,
     pub exhausted: bool,
 }
 
@@ -403,6 +404,9 @@ fn analyze_bodies<'g>(
     checker.result = integration.as_ref().and_then(|core| core.result);
     checker.show = integration.as_ref().and_then(|core| core.show);
     checker.installed_into = integration.as_ref().and_then(|core| core.into);
+    checker.collections = integration
+        .as_ref()
+        .map_or_else(Default::default, |core| core.collections);
     checker.elab.lexical = input.lexical().cloned();
     checker.conversions = conversions.map(|r| &r.families);
     let mut declaration_issues = Vec::new();

@@ -6,6 +6,8 @@ pub enum PathProjection<'g> {
     Dereference,
     Field(&'g DeclarationId),
     TupleElement(usize),
+    /// A dynamic selection retains the source but proves no element identity.
+    ListElement,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlacePath<'g> {
@@ -56,6 +58,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         context: &Context<'r, 'g>,
     ) -> Work<(Type<'g>, Option<Arc<Refinement<'g>>>)> {
         if let Some(path) = path {
+            self.elab.step(path.projections.len())?;
+            if path.projections.contains(&PathProjection::ListElement) {
+                return Ok((original, None));
+            }
             for view in context.views.iter().rev() {
                 self.elab.step(1 + path.projections.len())?;
                 if view.path.as_ref() == Some(path) {

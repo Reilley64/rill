@@ -56,9 +56,41 @@ impl InstalledProfile {
             .then_some(Self::DarwinArm64)
     }
 
-    pub(super) fn question_mark_dependencies(self) -> &'static [&'static str] {
+    pub(super) fn metadata(self) -> &'static [MetadataEdge] {
         match self {
-            Self::DarwinArm64 => &["option.rill"],
+            Self::DarwinArm64 => &[
+                MetadataEdge {
+                    path: "option.rill",
+                    triggered_by: |kind| {
+                        matches!(
+                            kind,
+                            NodeKind::Propagate
+                                | NodeKind::Wrap
+                                | NodeKind::PipeStep { propagate: true }
+                        )
+                    },
+                    dependencies: &[],
+                    families: &[],
+                },
+                MetadataEdge {
+                    path: "collection.rill",
+                    triggered_by: |kind| matches!(kind, NodeKind::Bracket | NodeKind::Index),
+                    dependencies: &[("option", "option.rill")],
+                    families: &["get", "first"],
+                },
+                MetadataEdge {
+                    path: "iter.rill",
+                    triggered_by: |kind| kind == NodeKind::For,
+                    dependencies: &[("option", "option.rill"), ("collection", "collection.rill")],
+                    families: &["iterate", "next"],
+                },
+                MetadataEdge {
+                    path: "format.rill",
+                    triggered_by: |kind| kind == NodeKind::TemplateHole,
+                    dependencies: &[],
+                    families: &[],
+                },
+            ],
         }
     }
 
@@ -68,12 +100,6 @@ impl InstalledProfile {
                 "runtime/aarch64-apple-darwin/error.rs",
                 include_bytes!("../../../../runtime/error.rs"),
             ),
-        }
-    }
-
-    pub(super) fn interpolation_dependencies(self) -> &'static [&'static str] {
-        match self {
-            Self::DarwinArm64 => &["format.rill"],
         }
     }
 
@@ -106,9 +132,22 @@ impl InstalledProfile {
             (Self::DarwinArm64, "channel.rill") => {
                 Some(include_bytes!("../../../../stdlib/channel.rill"))
             }
+            (Self::DarwinArm64, "collection.rill") => {
+                Some(include_bytes!("../../../../stdlib/collection.rill"))
+            }
+            (Self::DarwinArm64, "iter.rill") => {
+                Some(include_bytes!("../../../../stdlib/iter.rill"))
+            }
             _ => None,
         }
     }
+}
+
+pub(super) struct MetadataEdge {
+    pub path: &'static str,
+    pub triggered_by: fn(NodeKind) -> bool,
+    pub dependencies: &'static [(&'static str, &'static str)],
+    pub families: &'static [&'static str],
 }
 
 /// Load using the standard root beside the running toolchain executable.

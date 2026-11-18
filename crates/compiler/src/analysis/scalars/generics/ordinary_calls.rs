@@ -930,7 +930,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(output)
     }
 
-    fn determine_source(
+    pub(in crate::analysis::scalars) fn determine_source(
         &mut self,
         site: Site<'g>,
         callee: &'g DeclarationId,

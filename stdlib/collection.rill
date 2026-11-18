@@ -1,0 +1,20 @@
+// The private, uninhabited slot prevents source construction of the opaque owner.
+// Its declared shape is not the layout of the linked collection backing.
+import std::option::{Option};
+
+enum ListStorage {}
+export type List<T> = { private storage: ListStorage; }
+
+export function get<C, Q, R>(source: C, key: Q): Option<R>;
+export function first<C, R>(source: C): Option<R>;
+
+// Private bridge to the linked List<T>::get operation.
+function lookupList<T>(source: &List<T>, index: u64): Option<&T>;
+
+implement<T> get<&List<T>, u64, &T>(source: &List<T>, index: u64): Option<&T> {
+    return lookupList(source, index);
+}
+
+implement<T> first<&List<T>, &T>(source: &List<T>): Option<&T> {
+    return lookupList(source, 0u64);
+}

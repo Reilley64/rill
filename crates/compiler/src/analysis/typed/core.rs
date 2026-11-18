@@ -33,7 +33,6 @@ pub(in crate::analysis) struct IntoAdmission<'g> {
     pub(in crate::analysis) declaration: &'g Declaration,
     pub(in crate::analysis) issues: Vec<RegistrationIssue<'g>>,
 }
-
 pub(super) fn export<'g>(
     graph: &'g Graph,
     module: &'g Module,

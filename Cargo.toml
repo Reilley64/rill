@@ -5,6 +5,7 @@ members = [
     "crates/lsp",
     "crates/codegen-llvm",
     "crates/cli",
+    "runtime/collection",
 ]
 resolver = "3"
 
