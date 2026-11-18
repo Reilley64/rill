@@ -1,19 +1,30 @@
 //! Core-dependent checking over admitted identities; absent contracts stay pending.
 use super::*;
 
+mod errors;
+pub(super) use errors::ClosedErr;
+
 #[derive(Clone, Copy, Debug)]
 pub enum PropagationTarget<'g> {
     Callable(&'g DeclarationId),
     Arrow(NodeId),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
+pub struct PropagationError<'g> {
+    /// The existing wrapper type constructor, not a newly constructed error.
+    pub wrapper: &'g DeclarationId,
+    pub payload: Type<'g>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Propagation<'g> {
     pub target: PropagationTarget<'g>,
     pub success: &'g DeclarationId,
     pub failure: &'g DeclarationId,
     pub can_continue: bool,
     pub can_return: bool,
+    pub error: Option<PropagationError<'g>>,
 }
 
 pub(super) struct OptionOperand<'g> {
@@ -93,7 +104,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
     }
 
-    pub(super) fn option_propagation(
+    pub(super) fn postfix_propagation(
         &mut self,
         inference: &mut Inference<'g>,
         node: NodeId,
@@ -102,17 +113,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         let module = inference.module;
         let operand = module.syntax.nodes[node].children[0];
         let slot = &inference.slots[&operand];
-        let (Some(role), Some(ty), Some((target, Some(result)))) = (
-            self.option,
-            slot.ty.as_ref(),
-            self.propagation_target(context),
-        ) else {
+        let (Some(ty), Some((target, Some(result)))) =
+            (slot.ty.as_ref(), self.propagation_target(context))
+        else {
             return Ok(());
         };
         if inference.slots[&node].propagation.is_some() || slot.blocked {
             return Ok(());
         }
-        let (container, variant) = match ty.as_ref() {
+        let (access, container) = match ty.as_ref() {
+            TypeTerm::Reference { referent, .. } => (data::Access::ReadOnly, referent.as_ref()),
+            container => (slot.access, container),
+        };
+        let (container, variant) = match container {
             TypeTerm::Variant {
                 parent,
                 declaration,
@@ -132,24 +145,53 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             return Ok(());
         };
-        if *declaration != &role.declaration.id {
-            // Result and its contracts have not yet been admitted.
+        let (success, failure, error) = if let Some(role) = self.option
+            && *declaration == &role.declaration.id
+        {
+            (&role.some.id, &role.none.id, None)
+        } else if let Some(role) = self.result
+            && *declaration == &role.declaration.id
+        {
+            (
+                &role.ok.id,
+                &role.err.id,
+                Some(PropagationError {
+                    wrapper: &role.wrapper.id,
+                    payload: arguments[1].clone(),
+                }),
+            )
+        } else {
+            return Ok(());
+        };
+        let TypeTerm::Nominal {
+            declaration: returned,
+            arguments: returned_args,
+        } = result.as_ref()
+        else {
+            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        };
+        if access != data::Access::Owned || declaration != returned {
+            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
         }
-        if slot.access != data::Access::Owned
-            || !matches!(result.as_ref(), TypeTerm::Nominal { declaration, .. } if *declaration == &role.declaration.id)
+        if let Some(error) = &error
+            && !self.same(&error.payload, &returned_args[1])?
         {
-            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+            self.mismatch(module, node, &error.payload, &returned_args[1])?;
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
         }
         let payload = arguments[0].clone();
         let propagation = Propagation {
             target,
-            success: &role.some.id,
-            failure: &role.none.id,
-            can_continue: variant != Some(&role.none.id),
-            can_return: variant != Some(&role.some.id),
+            success,
+            failure,
+            can_continue: variant != Some(failure),
+            can_return: variant != Some(success),
+            error,
         };
         self.elab.reserve(1)?;
         inference.slots.get_mut(&node).unwrap().propagation = Some(propagation);

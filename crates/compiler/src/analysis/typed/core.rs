@@ -1,8 +1,14 @@
 //! Admission of delivered contracts from the installed capture.
 use super::*;
 use crate::analysis::scalars::BodyOwner;
-use crate::analysis::{Declaration, DeclarationFacts, DeclarationShape, Payload, Type, TypeTerm};
+use crate::analysis::{
+    Binder, Declaration, DeclarationFacts, DeclarationShape, Payload, Type, TypeTerm,
+};
 use crate::loader::{DeclarationKind, Module, Namespace, Target};
+
+mod result;
+pub use result::ResultRole;
+pub(super) use result::check_result;
 
 #[derive(Clone, Copy, Debug)]
 pub struct OptionRole<'g> {
@@ -15,6 +21,8 @@ pub struct OptionRole<'g> {
 pub(super) struct InstalledCore<'g> {
     pub(super) option: Option<OptionRole<'g>>,
     pub(super) option_inspection: Option<&'g Declaration>,
+    pub(super) result: Option<ResultRole<'g>>,
+    pub(super) result_inspection: Option<&'g Declaration>,
 }
 
 fn export<'g>(
@@ -69,15 +77,7 @@ pub(super) fn check_roles<'g>(
     budget: &mut Budget,
 ) -> Work<Option<OptionRole<'g>>> {
     let graph = inventory.graph();
-    let mut module = None;
-    for candidate in graph.modules() {
-        budget.step(1)?;
-        if candidate.key.path == "option.rill" && graph.is_pinned_standard_source(candidate) {
-            module = Some(candidate);
-            break;
-        }
-    }
-    let Some(module) = module else {
+    let Some(module) = pinned_module(graph, "option.rill", budget)? else {
         return Ok(None);
     };
     let Some(option) = export(graph, module, Namespace::TypeModule, "Option", budget)? else {
@@ -102,7 +102,7 @@ pub(super) fn check_roles<'g>(
     };
     if some.declaration.name.as_deref() != Some("Some")
         || none.declaration.name.as_deref() != Some("None")
-        || !parameter_is(element, parameter.declaration)
+        || !binder_is(element, parameter)
         || !matches!(none.payload, Payload::Unit)
     {
         return Ok(None);
@@ -115,8 +115,23 @@ pub(super) fn check_roles<'g>(
     }))
 }
 
-fn parameter_is(term: &Type<'_>, binder: &Declaration) -> bool {
-    matches!(term.as_ref(), TypeTerm::Parameter { declaration, position: 0 } if **declaration == binder.id)
+fn pinned_module<'g>(
+    graph: &'g Graph,
+    path: &str,
+    budget: &mut Budget,
+) -> Work<Option<&'g Module>> {
+    for module in graph.modules() {
+        budget.step(1)?;
+        if module.key.path == path && graph.is_pinned_standard_source(module) {
+            return Ok(Some(module));
+        }
+    }
+    Ok(None)
+}
+
+fn binder_is(term: &Type<'_>, binder: &Binder<'_>) -> bool {
+    matches!(term.as_ref(), TypeTerm::Parameter { declaration, position }
+        if **declaration == binder.declaration.id && *position == binder.position)
 }
 
 pub(super) fn check_providers<'g>(
@@ -125,60 +140,67 @@ pub(super) fn check_providers<'g>(
     budget: &mut Budget,
     admitted: &mut InstalledCore<'g>,
 ) -> Work<()> {
-    let Some(OptionRole {
-        declaration: option,
-        ..
-    }) = admitted.option
-    else {
-        return Ok(());
-    };
-    let graph = inventory.graph();
-    let mut owner = None;
-    for module in graph.modules() {
-        budget.step(1)?;
-        if module.key == option.id.module {
-            owner = Some(module);
-            break;
-        }
+    if let Some(role) = admitted.option {
+        admitted.option_inspection =
+            checked_inspection(inventory, bodies, budget, role.declaration, "isSome", 1)?;
     }
-    let module = owner.expect("the admitted Option declaration is in this graph");
-    let Some(inspection) = export(graph, module, Namespace::ValueFunction, "isSome", budget)?
-    else {
-        return Ok(());
+    if let Some(role) = admitted.result {
+        admitted.result_inspection =
+            checked_inspection(inventory, bodies, budget, role.declaration, "isOk", 2)?;
+    }
+    Ok(())
+}
+
+fn checked_inspection<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    bodies: &GenericReport<'g>,
+    budget: &mut Budget,
+    container: &'g Declaration,
+    name: &str,
+    binder_count: usize,
+) -> Work<Option<&'g Declaration>> {
+    let graph = inventory.graph();
+    let module = pinned_module(graph, &container.id.module.path, budget)?
+        .expect("admitted inspection roles use pinned source");
+    let Some(inspection) = export(graph, module, Namespace::ValueFunction, name, budget)? else {
+        return Ok(None);
     };
     if inspection.id.kind != DeclarationKind::Function {
-        return Ok(());
+        return Ok(None);
     }
     let Some(signature) = unconditional_declaration(inventory, inspection, budget)? else {
-        return Ok(());
+        return Ok(None);
     };
-    let (DeclarationShape::Function { parameters, result }, [binder]) =
-        (&signature.shape, signature.binders.as_slice())
-    else {
-        return Ok(());
+    let DeclarationShape::Function { parameters, result } = &signature.shape else {
+        return Ok(None);
     };
     let [input] = parameters.as_slice() else {
-        return Ok(());
+        return Ok(None);
     };
     let TypeTerm::Reference {
         mutable: false,
         referent,
     } = input.ty.as_ref()
     else {
-        return Ok(());
+        return Ok(None);
     };
     let TypeTerm::Nominal {
         declaration,
         arguments,
     } = referent.as_ref()
     else {
-        return Ok(());
+        return Ok(None);
     };
-    if **declaration != option.id
-        || !matches!(arguments.as_slice(), [argument] if parameter_is(argument, binder.declaration))
+    if **declaration != container.id
+        || signature.binders.len() != binder_count
+        || arguments.len() != binder_count
+        || !arguments
+            .iter()
+            .zip(&signature.binders)
+            .all(|(arg, binder)| binder_is(arg, binder))
         || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
     {
-        return Ok(());
+        return Ok(None);
     }
     if let Some(checked) =
         bodies.checked_body(module, BodyOwner::Declaration(&inspection.id), budget)?
@@ -186,9 +208,9 @@ pub(super) fn check_providers<'g>(
         && !checked.flow.normal
     {
         budget.reserve(1)?;
-        admitted.option_inspection = Some(inspection);
+        return Ok(Some(inspection));
     }
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]

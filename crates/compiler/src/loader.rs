@@ -328,6 +328,7 @@ pub struct Graph {
     implementations: Vec<Implementation>,
     host: Host,
     installed: Option<InstalledProfile>,
+    error_storage: Option<(PathBuf, Vec<u8>)>,
 }
 
 impl Graph {
@@ -339,6 +340,10 @@ impl Graph {
                 .installed
                 .and_then(|p| p.source(&module.key.path))
                 .is_some()
+    }
+
+    pub(crate) fn error_storage_source(&self) -> Option<&std::path::Path> {
+        self.error_storage.as_ref().map(|(path, _)| path.as_path())
     }
 
     pub fn id(&self) -> GraphId {
@@ -431,7 +436,13 @@ pub fn validate_inputs(graph: &Graph, limits: Limits) -> Result<()> {
         graph
             .modules
             .iter()
-            .map(|m| (m.path.as_path(), m.snapshot.bytes())),
+            .map(|m| (m.path.as_path(), m.snapshot.bytes()))
+            .chain(
+                graph
+                    .error_storage
+                    .iter()
+                    .map(|(path, bytes)| (path.as_path(), bytes.as_slice())),
+            ),
         false,
     )
 }

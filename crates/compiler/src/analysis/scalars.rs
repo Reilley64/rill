@@ -114,7 +114,7 @@ pub struct ExpressionFacts<'g> {
     pub read_only_projection: bool,
     pub access: data::Access,
 }
-pub use core::{Propagation, PropagationTarget};
+pub use core::{Propagation, PropagationError, PropagationTarget};
 
 #[derive(Debug)]
 pub struct CallFacts<'g> {
@@ -372,7 +372,7 @@ struct Slot<'g> {
     diverges: bool,
     boolean: Option<BooleanSet>,
     propagation: Option<Propagation<'g>>,
-    pending_propagation: bool,
+    pending_core: bool,
     admission: Option<data::Admission<'g>>,
     path: Option<data::PlacePath<'g>>,
     refinement: Option<Arc<data::Refinement<'g>>>,
@@ -422,6 +422,7 @@ struct PreparedCall<'g> {
     result: Type<'g>,
     infer: bool,
     family: bool,
+    closed_error: Option<core::ClosedErr<'g>>,
 }
 struct PipeInvocation {
     receiver: NodeId,
@@ -462,6 +463,7 @@ struct Checker<'r, 'g> {
     data: bool,
     integrated: bool,
     option: Option<super::typed::OptionRole<'g>>,
+    result: Option<super::typed::ResultRole<'g>>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
@@ -491,6 +493,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             data,
             integrated: false,
             option: None,
+            result: None,
             data_depth: 0,
             evidence: generics::Evidence::default(),
             conversions: None,
@@ -1556,9 +1559,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
             return Ok(None);
         };
-        let family =
-            declaration.id.kind == DeclarationKind::Family && self.input.ordinary.is_some();
-        if declaration.id.kind != DeclarationKind::Function && !family {
+        let closed_error = self.closed_err(&declaration.id);
+        let family = declaration.id.kind == DeclarationKind::Family
+            && self.input.ordinary.is_some()
+            && !closed_error;
+        if declaration.id.kind != DeclarationKind::Function && !family && !closed_error {
             self.deferred_declaration(
                 module,
                 node,
@@ -1568,7 +1573,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             return Ok(None);
         }
-        let signature = if family {
+        let signature = if family || closed_error {
             let Some(facts) = self
                 .input
                 .ordinary
@@ -1608,13 +1613,37 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(None);
         }
         let argument_nodes = Self::written_call_arguments(module, callee);
+        let closed = if closed_error {
+            if !(1..=2).contains(&arguments.len()) || argument_nodes.len() > arguments.len() + 1 {
+                self.finding(module, node, ScalarFindingKind::Arity)?;
+                return Ok(None);
+            }
+            let cause = if let Some(&ty) = argument_nodes.get(2) {
+                let binders = context.signature.map_or(&[][..], |s| s.binders.as_slice());
+                let Some(ty) = self.elab.ty(module, ty, binders, 1)? else {
+                    return Ok(None);
+                };
+                Some(ty)
+            } else {
+                None
+            };
+            Some(core::ClosedErr { cause })
+        } else {
+            None
+        };
+        let argument_nodes = if closed_error {
+            &argument_nodes[..argument_nodes.len().min(2)]
+        } else {
+            argument_nodes
+        };
         let requires_evidence = self.input.ordinary.is_some_and(|ordinary| {
             ordinary
                 .headers()
                 .get(&declaration.id)
                 .is_some_and(|header| !header.requirements.is_empty())
         });
-        let infer = family || requires_evidence || argument_nodes.len() < signature.binders.len();
+        let infer = !closed_error
+            && (family || requires_evidence || argument_nodes.len() < signature.binders.len());
         if infer && self.input.ordinary.is_none() {
             self.deferred_declaration(
                 module,
@@ -1647,7 +1676,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let DeclarationShape::Function { parameters, result } = &signature.shape else {
             unreachable!()
         };
-        if parameters.len() != arguments.len() {
+        if !closed_error && parameters.len() != arguments.len() {
             if family {
                 self.deferred_declaration(
                     module,
@@ -1661,7 +1690,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.finding(module, node, ScalarFindingKind::Arity)?;
         }
         self.elab.reserve(parameters.len())?;
-        let (parameters, result) = if infer {
+        let (parameters, result) = if infer || closed_error {
             (
                 parameters.iter().map(|p| p.ty.clone()).collect(),
                 result.clone(),
@@ -1675,7 +1704,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         self.elab.reserve(1 + arguments.len())?;
         let arguments = arguments.to_vec();
-        if !infer {
+        if !infer && !closed_error {
             self.record_callee(module, callee, &declaration.id)?;
         }
         Ok(Some(PreparedCall {
@@ -1692,6 +1721,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             result,
             infer,
             family,
+            closed_error: closed,
         }))
     }
     fn record_callee(
@@ -1923,10 +1953,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 NodeKind::Literal => (),
                 NodeKind::Propagate | NodeKind::Wrap if self.integrated => {
-                    if syntax.kind == NodeKind::Wrap {
-                        self.pending_propagation(module, node, context)?;
-                        inference.slots.get_mut(&node).unwrap().blocked = true;
-                    } else if !self.valid_propagation_target(module, node, context)? {
+                    if !self.valid_propagation_target(module, node, context)? {
                         inference.slots.get_mut(&node).unwrap().blocked = true;
                     }
                     for &child in &syntax.children {
@@ -1968,7 +1995,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 NodeKind::ValueReference | NodeKind::Name => {
                     let value = self.value(module, node, context)?;
                     if let Some(Value::Declaration(declaration, bindings)) = value {
-                        if self.input.ordinary.is_some() {
+                        if self.closed_err(&declaration.id) {
+                            self.finding(module, node, ScalarFindingKind::InvalidTarget)?;
+                            inference.slots.get_mut(&node).unwrap().blocked = true;
+                        } else if self.input.ordinary.is_some() {
                             self.register_function_value(
                                 &mut inference,
                                 node,
@@ -2142,6 +2172,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                     NodeKind::Call | NodeKind::Pipe => {
                         if inference.data_nodes.contains(&node) {
                             self.variant_step(&mut inference, node, context)?;
+                        } else if inference
+                            .calls
+                            .get(&node)
+                            .is_some_and(|c| c.closed_error.is_some())
+                        {
+                            self.closed_err_step(&mut inference, node)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.family) {
                             let id = inference.calls[&node].fact.callee;
                             if self.conversion_family(id).is_some() {
@@ -2169,8 +2205,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                             }
                         }
                     }
-                    NodeKind::Propagate if self.option.is_some() => {
-                        self.option_propagation(&mut inference, node, context)?;
+                    NodeKind::Propagate if self.option.is_some() || self.result.is_some() => {
+                        self.postfix_propagation(&mut inference, node, context)?;
+                    }
+                    NodeKind::Wrap if self.integrated => {
+                        self.wrapping_prerequisites(&mut inference, node, context)?;
                     }
                     NodeKind::IfExpression => self.conditional(&mut inference, node)?,
                     NodeKind::Prefix(operator) => {
@@ -2253,10 +2292,17 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.elab.step(1)?;
                 slot.blocked |= Self::propagating_pipe(module, node);
                 if !slot.blocked
-                    && slot.propagation.is_none()
-                    && module.syntax.nodes[node].kind == NodeKind::Propagate
+                    && ((slot.propagation.is_none()
+                        && matches!(
+                            module.syntax.nodes[node].kind,
+                            NodeKind::Propagate | NodeKind::Wrap
+                        ))
+                        || inference
+                            .calls
+                            .get(&node)
+                            .is_some_and(|c| c.closed_error.is_some()))
                 {
-                    slot.pending_propagation = true;
+                    slot.pending_core = true;
                     slot.blocked = true;
                 }
             }
@@ -2369,9 +2415,18 @@ impl<'r, 'g> Checker<'r, 'g> {
         for &node in &ordered {
             let children = self.runtime_children(&inference, node)?;
             let blocked = children.iter().any(|child| inference.slots[child].blocked);
-            if !blocked && inference.slots[&node].pending_propagation {
+            if !blocked && inference.slots[&node].pending_core {
                 // An invalid or pending operand has its own finding or prerequisite.
-                self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                let index = self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                if let Some(call) = inference
+                    .calls
+                    .get(&node)
+                    .filter(|c| c.closed_error.is_some())
+                {
+                    self.elab.reserve(call.fact.bindings.len())?;
+                    self.facts.obligations[index].declaration = Some(call.fact.callee);
+                    self.facts.obligations[index].bindings = call.fact.bindings.clone();
+                }
             }
             let mut normal = inference.slots[&node]
                 .ty
@@ -2513,9 +2568,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                     (Some(a), Some(b)) => Some(a.combine(b)),
                     (a, b) => a.or(b),
                 };
-                let data = if let Some(propagation) = slot.propagation {
+                let data = if let Some(propagation) = &slot.propagation {
                     self.elab.reserve(1)?;
-                    Some(data::DataExpression::Propagation(Box::new(propagation)))
+                    Some(data::DataExpression::Propagation(Box::new(
+                        propagation.clone(),
+                    )))
                 } else {
                     inference.data.remove(&node).map(|p| p.fact)
                 };
@@ -2631,7 +2688,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 flow = self.sequence(flow, &inference.slots[child].flow)?;
             }
             if flow.normal
-                && let Some(propagation) = inference.slots[&node].propagation
+                && let Some(propagation) = &inference.slots[&node].propagation
             {
                 flow.normal = propagation.can_continue;
                 flow.returns |= propagation.can_return;

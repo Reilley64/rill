@@ -1,0 +1,71 @@
+import std::error::{Cause, Error, SourceLocation, display};
+import std::option::Option;
+
+export type Err<E> = {
+    private payload: E;
+    private site: SourceLocation;
+    private retained: Option<Cause>;
+};
+
+export enum Result<T, E = Error> { Ok(T), Err(Err<E>) }
+
+export function Ok<T, E = Error>(value: T): Result<T, E> {
+    return Result.Ok(value);
+}
+
+// The pinned value identity marks the closed constructor, not an ordinary body.
+export function Err<T, E>(value: E): Result<T, E>;
+
+export function value<E>(wrapped: &Err<E>): &E {
+    return &wrapped.payload;
+}
+
+export function intoValue<E>(wrapped: Err<E>): E {
+    return wrapped.payload;
+}
+
+export function isOk<T, E>(value: &Result<T, E>): bool {
+    return match (value) { Result.Ok(_) => true, Result.Err(_) => false };
+}
+
+export function ok<T, E>(value: &Result<T, E>): Option<&T> {
+    return match (value) {
+        Result.Ok(element) => Option.Some(element),
+        Result.Err(_) => Option.None,
+    };
+}
+
+export function err<T, E>(value: &Result<T, E>): Option<&Err<E>> {
+    return match (value) {
+        Result.Ok(_) => Option.None,
+        Result.Err(failure) => Option.Some(failure),
+    };
+}
+
+export function map<T, U, E, F>(value: Result<T, E>, apply: F): Result<U, E>
+where callableOnce(F, [T], U) {
+    return match (value) {
+        Result.Ok(element) => Result.Ok(apply(element)),
+        Result.Err(failure) => Result.Err(failure),
+    };
+}
+
+export function mapErr<T, E, D, F>(value: Result<T, E>, apply: F): Result<T, D>
+where callableOnce(F, [E], D), display(D) {
+    return match (value) {
+        Result.Ok(element) => Result.Ok(element),
+        Result.Err(failure) => Result.Err(Err {
+            payload: apply(failure.payload),
+            site: failure.site,
+            retained: failure.retained,
+        }),
+    };
+}
+
+export function andThen<T, U, E, F>(value: Result<T, E>, apply: F): Result<U, E>
+where callableOnce(F, [T], Result<U, E>) {
+    return match (value) {
+        Result.Ok(element) => apply(element),
+        Result.Err(failure) => Result.Err(failure),
+    };
+}

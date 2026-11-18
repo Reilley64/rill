@@ -1,14 +1,14 @@
 //! Integrated typed analysis with separately validated first-party contracts.
 use super::Work;
 use super::declarations::Budget;
-use super::generics::{GenericReport, analyze_integrated_bodies};
+use super::generics::{GenericReport, IntegratedInputs, analyze_integrated_bodies};
 use super::ordinary::{OrdinaryAnalysis, analyze_typed_inventory};
 use super::scalars::ScalarFailureKind;
 use super::{AnalysisLimits, Graph, Stage, Statistics};
 
 mod core;
 mod interfaces;
-pub use core::OptionRole;
+pub use core::{OptionRole, ResultRole};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,9 +53,26 @@ impl<'g> TypedReport<'g> {
         self.core.option.as_ref()
     }
 
+    /// Nominal Result schema, independent of wrapper representation and protection.
+    pub fn result_role(&self) -> Option<&ResultRole<'g>> {
+        self.core.result.as_ref()
+    }
+
+    /// Pinned, delivered Rust storage source for the admitted schema. This is not a
+    /// lowered representation, a native provider binding, or a protection inventory.
+    pub fn error_storage_source(&self) -> Option<&'g std::path::Path> {
+        self.core.result?;
+        self.inventory.graph().error_storage_source()
+    }
+
     /// The checked delivered inspection implementation, separate from the enum schema.
     pub fn option_inspection(&self) -> Option<&'g super::Declaration> {
         self.core.option_inspection
+    }
+
+    /// The admitted and checked source body for canonical `isOk`.
+    pub fn result_inspection(&self) -> Option<&'g super::Declaration> {
+        self.core.result_inspection
     }
 
     pub fn core_blockers(&self) -> &'static [CoreBlocker] {
@@ -93,7 +110,20 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         option: roles.unwrap_or_default(),
         ..Default::default()
     };
-    let bodies = analyze_integrated_bodies(&inventory, budget, core.option, roles.is_err());
+    let result_roles = match core.option {
+        Some(option) => core::check_result(&inventory, option, &mut budget),
+        None => Ok(None),
+    };
+    core.result = result_roles.unwrap_or_default();
+    let bodies = analyze_integrated_bodies(
+        &inventory,
+        budget,
+        IntegratedInputs {
+            option: core.option,
+            result: core.result,
+            exhausted: roles.is_err() || result_roles.is_err(),
+        },
+    );
     let mut budget = Budget {
         limits,
         statistics: bodies.statistics(),

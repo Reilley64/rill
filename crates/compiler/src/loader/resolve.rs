@@ -24,6 +24,7 @@ struct Engine {
     findings: Vec<Finding>,
     pending: VecDeque<ModuleKey>,
     installed: Option<InstalledProfile>,
+    error_storage: Option<(PathBuf, Vec<u8>)>,
 }
 
 pub(super) fn load(request: Request, installed: Option<InstalledProfile>) -> Result<Graph> {
@@ -38,6 +39,7 @@ pub(super) fn load(request: Request, installed: Option<InstalledProfile>) -> Res
         findings: Vec::new(),
         pending: VecDeque::new(),
         installed,
+        error_storage: None,
     };
     match engine.run() {
         Ok((bindings, implementations, prelude)) => Ok(Graph {
@@ -50,6 +52,7 @@ pub(super) fn load(request: Request, installed: Option<InstalledProfile>) -> Res
             prelude,
             host: engine.host,
             installed,
+            error_storage: engine.error_storage,
         }),
         Err(mut error) => {
             error.findings.append(&mut engine.findings);
@@ -357,14 +360,63 @@ impl Engine {
             dispose: select(&prelude_keys[1], &selectors[1])?,
         };
         let implementations = self.attach_implementations(&bindings, &prelude)?;
+        self.capture_error_storage()?;
         self.host.replay(
             self.request.limits,
             self.modules
                 .values()
-                .map(|m| (m.path.as_path(), m.snapshot.bytes())),
+                .map(|m| (m.path.as_path(), m.snapshot.bytes()))
+                .chain(
+                    self.error_storage
+                        .iter()
+                        .map(|(path, bytes)| (path.as_path(), bytes.as_slice())),
+                ),
             true,
         )?;
+        if let Some((path, bytes)) = &self.error_storage
+            && Some(bytes.as_slice()) != self.installed.map(|profile| profile.error_storage().1)
+        {
+            let mut error = failure(
+                FailureKind::InvalidRequest,
+                "installed error storage differs from toolchain pin",
+            );
+            error.path = Some(path.clone());
+            return Err(error);
+        }
         Ok((bindings, implementations, prelude))
+    }
+
+    fn capture_error_storage(&mut self) -> Result<()> {
+        let Some(profile) = self.installed else {
+            return Ok(());
+        };
+        self.host.charge(1)?;
+        if !self.modules.contains_key(&ModuleKey {
+            origin: Origin::Standard,
+            path: "error.rill".into(),
+        }) {
+            return Ok(());
+        }
+        // Installed requests derive this parent from the canonical executable path.
+        let root = self
+            .request
+            .standard_root
+            .parent()
+            .expect("installed lib/rill");
+        let path = root.join(profile.error_storage().0);
+        let Some(probe) = self.host.probe(&path, Some(root))? else {
+            return Ok(());
+        };
+        if probe.kind != Kind::File || probe.path != path {
+            return Err(failure(
+                FailureKind::InvalidRequest,
+                "installed error storage does not have its pinned artifact key",
+            ));
+        }
+        let bytes = self.host.read(&path, true)?;
+        self.host.charge(bytes.len())?;
+        self.error_storage = Some((path, bytes));
+        Ok(())
     }
 
     fn attach_implementations(

@@ -340,20 +340,25 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
     analyze_bodies(input, conversions, budget, None)
 }
 
+pub(in crate::analysis) struct IntegratedInputs<'g> {
+    pub option: Option<crate::analysis::typed::OptionRole<'g>>,
+    pub result: Option<crate::analysis::typed::ResultRole<'g>>,
+    pub exhausted: bool,
+}
+
 pub(in crate::analysis) fn analyze_integrated_bodies<'g>(
     input: &OrdinaryAnalysis<'g>,
     budget: declarations::Budget,
-    option: Option<crate::analysis::typed::OptionRole<'g>>,
-    exhausted: bool,
+    integration: IntegratedInputs<'g>,
 ) -> GenericReport<'g> {
-    analyze_bodies(input, None, budget, Some((option, exhausted)))
+    analyze_bodies(input, None, budget, Some(integration))
 }
 
 fn analyze_bodies<'g>(
     input: &OrdinaryAnalysis<'g>,
     conversions: Option<&ConversionReport<'_, 'g>>,
     mut budget: declarations::Budget,
-    integration: Option<(Option<crate::analysis::typed::OptionRole<'g>>, bool)>,
+    integration: Option<IntegratedInputs<'g>>,
 ) -> GenericReport<'g> {
     let graph = input.graph();
     let limits = budget.limits;
@@ -383,7 +388,8 @@ fn analyze_bodies<'g>(
             budget.statistics
         };
     checker.integrated = integrated;
-    checker.option = integration.and_then(|(option, _)| option);
+    checker.option = integration.as_ref().and_then(|inputs| inputs.option);
+    checker.result = integration.as_ref().and_then(|inputs| inputs.result);
     checker.elab.lexical = input.lexical().cloned();
     checker.conversions = conversions.map(|r| &r.families);
     let mut declaration_issues = Vec::new();
@@ -399,7 +405,7 @@ fn analyze_bodies<'g>(
             declaration_issues.push(issue.clone());
         }
         if preflight_exhausted
-            || integration.is_some_and(|(_, exhausted)| exhausted)
+            || integration.is_some_and(|inputs| inputs.exhausted)
             || input.completion() == Completion::ResourceLimit
             || conversions.is_some_and(|r| r.completion() == Completion::ResourceLimit)
         {

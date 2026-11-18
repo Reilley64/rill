@@ -1,0 +1,23 @@
+export import std::result::{value, intoValue};
+
+export type Error = { private message: string };
+
+// Owned source metadata. Only compiler-generated construction can supply it.
+export type SourceLocation = { private file: string; private byteOffset: u64 };
+
+// There is no inline source constructor for the runtime's sealed storage.
+export type Cause = { private storage: never };
+
+export function error(message: string): Error {
+    return Error { message };
+}
+
+export function display<E>(value: &E): string;
+
+implement display(value: &Error): string {
+    return copy(&value.message);
+}
+
+implement display(value: &string): string {
+    return copy(value);
+}

@@ -28,6 +28,15 @@ impl InstalledProfile {
         }
     }
 
+    pub(super) fn error_storage(self) -> (&'static str, &'static [u8]) {
+        match self {
+            Self::DarwinArm64 => (
+                "runtime/aarch64-apple-darwin/error.rs",
+                include_bytes!("../../../../runtime/error.rs"),
+            ),
+        }
+    }
+
     pub(super) fn source(self, path: &str) -> Option<&'static [u8]> {
         match (self, path) {
             (Self::DarwinArm64, "core.rill") => {
@@ -35,6 +44,12 @@ impl InstalledProfile {
             }
             (Self::DarwinArm64, "option.rill") => {
                 Some(include_bytes!("../../../../stdlib/option.rill"))
+            }
+            (Self::DarwinArm64, "result.rill") => {
+                Some(include_bytes!("../../../../stdlib/result.rill"))
+            }
+            (Self::DarwinArm64, "error.rill") => {
+                Some(include_bytes!("../../../../stdlib/error.rill"))
             }
             _ => None,
         }
