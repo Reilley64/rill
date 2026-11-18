@@ -42,15 +42,13 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         let body = self.module.syntax.nodes[node].children[2];
         let iterator = Root::Temporary(node);
-        let mut running = self.singleton(state)?;
-        for (index, &element) in elements.iter().enumerate() {
-            running = self.component(
-                running,
-                element,
-                iterator,
-                &[ResultComponent::ListElement(index)],
-                depth + 1,
-            )?;
+        let source = Root::Temporary(iteration.source);
+        let mut running = self.expression(iteration.source, state, depth + 1)?;
+        if elements.is_empty() || running.is_empty() {
+            self.dead_statement(body, Residence::default(), depth + 1)?;
+        }
+        for state in &mut running {
+            self.move_value(state, source, &[], iterator, &[])?;
         }
         let mut exits = Vec::new();
         for index in 0..elements.len() {
@@ -112,15 +110,10 @@ impl<'a, 'g> Check<'a, 'g> {
         let mut seen = Vec::new();
         let mut exits = Vec::new();
         let mut entered = false;
-        'work: while let Some(mut state) = queue.pop_front() {
-            state.normalize(self.budget)?;
-            for old in &seen {
-                if state.same_as(old, self.budget)? {
-                    continue 'work;
-                }
+        while let Some(mut state) = queue.pop_front() {
+            if !self.first_visit(&mut state, &mut seen)? {
+                continue;
             }
-            self.budget.reserve(1)?;
-            seen.push(state.fork(self.budget)?);
             // The condition can itself transfer to this loop.
             let jumped = self.with_loop(node, |check| {
                 for (truth, state) in check.branch_condition(condition, state, depth + 1)? {
@@ -164,6 +157,15 @@ impl<'a, 'g> Check<'a, 'g> {
         {
             return self.owned_literal_iteration(node, state, depth);
         }
+        if let Some(iteration) = iteration
+            && iteration.traversal == Some(crate::analysis::typed::ListTraversal::Owned)
+            && matches!(iteration.yielded.as_ref(), TypeTerm::Primitive(p) if p.name() != "never")
+            && self
+                .facts(iteration.pattern)?
+                .is_some_and(|fact| matches!(fact.kind, NodeFactKind::Pattern(_)))
+        {
+            return self.owned_scalar_iteration(node, iteration.source, body, state, depth);
+        }
         self.pending(
             node,
             if iteration.is_some() {
@@ -182,6 +184,57 @@ impl<'a, 'g> Check<'a, 'g> {
         } else {
             self.singleton(Residence::default())
         }
+    }
+
+    fn owned_scalar_iteration(
+        &mut self,
+        node: NodeId,
+        source: NodeId,
+        body: NodeId,
+        state: Residence<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        let mut initial = self.expression(source, state, depth + 1)?;
+        if initial.is_empty() {
+            self.dead_statement(body, Residence::default(), depth + 1)?;
+        }
+        for state in &mut initial {
+            state.take(Root::Temporary(source), &[], self.budget)?;
+        }
+        let mut queue = VecDeque::from(initial);
+        let mut seen = Vec::new();
+        let mut exits = Vec::new();
+        while let Some(mut state) = queue.pop_front() {
+            if !self.first_visit(&mut state, &mut seen)? {
+                continue;
+            }
+            // None has no retained Result, but any outer residence remains.
+            self.budget.reserve(1)?;
+            exits.push(state.fork(self.budget)?);
+            let jumped = self.with_loop(node, |check| {
+                queue.extend(check.statement(body, state, depth + 1)?);
+                Ok(())
+            })?;
+            queue.extend(jumped.continues);
+            exits.extend(jumped.breaks);
+        }
+        Ok(exits)
+    }
+
+    fn first_visit(
+        &mut self,
+        state: &mut Residence<'g>,
+        seen: &mut Alternatives<'g>,
+    ) -> Work<bool> {
+        state.normalize(self.budget)?;
+        for old in seen.iter() {
+            if state.same_as(old, self.budget)? {
+                return Ok(false);
+            }
+        }
+        self.budget.reserve(1)?;
+        seen.push(state.fork(self.budget)?);
+        Ok(true)
     }
 
     fn with_loop(

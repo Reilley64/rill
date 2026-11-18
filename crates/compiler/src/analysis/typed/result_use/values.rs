@@ -82,7 +82,7 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
-    pub(super) fn opaque_list(
+    pub(super) fn list_literal(
         &mut self,
         node: NodeId,
         elements: &[NodeId],
@@ -90,19 +90,15 @@ impl<'a, 'g> Check<'a, 'g> {
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         let mut states = self.singleton(state)?;
-        for &element in elements {
-            let mut next = Vec::new();
-            for state in states {
-                next.extend(self.expression(element, state, depth)?);
-            }
-            states = next;
+        for (index, &element) in elements.iter().enumerate() {
+            states = self.component(
+                states,
+                element,
+                Root::Temporary(node),
+                &[ResultComponent::ListElement(index)],
+                depth,
+            )?;
         }
-        for state in &mut states {
-            for &element in elements {
-                state.take(Root::Temporary(element), &[], self.budget)?;
-            }
-        }
-        self.pending(node, ResultUseBlocker::Containment)?;
         Ok(states)
     }
 
@@ -114,7 +110,14 @@ impl<'a, 'g> Check<'a, 'g> {
         state: Residence<'g>,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
-        self.pending(node, ResultUseBlocker::Storage)?;
+        let owned = value.access == Access::Owned
+            && !matches!(
+                value.ty.as_ref(),
+                TypeTerm::Primitive(_) | TypeTerm::Reference { .. }
+            );
+        if owned {
+            self.pending(node, ResultUseBlocker::Storage)?;
+        }
         let place = self
             .expression_facts(base)?
             .and_then(|value| value.path.as_ref());
@@ -126,13 +129,21 @@ impl<'a, 'g> Check<'a, 'g> {
         let mut result = Vec::new();
         for state in sources {
             for mut state in self.expression(selector, state, depth)? {
-                if value.access == Access::Owned {
+                if owned {
                     for address in self.place_storage(&state, value.path.as_ref())?.addresses() {
                         self.forget_address(&mut state, &address, node)?;
                     }
                 }
                 state.take(Root::Temporary(selector), &[], self.budget)?;
-                state.take(Root::Temporary(base), &[], self.budget)?;
+                let removed = state.take(Root::Temporary(base), &[], self.budget)?;
+                if !owned {
+                    self.budget.step(removed.len())?;
+                    if removed.iter().any(|entry| {
+                        matches!(entry.content, Content::Result(_) | Content::Unclassified(_))
+                    }) {
+                        self.pending(node, ResultUseBlocker::Storage)?;
+                    }
+                }
                 result.extend(self.singleton(state)?);
             }
         }

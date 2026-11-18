@@ -712,7 +712,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     return Ok(alternatives);
                 }
                 DataExpression::List { elements, .. } => {
-                    return self.opaque_list(node, elements, state, depth + 1);
+                    return self.list_literal(node, elements, state, depth + 1);
                 }
                 DataExpression::ListIndex { base, selector, .. } => {
                     return self.dynamic_index(node, (*base, *selector), value, state, depth + 1);
@@ -839,15 +839,28 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             NodeKind::Prefix("&" | "&mut") => {
                 let operand = syntax.children[0];
-                let path = self.facts(operand)?.and_then(|fact| match &fact.kind {
-                    NodeFactKind::Expression(e) => e.path.as_ref(),
-                    _ => None,
-                });
-                if let PlaceStorage::Exact(address) = self.place_storage(&state, path)? {
+                let operand_facts = self.expression_facts(operand)?;
+                let path = operand_facts.and_then(|e| e.path.as_ref());
+                let place = self.place_storage(&state, path)?;
+                if let PlaceStorage::Exact(address) = place {
                     state.store(root, &[], Content::Alias(address), self.budget)?;
                     return self.singleton(state);
                 }
-                let mut alternatives = self.expression(operand, state, depth + 1)?;
+                let mut alternatives = if matches!(place, PlaceStorage::Dynamic(_))
+                    && let Some(DataExpression::ListIndex { base, selector, .. }) =
+                        operand_facts.and_then(|e| e.data.as_ref())
+                    && let Some(base) = self.expression_facts(*base)?
+                    && self.address(&state, base.path.as_ref())?.is_some()
+                {
+                    // Computing this borrowed address evaluates the selector, not a move from the List.
+                    let mut states = self.expression(*selector, state, depth + 1)?;
+                    for state in &mut states {
+                        state.take(Root::Temporary(*selector), &[], self.budget)?;
+                    }
+                    states
+                } else {
+                    self.expression(operand, state, depth + 1)?
+                };
                 for state in &mut alternatives {
                     if path.is_none() {
                         state.store(

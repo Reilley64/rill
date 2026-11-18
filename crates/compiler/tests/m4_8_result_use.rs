@@ -238,9 +238,7 @@ fn opaque_storage_does_not_erase_an_independent_witness() {
         "
         import std::collection::List;
         import std::result::{Result, isOk};
-        function make(flag: bool): Result<bool> { return Result.Ok(flag); }
-        function opaque(owed: Result<bool>, index: u64): void {
-            let items: List<Result<bool>> = [make(true)];
+        function opaque(owed: Result<bool>, items: List<Result<bool>>, index: u64): void {
             let _ = &items[index];
         }
         function identity(value: &Result<bool>): &Result<bool> { return value; }
@@ -306,6 +304,30 @@ fn typed_arrow_entries_check_parameters_without_assuming_a_capture_layout() {
 }
 
 #[test]
+fn list_literal_stores_each_result_and_borrowing_does_not_acknowledge_it() {
+    installed(
+        "list_literal_stores_each_result_and_borrowing_does_not_acknowledge_it",
+        "
+        import std::collection::List;
+        import std::result::Result;
+        function make(flag: bool): Result<bool> { return Result.Ok(flag); }
+        function remember(index: u64): void {
+            let items: List<Result<bool>> = [make(true), make(false)];
+            let _ = &items[index];
+        }
+        function acknowledge(): void {
+            let items: List<Result<bool>> = [make(true)];
+            let _ = items;
+        }
+        ",
+        &[
+            ("make(false)", Some("items")),
+            ("make(true)", Some("items")),
+        ],
+    );
+}
+
+#[test]
 fn collection_representations_distinguish_retained_outcomes_from_borrowed_storage() {
     installed_with(
         "collection_representations_distinguish_retained_outcomes_from_borrowed_storage",
@@ -335,6 +357,32 @@ fn collection_representations_distinguish_retained_outcomes_from_borrowed_storag
                 .map(|p| p.site.span.bytes())
                 .collect();
             assert_eq!(pending, [b"remaining: OwnedListIter<Result<bool>>"]);
+        },
+    );
+}
+
+#[test]
+fn scalar_list_iteration_keeps_the_empty_exit() {
+    installed_with(
+        "scalar_list_iteration_keeps_the_empty_exit",
+        "
+        import std::collection::List;
+        import std::result::Result;
+        function visit(owed: Result<bool>, source: List<i32>): void {
+            for (let item of source) {
+                if (item == 0i32) { let _ = owed; break; }
+            }
+        }
+        ",
+        &[("owed: Result<bool>", Some("owed"))],
+        |report| {
+            assert!(
+                !report.result_use().unwrap().pending().iter().any(|p| p
+                    .site
+                    .span
+                    .bytes()
+                    .starts_with(b"for (let item of source)"))
+            )
         },
     );
 }
