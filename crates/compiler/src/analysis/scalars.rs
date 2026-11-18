@@ -8,7 +8,6 @@ use std::collections::{BTreeSet, VecDeque};
 mod copying;
 mod core;
 pub mod data;
-use copying::implicit_copy;
 mod formatting;
 pub mod generics;
 mod iteration;

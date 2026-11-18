@@ -108,6 +108,7 @@ fn installed_ownership_requires_the_built_archive() {
         missing_evidence(&root, &request);
         partial_collection(&request);
         combined_installed_capture(&request);
+        aggregate_classification(&root, &request);
         closed_roles_without_native_providers(&root, &request);
         complete_provider_and_protection_scope(&request);
         installed_receipts(&request);
@@ -225,6 +226,283 @@ fn installed_ownership_requires_the_built_archive() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn aggregate_classification(root: &Path, request: &InstalledRequest) {
+    use compiler::analysis::scalars::generics::{GoalJudgment, GoalState};
+    use compiler::analysis::scalars::{NodeFactKind, ScalarUnsupported};
+    use compiler::analysis::{InvocationMode, TypeTerm};
+
+    let mut source = String::from(
+        "
+        import std::core::{dispose as release, copy as duplicate};
+        import std::mutex::LockGuard as Guard;
+        import std::bytes::Bytes;
+        import std::error::Cause;
+        import std::collection::List;
+        type Plain = { member: bool; }
+        type Text = { member: string; }
+        implement duplicate(value: &Text): Text { while (true) {} }
+        type Special<T> = { member: bool; }
+        implement release(value: Special<bool>): void {}
+        type Wrap<T> = { member: T; }
+        type Conditional<T> = { member: bool; }
+        implement<T> release(value: Conditional<T>): void where noBorrow(T) {}
+        type Fallback<T> = { member: bool; }
+        implement<T> release(value: Fallback<T>): void {}
+        implement release(value: Fallback<&bool>): void where noBorrow(&bool) {}
+        type Pair<T, U> = { member: bool; }
+        implement<T> release(value: Pair<bool, T>): void {}
+        implement<T> release(value: Pair<T, bool>): void {}
+        enum Choice<T> { Empty, Value(T), Released }
+        implement release(value: Choice<bool>.Released): void {}
+        implement release(value: [Plain, bool]): void {}
+        // This overlap blocks the required release. The independent copy
+        // prohibition must still classify Guard.
+        implement release(value: Guard<Plain>): void {}
+        ",
+    );
+    // Some(true) copies; Some(false) borrows / consumes; None stays pending.
+    let cases = [
+        ("Plain", "Plain", "", Some(true), None),
+        ("Tuple", "[bool, Plain]", "", Some(true), None),
+        ("TupleDispose", "[Plain, bool]", "", Some(false), None),
+        ("Nested", "Wrap<Special<i32>>", "", Some(true), None),
+        (
+            "NestedDispose",
+            "Wrap<Special<bool>>",
+            "",
+            Some(false),
+            None,
+        ),
+        ("Nonuniform", "Special<T>", "<T>", None, None),
+        ("Where", "Conditional<T>", "<T>", Some(false), None),
+        ("MissingWhere", "Conditional<T>", "<T>", None, None),
+        ("FailedWinner", "Fallback<&bool>", "", None, None),
+        ("Ambiguous", "Pair<bool, bool>", "", None, None),
+        ("Variant", "Choice<string>.Empty", "", Some(true), None),
+        (
+            "VariantDispose",
+            "Choice<bool>.Released",
+            "",
+            Some(false),
+            None,
+        ),
+        ("Enum", "Choice<string>", "", Some(false), Some(false)),
+        ("Descriptor", "Wrap<&Guard<Plain>>", "", Some(true), None),
+        ("Exclusive", "Wrap<&mut bool>", "", Some(false), Some(false)),
+        ("Protected", "Guard<Plain>", "", Some(false), None),
+        ("Bytes", "Bytes", "", Some(false), None),
+        ("Cause", "Cause", "", Some(false), None),
+        ("List", "List<bool>", "", Some(false), None),
+        ("ExplicitCopy", "Text", "", Some(false), Some(false)),
+        ("Rigid", "T", "<T>", Some(false), Some(false)),
+    ];
+    for (name, ty, generics, _, _) in cases {
+        let requirements = if name == "Where" {
+            " where noBorrow(T)"
+        } else {
+            ""
+        };
+        source.push_str(&format!(
+            "\nfunction bind{name}{generics}(input: &[{ty}]): void{requirements} {{ let [bound{name}] = input; }}
+            function capture{name}{generics}(captured{name}: {ty}): void{requirements} {{ let arrow = () => captured{name}; }}\n"
+        ));
+    }
+    fs::write(&request.entry, source).unwrap();
+    for test_mode in [false, true] {
+        let installed = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let source_only = loader::load(installed.request().clone()).unwrap();
+        let archive = root.join(ARCHIVE);
+        let saved = archive.with_extension("saved");
+        fs::rename(&archive, &saved).unwrap();
+        let storage = archive.with_file_name("error.rs");
+        let saved_storage = storage.with_extension("saved");
+        fs::rename(&storage, &saved_storage).unwrap();
+        let no_artifacts = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        });
+        fs::rename(saved, archive).unwrap();
+        fs::rename(saved_storage, storage).unwrap();
+        for (graph, admitted, artifacts) in [
+            (&installed, true, true),
+            (&source_only, false, false),
+            (&no_artifacts.unwrap(), true, false),
+        ] {
+            let report = analyze_typed(graph, AnalysisLimits::default());
+            let dispose = report.dispose_role();
+            assert_eq!(dispose.is_some(), admitted);
+            let app = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application)
+                .unwrap();
+            if let Some(dispose) = dispose {
+                assert_eq!(dispose.id, graph.prelude().dispose);
+                assert_eq!(dispose.id.context, graph.id());
+                assert_eq!(report.error_representation().is_some(), artifacts);
+                let guard: Vec<_> = report
+                    .ownership_protection()
+                    .iter()
+                    .filter(|scope| scope.owner.name.as_deref() == Some("LockGuard"))
+                    .collect();
+                let [release, copy] = guard.as_slice() else {
+                    panic!("missing Guard scopes: {guard:?}")
+                };
+                assert_eq!(copy.owner.id.context, graph.id());
+                assert_eq!(copy.owner.id.module.path, "mutex.rill");
+                assert_eq!(release.owner.id, copy.owner.id);
+                assert_eq!(release.family, &dispose.id);
+                assert_eq!(copy.family, &report.copy_role().unwrap().id);
+                assert_eq!(copy.family, &graph.prelude().copy);
+                assert_eq!(copy.rule, OwnershipRule::ProhibitedCopy);
+                assert!(copy.provider.is_none());
+                assert_eq!(
+                    release.rule,
+                    OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
+                );
+                assert_eq!(release.provider.is_some(), artifacts);
+                let coverage = if artifacts {
+                    let [overlap] = report.ownership_overlaps() else {
+                        panic!("expected only the Guard release overlap")
+                    };
+                    assert_eq!(overlap.owner.id, copy.owner.id);
+                    assert_eq!(overlap.rule, release.rule);
+                    assert_eq!(overlap.implementation.id.module, app.key);
+                    (OwnershipCoverage::Overlap, OwnershipCoverage::Clear)
+                } else {
+                    (OwnershipCoverage::Pending, OwnershipCoverage::Pending)
+                };
+                assert_eq!((release.coverage, copy.coverage), coverage);
+            } else {
+                assert!(report.ownership_protection().is_empty());
+                assert!(report.error_representation().is_none());
+            }
+            let bodies = report.bodies();
+            for (name, _, generics, with_authority, without_authority) in cases {
+                let expected = if !admitted {
+                    without_authority
+                } else if matches!(name, "Protected" | "Cause") && !artifacts {
+                    None
+                } else {
+                    with_authority
+                };
+                let original = |source: &str| {
+                    app.syntax
+                        .nodes
+                        .iter()
+                        .position(|n| n.span.bytes() == source.as_bytes())
+                        .unwrap()
+                };
+                let binder = format!("bound{name}");
+                let binding = app
+                    .syntax
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .find_map(|(node, n)| {
+                        if n.span.bytes() == binder.as_bytes()
+                            && let Some(fact) = bodies.node(app, node).unwrap()
+                            && let NodeFactKind::Binding(binding) = &fact.kind
+                        {
+                            Some(binding)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                let bound = binding
+                    .ty
+                    .as_ref()
+                    .map(|ty| !matches!(ty.as_ref(), TypeTerm::Reference { .. }));
+                assert_eq!(
+                    bound, expected,
+                    "binder {name}, admitted={admitted} artifacts={artifacts}"
+                );
+                let arrow = format!("() => captured{name}");
+                let arrow = bodies.arrow(app, original(&arrow)).unwrap().unwrap();
+                let mode = expected.map(|copy| {
+                    if copy {
+                        InvocationMode::ReadOnly
+                    } else {
+                        InvocationMode::Once
+                    }
+                });
+                assert_eq!(
+                    arrow.mode, mode,
+                    "arrow {name}, admitted={admitted} artifacts={artifacts}"
+                );
+                let [capture] = arrow.captures.as_slice() else {
+                    panic!("{:?}", arrow.captures)
+                };
+                assert_eq!(capture.demand, mode);
+                assert_eq!(capture.storage.as_ref(), Some(&capture.ty));
+                if generics.is_empty()
+                    && let Some(ty) = &binding.ty
+                {
+                    match expected {
+                        Some(true) => assert_eq!(ty, &capture.ty),
+                        Some(false) => assert!(matches!(ty.as_ref(),
+                            TypeTerm::Reference { mutable: false, referent } if referent == &capture.ty)),
+                        None => unreachable!(),
+                    }
+                }
+                if admitted && name == "Where" {
+                    for span in [&binder, &format!("captured{name}")] {
+                        let goal = bodies
+                            .goals()
+                            .iter()
+                            .find(|g| {
+                                g.site.module == &app.key
+                                    && g.site.span.bytes() == span.as_bytes()
+                                    && g.source.span.bytes() == b"noBorrow(T)"
+                                    && g.state == GoalState::Proved
+                            })
+                            .expect("disposer requirement proof");
+                        let [dependency] = goal.dependencies.as_slice() else {
+                            panic!("{goal:?}")
+                        };
+                        let premise = bodies.goal(dependency).unwrap();
+                        let GoalJudgment::Requirement { arguments, .. } = &goal.judgment else {
+                            panic!("{goal:?}")
+                        };
+                        let GoalJudgment::Requirement {
+                            arguments: assumed, ..
+                        } = &premise.judgment
+                        else {
+                            panic!("{premise:?}")
+                        };
+                        assert_eq!(arguments, assumed);
+                        assert_eq!(premise.state, GoalState::Assumption);
+                        assert!(goal.premise.is_none());
+                    }
+                }
+                if expected.is_none() {
+                    assert!(
+                        bodies
+                            .obligations()
+                            .iter()
+                            .any(|o| o.site.module == &app.key
+                                && o.site.span.bytes() == binder.as_bytes()
+                                && o.reason == ScalarUnsupported::ImplicitCopy)
+                    );
+                    assert!(
+                        bodies
+                            .obligations()
+                            .iter()
+                            .any(|o| o.site.node == arrow.site.node
+                                && o.site.module == &app.key
+                                && o.reason == ScalarUnsupported::CaptureMode)
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn combined_installed_capture(request: &InstalledRequest) {

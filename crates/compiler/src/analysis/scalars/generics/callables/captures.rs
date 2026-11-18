@@ -53,7 +53,6 @@ impl<'r, 'g> Checker<'r, 'g> {
         arrow: NodeId,
         first_fact: usize,
     ) -> Work<(Option<InvocationMode>, Vec<CaptureFact<'g>>)> {
-        let copying = self.copy_inputs();
         let span = &module.syntax.nodes[arrow].span;
         let body = module.syntax.nodes[arrow].children[1];
         let local = |path: &data::PlacePath<'g>| {
@@ -84,7 +83,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 })
             };
             if syntax.kind == NodeKind::Arrow {
-                if let Some(inner) = self.facts.arrows.get(&(&module.key, node)) {
+                if let Some(inner) = self.facts.arrows.get(&(&module.key, node)).cloned() {
                     for capture in &inner.captures {
                         self.elab.step(1)?;
                         if !local(&capture.path) {
@@ -95,9 +94,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 CaptureForm::ExplicitBorrow { mutable: false } => {
                                     Some(InvocationMode::ReadOnly)
                                 }
-                                _ => Self::capture_demand(
-                                    &mut self.elab,
-                                    copying,
+                                _ => self.capture_demand(
+                                    capture.site,
                                     Demand::Value,
                                     &capture.ty,
                                     capture.access,
@@ -144,21 +142,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                     } else {
                         CaptureForm::Value
                     };
-                    let demand = if let Some(mutable) = explicit {
-                        Some(if mutable {
-                            InvocationMode::Mutable
-                        } else {
-                            InvocationMode::ReadOnly
-                        })
-                    } else {
-                        Self::capture_demand(
-                            &mut self.elab,
-                            copying,
-                            use_,
-                            &place.ty,
-                            place.access,
-                        )?
-                    };
                     let ty = expression(node).unwrap_or(place).ty.clone();
                     let storage = if matches!(form, CaptureForm::CarriedReference { .. }) {
                         let mut base = node;
@@ -188,7 +171,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         Some(ty.clone())
                     };
                     self.elab.reserve(1 + path.projections.len())?;
-                    captures.push(CaptureFact {
+                    let mut capture = CaptureFact {
                         site: Self::site(module, node),
                         path: path.clone(),
                         ty,
@@ -201,7 +184,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 data::Access::ReadOnly
                             }
                         }),
-                        demand,
+                        demand: None,
                         reachable,
                         through: None,
                         value_origin: node_fact(if explicit.is_some() {
@@ -211,7 +194,17 @@ impl<'r, 'g> Checker<'r, 'g> {
                         })
                         .and_then(|fact| fact.callable.as_ref()?.arrow.as_ref())
                         .map(|a| a.site),
-                    });
+                    };
+                    capture.demand = if let Some(mutable) = explicit {
+                        Some(if mutable {
+                            InvocationMode::Mutable
+                        } else {
+                            InvocationMode::ReadOnly
+                        })
+                    } else {
+                        self.capture_demand(capture.site, use_, &capture.ty, capture.access)?
+                    };
+                    captures.push(capture);
                 }
                 // The typed stable path already accounts for its entire base.
                 continue;
@@ -364,8 +357,8 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
 
     fn capture_demand(
-        elab: &mut Analyzer<'g>,
-        copying: Option<copying::Inputs<'r, 'g>>,
+        &mut self,
+        site: Site<'g>,
         use_: Demand,
         ty: &Type<'g>,
         access: data::Access,
@@ -375,7 +368,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             Demand::Mutate => Some(InvocationMode::Mutable),
             Demand::Invoke(mode) => Some(mode),
             Demand::Pending => None,
-            Demand::Value => match implicit_copy(elab, copying, ty)? {
+            Demand::Value => match self.implicit_copy(site, ty)? {
                 Some(true) => Some(InvocationMode::ReadOnly),
                 Some(false) if access == data::Access::Owned => Some(InvocationMode::Once),
                 _ => None,

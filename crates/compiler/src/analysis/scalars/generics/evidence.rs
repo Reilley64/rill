@@ -216,7 +216,8 @@ pub(super) struct SymbolicCallable<'g> {
 
 enum GoalChoice<'g> {
     Blocked,
-    NoWinner,
+    NoMatch,
+    Ambiguous,
     NonUniform,
     Selected(GoalSelection<'g>),
 }
@@ -1165,7 +1166,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 GoalChoice::Blocked => {
                     return Ok(GoalState::Unresolved(GoalBlocker::InputSelection));
                 }
-                GoalChoice::NoWinner => return Ok(GoalState::Disproved),
+                GoalChoice::NoMatch | GoalChoice::Ambiguous => return Ok(GoalState::Disproved),
                 GoalChoice::NonUniform => {
                     return Ok(GoalState::Unresolved(GoalBlocker::MissingAssumption));
                 }
@@ -1289,19 +1290,76 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(true)
     }
 
+    /// Only the actual absence of a matching disposer permits structural copying.
+    /// This does not authorize an explicit dispose call.
+    pub(in crate::analysis::scalars) fn aggregate_has_disposer(
+        &mut self,
+        site: Site<'g>,
+        ty: &Type<'g>,
+    ) -> Work<Option<bool>> {
+        let Some(dispose) = self.primitives.and_then(|core| core.dispose) else {
+            return Ok(None);
+        };
+        if self.arrow_premise.is_some() {
+            return Ok(None);
+        }
+        let family = &dispose.id;
+        let selection =
+            match self.select_goal_contract(family, std::slice::from_ref(ty), &[], true)? {
+                GoalChoice::NoMatch => return Ok(Some(false)),
+                GoalChoice::Selected(selected) => selected,
+                _ => return Ok(None),
+            };
+        let facts = self.evidence_family(family)?.unwrap();
+        self.elab.step(facts.implementations.len())?;
+        let body = facts
+            .implementations
+            .iter()
+            .find(|body| &body.source.declaration == selection.implementation)
+            .unwrap();
+        if selection.substitution.len() != body.header.binders.len()
+            || self.signature_unavailable(&body.header)?
+        {
+            return Ok(None);
+        }
+        let family_substitution =
+            self.selected_family_substitution(body, &selection.substitution)?;
+        for (owner, substitutions) in [
+            (family, family_substitution.as_slice()),
+            (selection.implementation, selection.substitution.as_slice()),
+        ] {
+            let Some(header) = self.input.ordinary.unwrap().headers().get(owner) else {
+                return Ok(None);
+            };
+            let module = self.evidence_module(&owner.module)?;
+            for requirement in &header.requirements {
+                self.elab.step(1)?;
+                let Some(goal) =
+                    self.issue_header_requirement(site, module, requirement, substitutions)?
+                else {
+                    return Ok(None);
+                };
+                if self.solve_goal(&goal)? != GoalState::Proved {
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(Some(true))
+    }
+
     fn select_goal_contract(
         &mut self,
         family: &'g DeclarationId,
         inputs: &[Type<'g>],
         filters: &[Substitution<'g>],
-        admitted_lifecycle: bool,
+        admitted_role: bool,
     ) -> Work<GoalChoice<'g>> {
         let mut budget = declarations::Budget {
             limits: self.elab.limits,
             statistics: self.elab.statistics,
         };
         let selected = (|| {
-            let admitted = admitted_lifecycle || self.ordinary_scalar_role(family).is_some();
+            let admitted = admitted_role || self.ordinary_scalar_role(family).is_some();
             let inventory = self.input.ordinary.unwrap();
             let facts = if admitted {
                 ordinary::source::admitted_family(inventory, family, &mut budget)?
@@ -1328,7 +1386,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                         substitution: found.substitution,
                     }))
                 }
-                Some(_) => Ok(GoalChoice::NoWinner),
+                Some(ordinary::HypotheticalOutcome::NoMatch) => Ok(GoalChoice::NoMatch),
+                Some(ordinary::HypotheticalOutcome::Ambiguous) => Ok(GoalChoice::Ambiguous),
                 None if admitted => Ok(GoalChoice::NonUniform),
                 None => Ok(GoalChoice::Blocked),
             }
@@ -1411,16 +1470,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         );
         let site = self.evidence.goals[goal].site;
         let result = self.substitute(result, &selected_substitutions, 1)?;
-        let header_substitution = body.substitution.as_ref().unwrap();
-        self.elab.reserve(header_substitution.len())?;
-        let mut substitutions = Vec::with_capacity(header_substitution.len());
-        for family_slot in header_substitution {
-            substitutions.push(Substitution {
-                binder: family_slot.binder,
-                position: family_slot.position,
-                argument: self.substitute(&family_slot.argument, &selected_substitutions, 1)?,
-            });
-        }
+        let substitutions = self.selected_family_substitution(body, &selected_substitutions)?;
         self.elab.reserve(substitutions.len())?;
         self.evidence.goals[goal].output = Some(GoalOutput {
             arguments: substitutions
@@ -1435,6 +1485,24 @@ impl<'r, 'g> Checker<'r, 'g> {
         let selected =
             self.append_header_goals(goal, site, implementation, &selected_substitutions)?;
         Ok(join(declared, selected))
+    }
+
+    fn selected_family_substitution(
+        &mut self,
+        body: &ordinary::ImplementationFacts<'g>,
+        selected: &[Substitution<'g>],
+    ) -> Work<Vec<Substitution<'g>>> {
+        let header = body.substitution.as_ref().unwrap();
+        self.elab.reserve(header.len())?;
+        let mut substitutions = Vec::with_capacity(header.len());
+        for slot in header {
+            substitutions.push(Substitution {
+                binder: slot.binder,
+                position: slot.position,
+                argument: self.substitute(&slot.argument, selected, 1)?,
+            });
+        }
+        Ok(substitutions)
     }
 
     fn update_selection_slots(

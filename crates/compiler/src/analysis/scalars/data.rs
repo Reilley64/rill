@@ -135,7 +135,7 @@ struct RecordInitializers<'g> {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
-    fn nominal_substitution(
+    pub(super) fn nominal_substitution(
         &mut self,
         binders: &[Binder<'g>],
         arguments: &[Type<'g>],
