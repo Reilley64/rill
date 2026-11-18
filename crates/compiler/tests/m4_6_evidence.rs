@@ -111,6 +111,142 @@ fn a_selected_clause_determines_open_output_before_checking_equality() {
 }
 
 #[test]
+fn a_free_source_output_resumes_a_dependency_without_setting_its_output() {
+    use compiler::analysis::generics::OutputAgreement;
+    let fixture = Fixture::new(
+        "function seed<V,W>(value: V): W;
+         implement seed(value: bool): i32 { return 1i32; }
+         function open<T,V = bool,W = u8>(value: T): [V,W];
+         implement<U,V,W> open(value: U): [V,W] where seed(V,W) { while (true) {} }
+         let fixed: [bool,i32] = open(true);
+         let wrong: [bool,u8] = open(true);
+         let defaulted = open(true);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let calls: Vec<_> = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind == NodeKind::Call)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(calls.len(), 3);
+    for (i, node) in calls.into_iter().enumerate() {
+        let call = report.ordinary_call(module, node).unwrap().unwrap();
+        let Some(TypeTerm::Tuple(fields)) = call.selected_result.as_deref() else {
+            panic!("selected tuple result after resuming evidence")
+        };
+        assert_eq!(fields.len(), 2);
+        assert!(matches!(fields[0].as_ref(), TypeTerm::Primitive(id) if id.name() == "bool"));
+        assert!(matches!(fields[1].as_ref(), TypeTerm::Primitive(id) if id.name() == "i32"));
+        assert_eq!(
+            matches!(call.output_agreement, OutputAgreement::Agrees),
+            i != 1
+        );
+        if i == 1 {
+            assert!(matches!(
+                call.output_agreement,
+                OutputAgreement::Disagrees { .. }
+            ));
+        }
+        let independent = report.goal(call.goal.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            independent.state,
+            GoalState::Unresolved(GoalBlocker::SelectedOutput)
+        );
+        assert!(independent.output.is_none());
+        let instantiated = report.goal(call.instantiation.as_ref().unwrap()).unwrap();
+        use compiler::analysis::generics::{GoalJudgment, GoalVerdict};
+        let GoalJudgment::Instantiate {
+            determination,
+            free,
+            ..
+        } = &instantiated.judgment
+        else {
+            panic!("proof at this use")
+        };
+        assert_eq!(determination, &independent.id);
+        assert_eq!(
+            free.len(),
+            usize::from(i != 2),
+            "the pending output must not be bound by the source"
+        );
+        if let Some(anchor) = free.first() {
+            assert!(
+                matches!(anchor.argument.as_ref(), TypeTerm::Primitive(id) if id.name() == "bool")
+            );
+        }
+        assert_eq!(
+            instantiated.state,
+            GoalState::Unresolved(GoalBlocker::OrdinaryAdmission)
+        );
+        assert_eq!(instantiated.hypothetical, Some(GoalVerdict::Proved));
+        assert!(
+            instantiated
+                .dependencies
+                .iter()
+                .any(|id| report.goal(id).unwrap().source.span.bytes() == b"seed(V,W)")
+        );
+        assert_eq!(call.defaults.len(), usize::from(i == 2));
+        if i == 2 {
+            assert_eq!(call.defaults[0].span.bytes(), b"bool");
+        }
+        assert!(report.node(module, node).unwrap().is_none());
+    }
+}
+
+#[test]
+fn a_later_default_can_read_the_output_determined_after_an_earlier_default() {
+    let fixture = Fixture::new(
+        "function seed<V,W>(value: V): W;
+         implement seed(value: bool): i32 { return 1i32; }
+         function open<T,V = bool,W = u8,K = W>(value: T): [V,W,K];
+         implement<U,V,W,K> open(value: U): [V,W,K] where seed(V,W) { while (true) {} }
+         let pending = open(true);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    let Some(TypeTerm::Tuple(fields)) = call.selected_result.as_deref() else {
+        panic!("default, determination and then dependent default")
+    };
+    assert_eq!(fields.len(), 3);
+    for (field, expected) in fields.iter().zip(["bool", "i32", "i32"]) {
+        assert!(matches!(field.as_ref(), TypeTerm::Primitive(id) if id.name() == expected));
+    }
+    assert_eq!(
+        call.defaults
+            .iter()
+            .map(|d| d.span.bytes())
+            .collect::<Vec<_>>(),
+        [&b"bool"[..], &b"W"[..]]
+    );
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
 fn an_output_producing_cycle_retains_the_active_edge_without_guessing_a_result() {
     let fixture = Fixture::new(
         "function read<T,E>(value: T): E;
@@ -233,6 +369,99 @@ fn callable_assumption_types_rigid_invocation_and_flexible_arrow() {
         .unwrap();
     assert_eq!(assumed.state, GoalState::Assumption);
     assert_eq!(assumed.source.span.bytes(), b"callable(F,[i32],R)");
+}
+
+#[test]
+fn same_arity_callable_assumptions_match_the_whole_argument_vector() {
+    let fixture = Fixture::new(
+        "function run<F>(cb: F): void
+             where callable(F,[i32,bool],bool), callable(F,[u8,u8],i32) {
+             let flag: bool = cb(1, true);
+             let count: i32 = cb(2, 3u8);
+         }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let run = module
+        .declarations
+        .iter()
+        .find(|d| d.name.as_deref() == Some("run"))
+        .unwrap();
+    assert!(
+        report
+            .body(module, BodyOwner::Declaration(&run.id))
+            .unwrap()
+            .is_some()
+    );
+    for (call, source) in [
+        (&b"cb(1, true)"[..], &b"callable(F,[i32,bool],bool)"[..]),
+        (&b"cb(2, 3u8)"[..], &b"callable(F,[u8,u8],i32)"[..]),
+    ] {
+        let node = module
+            .syntax
+            .nodes
+            .iter()
+            .position(|n| n.kind == NodeKind::Call && n.span.bytes() == call)
+            .unwrap();
+        let invocation = report
+            .node(module, node)
+            .unwrap()
+            .unwrap()
+            .callable
+            .as_ref()
+            .unwrap()
+            .invocation
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            report
+                .goal(invocation.assumption.as_ref().unwrap())
+                .unwrap()
+                .source
+                .span
+                .bytes(),
+            source
+        );
+    }
+}
+
+#[test]
+fn an_expected_result_does_not_choose_a_symbolic_callable_input() {
+    use compiler::analysis::scalars::ScalarUnsupported;
+    let fixture = Fixture::new(
+        "function run<F>(cb: F): bool
+             where callable(F,[i32],bool), callable(F,[u8],i32) { return cb(1); }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    assert!(report.node(module, node).unwrap().is_none());
+    assert!(report.findings().is_empty());
+    assert!(
+        report
+            .obligations()
+            .iter()
+            .any(|o| o.site.node == node && o.reason == ScalarUnsupported::CallableInvocation)
+    );
 }
 
 #[test]

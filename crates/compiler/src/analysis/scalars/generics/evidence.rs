@@ -28,6 +28,13 @@ pub enum GoalJudgment<'g> {
         /// Only explicit input-position bindings, in declaration order.
         filters: Vec<Substitution<'g>>,
     },
+    /// Discharge the selected contract at this use after source context or a
+    /// ready default binds free positions. This is not a determination key.
+    Instantiate {
+        family: &'g DeclarationId,
+        determination: GoalId,
+        free: Vec<Substitution<'g>>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +107,8 @@ pub struct GoalFacts<'g> {
     pub hypothetical: Option<GoalVerdict>,
     pub selection: Option<GoalSelection<'g>>,
     pub output: Option<GoalOutput<'g>>,
+    /// Written output defaults actually taken at a source instantiation.
+    pub defaults: Vec<DefaultArgumentUse<'g>>,
     pub equalities: Vec<GoalEquality<'g>>,
     pub assumptions: Vec<GoalId>,
     pub dependencies: Vec<GoalId>,
@@ -132,12 +141,17 @@ impl<'g> GoalJudgment<'g> {
     fn target(&self) -> RequirementTarget<'g> {
         match self {
             Self::Requirement { target, .. } => *target,
-            Self::Determine { family, .. } => RequirementTarget::Family(family),
+            Self::Determine { family, .. } | Self::Instantiate { family, .. } => {
+                RequirementTarget::Family(family)
+            }
         }
     }
 
     fn key_term(&self, index: usize) -> Option<(Option<usize>, &Type<'g>)> {
         match self {
+            Self::Instantiate { free, .. } => {
+                free.get(index).map(|s| (Some(s.position), &s.argument))
+            }
             Self::Requirement { arguments, .. } => arguments.get(index).map(|ty| (None, ty)),
             Self::Determine {
                 inputs, filters, ..
@@ -151,6 +165,7 @@ impl<'g> GoalJudgment<'g> {
 
     fn key_len(&self) -> usize {
         match self {
+            Self::Instantiate { free, .. } => free.len(),
             Self::Requirement { arguments, .. } => arguments.len(),
             Self::Determine {
                 inputs, filters, ..
@@ -181,6 +196,11 @@ impl Predicate {
             _ => unreachable!("captured M3 predicate"),
         }
     }
+}
+
+pub(super) struct SymbolicCallable<'g> {
+    pub receiving: Vec<Option<Type<'g>>>,
+    pub selected: Option<(Type<'g>, GoalId)>,
 }
 
 enum GoalChoice<'g> {
@@ -236,6 +256,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             hypothetical: None,
             selection: None,
             output: None,
+            defaults: Vec::new(),
             equalities: Vec::new(),
             assumptions,
             dependencies: Vec::new(),
@@ -440,9 +461,11 @@ impl<'r, 'g> Checker<'r, 'g> {
     pub(super) fn symbolic_callable(
         &mut self,
         receiver: &Type<'g>,
-        arity: usize,
-    ) -> Work<Option<(Type<'g>, GoalId)>> {
+        actual: &[Option<Type<'g>>],
+    ) -> Work<SymbolicCallable<'g>> {
         let mut matching: Option<(InvocationMode, Type<'g>, Type<'g>, GoalId)> = None;
+        let mut receiving: Vec<Option<Type<'g>>> = Vec::new();
+        let mut conflicting = false;
         for i in 0..self.evidence.assumptions.len() {
             self.elab.step(1)?;
             let id = self.evidence.assumptions[i].clone();
@@ -459,41 +482,72 @@ impl<'r, 'g> Checker<'r, 'g> {
             let [subject, inputs, output] = arguments.as_slice() else {
                 continue;
             };
+            let (subject, inputs, output) = (subject.clone(), inputs.clone(), output.clone());
             let TypeTerm::Tuple(fields) = inputs.as_ref() else {
                 continue;
             };
-            if fields.len() != arity {
+            if fields.len() != actual.len() || !self.same(&subject, receiver)? {
                 continue;
             }
-            let (subject, inputs, output) = (subject.clone(), inputs.clone(), output.clone());
-            if !self.same(&subject, receiver)? {
+            let mut fits = true;
+            for (argument, parameter) in actual.iter().zip(fields) {
+                self.elab.step(1)?;
+                if let Some(argument) = argument
+                    && primitive_name(argument) != Some("never")
+                    && !self.same(argument, parameter)?
+                    && !self.data_admission(argument, parameter)?
+                    && !self.callable_admission(argument, parameter)?
+                {
+                    fits = false;
+                    break;
+                }
+            }
+            if !fits {
                 continue;
             }
             if let Some((other, before, result, _)) = &matching {
-                if !self.same(before, &inputs)? || !self.same(result, &output)? {
-                    return Ok(None);
+                for (agreed, field) in receiving.iter_mut().zip(fields) {
+                    self.elab.step(1)?;
+                    if let Some(ty) = agreed
+                        && !self.same(ty, field)?
+                    {
+                        *agreed = None;
+                    }
                 }
+                conflicting |= !self.same(before, &inputs)? || !self.same(result, &output)?;
                 if Self::mode_admits(*other, mode) {
                     continue;
                 }
+            } else {
+                self.elab.reserve(fields.len())?;
+                receiving.extend(fields.iter().cloned().map(Some));
             }
             matching = Some((mode, inputs, output, id));
         }
-        let Some((mode, inputs, result, id)) = matching else {
-            return Ok(None);
+        self.elab.step(actual.len())?;
+        let selected = if let Some((mode, inputs, result, id)) = matching
+            && !conflicting
+            && actual.iter().all(Option::is_some)
+        {
+            let TypeTerm::Tuple(parameters) = inputs.as_ref() else {
+                unreachable!()
+            };
+            self.elab.reserve(1 + parameters.len())?;
+            Some((
+                Arc::new(TypeTerm::Callable {
+                    mode,
+                    parameters: parameters.clone(),
+                    result,
+                }),
+                id,
+            ))
+        } else {
+            None
         };
-        let TypeTerm::Tuple(parameters) = inputs.as_ref() else {
-            unreachable!()
-        };
-        self.elab.reserve(1 + parameters.len())?;
-        Ok(Some((
-            Arc::new(TypeTerm::Callable {
-                mode,
-                parameters: parameters.clone(),
-                result,
-            }),
-            id,
-        )))
+        Ok(SymbolicCallable {
+            receiving,
+            selected,
+        })
     }
 
     fn arrow_subject(
@@ -541,6 +595,18 @@ impl<'r, 'g> Checker<'r, 'g> {
         let l = &l_fact.judgment;
         let r = &self.evidence.goals[right].judgment;
         if std::mem::discriminant(l) != std::mem::discriminant(r) {
+            return Ok(false);
+        }
+        if let (
+            GoalJudgment::Instantiate {
+                determination: l, ..
+            },
+            GoalJudgment::Instantiate {
+                determination: r, ..
+            },
+        ) = (l, r)
+            && l != r
+        {
             return Ok(false);
         }
         let (lt, rt) = (l.target(), r.target());
@@ -694,6 +760,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         let judgment = &self.evidence.goals[goal].judgment;
         match judgment {
             GoalJudgment::Determine { .. } => self.expand_determination(goal),
+            GoalJudgment::Instantiate { family, .. } => {
+                let family = self.evidence_family(family)?.unwrap();
+                self.continue_selected_contract(goal, family)
+            }
             GoalJudgment::Requirement {
                 target: RequirementTarget::Family(family),
                 arguments,
@@ -1013,7 +1083,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.reserve(selection.substitution.len())?;
         let mut selected_substitutions = selection.substitution.clone();
         let binders = &body.header.binders;
-        if selected_substitutions.len() != binders.len() {
+        while selected_substitutions.len() != binders.len() {
             self.elab.reserve(binders.len())?;
             let mut slots = vec![None; binders.len()];
             for sub in &selected_substitutions {
@@ -1030,16 +1100,27 @@ impl<'r, 'g> Checker<'r, 'g> {
                 binders,
                 &mut slots,
             )?;
-            selected_substitutions = self.slot_substitutions(binders, &slots)?;
-            self.elab.reserve(selected_substitutions.len())?;
-            self.evidence.goals[goal]
-                .selection
-                .as_mut()
-                .unwrap()
-                .substitution = selected_substitutions.clone();
-            if selected_substitutions.len() != binders.len() {
-                return self.request_selected_output(goal, family, body, &selected_substitutions);
+            selected_substitutions = self.update_selection_slots(goal, binders, &slots)?;
+            if selected_substitutions.len() == binders.len() {
+                break;
             }
+
+            let state =
+                self.request_selected_output(goal, family, body, &selected_substitutions)?;
+            if state != GoalState::Unresolved(GoalBlocker::SelectedOutput)
+                || !matches!(
+                    self.evidence.goals[goal].judgment,
+                    GoalJudgment::Instantiate { .. }
+                )
+            {
+                return Ok(state);
+            }
+            let Some(default) = self.try_source_output_default(family, body, &mut slots)? else {
+                return Ok(state);
+            };
+            self.elab.reserve(1)?;
+            self.evidence.goals[goal].defaults.push(default);
+            selected_substitutions = self.update_selection_slots(goal, binders, &slots)?;
         }
         let source = Self::site(
             self.evidence_module(&body.source.declaration.module)?,
@@ -1073,32 +1154,81 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(join(declared, selected))
     }
 
-    pub(super) fn source_contract_requirements(
+    fn update_selection_slots(
         &mut self,
-        site: Site<'g>,
-        contracts: &[(&DeclarationId, &[Substitution<'g>])],
-    ) -> Work<Vec<GoalId>> {
-        let mut goals = Vec::new();
-        for &(owner, substitutions) in contracts {
-            let Some(header) = self.input.ordinary.unwrap().headers().get(owner) else {
-                continue;
+        goal: usize,
+        binders: &[Binder<'g>],
+        slots: &[Option<Type<'g>>],
+    ) -> Work<Vec<Substitution<'g>>> {
+        let substitutions = self.slot_substitutions(binders, slots)?;
+        self.elab.reserve(substitutions.len())?;
+        self.evidence.goals[goal]
+            .selection
+            .as_mut()
+            .unwrap()
+            .substitution = substitutions.clone();
+        Ok(substitutions)
+    }
+
+    pub(super) fn instantiate_source_contract(
+        &mut self,
+        determination: &GoalId,
+        prior: Option<&GoalId>,
+        selection: GoalSelection<'g>,
+        free: Vec<Substitution<'g>>,
+    ) -> Work<GoalId> {
+        if let Some(prior) = prior {
+            let GoalJudgment::Instantiate {
+                determination: previous,
+                free: bindings,
+                ..
+            } = &self.evidence.get(prior).unwrap().judgment
+            else {
+                unreachable!()
             };
-            let module = self.evidence_module(&owner.module)?;
-            for requirement in &header.requirements {
-                self.elab.step(1)?;
-                let Some(child) =
-                    self.issue_header_requirement(site, module, requirement, substitutions)?
-                else {
-                    continue;
-                };
-                self.evidence.goals[child.index].premise =
-                    Some(InputPremise::HypotheticalOrdinaryRole);
-                self.elab.reserve(1)?;
-                goals.push(child.clone());
-                self.solve_goal(&child)?;
+            if previous == determination && bindings.len() == free.len() {
+                let mut agrees = true;
+                for (i, binding) in free.iter().enumerate() {
+                    self.elab.step(1)?;
+                    let GoalJudgment::Instantiate { free: bindings, .. } =
+                        &self.evidence.get(prior).unwrap().judgment
+                    else {
+                        unreachable!()
+                    };
+                    let previous = &bindings[i];
+                    if previous.position != binding.position
+                        || !self.same(&previous.argument.clone(), &binding.argument)?
+                    {
+                        agrees = false;
+                        break;
+                    }
+                }
+                if agrees {
+                    return Ok(prior.clone());
+                }
             }
         }
-        Ok(goals)
+        let original = self.evidence.get(determination).unwrap();
+        let GoalJudgment::Determine { family, .. } = original.judgment else {
+            unreachable!()
+        };
+        let (site, source) = (original.site, original.source);
+        self.elab.reserve(original.routes.len())?;
+        let routes = original.routes.clone();
+        let id = self.issue_goal(
+            GoalJudgment::Instantiate {
+                family,
+                determination: determination.clone(),
+                free,
+            },
+            site,
+            source,
+            &routes,
+            false,
+        )?;
+        self.evidence.goals[id.index].selection = Some(selection);
+        self.solve_goal(&id)?;
+        Ok(id)
     }
 
     fn issue_header_requirement(
@@ -1141,6 +1271,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                 state = GoalState::Unresolved(GoalBlocker::UnavailableRequirement);
                 continue;
             };
+            if matches!(
+                self.evidence.goals[goal].judgment,
+                GoalJudgment::Instantiate { .. }
+            ) {
+                self.evidence.goals[child.index].premise =
+                    Some(InputPremise::HypotheticalOrdinaryRole);
+            }
             self.link_goal(goal, child)?;
         }
         Ok(state)

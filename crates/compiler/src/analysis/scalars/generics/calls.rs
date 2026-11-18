@@ -1,6 +1,12 @@
 use super::*;
 use ordinary::shape;
 
+#[derive(Clone, Copy)]
+enum Equation<'a, 'g> {
+    Input(&'a [Substitution<'g>]),
+    FreeOutput(&'a BTreeSet<usize>),
+}
+
 pub(in crate::analysis::scalars) struct Producer {
     reads: BTreeSet<usize>,
     writes: BTreeSet<usize>,
@@ -721,22 +727,77 @@ impl<'r, 'g> Checker<'r, 'g> {
         fixed: &[Substitution<'g>],
         depth: usize,
     ) -> Work<bool> {
+        self.equate(
+            pattern,
+            actual,
+            binders,
+            slots,
+            Equation::Input(fixed),
+            depth,
+        )
+    }
+
+    pub(super) fn free_output_equation(
+        &mut self,
+        pattern: &Type<'g>,
+        actual: &Type<'g>,
+        binders: &[Binder<'g>],
+        slots: &mut [Option<Type<'g>>],
+        pending: &BTreeSet<usize>,
+    ) -> Work<bool> {
+        if self.closed(pattern, binders, &|i| slots[i].is_some(), 1)? {
+            return Ok(false);
+        }
+        self.elab.reserve(slots.len())?;
+        let mut proposed = slots.to_vec();
+        if !self.equate(
+            pattern,
+            actual,
+            binders,
+            &mut proposed,
+            Equation::FreeOutput(pending),
+            1,
+        )? {
+            return Ok(false);
+        }
+        self.elab.step(slots.len())?;
+        let changed = slots
+            .iter()
+            .zip(&proposed)
+            .any(|(old, new)| old.is_none() && new.is_some());
+        slots.clone_from_slice(&proposed);
+        Ok(changed)
+    }
+
+    fn equate(
+        &mut self,
+        pattern: &Type<'g>,
+        actual: &Type<'g>,
+        binders: &[Binder<'g>],
+        slots: &mut [Option<Type<'g>>],
+        equation: Equation<'_, 'g>,
+        depth: usize,
+    ) -> Work<bool> {
         self.equation_depth(depth)?;
         if let Some(i) = self.call_slot(pattern, binders)? {
             if let Some(established) = &slots[i] {
-                self.elab.step(fixed.len())?;
-                return if depth == 1
-                    && fixed.iter().any(|s| s.position == i)
-                    && (self.data_admission(actual, established)?
-                        || self.callable_admission(actual, established)?)
-                {
-                    Ok(true)
-                } else {
-                    self.same(established, actual)
-                };
+                if let Equation::Input(fixed) = equation {
+                    self.elab.step(fixed.len())?;
+                    if depth == 1
+                        && fixed.iter().any(|s| s.position == i)
+                        && (self.data_admission(actual, established)?
+                            || self.callable_admission(actual, established)?)
+                    {
+                        return Ok(true);
+                    }
+                }
+                return self.same(established, actual);
             }
-            // Actual arguments come from the caller, where its binders are rigid.
-            slots[i] = Some(actual.clone());
+            // The source term has its caller's rigid binders. Leave pending
+            // outputs unbound, even beside genuinely free leaves in a tuple.
+            if !matches!(equation, Equation::FreeOutput(pending) if pending.contains(&i)) {
+                slots[i] = Some(actual.clone());
+            }
             return Ok(true);
         }
         let (p, ps) = shape(pattern);
@@ -745,7 +806,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(false);
         }
         for (p, a) in ps.zip(ac) {
-            if !self.input_equation(p, a, binders, slots, fixed, depth + 1)? {
+            if !self.equate(p, a, binders, slots, equation, depth + 1)? {
                 return Ok(false);
             }
         }

@@ -62,6 +62,64 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(Some(pending))
     }
 
+    pub(super) fn try_source_output_default(
+        &mut self,
+        family: &'r ordinary::FamilyFacts<'g>,
+        body: &'r ordinary::ImplementationFacts<'g>,
+        slots: &mut [Option<Type<'g>>],
+    ) -> Work<Option<DefaultArgumentUse<'g>>> {
+        let ordinary = self.input.ordinary.unwrap();
+        let callee = &family.header.declaration.id;
+        let Some(written) = ordinary.headers().get(callee) else {
+            return Ok(None);
+        };
+        if written.defaults.is_empty() {
+            return Ok(None);
+        }
+        let binders = &body.header.binders;
+        let header = body.substitution.as_deref().unwrap();
+        let contracts = [(callee, header), (&body.source.declaration, &[][..])];
+        let Some(pending) = self.pending_output_slots(&contracts, binders, slots)? else {
+            return Ok(None);
+        };
+        for default in &written.defaults {
+            self.elab.step(header.len())?;
+            let Some(output) = header.iter().find(|s| s.binder == default.binder) else {
+                continue;
+            };
+            if self.closed(&output.argument, binders, &|i| slots[i].is_some(), 1)? {
+                continue;
+            }
+            let Some(ty) = &default.ty else {
+                continue;
+            };
+            let solved = self.slot_substitutions(binders, slots)?;
+            let mut known = Vec::new();
+            let mut positions = BTreeSet::new();
+            for slot in &header[..output.position] {
+                if self.closed(&slot.argument, binders, &|i| slots[i].is_some(), 1)? {
+                    self.elab.reserve(2)?;
+                    known.push(Substitution {
+                        argument: self.substitute(&slot.argument, &solved, 1)?,
+                        ..slot.clone()
+                    });
+                    positions.insert(slot.position);
+                }
+            }
+            if self.closed(ty, &family.header.binders, &|i| positions.contains(&i), 1)? {
+                let actual = self.substitute(ty, &known, 1)?;
+                if self.free_output_equation(&output.argument, &actual, binders, slots, &pending)? {
+                    return Ok(Some(DefaultArgumentUse {
+                        binder: default.binder,
+                        node: default.node,
+                        span: default.span,
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub(super) fn request_selected_output(
         &mut self,
         goal: usize,
@@ -180,8 +238,11 @@ impl<'r, 'g> Checker<'r, 'g> {
         goal: usize,
         equation: OutputEquation<'g>,
     ) -> Work<GoalState> {
-        let GoalJudgment::Determine { family, .. } = self.evidence.goals[goal].judgment else {
-            unreachable!()
+        let family = match self.evidence.goals[goal].judgment {
+            GoalJudgment::Determine { family, .. } | GoalJudgment::Instantiate { family, .. } => {
+                family
+            }
+            _ => unreachable!(),
         };
         let family = self.evidence_family(family)?.unwrap();
         let selection = self.evidence.goals[goal].selection.as_ref().unwrap();
@@ -210,12 +271,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     return Ok(GoalState::Disproved);
                 }
             }
-            let substitutions = self.slot_substitutions(binders, &slots)?;
-            self.evidence.goals[goal]
-                .selection
-                .as_mut()
-                .unwrap()
-                .substitution = substitutions;
+            self.update_selection_slots(goal, binders, &slots)?;
         }
         self.continue_selected_contract(goal, family)
     }

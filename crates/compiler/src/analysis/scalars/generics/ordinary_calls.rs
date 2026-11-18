@@ -45,6 +45,8 @@ pub struct OrdinaryCall<'g> {
     pub blocker: Option<SelectionBlocker>,
     pub outcome: Option<HypotheticalOutcome<'g>>,
     pub goal: Option<GoalId>,
+    /// Proof of the selected contract after filling free slots at this source use.
+    pub instantiation: Option<GoalId>,
     /// Selected requirements formed after a genuinely free output was instantiated at this use.
     pub instantiated_requirements: Vec<GoalId>,
     /// Type from the selected header alone, not a checked result or evidence.
@@ -52,10 +54,9 @@ pub struct OrdinaryCall<'g> {
     pub output_agreement: OutputAgreement<'g>,
 }
 
-#[derive(Clone, Copy)]
 struct CallablePath {
     column: usize,
-    tuple_index: Option<usize>,
+    tuple_indices: Vec<usize>,
     node: NodeId,
 }
 
@@ -67,6 +68,7 @@ pub struct OrdinaryValue<'g> {
 
 struct ConditionalOutput<'g> {
     goal: Option<GoalId>,
+    instantiation: Option<GoalId>,
     ty: Option<Type<'g>>,
     agreement: OutputAgreement<'g>,
     defaults: Vec<DefaultArgumentUse<'g>>,
@@ -192,39 +194,16 @@ impl<'r, 'g> Checker<'r, 'g> {
             outcome = None;
         }
         if consistent {
-            self.commit_brackets(inference, &call, &substitutions, &mut viable)?;
-            for (column, &node) in call.fact.arguments.iter().enumerate() {
-                self.elab.step(1)?;
-                let syntax = &module.syntax.nodes[node];
-                if syntax.kind == NodeKind::Bracket && inference.ordinary_tuples.contains(&node) {
-                    for (tuple_index, &element) in syntax.children.iter().enumerate() {
-                        self.append_callback(
-                            inference,
-                            &call,
-                            &substitutions,
-                            &viable,
-                            CallablePath {
-                                column,
-                                tuple_index: Some(tuple_index),
-                                node: element,
-                            },
-                            &mut callbacks,
-                        )?;
-                    }
-                } else {
-                    self.append_callback(
-                        inference,
-                        &call,
-                        &substitutions,
-                        &viable,
-                        CallablePath {
-                            column,
-                            tuple_index: None,
-                            node,
-                        },
-                        &mut callbacks,
-                    )?;
-                }
+            let paths = self.commit_brackets(inference, &call, &substitutions, &mut viable)?;
+            for path in &paths {
+                self.append_callback(
+                    inference,
+                    &call,
+                    &substitutions,
+                    &viable,
+                    path,
+                    &mut callbacks,
+                )?;
             }
         }
         for context in &callbacks {
@@ -248,7 +227,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             }
             if context.is_none() && blocker.is_none() {
-                *context = self.agreed_receiving(&viable, i)?;
+                *context = self.agreed_path_receiving(
+                    &viable,
+                    &CallablePath {
+                        column: i,
+                        tuple_indices: Vec::new(),
+                        node: call.fact.arguments[i],
+                    },
+                )?;
             }
             if let Some(ty) = context.clone() {
                 self.conditional_context(inference, call.fact.arguments[i], ty)?;
@@ -259,6 +245,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         } else {
             ConditionalOutput {
                 goal: None,
+                instantiation: None,
                 ty: None,
                 agreement: OutputAgreement::NotDetermined,
                 defaults: Vec::new(),
@@ -297,6 +284,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 blocker,
                 outcome,
                 goal: output.goal,
+                instantiation: output.instantiation,
                 instantiated_requirements: output.instantiated_requirements,
                 selected_result: output.ty,
                 output_agreement: output.agreement,
@@ -348,16 +336,20 @@ impl<'r, 'g> Checker<'r, 'g> {
         &mut self,
         receiver: &'a Type<'g>,
         substitutions: &'a [Substitution<'g>],
-        index: Option<usize>,
+        path: &CallablePath,
     ) -> Work<Option<&'a Type<'g>>> {
-        let Some(index) = index else {
-            return Ok(Some(receiver));
-        };
-        let tuple = self.receiving_root(receiver, substitutions)?;
-        Ok(match tuple.as_ref() {
-            TypeTerm::Tuple(fields) => fields.get(index),
-            _ => None,
-        })
+        let mut term = receiver;
+        for &i in &path.tuple_indices {
+            let root = self.receiving_root(term, substitutions)?;
+            let TypeTerm::Tuple(fields) = root.as_ref() else {
+                return Ok(None);
+            };
+            let Some(field) = fields.get(i) else {
+                return Ok(None);
+            };
+            term = field;
+        }
+        Ok(Some(term))
     }
 
     fn append_callback(
@@ -366,7 +358,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         call: &PreparedCall<'g>,
         declared: &[Substitution<'g>],
         candidates: &[SourceCandidate<'r, 'g>],
-        path: CallablePath,
+        path: &CallablePath,
         contexts: &mut Vec<OrdinaryCallbackContext<'g>>,
     ) -> Work<()> {
         let node = self.source_leaf(inference.module, path.node)?;
@@ -393,7 +385,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             .unwrap()
             .header;
         let written = if let Some(receiver) =
-            self.receiver_at(&call.parameters[path.column], declared, path.tuple_index)?
+            self.receiver_at(&call.parameters[path.column], declared, path)?
         {
             self.written_callable_context(header, receiver, declared, path.node)?
         } else {
@@ -404,7 +396,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             let receiver = self.receiver_at(
                 parameter(candidate, path.column),
                 &candidate.substitution,
-                path.tuple_index,
+                path,
             )?;
             let found = if let Some(receiver) = receiver {
                 self.written_callable_context(
@@ -453,88 +445,169 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
+    /// Walk only fresh source tuples. A tuple's category is settled before its
+    /// arity can narrow the alternatives seen by any of its descendants.
     fn commit_brackets(
         &mut self,
         inference: &mut Inference<'g>,
         call: &PreparedCall<'g>,
         declared: &[Substitution<'g>],
         viable: &mut Vec<SourceCandidate<'r, 'g>>,
-    ) -> Work<()> {
-        for (column, &node) in call.fact.arguments.iter().enumerate() {
-            self.elab.step(1)?;
-            let syntax = &inference.module.syntax.nodes[node];
-            if syntax.kind != NodeKind::Bracket || inference.slots[&node].ty.is_some() {
+    ) -> Work<Vec<CallablePath>> {
+        let module = inference.module;
+        let header = &self
+            .input
+            .ordinary
+            .unwrap()
+            .captured_family(call.fact.callee)
+            .unwrap()
+            .header;
+        self.elab
+            .reserve(call.fact.arguments.len() + declared.len())?;
+        let bound: BTreeSet<_> = declared.iter().map(|s| s.position).collect();
+        let mut pending: Vec<_> = call
+            .fact
+            .arguments
+            .iter()
+            .copied()
+            .enumerate()
+            .rev()
+            .map(|(column, node)| CallablePath {
+                column,
+                node,
+                tuple_indices: Vec::new(),
+            })
+            .collect();
+        let mut leaves = Vec::new();
+        while let Some(path) = pending.pop() {
+            self.equation_depth(1 + path.tuple_indices.len())?;
+            let node = self.source_leaf(module, path.node)?;
+            let syntax = &module.syntax.nodes[node];
+            if syntax.kind != NodeKind::Bracket {
+                self.elab.reserve(1)?;
+                leaves.push(path);
                 continue;
             }
-            let declared = self.receiving_root(&call.parameters[column], declared)?;
-            let fixed = matches!(declared.as_ref(), TypeTerm::Tuple(_));
-            if !fixed {
+            if inference.slots[&node].blocked {
+                continue;
+            }
+            let committed = inference.ordinary_tuples.contains(&node);
+            if !committed && inference.slots[&node].ty.is_some() {
+                continue;
+            }
+            let written = self.tuple_arity(&call.parameters[path.column], declared, &path)?;
+            if !committed && written.is_none() {
                 let mut unanimous = !viable.is_empty();
-                for candidate in viable.iter() {
-                    let root =
-                        self.receiving_root(parameter(candidate, column), &candidate.substitution)?;
-                    unanimous &= matches!(root.as_ref(), TypeTerm::Tuple(_));
+                for candidate in &*viable {
+                    unanimous &= self
+                        .tuple_arity(
+                            parameter(candidate, path.column),
+                            &candidate.substitution,
+                            &path,
+                        )?
+                        .is_some();
                 }
                 if !unanimous {
                     continue;
                 }
             }
-            let count = syntax.children.len();
-            let before = std::mem::take(viable);
-            self.elab.reserve(before.len())?;
-            for candidate in before {
-                let root =
-                    self.receiving_root(parameter(&candidate, column), &candidate.substitution)?;
-                if !matches!(root.as_ref(), TypeTerm::Tuple(fields) if fields.len() != count) {
-                    viable.push(candidate);
-                }
-            }
-            if let TypeTerm::Tuple(fields) = declared.as_ref()
-                && fields.len() != count
-            {
-                continue;
-            }
-            if viable.is_empty() && !fixed {
-                continue;
-            }
-            self.elab.reserve(1)?;
-            if inference.ordinary_tuples.insert(node) {
+            if !committed {
+                self.elab.reserve(1)?;
+                inference.ordinary_tuples.insert(node);
                 inference.slots.get_mut(&node).unwrap().ordinary_context = Some(PREMISE);
                 self.enqueue(inference, node)?;
             }
-            for (position, &child) in syntax.children.iter().enumerate() {
-                self.elab.step(1)?;
-                if inference.slots[&child].ty.is_some() {
-                    continue;
-                }
-                let mut agreed = None;
-                for candidate in viable.iter() {
-                    let root =
-                        self.receiving_root(parameter(candidate, column), &candidate.substitution)?;
-                    let TypeTerm::Tuple(fields) = root.as_ref() else {
-                        agreed = None;
-                        break;
-                    };
-                    let field = &fields[position];
-                    if !self.candidate_closed(field, candidate)? {
-                        agreed = None;
-                        break;
-                    }
-                    let proposed = self.substitute(field, &candidate.substitution, 1)?;
-                    if let Some(ref previous) = agreed
-                        && !self.same(previous, &proposed)?
-                    {
-                        agreed = None;
-                        break;
-                    }
-                    agreed = Some(proposed);
-                }
-                if let Some(ty) = agreed {
-                    self.conditional_context(inference, child, ty)?;
+            let count = syntax.children.len();
+            let before = std::mem::take(viable);
+            let projected = written.is_none() && !before.is_empty();
+            self.elab.reserve(before.len())?;
+            for candidate in before {
+                let arity = self.tuple_arity(
+                    parameter(&candidate, path.column),
+                    &candidate.substitution,
+                    &path,
+                )?;
+                if arity.is_none_or(|a| a == count) {
+                    viable.push(candidate);
                 }
             }
+            if written.is_some_and(|a| a != count) || (projected && viable.is_empty()) {
+                self.finding(module, node, ScalarFindingKind::Arity)?;
+                inference.slots.get_mut(&node).unwrap().blocked = true;
+                continue;
+            }
+            for (position, &child) in syntax.children.iter().enumerate().rev() {
+                self.elab.reserve(2 + path.tuple_indices.len())?;
+                let mut tuple_indices = path.tuple_indices.clone();
+                tuple_indices.push(position);
+                let child_path = CallablePath {
+                    column: path.column,
+                    tuple_indices,
+                    node: child,
+                };
+                if inference.slots[&child].ty.is_none() {
+                    let written =
+                        self.receiver_at(&call.parameters[path.column], declared, &child_path)?;
+                    let context = if let Some(term) = written
+                        && self.closed(term, &header.binders, &|i| bound.contains(&i), 1)?
+                    {
+                        Some(self.substitute(term, declared, 1)?)
+                    } else {
+                        self.agreed_path_receiving(viable, &child_path)?
+                    };
+                    if let Some(ty) = context {
+                        self.conditional_context(inference, child, ty)?;
+                    }
+                }
+                pending.push(child_path);
+            }
         }
-        Ok(())
+        Ok(leaves)
+    }
+
+    fn tuple_arity(
+        &mut self,
+        receiver: &Type<'g>,
+        substitution: &[Substitution<'g>],
+        path: &CallablePath,
+    ) -> Work<Option<usize>> {
+        let Some(term) = self.receiver_at(receiver, substitution, path)? else {
+            return Ok(None);
+        };
+        let ty = self.receiving_root(term, substitution)?;
+        Ok(match ty.as_ref() {
+            TypeTerm::Tuple(fields) => Some(fields.len()),
+            _ => None,
+        })
+    }
+
+    fn agreed_path_receiving(
+        &mut self,
+        candidates: &[SourceCandidate<'_, 'g>],
+        path: &CallablePath,
+    ) -> Work<Option<Type<'g>>> {
+        let mut agreed = None;
+        for candidate in candidates {
+            let Some(field) = self.receiver_at(
+                parameter(candidate, path.column),
+                &candidate.substitution,
+                path,
+            )?
+            else {
+                return Ok(None);
+            };
+            if !self.candidate_closed(field, candidate)? {
+                return Ok(None);
+            }
+            let proposed = self.substitute(field, &candidate.substitution, 1)?;
+            if let Some(ref previous) = agreed
+                && !self.same(previous, &proposed)?
+            {
+                return Ok(None);
+            }
+            agreed = Some(proposed);
+        }
+        Ok(agreed)
     }
 
     fn receiving_root<'a>(
@@ -601,28 +674,6 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.establish(inference, node, ty, false)
     }
 
-    fn agreed_receiving(
-        &mut self,
-        candidates: &[SourceCandidate<'_, 'g>],
-        column: usize,
-    ) -> Work<Option<Type<'g>>> {
-        let mut agreed = None;
-        for candidate in candidates {
-            let parameter = parameter(candidate, column);
-            if !self.candidate_closed(parameter, candidate)? {
-                return Ok(None);
-            }
-            let proposed = self.substitute(parameter, &candidate.substitution, 1)?;
-            if let Some(ref previous) = agreed
-                && !self.same(previous, &proposed)?
-            {
-                return Ok(None);
-            }
-            agreed = Some(proposed);
-        }
-        Ok(agreed)
-    }
-
     fn candidate_closed(
         &mut self,
         ty: &Type<'g>,
@@ -653,6 +704,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<ConditionalOutput<'g>> {
         let mut output = ConditionalOutput {
             goal: None,
+            instantiation: None,
             ty: None,
             agreement: OutputAgreement::NotDetermined,
             defaults: Vec::new(),
@@ -721,159 +773,106 @@ impl<'r, 'g> Checker<'r, 'g> {
             output.ty = Some(result);
             return Ok(output);
         }
-        // If a selected header cannot yet supply its entire evidence output,
-        // retain any independently fixed result, not a checked call.
+        // Context can fill genuinely free positions, but it cannot change the
+        // independent determination or the winner chosen from the input vector.
         if let Some((selected, mut slots, _)) = solved {
             let binders = &selected.body.header.binders;
             let DeclarationShape::Function { result, .. } = &selected.body.header.shape else {
                 unreachable!()
             };
-            if let Some(proof_selection) = self.evidence.get(&goal).unwrap().selection.as_ref() {
+            let determination = self.evidence.get(&goal).unwrap();
+            if determination.state == GoalState::Unresolved(GoalBlocker::ConflictingAssumptions) {
+                return Ok(output);
+            }
+            if let Some(proof_selection) = determination.selection.as_ref() {
                 self.elab.step(proof_selection.substitution.len())?;
                 for sub in &proof_selection.substitution {
                     slots[sub.position] = Some(sub.argument.clone());
                 }
             }
-            let header = selected.body.substitution.as_deref().unwrap();
-            if let Some(pending) = self.pending_output_slots(
-                &[
+            if determination.state == GoalState::Unresolved(GoalBlocker::SelectedOutput) {
+                let header = selected.body.substitution.as_deref().unwrap();
+                let contracts = [
                     (call.fact.callee, header),
-                    (&selected.body.source.declaration, &[]),
-                ],
-                binders,
-                &slots,
-            )? {
-                for explicit in written_arguments(call) {
-                    self.free_output_equation(
-                        &header[explicit.position].argument,
-                        &explicit.argument,
-                        binders,
-                        &mut slots,
-                        &pending,
-                    )?;
-                }
-                if let Some(expected) = &expected {
-                    self.free_output_equation(result, expected, binders, &mut slots, &pending)?;
-                }
-                output.defaults = self.selected_output_defaults(
-                    call.fact.callee,
-                    selected,
-                    &mut slots,
-                    &pending,
-                )?;
-            }
-            let substitution = self.slot_substitutions(binders, &slots)?;
-            if self.closed(result, binders, &|i| slots[i].is_some(), 1)? {
-                output.ty = Some(self.substitute(result, &substitution, 1)?);
-                if slots.iter().all(Option::is_some) {
-                    let header = selected.body.substitution.as_ref().unwrap();
-                    self.elab.reserve(header.len().checked_mul(2).ok_or(())?)?;
-                    let instantiated = header
-                        .iter()
-                        .map(|s| {
-                            Ok(Substitution {
-                                argument: self.substitute(&s.argument, &substitution, 1)?,
-                                ..s.clone()
-                            })
-                        })
-                        .collect::<Work<Vec<_>>>()?;
-                    let arguments: Vec<_> =
-                        instantiated.iter().map(|s| s.argument.clone()).collect();
-                    output.agreement = self.check_selected_output(
-                        written_arguments(call),
-                        expected.as_ref(),
-                        output.ty.as_ref().unwrap(),
-                        &arguments,
-                    )?;
-                    if matches!(output.agreement, OutputAgreement::Agrees) {
-                        output.instantiated_requirements = self.source_contract_requirements(
-                            Self::site(module, node),
-                            &[
-                                (call.fact.callee, &instantiated),
-                                (&selected.body.source.declaration, &substitution),
-                            ],
+                    (&selected.body.source.declaration, &[][..]),
+                ];
+                if let Some(pending) = self.pending_output_slots(&contracts, binders, &slots)? {
+                    self.elab.reserve(slots.len())?;
+                    let established: Vec<_> = slots.iter().map(Option::is_some).collect();
+                    for explicit in written_arguments(call) {
+                        self.free_output_equation(
+                            &header[explicit.position].argument,
+                            &explicit.argument,
+                            binders,
+                            &mut slots,
+                            &pending,
                         )?;
+                    }
+                    if let Some(expected) = &expected {
+                        self.free_output_equation(result, expected, binders, &mut slots, &pending)?;
+                    }
+                    let substitution = self.slot_substitutions(binders, &slots)?;
+                    self.elab.reserve(substitution.len())?;
+                    let free: Vec<_> = substitution
+                        .iter()
+                        .filter(|s| !established[s.position])
+                        .cloned()
+                        .collect();
+                    let has_defaults = self
+                        .input
+                        .ordinary
+                        .unwrap()
+                        .headers()
+                        .get(call.fact.callee)
+                        .is_some_and(|h| !h.defaults.is_empty());
+                    if !free.is_empty() || has_defaults {
+                        let prior = self
+                            .ordinary_calls
+                            .get(&(&module.key, node))
+                            .and_then(|call| call.instantiation.clone());
+                        let id = self.instantiate_source_contract(
+                            &goal,
+                            prior.as_ref(),
+                            GoalSelection {
+                                implementation: &selected.body.source.declaration,
+                                alternative: selected.alternative,
+                                substitution,
+                            },
+                            free,
+                        )?;
+                        output.instantiation = Some(id.clone());
+                        let proof = self.evidence.get(&id).unwrap();
+                        self.elab
+                            .reserve(proof.dependencies.len() + proof.defaults.len())?;
+                        output.defaults = proof.defaults.clone();
+                        output.instantiated_requirements = proof.dependencies.clone();
+                        if let Some(instantiated) = &proof.output {
+                            let result = instantiated.result.clone();
+                            self.elab.reserve(instantiated.arguments.len())?;
+                            let arguments = instantiated.arguments.clone();
+                            output.agreement = self.check_selected_output(
+                                written_arguments(call),
+                                expected.as_ref(),
+                                &result,
+                                &arguments,
+                            )?;
+                            output.ty = Some(result);
+                            return Ok(output);
+                        }
+                        let substitution = &proof.selection.as_ref().unwrap().substitution;
+                        self.elab.step(substitution.len())?;
+                        for sub in substitution {
+                            slots[sub.position] = Some(sub.argument.clone());
+                        }
                     }
                 }
             }
+            if self.closed(result, binders, &|i| slots[i].is_some(), 1)? {
+                let substitution = self.slot_substitutions(binders, &slots)?;
+                output.ty = Some(self.substitute(result, &substitution, 1)?);
+            }
         }
         Ok(output)
-    }
-
-    fn free_output_equation(
-        &mut self,
-        pattern: &Type<'g>,
-        actual: &Type<'g>,
-        binders: &[Binder<'g>],
-        slots: &mut [Option<Type<'g>>],
-        pending: &BTreeSet<usize>,
-    ) -> Work<bool> {
-        if self.closed(pattern, binders, &|i| slots[i].is_some(), 1)?
-            || !self.closed(pattern, binders, &|i| !pending.contains(&i), 1)?
-        {
-            return Ok(false);
-        }
-        self.elab.reserve(slots.len())?;
-        let mut proposed = slots.to_vec();
-        let fits = self.input_equation(pattern, actual, binders, &mut proposed, &[], 1)?;
-        if fits {
-            slots.clone_from_slice(&proposed);
-        }
-        Ok(fits)
-    }
-
-    fn selected_output_defaults(
-        &mut self,
-        callee: &'g DeclarationId,
-        selected: &SourceCandidate<'r, 'g>,
-        slots: &mut [Option<Type<'g>>],
-        pending: &BTreeSet<usize>,
-    ) -> Work<Vec<DefaultArgumentUse<'g>>> {
-        let ordinary = self.input.ordinary.unwrap();
-        let family = ordinary.captured_family(callee).unwrap();
-        let Some(written) = ordinary.headers().get(callee) else {
-            return Ok(Vec::new());
-        };
-        let binders = &selected.body.header.binders;
-        let header = selected.body.substitution.as_deref().unwrap();
-        let mut used = Vec::new();
-        for default in &written.defaults {
-            self.elab.step(header.len())?;
-            let Some(output) = header.iter().find(|s| s.binder == default.binder) else {
-                continue;
-            };
-            if self.closed(&output.argument, binders, &|i| slots[i].is_some(), 1)? {
-                continue;
-            }
-            let Some(ty) = &default.ty else {
-                continue;
-            };
-            let solved = self.slot_substitutions(binders, slots)?;
-            let mut known = Vec::new();
-            let mut positions = BTreeSet::new();
-            for slot in &header[..output.position] {
-                if self.closed(&slot.argument, binders, &|i| slots[i].is_some(), 1)? {
-                    self.elab.reserve(2)?;
-                    known.push(Substitution {
-                        argument: self.substitute(&slot.argument, &solved, 1)?,
-                        ..slot.clone()
-                    });
-                    positions.insert(slot.position);
-                }
-            }
-            if self.closed(ty, &family.header.binders, &|i| positions.contains(&i), 1)? {
-                let actual = self.substitute(ty, &known, 1)?;
-                if self.free_output_equation(&output.argument, &actual, binders, slots, pending)? {
-                    self.elab.reserve(1)?;
-                    used.push(DefaultArgumentUse {
-                        binder: default.binder,
-                        node: default.node,
-                        span: default.span,
-                    });
-                }
-            }
-        }
-        Ok(used)
     }
 
     fn determine_source(

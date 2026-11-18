@@ -572,6 +572,106 @@ fn each_tuple_callback_uses_its_own_written_path() {
 }
 
 #[test]
+fn nested_tuple_callbacks_get_the_contract_at_each_committed_path() {
+    let fixture = Fixture::new(
+        "function joinDeep<F,G,A,B>(tasks: [[F],[bool,[G]]]): [A,B]
+             where callableOnce(F,[i32],A), callableOnce(G,[bool],B);
+         implement<F,G,A,B> joinDeep(tasks: [[F],[bool,[G]]]): [A,B] { while (true) {} }
+         let pending = joinDeep(([[(x) => x == 1i32],[true,[(b) => { if (b) { return 1i32; } return 2i32; }]]]));",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert_eq!(call.callbacks.len(), 2);
+    for (context, expected) in call.callbacks.iter().zip(["i32", "bool"]) {
+        assert!(
+            matches!(context.parameters[0].as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == expected)
+        );
+        let arrow = report.arrow(module, context.argument).unwrap().unwrap();
+        assert_eq!(arrow.parameters.first(), context.parameters[0].as_ref());
+    }
+    let Some(TypeTerm::Tuple(fields)) = call.selected_result.as_deref() else {
+        panic!("selected pair of results")
+    };
+    for (field, expected) in fields.iter().zip(["bool", "i32"]) {
+        assert!(matches!(field.as_ref(), TypeTerm::Primitive(id) if id.name() == expected));
+    }
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
+fn nested_tuple_arity_filters_only_after_category_agrees() {
+    use compiler::analysis::ordinary::HypotheticalOutcome;
+    let fixture = Fixture::new(
+        "function visit<C>(value: C): bool;
+         implement visit(value: [[(i32) => bool]]): bool { return true; }
+         implement visit(value: [[(u8) => bool, bool]]): bool { return false; }
+         let success = visit([[(x) => x == 1i32]]);
+         let wrong = visit([[(x) => x == 1i32, true, false]]);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let mut calls = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind == NodeKind::Call);
+    let success = report
+        .ordinary_call(module, calls.next().unwrap().0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(success.callbacks.len(), 1);
+    assert!(
+        matches!(success.callbacks[0].parameters[0].as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "i32")
+    );
+    assert!(matches!(
+        success.outcome,
+        Some(HypotheticalOutcome::Winner(_))
+    ));
+    let wrong = report
+        .ordinary_call(module, calls.next().unwrap().0)
+        .unwrap()
+        .unwrap();
+    assert!(wrong.callbacks.is_empty());
+    assert!(wrong.outcome.is_none());
+    assert!(report.findings().is_empty());
+    assert!(
+        report
+            .conditional_findings()
+            .iter()
+            .any(|f| f.finding.kind == ScalarFindingKind::Arity
+                && f.finding.site.span.bytes() == b"[(x) => x == 1i32, true, false]")
+    );
+    assert!(
+        !report
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::CoreAdmission)
+    );
+}
+
+#[test]
 fn a_symbolic_call_requires_one_winner_across_its_whole_input_domain() {
     use compiler::analysis::ordinary::HypotheticalOutcome;
     let fixture = Fixture::new(

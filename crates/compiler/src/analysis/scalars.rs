@@ -406,6 +406,7 @@ struct Inference<'g> {
     function_values: BTreeMap<NodeId, FunctionValueFacts<'g>>,
     callable_contexts: BTreeMap<NodeId, Arc<CallableContext<'g>>>,
     value_calls: BTreeSet<NodeId>,
+    pending_invocations: BTreeSet<NodeId>,
     data: BTreeMap<NodeId, data::PreparedData<'g>>,
     data_nodes: BTreeSet<NodeId>,
     ordinary_tuples: BTreeSet<NodeId>,
@@ -1535,6 +1536,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             function_values: BTreeMap::new(),
             callable_contexts: BTreeMap::new(),
             value_calls: BTreeSet::new(),
+            pending_invocations: BTreeSet::new(),
             data: BTreeMap::new(),
             data_nodes: BTreeSet::new(),
             ordinary_tuples: BTreeSet::new(),
@@ -1862,6 +1864,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             for node in pending {
                 self.match_step(&mut inference, node, context)?;
+            }
+        }
+        for &node in &inference.pending_invocations {
+            self.elab.step(1)?;
+            let slot = inference.slots.get_mut(&node).unwrap();
+            if !slot.blocked {
+                self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
+                slot.blocked = true;
             }
         }
         let mut unavailable = BTreeSet::new();

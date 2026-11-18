@@ -796,14 +796,29 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         let mut assumption = None;
         let ty = if matches!(ty.as_ref(), TypeTerm::Parameter { .. }) {
-            if let Some((descriptor, goal)) =
-                self.symbolic_callable(ty, syntax.children.len() - 1)?
-            {
+            let arguments = &syntax.children[1..];
+            self.elab.reserve(arguments.len())?;
+            let actual: Vec<_> = arguments
+                .iter()
+                .map(|id| inference.slots[id].ty.clone())
+                .collect();
+            let contract = self.symbolic_callable(ty, &actual)?;
+            if let Some((descriptor, goal)) = contract.selected {
+                inference.pending_invocations.remove(&node);
                 assumption = Some(goal);
                 descriptor
             } else {
-                self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
-                inference.slots.get_mut(&node).unwrap().blocked = true;
+                if !inference.pending_invocations.contains(&node) {
+                    self.elab.reserve(1)?;
+                    inference.pending_invocations.insert(node);
+                }
+                for (&argument, ty) in arguments.iter().zip(contract.receiving) {
+                    if let Some(ty) = ty
+                        && inference.slots[&argument].ty.is_none()
+                    {
+                        self.establish(inference, argument, ty, true)?;
+                    }
+                }
                 return Ok(());
             }
         } else {
