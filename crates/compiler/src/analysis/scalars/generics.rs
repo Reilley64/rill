@@ -4,8 +4,12 @@ use ordinary::{Completion, OrdinaryAnalysis};
 
 pub mod callables;
 mod calls;
+mod ordinary_callbacks;
 mod ordinary_calls;
-pub use ordinary_calls::{ConditionalFinding, OrdinaryCall, OrdinaryCandidate, OutputAgreement};
+pub use ordinary_callbacks::OrdinaryCallbackContext;
+pub use ordinary_calls::{
+    ConditionalFinding, OrdinaryCall, OrdinaryCandidate, OrdinaryValue, OutputAgreement,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BodyCompletion {
@@ -37,6 +41,7 @@ pub struct GenericReport<'g> {
     statistics: Statistics,
     completion: ScalarFailureKind,
     ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryCall<'g>>,
+    ordinary_values: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryValue<'g>>,
     conditional_findings: Vec<ConditionalFinding<'g>>,
 }
 
@@ -207,6 +212,19 @@ impl<'g> GenericReport<'g> {
         Ok(self.ordinary_calls.get(&(&module.key, node)))
     }
 
+    /// Conditional determination of a contextual overloaded name, not a checked value.
+    pub fn ordinary_value(
+        &self,
+        module: &Module,
+        node: NodeId,
+    ) -> Result<Option<&OrdinaryValue<'g>>, QueryError> {
+        let module = self.check_module(module)?;
+        if node >= module.syntax.nodes.len() {
+            return Err(QueryError::InvalidRequest);
+        }
+        Ok(self.ordinary_values.get(&(&module.key, node)))
+    }
+
     /// Formation facts may retain a signature and sources when mode is unresolved.
     pub fn arrow(
         &self,
@@ -308,6 +326,7 @@ pub fn analyze_generics<'g>(
         evidence: checker.evidence,
         statistics: checker.elab.statistics,
         ordinary_calls: checker.ordinary_calls,
+        ordinary_values: checker.ordinary_values,
         conditional_findings: checker.conditional_findings,
         completion: if exhausted {
             ScalarFailureKind::ResourceLimit

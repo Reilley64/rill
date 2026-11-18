@@ -369,6 +369,161 @@ fn ordinary_tuple_context_commits_category_then_filters_written_arity() {
 }
 
 #[test]
+fn borrowed_pattern_projects_callback_input_before_inferring_selected_output() {
+    use compiler::analysis::ordinary::HypotheticalOutcome;
+    let fixture = Fixture::new(
+        "type Box<T> = { value: T };
+         function mapLike<C,F,R>(source: C, transform: F): R;
+         implement<T,F,R> mapLike(source: Box<T>, transform: F): R
+             where callableMut(F,[T],R) { while (true) {} }
+         implement<T,F,R> mapLike(source: &Box<T>, transform: F): R
+             where callableMut(F,[&T],R) { while (true) {} }
+         function probe(borrowed: &Box<i32>): void {
+             let pending = mapLike(borrowed, (element) => true);
+         }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let (node, _) = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report
+        .ordinary_call(module, node)
+        .unwrap()
+        .unwrap_or_else(|| panic!("conditional source call: {:?}; declarations: {:?}; type findings: {:?}; type obligations: {:?}; body obligations: {:?}", report.completion(), ordinary.declaration_issues(), ordinary.type_facts().findings().collect::<Vec<_>>(), ordinary.type_facts().obligations().collect::<Vec<_>>(), report.obligations()));
+    let context = &call.callbacks[0];
+    assert_eq!(context.parameters.len(), 1);
+    let Some(TypeTerm::Reference {
+        mutable: false,
+        referent,
+    }) = context.parameters[0].as_deref()
+    else {
+        panic!("borrowed callback context")
+    };
+    assert!(matches!(referent.as_ref(), TypeTerm::Primitive(id) if id.name() == "i32"));
+    assert!(context.result.is_none());
+    let arrow = report.arrow(module, context.argument).unwrap().unwrap();
+    assert_eq!(arrow.parameters.first(), context.parameters[0].as_ref());
+    assert_eq!(arrow.premise, Some(call.premise));
+    let specialized = graph
+        .implementations()
+        .iter()
+        .max_by_key(|i| i.declaration.start)
+        .unwrap();
+    assert_eq!(
+        call.outcome,
+        Some(HypotheticalOutcome::Winner(&specialized.declaration))
+    );
+    assert!(
+        matches!(call.selected_result.as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "bool")
+    );
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
+fn a_family_input_default_supplies_width_without_becoming_an_explicit_filter() {
+    let fixture = Fixture::new(
+        "function size<T = i32>(value: T): bool;
+         implement<U> size(value: U): bool { return true; }
+         let defaulted = size(1);
+         let anchored = size(1u8);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let mut calls = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind == NodeKind::Call);
+    let defaulted = report
+        .ordinary_call(module, calls.next().unwrap().0)
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(defaulted.inputs[0].as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "i32")
+    );
+    assert_eq!(defaulted.defaults.len(), 1);
+    assert!(defaulted.explicit.is_empty());
+    let anchored = report
+        .ordinary_call(module, calls.next().unwrap().0)
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(anchored.inputs[0].as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "u8")
+    );
+    assert!(anchored.defaults.is_empty());
+}
+
+#[test]
+fn each_tuple_callback_uses_its_own_written_path() {
+    use compiler::analysis::generics::{GoalBlocker, GoalState};
+    let fixture = Fixture::new(
+        "function joinLike<F,G,A,B>(tasks: [F,G]): [A,B]
+             where callableOnce(F,[],A), callableOnce(G,[],B);
+         implement<F,G,A,B> joinLike(tasks: [F,G]): [A,B] { while (true) {} }
+         let pending = joinLike([() => true, () => 42i32]);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let (node, _) = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert_eq!(call.callbacks.len(), 2);
+    assert!(
+        call.callbacks
+            .iter()
+            .all(|c| c.parameters.is_empty() && c.result.is_none())
+    );
+    for (context, expected) in call.callbacks.iter().zip(["bool", "i32"]) {
+        let arrow = report.arrow(module, context.argument).unwrap().unwrap();
+        assert!(matches!(arrow.result.as_ref(), TypeTerm::Primitive(id) if id.name() == expected));
+    }
+    let Some(TypeTerm::Tuple(fields)) = call.selected_result.as_deref() else {
+        panic!("selected pair of results")
+    };
+    for (field, expected) in fields.iter().zip(["bool", "i32"]) {
+        assert!(matches!(field.as_ref(), TypeTerm::Primitive(id) if id.name() == expected));
+    }
+    let goal = report.goal(call.goal.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        goal.state,
+        GoalState::Unresolved(GoalBlocker::OrdinaryAdmission)
+    );
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
 fn a_symbolic_call_requires_one_winner_across_its_whole_input_domain() {
     use compiler::analysis::ordinary::HypotheticalOutcome;
     let fixture = Fixture::new(
@@ -414,6 +569,98 @@ fn a_symbolic_call_requires_one_winner_across_its_whole_input_domain() {
     assert!(
         matches!(closed.selected_result.as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "i32")
     );
+}
+
+#[test]
+fn a_contextual_family_value_ranks_inputs_then_compares_the_result() {
+    use compiler::analysis::generics::OutputAgreement;
+    let fixture = Fixture::new(
+        "function pick<T,R>(value: T): R;
+         implement<U> pick(value: U): i32 { return 1i32; }
+         implement pick(value: bool): bool { return false; }
+         let pending: (bool) => i32 = pick;",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let (node, _) = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.kind == NodeKind::ValueReference && n.span.bytes() == b"pick")
+        .unwrap();
+    let value = report.ordinary_value(module, node).unwrap().unwrap();
+    let goal = report.goal(&value.goal).unwrap();
+    let winner = graph
+        .implementations()
+        .iter()
+        .max_by_key(|i| i.declaration.start)
+        .unwrap();
+    assert_eq!(
+        goal.selection.as_ref().unwrap().implementation,
+        &winner.declaration
+    );
+    assert!(
+        matches!(&value.output_agreement, OutputAgreement::Disagrees { actual, required } if matches!(actual.as_ref(), TypeTerm::Primitive(id) if id.name() == "bool") && matches!(required.as_ref(), TypeTerm::Primitive(id) if id.name() == "i32"))
+    );
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
+fn a_written_exact_output_assumption_can_cover_an_equivalent_unfiltered_call() {
+    use compiler::analysis::generics::{GoalBlocker, GoalState, OutputAgreement};
+    let fixture = Fixture::new(
+        "function read<R,E>(value: R): E;
+         implement<U> read(value: U): i32 { return 1i32; }
+         implement read(value: bool): bool { return false; }
+         function useRead<R,E>(value: R): E where read(R,E) { return read(value); }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let (node, _) = module
+        .syntax
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert_eq!(
+        call.outcome, None,
+        "the currently loaded fallback is not a uniform winner"
+    );
+    assert!(matches!(call.output_agreement, OutputAgreement::Agrees));
+    let goal = report.goal(call.goal.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        goal.state,
+        GoalState::Unresolved(GoalBlocker::OrdinaryAdmission)
+    );
+    assert_eq!(goal.assumptions.len(), 1);
+    assert_eq!(goal.dependencies, goal.assumptions);
+    let Some(TypeTerm::Parameter { declaration, .. }) = call.selected_result.as_deref() else {
+        panic!("exact symbolic output")
+    };
+    assert!(
+        module
+            .declarations
+            .iter()
+            .any(|d| d.id == **declaration && d.name.as_deref() == Some("E"))
+    );
+    assert!(report.node(module, node).unwrap().is_none());
 }
 
 #[test]

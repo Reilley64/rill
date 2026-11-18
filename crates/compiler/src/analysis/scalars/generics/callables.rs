@@ -104,12 +104,14 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<()> {
         let module = inference.module;
         let ordinary = self.input.ordinary.unwrap();
-        let reason = if declaration.id.kind != DeclarationKind::Function {
+        let family = ordinary.captured_family(&declaration.id);
+        let reason = if declaration.id.kind != DeclarationKind::Function && family.is_none() {
             Some(ScalarUnsupported::FamilySelection)
-        } else if ordinary
-            .headers()
-            .get(&declaration.id)
-            .is_some_and(|h| !h.requirements.is_empty())
+        } else if family.is_none()
+            && ordinary
+                .headers()
+                .get(&declaration.id)
+                .is_some_and(|h| !h.requirements.is_empty())
         {
             Some(ScalarUnsupported::Requirements)
         } else {
@@ -120,7 +122,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
         }
-        let signature = &self.input.facts.declarations[&declaration.id];
+        let signature = family.map_or_else(
+            || &self.input.facts.declarations[&declaration.id],
+            |f| &f.header,
+        );
         let args = Self::written_call_arguments(module, node);
         if let Some(substitution) =
             self.explicit_callable_substitution(module, node, args, signature, context)?
@@ -151,6 +156,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         for node in waiting {
             let mut fact = inference.function_values.remove(&node).unwrap();
             if inference.slots[&node].blocked {
+                continue;
+            }
+            if fact.declaration.kind == DeclarationKind::Family {
+                if self.ordinary_value_step(inference, node, &fact)? {
+                    return Ok(true);
+                }
+                inference.function_values.insert(node, fact);
                 continue;
             }
             if self.function_value_step(inference, node, &mut fact, permit_defaults)? {
@@ -467,6 +479,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let module = inference.module;
         let expected = slot.expected.clone();
+        let premise = slot.ordinary_context;
         let callable = inference.callable_contexts.get(&node).cloned();
         let callable = callable.as_deref();
         let (receiving_parameters, receiving_result) = match expected.as_deref() {
@@ -553,9 +566,17 @@ impl<'r, 'g> Checker<'r, 'g> {
             contributions: Rc::default(),
         };
         inner.arrow_return = Some(target.clone());
+        let previous_premise = std::mem::replace(&mut self.arrow_premise, premise);
         self.arrow_depth += 1;
         let inferred = self.check_arrow_body(module, body, &mut inner, &target);
         self.arrow_depth -= 1;
+        let separated = if premise.is_some() {
+            self.separate_ordinary_findings(inference, before.1)
+        } else {
+            Ok(())
+        };
+        self.arrow_premise = previous_premise;
+        separated?;
         if let Some(result) = inferred?
             && self.marks() == before
         {
@@ -563,6 +584,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.elab.reserve(2)?;
             let facts = Arc::new(ArrowFacts {
                 site: Self::site(module, node),
+                premise,
                 parameters,
                 result,
                 mode,

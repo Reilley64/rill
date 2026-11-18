@@ -16,10 +16,15 @@ impl<'r, 'g> Checker<'r, 'g> {
         let waiting: Vec<_> = inference
             .calls
             .iter()
-            .filter_map(|(&node, call)| (call.infer && !call.family).then_some(node))
+            .filter_map(|(&node, call)| call.infer.then_some(node))
             .collect();
         for node in waiting {
-            if self.infer_standalone_call(inference, node, true)? {
+            let advanced = if inference.calls[&node].family {
+                self.ordinary_call_step(inference, node, true)?
+            } else {
+                self.infer_standalone_call(inference, node, true)?
+            };
+            if advanced {
                 return Ok(true);
             }
         }
@@ -69,7 +74,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let mut subs = self.slot_substitutions(binders, &slots)?;
         let applied = defaults_ready
-            && self.try_call_default(inference, node, &mut call, binders, &slots, &subs)?;
+            && self.try_call_default(inference, node, &mut call, binders, &slots, &subs, None)?;
         if applied {
             let chosen = call.fact.substitution.last().unwrap();
             slots[chosen.position] = Some(chosen.argument.clone());
@@ -86,7 +91,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .iter()
                 .all(|a| inference.slots[a].ty.is_some())
         {
-            if !self.check_call_requirements(module, node, call.fact.callee, &subs)? {
+            if !self.check_call_requirements(inference, node, &call, &subs)? {
                 inference.slots.get_mut(&node).unwrap().blocked = true;
                 return Ok(false);
             }
@@ -103,7 +108,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(applied)
     }
 
-    fn try_call_default(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn try_call_default(
         &mut self,
         inference: &mut Inference<'g>,
         node: NodeId,
@@ -111,6 +117,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         binders: &[Binder<'g>],
         slots: &[Option<Type<'g>>],
         solved: &[Substitution<'g>],
+        input_positions: Option<&[bool]>,
     ) -> Work<bool> {
         let Some(header) = self.input.ordinary.unwrap().headers().get(call.fact.callee) else {
             return Ok(false);
@@ -133,7 +140,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let necessary = self.necessary_reads(&producers, slots, &defaulted)?;
         for (binder, value) in binders.iter().zip(slots) {
             self.elab.step(header.defaults.len() + 1)?;
-            if value.is_some() {
+            if value.is_some() || input_positions.is_some_and(|p| !p[binder.position]) {
                 continue;
             }
             let Some(default) = header
@@ -181,7 +188,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         // A child standalone frame can wait on an enclosing immediate result
         // contract. Do not mark an unknown operation or evidence as such a read.
-        if inference.slots[&node].expected.is_none() && !producers.iter().any(|p| p.unavailable) {
+        if !call.family
+            && inference.slots[&node].expected.is_none()
+            && !producers.iter().any(|p| p.unavailable)
+        {
             let mut result_slots = BTreeSet::new();
             self.open_slots(&call.result, binders, slots, &mut result_slots, 1)?;
             for position in result_slots {

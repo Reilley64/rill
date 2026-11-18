@@ -64,6 +64,43 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn equal_callable_signatures_do_not_merge_different_capture_origins() {
+    let fixture = Fixture::new(
+        "function keep<T>(value: T): T where noBorrow(T) { return value; }
+         function probe(value: i32): void {
+             let safe = keep(() => 1i32);
+             let borrowed = keep(() => { let seen = &value; return 1i32; });
+         }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let direct: Vec<_> = report
+        .goals()
+        .iter()
+        .filter(|goal| {
+            goal.site.span.bytes().starts_with(b"keep(")
+                && goal.source.span.bytes() == b"noBorrow(T)"
+        })
+        .collect();
+    assert_eq!(direct.len(), 2);
+    assert_eq!(direct[0].state, GoalState::Proved);
+    assert_eq!(direct[1].state, GoalState::Disproved);
+    let safe = direct[0].arrow_origin.as_ref().unwrap();
+    let borrowed = direct[1].arrow_origin.as_ref().unwrap();
+    assert!(safe.captures.is_empty());
+    assert!(
+        graph
+            .modules()
+            .iter()
+            .flat_map(|m| &m.declarations)
+            .any(|d| d.id == *borrowed.captures[0].path.root && d.name.as_deref() == Some("value"))
+    );
+    assert_eq!(direct[1].dependencies.len(), 1);
+}
+
+#[test]
 fn scalar_and_written_predicate_evidence_check_a_standalone_call() {
     let fixture = Fixture::new(
         "function keep<T>(x: T): T where noBorrow(T) { return x; }

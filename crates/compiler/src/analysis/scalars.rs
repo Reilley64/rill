@@ -424,12 +424,14 @@ struct Checker<'r, 'g> {
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     arrow_depth: usize,
+    arrow_premise: Option<ordinary::InputPremise>,
     arrow_bindings: BTreeMap<&'g DeclarationId, Arc<ArrowFacts<'g>>>,
     prepared_calls: BTreeMap<(&'g ModuleKey, NodeId), PreparedCall<'g>>,
     match_inputs: BTreeMap<(&'g ModuleKey, NodeId), Option<ExpressionResult<'g>>>,
     match_hints: BTreeMap<(&'g ModuleKey, NodeId), Option<Type<'g>>>,
     match_blocks: BTreeMap<(&'g ModuleKey, NodeId), Flow>,
     ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), generics::OrdinaryCall<'g>>,
+    ordinary_values: BTreeMap<(&'g ModuleKey, NodeId), generics::OrdinaryValue<'g>>,
     conditional_findings: Vec<generics::ConditionalFinding<'g>>,
 }
 impl<'r, 'g> Checker<'r, 'g> {
@@ -442,12 +444,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             data_depth: 0,
             evidence: generics::Evidence::default(),
             arrow_depth: 0,
+            arrow_premise: None,
             arrow_bindings: BTreeMap::new(),
             prepared_calls: BTreeMap::new(),
             match_inputs: BTreeMap::new(),
             match_hints: BTreeMap::new(),
             match_blocks: BTreeMap::new(),
             ordinary_calls: BTreeMap::new(),
+            ordinary_values: BTreeMap::new(),
             conditional_findings: Vec::new(),
         }
     }
@@ -1110,12 +1114,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         Ok(None)
     }
-    fn marks(&self) -> (usize, usize, usize, usize) {
+    fn marks(&self) -> (usize, usize, usize, usize, usize) {
         (
             self.facts.obligations.len(),
             self.facts.findings.len(),
             self.elab.facts.obligations.len(),
             self.elab.facts.findings.len(),
+            self.conditional_findings.len(),
         )
     }
     fn local(&mut self, context: &Context<'r, 'g>, name: &str) -> Work<Option<Local<'g>>> {
@@ -1541,7 +1546,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.elab.step(1)?;
             let syntax = &module.syntax.nodes[node];
             self.elab.reserve(1)?;
-            inference.slots.insert(node, Slot::default());
+            inference.slots.insert(
+                node,
+                Slot {
+                    ordinary_context: self.arrow_premise,
+                    ..Slot::default()
+                },
+            );
             self.enqueue(&mut inference, node)?;
             match syntax.kind {
                 NodeKind::Field if self.data => {
@@ -1767,7 +1778,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         if inference.data_nodes.contains(&node) {
                             self.variant_step(&mut inference, node, context)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.family) {
-                            self.ordinary_call_step(&mut inference, node)?;
+                            self.ordinary_call_step(&mut inference, node, false)?;
                         } else if inference.value_calls.contains(&node) {
                             self.invocation_step(&mut inference, node)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.infer) {
@@ -1804,6 +1815,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         let restricted = inference.slots[&child].read_only_projection;
                         let access = inference.slots[&child].access;
                         let arrow = inference.slots[&child].arrow.clone();
+                        let premise = inference.slots[&child].ordinary_context;
                         let target = inference.slots.get_mut(&node).unwrap();
                         target.place = place;
                         target.path = path;
@@ -1811,6 +1823,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         target.read_only_projection = restricted;
                         target.access = access;
                         target.arrow = arrow;
+                        target.ordinary_context = target.ordinary_context.or(premise);
                         if let Some(ty) = inference.slots[&child].ty.clone() {
                             self.establish(&mut inference, node, ty, false)?;
                         }

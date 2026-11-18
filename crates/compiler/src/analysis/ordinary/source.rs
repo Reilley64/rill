@@ -6,6 +6,7 @@ pub(in crate::analysis) struct SourceCandidate<'r, 'g> {
     pub alternative: usize,
     pub covers: bool,
     pub substitution: Vec<Substitution<'g>>,
+    pub observed_domain: Option<InputKey<'g>>,
 }
 
 pub(in crate::analysis) fn family<'r, 'g>(
@@ -31,7 +32,45 @@ pub(in crate::analysis) fn project<'r, 'g>(
     filters: &[(usize, &Type<'g>)],
     budget: &mut Budget,
 ) -> Work<Vec<SourceCandidate<'r, 'g>>> {
-    patterns::project(family, inputs, filters, budget)
+    patterns::project(family, inputs, filters, false, budget)
+}
+
+/// Compare filtered *actual* domains, not just the set of intersecting bodies.
+pub(in crate::analysis) fn filters_agree<'g>(
+    family: &FamilyFacts<'g>,
+    inputs: &[Type<'g>],
+    left: &[Substitution<'g>],
+    right: &[Substitution<'g>],
+    budget: &mut Budget,
+) -> Work<bool> {
+    budget.reserve(inputs.len())?;
+    let inputs: Vec<_> = inputs.iter().map(|ty| Some(ty.clone())).collect();
+    let domains =
+        |filters: &[Substitution<'g>], budget: &mut Budget| -> Work<BTreeMap<_, Vec<_>>> {
+            budget.reserve(filters.len())?;
+            let filters: Vec<_> = filters.iter().map(|s| (s.position, &s.argument)).collect();
+            let mut grouped = BTreeMap::new();
+            for hit in patterns::project(family, &inputs, &filters, true, budget)? {
+                budget.reserve(2)?;
+                grouped
+                    .entry(&hit.body.source.declaration)
+                    .or_insert_with(Vec::new)
+                    .push(hit.observed_domain.unwrap());
+            }
+            Ok(grouped)
+        };
+    let left = domains(left, budget)?;
+    let right = domains(right, budget)?;
+    for body in &family.implementations {
+        budget.step(1)?;
+        let id = &body.source.declaration;
+        let l = left.get(id).map_or(&[][..], Vec::as_slice);
+        let r = right.get(id).map_or(&[][..], Vec::as_slice);
+        if !patterns::included(l, r, budget)? || !patterns::included(r, l, budget)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Demand a uniform winner when caller parameters are rigid. The augmented

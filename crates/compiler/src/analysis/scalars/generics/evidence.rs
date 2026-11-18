@@ -92,6 +92,8 @@ pub struct GoalFacts<'g> {
     pub routes: Vec<&'g Binding>,
     pub state: GoalState,
     pub premise: Option<InputPremise>,
+    /// Exact originating arrow, when the source ties this subject to one value.
+    pub arrow_origin: Option<Arc<ArrowFacts<'g>>>,
     /// A verdict only under the retained role and protection premise.
     pub hypothetical: Option<GoalVerdict>,
     pub selection: Option<GoalSelection<'g>>,
@@ -227,8 +229,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             source,
             routes: routes.to_vec(),
             state,
-            premise: matches!(target, RequirementTarget::Family(_))
-                .then_some(InputPremise::HypotheticalOrdinaryRole),
+            premise: self.arrow_premise.or_else(|| {
+                matches!(target, RequirementTarget::Family(_))
+                    .then_some(InputPremise::HypotheticalOrdinaryRole)
+            }),
+            arrow_origin: None,
             hypothetical: None,
             selection: None,
             output: None,
@@ -284,15 +289,11 @@ impl<'r, 'g> Checker<'r, 'g> {
         id: &DeclarationId,
     ) -> Work<Option<&'r ordinary::FamilyFacts<'g>>> {
         // All IDs at this seam already came from the captured inventory.
-        let input = self.input.ordinary.unwrap();
-        // Account for the public lookup's capture validation scan.
-        for module in self.input.graph.modules() {
-            self.elab.step(module.declarations.len() + 1)?;
-        }
-        Ok(input.family(id).expect("captured requirement target"))
+        self.elab.step(1)?;
+        Ok(self.input.ordinary.unwrap().captured_family(id))
     }
 
-    fn evidence_module(&mut self, key: &ModuleKey) -> Work<&'g Module> {
+    pub(super) fn evidence_module(&mut self, key: &ModuleKey) -> Work<&'g Module> {
         for module in self.input.graph.modules() {
             self.elab.step(1)?;
             if module.key == *key {
@@ -383,11 +384,13 @@ impl<'r, 'g> Checker<'r, 'g> {
 
     pub(super) fn check_call_requirements(
         &mut self,
-        module: &'g Module,
+        inference: &Inference<'g>,
         node: NodeId,
-        owner: &DeclarationId,
+        call: &PreparedCall<'g>,
         substitutions: &[Substitution<'g>],
     ) -> Work<bool> {
+        let module = inference.module;
+        let owner = call.fact.callee;
         let Some(header) = self
             .input
             .ordinary
@@ -411,6 +414,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 &requirement.routes,
                 false,
             )?;
+            let origin = self.arrow_subject(inference, call, requirement)?;
+            let fact = &mut self.evidence.goals[goal.index];
+            fact.premise = fact
+                .premise
+                .or(origin.as_ref().and_then(|arrow| arrow.premise));
+            fact.arrow_origin = origin;
             match self.solve_goal(&goal)? {
                 GoalState::Proved => (),
                 GoalState::Disproved | GoalState::Unresolved(GoalBlocker::MissingAssumption)
@@ -429,8 +438,49 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(!unresolved && !rejected)
     }
 
+    fn arrow_subject(
+        &mut self,
+        inference: &Inference<'g>,
+        call: &PreparedCall<'g>,
+        requirement: &RequirementMetadata<'g>,
+    ) -> Work<Option<Arc<ArrowFacts<'g>>>> {
+        if !matches!(requirement.target, Some(RequirementTarget::Predicate(id)) if !matches!(Predicate::of(id), Predicate::Callable(_)))
+        {
+            return Ok(None);
+        }
+        let [Some(subject)] = requirement.arguments.as_slice() else {
+            return Ok(None);
+        };
+        let mut origin: Option<Arc<ArrowFacts<'g>>> = None;
+        for (pattern, argument) in call.parameters.iter().zip(&call.fact.arguments) {
+            if !self.same(pattern, subject)? {
+                continue;
+            }
+            let Some(arrow) = inference.slots[argument].arrow.as_ref() else {
+                return Ok(None);
+            };
+            if origin
+                .as_ref()
+                .is_some_and(|other| !Arc::ptr_eq(other, arrow))
+            {
+                return Ok(None);
+            }
+            origin = Some(arrow.clone());
+        }
+        Ok(origin)
+    }
+
     fn same_goal(&mut self, left: usize, right: usize, weakening: bool) -> Work<bool> {
-        let l = &self.evidence.goals[left].judgment;
+        let l_fact = &self.evidence.goals[left];
+        let r_fact = &self.evidence.goals[right];
+        if !match (&l_fact.arrow_origin, &r_fact.arrow_origin) {
+            (None, None) => true,
+            (Some(l), Some(r)) => Arc::ptr_eq(l, r),
+            _ => false,
+        } {
+            return Ok(false);
+        }
+        let l = &l_fact.judgment;
         let r = &self.evidence.goals[right].judgment;
         if std::mem::discriminant(l) != std::mem::discriminant(r) {
             return Ok(false);
@@ -662,6 +712,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             },
             parent.site,
             parent.source,
+            &[],
             None,
         )?;
         self.link_goal(goal, child)?;
@@ -675,10 +726,11 @@ impl<'r, 'g> Checker<'r, 'g> {
         judgment: GoalJudgment<'g>,
         site: Site<'g>,
         source: Site<'g>,
+        routes: &[&'g Binding],
         selection: Option<GoalSelection<'g>>,
     ) -> Work<GoalId> {
         debug_assert!(matches!(judgment, GoalJudgment::Determine { .. }));
-        let id = self.issue_goal(judgment, site, source, &[], false)?;
+        let id = self.issue_goal(judgment, site, source, routes, false)?;
         self.evidence.goals[id.index].selection = selection;
         Ok(id)
     }
@@ -748,10 +800,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             let site = assume.source;
             let substitutions = self.family_substitutions(header, &arguments)?;
             let (actual_inputs, actual_filters) = self.family_inputs(header, &substitutions)?;
-            if !self.same_terms(inputs, &actual_inputs)? || filters.len() != actual_filters.len() {
+            if !self.same_terms(inputs, &actual_inputs)? {
                 continue;
             }
-            let mut agrees = true;
+            let mut agrees = filters.len() == actual_filters.len();
             for (requested, actual) in filters.iter().zip(&actual_filters) {
                 if requested.position != actual.position
                     || !self.same(&requested.argument, &actual.argument)?
@@ -760,7 +812,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                     break;
                 }
             }
-            if !agrees {
+            if !agrees
+                && !self.equal_filter_domains(
+                    &header.declaration.id,
+                    inputs,
+                    filters,
+                    &actual_filters,
+                )?
+            {
                 continue;
             }
             self.link_goal(goal, id)?;
@@ -786,6 +845,28 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(established.then_some(GoalState::Proved))
     }
 
+    fn equal_filter_domains(
+        &mut self,
+        family: &DeclarationId,
+        inputs: &[Type<'g>],
+        left: &[Substitution<'g>],
+        right: &[Substitution<'g>],
+    ) -> Work<bool> {
+        let mut budget = declarations::Budget {
+            limits: self.elab.limits,
+            statistics: self.elab.statistics,
+        };
+        let same = ordinary::source::family(self.input.ordinary.unwrap(), family, &mut budget)
+            .and_then(|facts| match facts {
+                Ok(facts) => {
+                    ordinary::source::filters_agree(facts, inputs, left, right, &mut budget)
+                }
+                Err(_) => Ok(false),
+            });
+        self.elab.statistics = budget.statistics;
+        same
+    }
+
     fn same_terms(&mut self, left: &[Type<'g>], right: &[Type<'g>]) -> Work<bool> {
         self.elab.step(1)?;
         if left.len() != right.len() {
@@ -799,86 +880,45 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(true)
     }
 
-    // Reuse M4.5's established-input selector for ground goal dependencies.
-    // The M4.6 source selector can replace this adapter with uniform selection
-    // and pass the same implementation witness to expand_selected_contract.
     fn select_goal_contract(
         &mut self,
         family: &'g DeclarationId,
         inputs: &[Type<'g>],
         filters: &[Substitution<'g>],
     ) -> Work<GoalChoice<'g>> {
-        for (i, binding) in filters.iter().enumerate() {
-            self.elab.step(1)?;
-            if binding.position != i {
+        let mut budget = declarations::Budget {
+            limits: self.elab.limits,
+            statistics: self.elab.statistics,
+        };
+        let selected = (|| {
+            let Ok(facts) =
+                ordinary::source::family(self.input.ordinary.unwrap(), family, &mut budget)?
+            else {
                 return Ok(GoalChoice::Blocked);
+            };
+            budget.reserve(inputs.len() + filters.len())?;
+            let inputs: Vec<_> = inputs.iter().map(|ty| Some(ty.clone())).collect();
+            let filters: Vec<_> = filters.iter().map(|s| (s.position, &s.argument)).collect();
+            let candidates = ordinary::source::project(facts, &inputs, &filters, &mut budget)?;
+            match ordinary::source::rank(facts, &candidates, &mut budget)? {
+                Some(ordinary::HypotheticalOutcome::Winner(implementation)) => {
+                    budget.step(candidates.len())?;
+                    let found = candidates
+                        .into_iter()
+                        .find(|c| c.covers && c.body.source.declaration == *implementation)
+                        .unwrap();
+                    Ok(GoalChoice::Selected(GoalSelection {
+                        implementation,
+                        alternative: found.alternative,
+                        substitution: found.substitution,
+                    }))
+                }
+                Some(_) => Ok(GoalChoice::NoWinner),
+                None => Ok(GoalChoice::Blocked),
             }
-        }
-        self.elab.reserve(inputs.len())?;
-        self.elab.reserve(filters.len())?;
-        let contracts: Vec<_> = inputs
-            .iter()
-            .cloned()
-            .map(ordinary::InputContract::Established)
-            .collect();
-        let explicit: Vec<_> = filters.iter().map(|s| s.argument.clone()).collect();
-        let remaining = AnalysisLimits {
-            max_work: self.elab.limits.max_work - self.elab.statistics.work,
-            max_entries: self.elab.limits.max_entries - self.elab.statistics.entries,
-            max_depth: self.elab.limits.max_depth,
-        };
-        let analysis = self.input.ordinary.unwrap();
-        let Ok(report) =
-            ordinary::select_inputs(analysis, family, &contracts, &explicit, remaining)
-        else {
-            return Ok(GoalChoice::Blocked);
-        };
-        self.elab.step(report.statistics.work)?;
-        self.elab.reserve(report.statistics.entries)?;
-        self.elab.statistics.max_depth = self
-            .elab
-            .statistics
-            .max_depth
-            .max(report.statistics.max_depth);
-        if report.completion == ordinary::Completion::ResourceLimit {
-            return Err(());
-        }
-        let (Some(outcome), None) = (report.outcome, report.blocker) else {
-            return Ok(GoalChoice::Blocked);
-        };
-        let ordinary::HypotheticalOutcome::Winner(implementation) = outcome else {
-            return Ok(GoalChoice::NoWinner);
-        };
-        self.elab.step(report.matches.len())?;
-        let alternative = report
-            .matches
-            .iter()
-            .find(|m| m.implementation == implementation)
-            .unwrap()
-            .alternative;
-        let family = self.evidence_family(family)?.unwrap();
-        self.elab.step(family.implementations.len())?;
-        let body = family
-            .implementations
-            .iter()
-            .find(|b| b.source.declaration == *implementation)
-            .unwrap();
-        let DeclarationShape::Function { parameters, .. } = &body.header.shape else {
-            unreachable!("implementation signature")
-        };
-        let binders = &body.header.binders;
-        self.elab.reserve(binders.len())?;
-        let mut slots = vec![None; binders.len()];
-        for (parameter, actual) in parameters.iter().zip(inputs) {
-            if !self.accept_input(&parameter.ty, actual, binders, &mut slots, &[])? {
-                return Ok(GoalChoice::Blocked);
-            }
-        }
-        Ok(GoalChoice::Selected(GoalSelection {
-            implementation,
-            alternative,
-            substitution: self.slot_substitutions(binders, &slots)?,
-        }))
+        })();
+        self.elab.statistics = budget.statistics;
+        selected
     }
 
     fn expand_selected_contract(
@@ -1111,7 +1151,19 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Ok(GoalState::Proved)
             }
             TypeTerm::Callable { .. } => {
-                Ok(GoalState::Unresolved(GoalBlocker::CallableEnvironment))
+                let Some(origin) = self.evidence.goals[goal].arrow_origin.clone() else {
+                    return Ok(GoalState::Unresolved(GoalBlocker::CallableEnvironment));
+                };
+                for capture in &origin.captures {
+                    self.property_dependency(goal, intrinsic, capture.ty.clone(), capture.site)?;
+                    if let Some(source) = capture.value_origin
+                        && let Some(arrow) = self.facts.arrows.get(&(source.module, source.node))
+                    {
+                        let child = self.evidence.goals[goal].dependencies.last().unwrap().index;
+                        self.evidence.goals[child].arrow_origin = Some(arrow.clone());
+                    }
+                }
+                Ok(GoalState::Proved)
             }
             TypeTerm::Nominal { .. } => self.nominal_property(goal, intrinsic, &receiver, None),
             TypeTerm::Variant {

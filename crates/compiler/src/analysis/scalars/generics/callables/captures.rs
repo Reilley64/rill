@@ -27,6 +27,8 @@ pub struct CaptureFact<'g> {
 #[derive(Debug)]
 pub struct ArrowFacts<'g> {
     pub site: Site<'g>,
+    /// Conditional when its signature used an unadmitted ordinary contract.
+    pub premise: Option<ordinary::InputPremise>,
     pub parameters: Vec<Type<'g>>,
     pub result: Type<'g>,
     pub mode: Option<InvocationMode>,

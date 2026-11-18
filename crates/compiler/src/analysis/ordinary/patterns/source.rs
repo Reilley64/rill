@@ -7,6 +7,7 @@ pub(in crate::analysis::ordinary) fn project<'r, 'g>(
     family: &'r FamilyFacts<'g>,
     inputs: &[Option<Type<'g>>],
     filters: &[(usize, &Type<'g>)],
+    keep_domain: bool,
     budget: &mut Budget,
 ) -> Work<Vec<SourceCandidate<'r, 'g>>> {
     let mut rigids = Vec::new();
@@ -74,6 +75,11 @@ pub(in crate::analysis::ordinary) fn project<'r, 'g>(
                 &mut BTreeMap::new(),
                 budget,
             )?;
+            let observed_domain = if keep_domain {
+                Some(restricted_domain(&domain, inputs.len(), &solved, budget)?)
+            } else {
+                None
+            };
             let mut substitution = Vec::new();
             for (binder, variable) in body.header.binders.iter().zip(&body.input_variables) {
                 budget.step(1)?;
@@ -94,10 +100,65 @@ pub(in crate::analysis::ordinary) fn project<'r, 'g>(
                 alternative,
                 covers,
                 substitution,
+                observed_domain,
             });
         }
     }
     Ok(out)
+}
+
+fn restricted_domain<'g>(
+    domain: &InputKey<'g>,
+    columns: usize,
+    solved: &Solution<'_, 'g>,
+    budget: &mut Budget,
+) -> Work<InputKey<'g>> {
+    let mut names = BTreeMap::new();
+    let mut nodes = Vec::new();
+    for term in terms(&domain.nodes).take(columns) {
+        write_domain(
+            Site { side: true, term },
+            solved,
+            &mut names,
+            &mut nodes,
+            budget,
+            1,
+        )?;
+    }
+    Ok(InputKey { nodes })
+}
+
+fn write_domain<'g>(
+    site: Site<'_, 'g>,
+    solved: &Solution<'_, 'g>,
+    names: &mut BTreeMap<(bool, usize), usize>,
+    out: &mut Vec<Node<'g>>,
+    budget: &mut Budget,
+    depth: usize,
+) -> Work<usize> {
+    if depth > budget.limits.max_depth.min(64) {
+        return Err(());
+    }
+    budget.statistics.max_depth = budget.statistics.max_depth.max(depth);
+    let root = chase(site, solved, budget)?;
+    let mut term = root.term[0];
+    if let Head::Variable(id) = term.head {
+        let next = names.len();
+        budget.reserve(1)?;
+        let name = *names.entry((root.side, id)).or_insert(next);
+        term.head = Head::Variable(name);
+    }
+    let start = out.len();
+    budget.reserve(1)?;
+    out.push(term);
+    let mut height = 0;
+    for child in root.children() {
+        height = height.max(write_domain(child, solved, names, out, budget, depth + 1)?);
+    }
+    let size = out.len() - start;
+    out[start].size = size;
+    out[start].height = height + 1;
+    Ok(height + 1)
 }
 
 fn materialize<'g>(
