@@ -59,6 +59,22 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
+    pub(super) fn guard_failure(
+        &mut self,
+        module: &'g Module,
+        node: NodeId,
+        failure: NodeId,
+        depth: usize,
+        context: &mut Context<'r, 'g>,
+    ) -> Work<Flow> {
+        let before = self.marks();
+        let flow = self.statement(module, failure, depth, context)?;
+        if flow.normal && (!self.integrated || before == self.marks()) {
+            self.finding(module, node, ScalarFindingKind::GuardFallthrough)?;
+        }
+        Ok(flow)
+    }
+
     fn pending_binder(
         &mut self,
         declaration: &'g Declaration,
@@ -128,12 +144,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             let error = self.elab.declaration_at(module, children[1])?;
             self.pending_binder(error, context)?;
         }
-        let before_failure = self.marks();
-        let failure = self.statement(module, *children.last().unwrap(), depth + 1, context)?;
+        self.guard_failure(module, node, *children.last().unwrap(), depth + 1, context)?;
         context.scopes.pop();
-        if failure.normal && before_failure == self.marks() {
-            self.finding(module, node, ScalarFindingKind::GuardFallthrough)?;
-        }
         self.pending_pattern(module, binder.children[0], context)?;
         Ok(input.map_or_else(Flow::normal, |e| e.flow))
     }

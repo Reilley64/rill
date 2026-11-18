@@ -77,7 +77,18 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.lookup_finding(module, node, ScalarFindingKind::TypeMismatch, bindings)?;
             return Ok(None);
         };
-        let Some(facts) = self.input.facts.declarations.get(&declaration.id) else {
+        let facts = self.input.facts.declarations.get(&declaration.id);
+        if self.integrated && (facts.is_none() || self.declaration_unusable(&declaration.id)?) {
+            self.deferred_declaration(
+                module,
+                node,
+                ScalarUnsupported::DeclarationPrerequisite,
+                declaration,
+                bindings,
+            )?;
+            return Ok(None);
+        }
+        let Some(facts) = facts else {
             self.lookup_finding(module, node, ScalarFindingKind::TypeMismatch, bindings)?;
             return Ok(None);
         };

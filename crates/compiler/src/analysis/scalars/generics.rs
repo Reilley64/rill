@@ -46,6 +46,7 @@ pub struct GenericReport<'g> {
     statistics: Statistics,
     completion: ScalarFailureKind,
     integrated: bool,
+    not_reached: Vec<Stage>,
     ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryCall<'g>>,
     ordinary_values: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryValue<'g>>,
     conditional_findings: Vec<ConditionalFinding<'g>>,
@@ -65,6 +66,10 @@ impl<'g> GenericReport<'g> {
 
     pub fn statistics(&self) -> Statistics {
         self.statistics
+    }
+
+    pub(in crate::analysis) fn not_reached(&self) -> &[Stage] {
+        &self.not_reached
     }
 
     pub fn findings(&self) -> &[ScalarFinding<'g>] {
@@ -449,7 +454,7 @@ fn analyze_bodies<'g>(
                 .reserve(1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len())?;
             checker.elab.facts.uses.insert(*key, use_.clone());
         }
-        if input.declaration_issues().is_empty()
+        if (integrated || input.declaration_issues().is_empty())
             && body_prerequisites(&mut checker.elab, input, integrated)?
         {
             checker.run()?;
@@ -458,9 +463,18 @@ fn analyze_bodies<'g>(
     })()
     .is_err();
     checker.facts.annotations = checker.elab.facts;
+    let not_reached = [
+        (Stage::Bodies, checker.reached_bodies),
+        (Stage::Startup, checker.reached_startup),
+        (Stage::Expectations, checker.reached_expectations),
+    ]
+    .into_iter()
+    .filter_map(|(stage, reached)| (!reached).then_some(stage))
+    .collect();
     GenericReport {
         graph,
         integrated,
+        not_reached,
         facts: checker.facts,
         evidence: checker.evidence,
         statistics: checker.elab.statistics,

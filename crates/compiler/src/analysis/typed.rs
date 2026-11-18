@@ -24,6 +24,7 @@ pub struct TypedReport<'g> {
     public_interface_findings: Vec<PublicInterfaceFinding<'g>>,
     completion: ScalarFailureKind,
     statistics: Statistics,
+    not_performed: Vec<Stage>,
 }
 
 impl<'g> TypedReport<'g> {
@@ -40,14 +41,9 @@ impl<'g> TypedReport<'g> {
         &self.public_interface_findings
     }
 
-    /// None of these stages ran, even if individual bodies have local facts.
-    pub fn not_performed(&self) -> &'static [Stage] {
-        &[
-            Stage::CoreAdmission,
-            Stage::ResultUse,
-            Stage::Ownership,
-            Stage::Execution,
-        ]
+    /// Stages not reached or outside this increment. An omitted stage is not a pass.
+    pub fn not_performed(&self) -> &[Stage] {
+        &self.not_performed
     }
 
     pub fn core_blockers(&self) -> &'static [CoreBlocker] {
@@ -84,11 +80,34 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     {
         completion = ScalarFailureKind::ResourceLimit;
     }
+    let mut not_performed = vec![
+        Stage::CoreAdmission,
+        Stage::ResultUse,
+        Stage::Ownership,
+        Stage::Execution,
+    ];
+    if inventory.lexical().is_none() {
+        not_performed.push(Stage::DeclarationTypes);
+    }
+    if !inventory.reached_validation() {
+        not_performed.extend([
+            Stage::DeclarationValidity,
+            Stage::SignatureCompatibility,
+            Stage::PositionValidity,
+            Stage::Layout,
+        ]);
+    }
+    let not_reached = bodies.not_reached();
+    not_performed.extend_from_slice(not_reached);
+    if not_reached.len() == 3 {
+        not_performed.extend([Stage::Inference, Stage::Coverage, Stage::Evidence]);
+    }
     TypedReport {
         inventory,
         bodies,
         public_interface_findings,
         completion,
         statistics: budget.statistics,
+        not_performed,
     }
 }

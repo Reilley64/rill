@@ -442,6 +442,9 @@ struct Checker<'r, 'g> {
     input: BodyInput<'r, 'g>,
     elab: Analyzer<'g>,
     facts: ScalarFacts<'g>,
+    reached_bodies: bool,
+    reached_startup: bool,
+    reached_expectations: bool,
     data: bool,
     integrated: bool,
     data_depth: usize,
@@ -467,6 +470,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             elab: Analyzer::new(input.graph, limits, input.ordinary.is_some()),
             input,
             facts: ScalarFacts::default(),
+            reached_bodies: false,
+            reached_startup: false,
+            reached_expectations: false,
             data,
             integrated: false,
             data_depth: 0,
@@ -698,6 +704,62 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
 
+    fn declaration_unusable(&mut self, declaration: &DeclarationId) -> Work<bool> {
+        if !self.integrated {
+            return Ok(false);
+        }
+        self.elab.step(1)?;
+        Ok(self
+            .input
+            .ordinary
+            .is_some_and(|o| o.declaration_unusable(declaration)))
+    }
+
+    fn type_unavailable(&mut self, ty: &Type<'g>, depth: usize) -> Work<bool> {
+        if !self.integrated {
+            return Ok(false);
+        }
+        self.elab.step(1)?;
+        if depth > self.elab.limits.max_depth.min(64) {
+            return Err(());
+        }
+        self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(depth);
+        if let TypeTerm::Nominal { declaration, .. } = ty.as_ref()
+            && (self.declaration_unusable(declaration)?
+                || !self.input.facts.declarations.contains_key(declaration))
+        {
+            return Ok(true);
+        }
+        for child in ordinary::shape(ty).1 {
+            if self.type_unavailable(child, depth + 1)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn signature_unavailable(&mut self, signature: &DeclarationFacts<'g>) -> Work<bool> {
+        if !self.integrated {
+            return Ok(false);
+        }
+        if self.declaration_unusable(&signature.declaration.id)? {
+            return Ok(true);
+        }
+        let DeclarationShape::Function { parameters, result } = &signature.shape else {
+            unreachable!()
+        };
+        for ty in parameters
+            .iter()
+            .map(|p| &p.ty)
+            .chain(std::iter::once(result))
+        {
+            if self.type_unavailable(ty, 1)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn establish(
         &mut self,
         inference: &mut Inference<'g>,
@@ -707,6 +769,15 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<()> {
         self.elab
             .step(inference.slots.len().checked_ilog2().unwrap_or(0) as usize + 1)?;
+        if self.type_unavailable(&ty, 1)? {
+            self.defer(
+                inference.module,
+                node,
+                ScalarUnsupported::DeclarationPrerequisite,
+            )?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        }
         let previous = if expected {
             &inference.slots[&node].expected
         } else {
@@ -1492,6 +1563,16 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             return Ok(None);
         };
+        if self.signature_unavailable(signature)? {
+            self.deferred_declaration(
+                module,
+                node,
+                ScalarUnsupported::DeclarationPrerequisite,
+                declaration,
+                bindings,
+            )?;
+            return Ok(None);
+        }
         let argument_nodes = Self::written_call_arguments(module, callee);
         let requires_evidence = self.input.ordinary.is_some_and(|ordinary| {
             ordinary
@@ -2725,7 +2806,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                             BooleanSet::EMPTY
                         }
                     });
-                    let body = self.statement(module, n.children[1], depth + 1, context)?;
+                    let body = if n.kind == NodeKind::Guard {
+                        self.guard_failure(module, node, n.children[1], depth + 1, context)?
+                    } else {
+                        self.statement(module, n.children[1], depth + 1, context)?
+                    };
                     if n.kind == NodeKind::While {
                         context.loops.pop();
                     }
@@ -2746,9 +2831,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                             }
                         }
                         NodeKind::Guard => {
-                            if body.normal {
-                                self.finding(module, node, ScalarFindingKind::GuardFallthrough)?;
-                            }
                             if truth.can_be_true() {
                                 flow.normal = true;
                             }
@@ -2864,6 +2946,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             unreachable!()
         };
         let node = module.syntax.nodes[declaration.node].children[1];
+        if self.signature_unavailable(typed)? {
+            self.defer(
+                module,
+                declaration.node,
+                ScalarUnsupported::DeclarationPrerequisite,
+            )?;
+            return Ok(());
+        }
         if !self.source_scope_ready(module, node)? {
             return Ok(());
         }
@@ -2888,6 +2978,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.elab.step(1)?;
                 count = count.checked_add(scope.len()).ok_or(())?;
             }
+            // reserve charges the work and entries of each cloned binding.
             self.elab.reserve(count)?;
             let mut scopes = enclosing.scopes.clone();
             context.inherited_scopes = scopes.len();
@@ -2897,6 +2988,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         } else {
             1
         };
+        self.reached_bodies = true;
         let flow = self.statement(module, node, depth, &mut context)?;
         self.clear_body_assumptions();
         if before == self.marks() {
@@ -2956,6 +3048,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     context.startup = false;
                     let boolean = self.primitive("bool")?;
                     let child = module.syntax.nodes[declaration.node].children[0];
+                    self.reached_expectations = true;
                     let expression =
                         self.expression(module, child, Some(boolean.clone()), &context)?;
                     self.elab.step(self.facts.findings.len())?;
@@ -2988,6 +3081,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             let before = self.marks();
             let mut context = self.context(None)?;
             let mut flow = Flow::normal();
+            self.reached_startup = true;
             for &node in &module.syntax.nodes[module.syntax.root].children {
                 self.elab.step(1)?;
                 if matches!(

@@ -28,7 +28,7 @@ def solve(graph, entries=(0,)):
             if kind in ("source", "overwrite", "move", "exit"):
                 place = args[-1]
                 displaced = {(site, path) for site, path in state if below(path, place)}
-                discards.update((site, point) for site, _ in displaced)
+                discards.update((site, point, path) for site, path in displaced)
                 state.difference_update(displaced)
             if kind == "source":
                 state.add(tuple(args))

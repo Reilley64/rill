@@ -4,6 +4,7 @@ use super::declarations::{
 };
 use super::*;
 use crate::loader::Implementation;
+use std::collections::BTreeSet;
 
 pub(super) mod metadata;
 pub(super) mod patterns;
@@ -124,9 +125,11 @@ pub struct OrdinaryAnalysis<'g> {
     families: BTreeMap<&'g DeclarationId, FamilyFacts<'g>>,
     types: PartialFacts<'g>,
     declaration_issues: Vec<DeclarationIssue<'g>>,
+    unusable: BTreeSet<&'g DeclarationId>,
     headers: metadata::Headers<'g>,
     statistics: Statistics,
     completion: Completion,
+    reached_validation: bool,
 }
 
 impl<'g> OrdinaryAnalysis<'g> {
@@ -136,6 +139,14 @@ impl<'g> OrdinaryAnalysis<'g> {
 
     pub(super) fn lexical(&self) -> Option<&Arc<Lexical<'g>>> {
         self.lexical.as_ref()
+    }
+
+    pub(super) fn reached_validation(&self) -> bool {
+        self.reached_validation
+    }
+
+    pub(super) fn declaration_unusable(&self, id: &DeclarationId) -> bool {
+        self.unusable.contains(id)
     }
 
     pub(super) fn headers(&self) -> &metadata::Headers<'g> {
@@ -454,6 +465,15 @@ impl<'g> OrdinaryAnalysis<'g> {
             },
         };
         let (result, facts) = check_inventory(self.graph, &self.types, schemas, budget);
+        if self.lexical.is_some() && result.is_ok() {
+            for checked in facts.declarations() {
+                budget.step(1)?;
+                if !checked.members_unique {
+                    budget.reserve(1)?;
+                    self.unusable.insert(&checked.types.declaration.id);
+                }
+            }
+        }
         for finding in facts.findings() {
             budget.reserve(1)?;
             let issue = match finding {
@@ -465,6 +485,10 @@ impl<'g> OrdinaryAnalysis<'g> {
                     }
                 }
                 CheckFinding::PreludeSignature { schema, actual } => {
+                    if self.lexical.is_some() {
+                        budget.reserve(1)?;
+                        self.unusable.insert(&actual.declaration.id);
+                    }
                     DeclarationIssue::PreludeSignature {
                         schema: *schema,
                         declaration: actual.declaration,
@@ -472,6 +496,10 @@ impl<'g> OrdinaryAnalysis<'g> {
                 }
                 CheckFinding::InlineCycle { steps } => {
                     budget.reserve(steps.len())?;
+                    if self.lexical.is_some() {
+                        budget.reserve(steps.len())?;
+                        self.unusable.extend(steps.iter().map(|step| step.origin));
+                    }
                     DeclarationIssue::InlineCycle {
                         steps: steps
                             .iter()
@@ -488,6 +516,10 @@ impl<'g> OrdinaryAnalysis<'g> {
             self.declaration_issues.push(issue);
         }
         for obligation in facts.obligations() {
+            if self.lexical.is_some() {
+                budget.reserve(1)?;
+                self.unusable.insert(obligation.declaration);
+            }
             budget.reserve(1)?;
             self.declaration_issues
                 .push(DeclarationIssue::UnknownLayout {
@@ -652,9 +684,11 @@ fn analyze_ordinary_types(
         lexical: analyzer.lexical,
         types: analyzer.facts,
         declaration_issues: Vec::new(),
+        unusable: BTreeSet::new(),
         headers,
         statistics: analyzer.statistics,
         completion: Completion::Incomplete,
+        reached_validation: elaborated,
     };
     let mut budget = Budget {
         limits,

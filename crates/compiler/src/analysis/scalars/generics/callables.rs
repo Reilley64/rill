@@ -137,6 +137,17 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots.get_mut(&node).unwrap().blocked = true;
             return Ok(());
         };
+        if self.signature_unavailable(signature)? {
+            self.deferred_declaration(
+                module,
+                node,
+                ScalarUnsupported::DeclarationPrerequisite,
+                declaration,
+                bindings,
+            )?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        }
         let args = Self::written_call_arguments(module, node);
         if let Some(substitution) =
             self.explicit_callable_substitution(module, node, args, signature, context)?

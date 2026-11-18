@@ -176,6 +176,21 @@ fn integrated_limits_include_visibility_and_reject_foreign_nodes() {
         assert!(limited.statistics().work <= short.max_work);
         assert!(limited.statistics().entries <= short.max_entries);
     }
+    let stopped = analyze_typed(
+        &graph,
+        AnalysisLimits {
+            max_work: 0,
+            ..limits
+        },
+    );
+    for stage in [
+        Stage::DeclarationTypes,
+        Stage::Bodies,
+        Stage::Startup,
+        Stage::Expectations,
+    ] {
+        assert!(stopped.not_performed().contains(&stage));
+    }
     let foreign = fixture.load(false);
     assert_eq!(
         report.bodies().node(&foreign.modules()[0], 0).unwrap_err(),
@@ -301,6 +316,33 @@ fn aggregate_noncopying_field_can_settle_borrowed_binder_and_capture_demand() {
     );
 }
 
+#[test]
+fn invalid_nominal_blocks_its_members_without_stopping_independent_source() {
+    let fixture = Fixture::new(
+        "import helper; type Broken = { value: bool; value: i32 }; function useBroken(x: Broken): bool { return x.value; } let x = Broken { value: true }; let bad: bool = 1i32;",
+    );
+    fixture.write("app/helper.rill", "let wrong: bool = 2i32;");
+    let graph = fixture.load(false);
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let findings = report.bodies().findings();
+    assert_eq!(findings.len(), 2);
+    assert!(
+        findings
+            .iter()
+            .all(|f| f.kind == ScalarFindingKind::TypeMismatch)
+    );
+    assert!(findings.iter().any(|f| f.site.module.path == "helper.rill"));
+    assert_eq!(
+        report
+            .bodies()
+            .obligations()
+            .iter()
+            .filter(|o| o.reason == ScalarUnsupported::DeclarationPrerequisite)
+            .count(),
+        2
+    );
+}
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Fixture(PathBuf);
 impl Fixture {
@@ -354,11 +396,11 @@ impl Drop for Fixture {
 #[test]
 fn both_modes_keep_independent_bodies_and_findings_without_core_admission() {
     let fixture = Fixture::new(
-        "import helper::{ok};\nexpect 1i32;\nfunction unused(): bool { return 1i32; }",
+        "import helper::{ok};\nexpect ok();\nfunction unused(): bool { return 1i32; }",
     );
     fixture.write(
         "app/helper.rill",
-        "export function ok(): bool { return true; }\nlet wrong: bool = 0i32;",
+        "export function ok(): bool { return true; }\nlet wrong: bool = 0i32; expect 2i32;",
     );
     for mode in [false, true] {
         let graph = fixture.load(mode);
@@ -396,11 +438,9 @@ fn both_modes_keep_independent_bodies_and_findings_without_core_admission() {
                 .iter()
                 .any(|f| f.site.module == &helper.key && f.kind == ScalarFindingKind::TypeMismatch)
         );
-        assert!(
-            findings
-                .iter()
-                .any(|f| f.kind == ScalarFindingKind::ExpectationBoolean)
-        );
+        assert!(findings.iter().any(
+            |f| f.site.module == &helper.key && f.kind == ScalarFindingKind::ExpectationBoolean
+        ));
         assert_eq!(
             findings
                 .iter()
