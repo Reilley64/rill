@@ -407,6 +407,32 @@ Use the captured lexical scopes for nested functions and nominal declarations. I
 
 A named function cannot capture enclosing runtime values. An expectation cannot capture startup values. Report such a capture as R0502 even if the value can be folded. An arrow keeps its own return context and its actual typed capture evidence.
 
+### Proposed first-party core authority for M4.8 completion
+
+This proposal supplies the authority source left open by the [initial M4.8 checkpoint](../implementation-plan.md#m48-design-checkpoint). It applies only to core contracts needed for typed analysis. It does not change public library paths, the fixed prelude, Rill syntax or the installed layout approved in [ADR 0026](../adr/0026-toolchain-repository-and-mise.md). It does not define a third-party provider format or accept this RFC.
+
+#### Source and capture
+
+The selected first-party toolchain owns the authority. Its build pins the exact bytes and relative module keys of the production core sources under `stdlib/`, the supported target and option profiles, and the role, provider, protection and representation inventories for each profile. Keep these inputs in the reviewed toolchain sources. An installed copy of the source is data to verify, not an authority. Do not discover authority through the working directory, application source, environment, a request-supplied manifest or an arbitrary standard root.
+
+The toolchain loader selects its own installed `lib/rill/std/` root and fixed prelude. The existing source-only loader remains available and cannot attach authority, even for a byte-identical copy of a production module. In an authoritative capture, load the modules required by the active inventory through the same M1 snapshots, M2 parser and M3 resolver as source imports. Those metadata dependencies add no source binding and run no startup. Charge the extra capture work to the normal load limits. Check the retained bytes against the pins, including dependencies that supply evidence; never check a second read instead of the captured bytes.
+
+Use a private handoff bound to that graph identity, pinned revision and exact target/options. The typed checker consumes it with the graph and never reloads a file. A toolchain missing a required pinned file, exact profile or provider reports the affected prerequisite as unavailable. A changed authoritative file or conflicting evidence cannot grant admission; distinguish that invalid capture from absence. Partial and invalid captures supply no completeness claims, and an untrusted root supplies no evidence by omission. Both load modes use the same authority rules.
+
+#### What can be admitted
+
+After pin validation, resolve each designated role and provider to canonical captured identities and validate their schema and routes under [the original core admission procedure](#proposed-m48-core-admission-and-interface-checks). Tag compiled-in operation evidence only for an actual compiler-owned operation with its implemented contract and version. A bodyless declaration, a reserved name, an unimplemented intrinsic, or a planned backend symbol is not a provider. If a required contract is owned by a native implementation, record only evidence tied to the matching delivered provider; leave it pending if no such provider exists. Static admission is not proof of native execution or ABI compatibility.
+
+For each protected input region, validate a required winner or an explicit prohibition. A missing implementation cannot certify an exclusion. The [numeric domain and specified gaps](0006-numbers-strings-and-primitive-operations.md#protected-numeric-conversions-and-explicit-arithmetic-helpers) and [ownership protection rules](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m45-protected-overlap-boundary) still own those decisions. Do not infer representation or aggregate properties from signatures, Layout completeness, or copyability of a payload. Validate stored and forwarded arguments against the separate representation evidence. Re-run dependent judgments with these admitted facts; do not relabel hypothetical results.
+
+#### Planned checks
+
+| Case | Expected outcome and evidence |
+| --- | --- |
+| Install the built first-party core and capture an application that uses it. | NotChecked. The authority handoff exposes only the validated exact-profile evidence. The ordinary loader over identical file bytes produces no authority. An explicit alias preserves identity but metadata does not create a source binding. |
+| Alter captured bytes, omit a required module or provider, or select an unsupported target/options profile. | NotChecked. Distinguish invalid evidence from absence. Partial inventories neither admit a required winner nor reinterpret absence as a specified gap. Independent typed checks remain available where the capture can be built. |
+| Check both modes using the real production core, not test-only declarations. | NotChecked. Use positive and negative cases for List, Option, Result, Err, iteration, formatting, protection and representation. Separately check source-level Result-use witnesses and bound exhaustion. Positive local facts do not imply a receipt; issue one only with all required typed stages complete. |
+
 ### Required companion rules
 
 | Rule owner | Required contribution | Current dependency state |

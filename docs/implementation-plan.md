@@ -1021,6 +1021,18 @@ The owner [approved U1 through U4](https://github.com/Reilley64/rill/issues/65#i
 
 Actual core admission still requires a shipped core implementation and approved authority source. Compiler Result-use checking, the remaining core-dependent checks and a typed-stage receipt are not established. Issues #65 and #56 remain open, and PR #58 remains draft and unmerged.
 
+### M4.8 completion checkpoint: first-party core authority
+
+This proposed checkpoint follows the partial publication at `4f5de4bc153979949282953aad66a552fc700993`. The U1 through U4 approval still covers the agreed independent checks and Result-use procedure. It did not select a production authority source. [RFC 0002's first-party authority proposal](rfcs/0002-modules-and-program-loading.md#proposed-first-party-core-authority-for-m48-completion) owns the new procedure. All other M4.8 rule owners and their scope remain as pinned above.
+
+| Decision for approval | Implementation and verification |
+| --- | --- |
+| A1. First-party pins are the authority. | The toolchain pins exact first-party source bytes and inventories for its target/options profiles. Its installed loader attaches private evidence only to the capture it validated. Prove that the ordinary loader cannot admit anything, even with copies of installed bytes. Test changed bytes, foreign graphs, unsupported profiles and bounded loading. |
+| A2. Pin actual implementations, not declarations standing in for providers. | Ship the production core sources and any required compiler-owned or delivered native implementations together with their exact coverage. Validate roles, provider identities, protected winners and prohibitions, and representations separately. Keep an unavailable native prerequisite pending rather than treating a static signature as an implementation. No product execution or ABI acceptance is added. |
+| A3. Check the real capture through the shared checker. | Use a production-path toolchain capture and the existing `analyze_typed` interface for positive and negative cases. Implement source-level Result-use witnesses under U2. Exercise the planned U3/U4 cases, all loaded roots in both modes, and invalid, rejected, incomplete, exhausted and successful typed outcomes. Require a positive typed receipt as well as negative tests. Run the four mise gates and independent Standards and Spec reviews before publishing. |
+
+The authority proposal and its planned checks are NotChecked. Get independent design reviews and owner approval of the exact A1 through A3 revision before implementing the new authority or provider mechanism. Work already approved under U1 through U4 can continue without it. Keep #65 and #56 open and PR #58 draft until the owner decides otherwise.
+
 ## Completion record
 
 The following M1 statement belongs to the original planning baseline. M1/M2 later merged as recorded above; M3 evidence is separate.
