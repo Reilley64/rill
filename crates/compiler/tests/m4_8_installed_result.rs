@@ -603,6 +603,36 @@ fn installed_error_rendering_uses_the_checked_display_requirement() {
                         "rill_error_storage::Cause::cause"
                     ]
                 );
+                let role = report.result_role().unwrap();
+                let observers = [role.origin.unwrap(), role.observe_cause.unwrap()];
+                for observer in observers {
+                    let implementations = graph
+                        .implementations()
+                        .iter()
+                        .filter(|entry| entry.family == observer.id);
+                    for implementation in implementations {
+                        let owner = graph
+                            .modules()
+                            .iter()
+                            .find(|module| module.key == implementation.declaration.module)
+                            .unwrap();
+                        assert!(
+                            report
+                                .bodies()
+                                .body(
+                                    owner,
+                                    compiler::analysis::scalars::BodyOwner::Declaration(
+                                        &implementation.declaration
+                                    )
+                                )
+                                .unwrap()
+                                .is_some(),
+                            "{} in {}",
+                            observer.name.as_deref().unwrap(),
+                            owner.key.path
+                        );
+                    }
+                }
                 let app = graph
                     .modules()
                     .iter()

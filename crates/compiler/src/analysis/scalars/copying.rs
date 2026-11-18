@@ -1,12 +1,15 @@
 //! Negative implicit-copy evidence from actual source components.
 use super::*;
-use crate::analysis::typed::{OwnershipCoverage, OwnershipProtection, OwnershipRule};
+use crate::analysis::typed::{
+    ErrorRepresentation, OwnershipCoverage, OwnershipProtection, OwnershipRule,
+};
 
 #[derive(Clone, Copy)]
 pub(super) struct Inputs<'r, 'g> {
     inventory: &'r ordinary::OrdinaryAnalysis<'g>,
     native: &'r [OwnershipProtection<'g>],
     collections: crate::analysis::typed::CollectionCore<'g>,
+    error: Option<ErrorRepresentation<'g>>,
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
@@ -15,6 +18,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             inventory: self.input.ordinary.filter(|_| self.integrated)?,
             native: self.native_ownership,
             collections: self.collections,
+            error: self.result.and_then(|role| role.representation),
         })
     }
 }
@@ -98,6 +102,12 @@ fn classify<'g>(
             arguments: types,
         } => {
             elab.step(2)?;
+            if inputs.error.is_some_and(|repr| {
+                repr.cause.id == **declaration || repr.wrapper.id == **declaration
+            }) {
+                // These owners carry an uncopyable retained chain, not the source seal.
+                return Ok(Some(false));
+            }
             let Some(facts) = inputs.inventory.type_facts().declarations.get(declaration) else {
                 return Ok(None);
             };
