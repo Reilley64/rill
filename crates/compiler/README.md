@@ -237,3 +237,20 @@ M3 supplies no canonical role and protection catalogue. The report keeps those o
 The checker keeps independent output determination separate from a request to prove a particular result. It does not try another ordinary body when selected evidence fails. A repeated active goal stays unresolved; exhaustion on a growing type is a resource limit. Neither is proof of absence.
 
 The [M4.6 verification record](tests/m4-6-acceptance.md) identifies the reviewed and tested revisions and the limits of the slice. Core role and protection admission still belong to M4.8. These facts grant no ownership or execution permission.
+
+## M4.7 conversion analysis
+
+`analysis::conversions::analyze_conversions` uses the retained ordinary inventory and explicitly designated standard export bindings. The bindings name hypotheses, not trusted providers. Fallible analysis also requires a captured Result export. The report validates the signatures and keeps conversion pair keys and endpoint placement separate from ordinary overloads.
+
+| Query | Facts |
+| --- | --- |
+| `family`, `type_facts`, `header_metadata` | Registration keys, source routes, signature and protection issues, and structural routes to determine the error type. |
+| `query_pair` | A separately limited query over established types from the same capture. It reports candidate applicability, pair comparisons, the conditional winner and its signature, required providers, and exact error agreement. The error demand does not select a body. |
+| `bodies` | Uses the shared typed checker to inspect written bodies, including unused conversion implementations. Query `conversion_use` for original calls and contextual function values, and `goal` for their issued evidence. |
+| `conditional_conversion_node` | Provisional typing facts after a selected conversion output supplies an exact equation. The ordinary node query does not expose these facts as unconditional. |
+
+The destination is exact. Only a written fixed outer source can admit a variant, a shared variant reference, or a permitted weaker callable mode. A variable at the source remains exact even if the destination bound it. An explicit source filter compares against the declared receiving type. It does not retag the actual source.
+
+A proved false requirement can exclude a conversion candidate. Pending requirements block only if they can affect selection. A selected error or a frozen exact relation can feed a waiting equation, but a different expected error does not restart selection. Ordinary selection and its no-fallback rule remain separate.
+
+The [M4.7 verification record](tests/m4-7-acceptance.md) lists the tests, review findings and exact revisions. Hypothetical outcomes establish no core admission, checked conversion, or permission. M4.8 owns actual admission and integrated typing.

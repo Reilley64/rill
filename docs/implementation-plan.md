@@ -926,7 +926,13 @@ Standards and Spec reviewed `e0142f5c9da9bbc5258ed48168675f5b08f7b4e5` against `
 | Standards | Pin the companion revision and review scope. Correct the missing-target diagnostic in C5, split long RFC paragraphs, and give established-pair requests their own analysis limits. |
 | Spec | Distinguish a missing provider from a specified numeric gap. Check filter equivalence per candidate, not over the union. Feed a determined E into the waiting caller and require separate symbolic output evidence. Leave admission at a destination-bound variable as a choice for the owner in V2. |
 
-The corrected checkpoint is checked locally, not independently re-reviewed. Formal ASD-STE100 vocabulary compliance is unverified. No model, compiler check or Rill execution validates this proposed procedure yet.
+The corrected checkpoint was checked locally, not independently re-reviewed. At checkpoint publication, no model or compiler work had started. Formal ASD-STE100 vocabulary compliance is unverified.
+
+### M4.7 implementation acceptance
+
+The owner [approved V1 through V4](https://github.com/Reilley64/rill/issues/64#issuecomment-6967953617) at `f0b261a887dec3bf6252c40da928335e29bfc602` before model or compiler work. The approval includes V2's exact source capture for destination-bound variables. It does not approve core admission or authorize a merge.
+
+[The acceptance record](../crates/compiler/tests/m4-7-acceptance.md) lists the bounded model and public tests, the independent Standards and Spec findings, and the locally verified corrections. M4.7 leaves actual core admission and integrated typed-stage completion to M4.8. PR #58 remains draft.
 
 ## Completion record
 
