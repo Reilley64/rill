@@ -16,6 +16,12 @@ fn active_disposer_cleans_only_remaining_fields() {
                 let mut current = old;
                 current = incoming;
             }
+            function replaceField(value: Bag): void {
+                let mut local = value;
+                local.tail = "new";
+            }
+            function pass(value: Bag): Bag { return value; }
+            function cleanResult(value: Bag): void { let _ = pass(value); }
             function liveFieldLoan(value: Bag, seed: &string): &string {
                 let mut view = seed;
                 if (true) {
@@ -31,6 +37,14 @@ fn active_disposer_cleans_only_remaining_fields() {
                 if (active.flag) { let saved = active.first; return; }
             }
             function split(value: Split): void { }
+
+            type Ordered = { text: string; }
+            implement release(value: Ordered): void {
+                if (true) { let inner = value; }
+                let marker = "later";
+                dispose(marker);
+            }
+            function ordered(value: Ordered): void { }
 
             type Escape = { text: string; }
             function take(value: Escape): void { }
@@ -156,6 +170,53 @@ fn active_disposer_cleans_only_remaining_fields() {
                 matches!(path_drops(active, no).as_slice(), [Obligation::Drop(rest), Obligation::Drop(first)]
                 if rest.field.and_then(|f| f.name.as_deref()) == Some("rest")
                     && first.field.and_then(|f| f.name.as_deref()) == Some("first"))
+            );
+
+            let ordered = lower("ordered");
+            let ordered = ordered.mir().expect("ordered outer disposer");
+            let retire = path_drops(ordered, ordered.entry);
+            let [Obligation::InvokeDisposer { implementation, .. }] = retire.as_slice() else {
+                panic!("expected one outer action: {retire:?}");
+            };
+            let active = ordered.disposer(implementation).unwrap();
+            let deferred = active.blocks.iter().position(|b| matches!(&b.operation, Operation::Cleanup(actions)
+                if actions.iter().any(|a| matches!(a, Obligation::DeferDisposerFields { from, .. } if from.root.span.bytes() == b"inner")))).expect("transfer the inner alias's remaining fields to the epilogue");
+            let explicit = active
+                .blocks
+                .iter()
+                .position(|b| {
+                    matches!(b.operation, Operation::Dispose { operand, .. }
+                if operand.root.span.bytes() == b"marker")
+                })
+                .expect("later explicit disposal");
+            let remaining = active.blocks.iter().position(|b| matches!(&b.operation, Operation::Cleanup(actions)
+                if actions.iter().any(|a| matches!(a, Obligation::Drop(place) if place.field.is_some_and(|f| f.name.as_deref() == Some("text")))))).expect("remaining field cleanup");
+            assert!(
+                deferred < explicit && explicit < remaining,
+                "retiring the inner alias must not drop fields before the disposer ends"
+            );
+
+            let field = lower("replaceField");
+            let field = field
+                .mir()
+                .expect("ordinary custom record's field replacement");
+            assert!(
+                matches!(path_drops(field, field.entry).as_slice(), [Obligation::Drop(old), Obligation::InvokeDisposer { .. }]
+                if old.field.is_some_and(|f| f.name.as_deref() == Some("tail")))
+            );
+            let result = lower("cleanResult");
+            let result = result
+                .mir()
+                .expect("cleanup after a checked record-valued call");
+            assert!(
+                result
+                    .blocks
+                    .iter()
+                    .any(|b| matches!(b.operation, Operation::Call(_)))
+            );
+            assert!(
+                matches!(path_drops(result, result.entry).as_slice(), [Obligation::InvokeDisposer { implementation, .. }]
+                if result.disposer(implementation).is_some())
             );
 
             let protected = lower("protectedCleanup");

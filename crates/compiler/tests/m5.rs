@@ -485,12 +485,14 @@ fn path_drops<'g>(mir: &Mir<'g>, mut block: usize) -> Vec<Obligation<'g>> {
                 closure: *closure,
                 field: *field,
             }),
-            Operation::Cleanup(obligations) => drops.extend(
-                obligations
-                    .iter()
-                    .copied()
-                    .filter(|op| !matches!(op, Obligation::EndStorage(_))),
-            ),
+            Operation::Cleanup(obligations) => {
+                drops.extend(obligations.iter().copied().filter(|op| {
+                    !matches!(
+                        op,
+                        Obligation::EndStorage(_) | Obligation::DeferDisposerFields { .. }
+                    )
+                }))
+            }
             _ => {}
         }
         match step.terminator {

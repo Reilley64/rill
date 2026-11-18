@@ -252,7 +252,7 @@ fn require_initialized(
     Ok(())
 }
 
-fn active_disposer(state: &State) -> Option<NodeId> {
+fn disposal_origin(state: &State) -> Option<NodeId> {
     match state {
         State::Initialized(held) => held.disposal_started_at,
         _ => None,
@@ -260,7 +260,7 @@ fn active_disposer(state: &State) -> Option<NodeId> {
 }
 
 fn forbid_active_escape(state: &State, site: NodeId) -> ResultOf<()> {
-    if let Some(related) = active_disposer(state) {
+    if let Some(related) = disposal_origin(state) {
         return Err(Stop::Rejected {
             site,
             related,
@@ -270,6 +270,12 @@ fn forbid_active_escape(state: &State, site: NodeId) -> ResultOf<()> {
     Ok(())
 }
 
+fn owed_disposer<'g>(local: Local<'g>, state: &State) -> Option<&'g DeclarationId> {
+    local
+        .custom_disposer
+        .filter(|_| disposal_origin(state).is_none())
+}
+
 fn forbid_custom_partial(
     slots: &[Local<'_>],
     state: &[State],
@@ -277,10 +283,7 @@ fn forbid_custom_partial(
     node: NodeId,
 ) -> ResultOf<()> {
     let owner = slots[slot].owner;
-    if owner != slot
-        && slots[owner].custom_disposer.is_some()
-        && active_disposer(&state[owner]).is_none()
-    {
+    if owner != slot && owed_disposer(slots[owner], &state[owner]).is_some() {
         return Err(Stop::Rejected {
             site: node,
             related: slots[owner].node,
@@ -312,8 +315,8 @@ fn cleanup_operation<'g>(module: &'g Module, local: Local<'g>, state: State) -> 
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
         Cleanup::EndStorage(_) => Operation::None,
-        Cleanup::InvokeDisposer { .. } => {
-            unreachable!("local storage cleanup cannot invoke an outer disposer")
+        Cleanup::InvokeDisposer { .. } | Cleanup::DeferDisposerFields { .. } => {
+            unreachable!("local storage cleanup cannot transfer disposer obligations")
         }
     }
 }
@@ -324,7 +327,7 @@ fn cleanup_boundary<'g>(
     state: &mut [State],
     scope: &[Slot],
     live: &BTreeSet<Slot>,
-    node: NodeId,
+    (node, remainder): (NodeId, Option<Slot>),
     budget: &mut Budget,
 ) -> ResultOf<Operation<'g>> {
     budget.reserve(3 * scope.len())?;
@@ -386,9 +389,28 @@ fn cleanup_boundary<'g>(
             Ok(())
         })?;
         scheduled += 1;
-        if let Some(implementation) = slots[slot].custom_disposer
-            && active_disposer(&state[slot]).is_none()
+        if disposal_origin(&state[slot]).is_some()
+            && let Some(remainder) = remainder.filter(|&remainder| remainder != slot)
         {
+            // This lexical alias ends before the outer disposer has returned.
+            // Its source-level storage still goes out of scope. Keep only the
+            // compiler's remaining cleanup responsibility for the epilogue.
+            if !matches!(state[remainder], State::Vacant) {
+                return Err(Stop::Pending(node));
+            }
+            let storage = slots[slot].storage(slot);
+            budget.step(storage.len())?;
+            for member in storage {
+                state[remainder + (member - slot)] =
+                    std::mem::replace(&mut state[member], State::Vacant);
+            }
+            actions.push(Cleanup::DeferDisposerFields {
+                from: slots[slot].place(module),
+                into: slots[remainder].place(module),
+            });
+            continue;
+        }
+        if let Some(implementation) = owed_disposer(slots[slot], &state[slot]) {
             require_initialized(slots, state, slot, node, budget)?;
             // The selected body owns the record and runs its remaining-field
             // cleanup. This boundary must not repeat it.
@@ -465,7 +487,7 @@ pub(super) fn run<'g>(
     build: Build<'_, 'g>,
     entry: Pc,
     params: &[Slot],
-    active: Option<Slot>,
+    active: Option<DisposerFrame>,
 ) -> ResultOf<Mir<'g>> {
     let Build {
         module,
@@ -512,12 +534,13 @@ pub(super) fn run<'g>(
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
     }
-    if let Some(slot) = active {
-        state[slot] = State::Initialized(Held {
-            disposal_started_at: Some(slots[slot].node),
+    if let Some(frame) = active {
+        state[frame.operand] = State::Initialized(Held {
+            disposal_started_at: Some(slots[frame.operand].node),
             ..Held::default()
         });
     }
+    let remainder = active.map(|frame| frame.remainder);
     let entry = add(entry, state, &mut known, &mut pending, budget)?;
     let mut blocked = None;
     while blocks.len() < pending.len() {
@@ -754,6 +777,9 @@ pub(super) fn run<'g>(
                         state[storage].fill(State::Vacant);
                     }
                     if let Some(into) = call.into {
+                        let storage = slots[into].storage(into);
+                        budget.step(storage.len())?;
+                        state[storage].fill(State::Initialized(empty.clone()));
                         state[into] = State::Initialized(Held {
                             loans: loan_set(retained, budget)?,
                             ..Held::default()
@@ -796,26 +822,23 @@ pub(super) fn run<'g>(
                         operand: local(slot),
                     }
                 }
-                Action::Displace { target, .. }
-                    if slots[target].fields > 0 || slots[target].custom_disposer.is_some() =>
-                {
+                Action::Displace { target, .. } if slots[target].needs_boundary_cleanup() => {
+                    if disposal_origin(&state[target]).is_some() {
+                        return Err(Stop::Pending(node));
+                    }
                     cleanup_boundary(
                         module,
                         &slots,
                         &mut state,
                         &[target],
                         &live[pc],
-                        node,
+                        (node, remainder),
                         budget,
                     )?
                 }
                 Action::Displace { target, .. } => {
                     let owner = slots[target].owner;
-                    if owner != target
-                        && (slots[owner].custom_disposer.is_some()
-                            && active_disposer(&state[owner]).is_none()
-                            || !matches!(state[owner], State::Initialized(_)))
-                    {
+                    if owner != target && !matches!(state[owner], State::Initialized(_)) {
                         return Err(Stop::Pending(node));
                     }
                     conflict(
@@ -883,7 +906,7 @@ pub(super) fn run<'g>(
                     &mut state,
                     &cleanups[index],
                     &live[pc],
-                    node,
+                    (node, remainder),
                     budget,
                 )?,
                 Action::End(slot) => {

@@ -39,7 +39,7 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(slot)
     }
 
-    fn slot(&mut self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<Slot> {
+    pub(super) fn slot(&mut self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<Slot> {
         let slot = self.slots.len();
         let (moves, drops, fields, custom_disposer) = match ty {
             TypeTerm::Primitive(_) => {
@@ -370,7 +370,7 @@ impl<'a, 'g> Build<'a, 'g> {
     ) -> ResultOf<Pc> {
         let ty = self.value(value)?.ty.clone();
         let slot = self.slot(value, &ty)?;
-        let end = if self.slots[slot].fields > 0 || self.slots[slot].custom_disposer.is_some() {
+        let end = if self.slots[slot].needs_boundary_cleanup() {
             self.cleanup(statement, &[slot], next)?
         } else {
             self.emit(statement, Action::End(slot), Edges::Next(next))?
@@ -564,10 +564,23 @@ impl<'a, 'g> Build<'a, 'g> {
         if call.callee.kind != DeclarationKind::Function
             || call.callee.module.origin != Origin::Application
             || !call.substitution.is_empty()
-            || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(_))
-                && !primitive_reference(&facts.ty)
+            || !matches!(
+                facts.ty.as_ref(),
+                TypeTerm::Primitive(_) | TypeTerm::Nominal { .. }
+            ) && !primitive_reference(&facts.ty)
         {
             return Err(Stop::Pending(node));
+        }
+        if matches!(facts.ty.as_ref(), TypeTerm::Nominal { .. }) {
+            // Return loans for record-valued results need their own routes.
+            // Admit only the flat borrow-free record storage in this slice.
+            let output = into.ok_or(Stop::Pending(node))?;
+            for member in self.slots[output].storage(output).skip(1) {
+                self.budget.step(1)?;
+                if self.slots[member].reference_field {
+                    return Err(Stop::Pending(node));
+                }
+            }
         }
         self.budget.reserve(1 + call.arguments.len())?;
         let mut args = Vec::with_capacity(call.arguments.len());

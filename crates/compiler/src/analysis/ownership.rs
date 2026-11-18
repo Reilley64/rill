@@ -85,7 +85,7 @@ pub struct Mir<'g> {
 }
 
 impl<'g> Mir<'g> {
-    /// A checked active disposer reached from this query's entry body.
+    /// On the root MIR, look up an active disposer reached by this query.
     pub fn disposer(&self, implementation: &DeclarationId) -> Option<&Mir<'g>> {
         self.disposer_bodies.get(implementation)
     }
@@ -162,6 +162,11 @@ pub enum Cleanup<'g> {
     InvokeDisposer {
         operand: Place<'g>,
         implementation: &'g DeclarationId,
+    },
+    /// Transfer the initialized remainder to the active disposer's epilogue.
+    DeferDisposerFields {
+        from: Place<'g>,
+        into: Place<'g>,
     },
 }
 
@@ -250,14 +255,14 @@ fn checked_graph<'g>(
     budget: &mut Budget,
 ) -> Result<Mir<'g>, (&'g Module, Stop)> {
     let reached = |mir: &Mir<'g>,
-                   pending: &mut VecDeque<(&'g Module, &'g DeclarationId)>,
+                   pending: &mut VecDeque<(&'g Module, &'g DeclarationId, bool)>,
                    seen: &mut BTreeSet<&'g DeclarationId>,
                    budget: &mut Budget|
      -> ResultOf<()> {
         for block in &mir.blocks {
             budget.step(1)?;
             let call = match block.operation {
-                Operation::Call(callee) => Some(callee),
+                Operation::Call(callee) => Some((callee, false)),
                 _ => None,
             };
             let cleanup = match &block.operation {
@@ -265,12 +270,14 @@ fn checked_graph<'g>(
                 _ => &[],
             };
             budget.step(cleanup.len())?;
-            for callee in call
-                .into_iter()
-                .chain(cleanup.iter().filter_map(|action| match action {
-                    Cleanup::InvokeDisposer { implementation, .. } => Some(*implementation),
-                    _ => None,
-                }))
+            for (callee, is_disposer) in
+                call.into_iter()
+                    .chain(cleanup.iter().filter_map(|action| match action {
+                        Cleanup::InvokeDisposer { implementation, .. } => {
+                            Some((*implementation, true))
+                        }
+                        _ => None,
+                    }))
             {
                 if seen.contains(callee) {
                     continue;
@@ -286,7 +293,7 @@ fn checked_graph<'g>(
                 let target = target.ok_or(Stop::Pending(block.site.node))?;
                 budget.reserve(2)?;
                 seen.insert(callee);
-                pending.push_back((target, callee));
+                pending.push_back((target, callee, is_disposer));
             }
         }
         Ok(())
@@ -295,17 +302,16 @@ fn checked_graph<'g>(
     budget.reserve(1).map_err(|()| (module, Stop::Limit))?;
     let mut seen = BTreeSet::from([&header.declaration.id]);
     let mut pending = VecDeque::new();
-    let mut root = lower(typed, module, header, budget).map_err(|stop| (module, stop))?;
+    let mut root = lower(typed, module, header, false, budget).map_err(|stop| (module, stop))?;
     reached(&root, &mut pending, &mut seen, budget).map_err(|stop| (module, stop))?;
-    while let Some((target, id)) = pending.pop_front() {
+    while let Some((target, id, is_disposer)) = pending.pop_front() {
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
         let missing = (module, Stop::Pending(header.declaration.node));
-        let is_disposer = id.kind == DeclarationKind::Implementation;
         let selected = if is_disposer {
             let family = typed
                 .dispose_role()
                 .and_then(|role| typed.inventory().captured_family(&role.id))
-                .ok_or_else(|| (module, Stop::Pending(header.declaration.node)))?;
+                .ok_or((module, Stop::Pending(header.declaration.node)))?;
             budget
                 .step(family.implementations.len())
                 .map_err(|()| (target, Stop::Limit))?;
@@ -318,7 +324,8 @@ fn checked_graph<'g>(
             typed.inventory().type_facts().declarations.get(id)
         }
         .ok_or(missing)?;
-        let mir = lower(typed, target, selected, budget).map_err(|stop| (target, stop))?;
+        let mir =
+            lower(typed, target, selected, is_disposer, budget).map_err(|stop| (target, stop))?;
         reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
         if is_disposer {
             budget.reserve(1).map_err(|()| (target, Stop::Limit))?;
@@ -332,6 +339,7 @@ fn lower<'g>(
     typed: &TypedReport<'g>,
     module: &'g Module,
     header: &DeclarationFacts<'g>,
+    start_disposer: bool,
     budget: &mut Budget,
 ) -> ResultOf<Mir<'g>> {
     let entry_site = header.declaration.node;
@@ -373,18 +381,26 @@ fn lower<'g>(
         )?;
         params.push(slot);
     }
-    let active = if header.declaration.id.kind == DeclarationKind::Implementation {
-        let [slot] = params.as_slice() else {
+    let active = if start_disposer {
+        let ([slot], [parameter]) = (params.as_slice(), parameters.as_slice()) else {
             return Err(Stop::Pending(entry_site));
         };
         if build.slots[*slot].custom_disposer != Some(&header.declaration.id) {
             return Err(Stop::Pending(entry_site));
         }
-        Some(*slot)
+        let remainder = build.slot(body, &parameter.ty)?;
+        Some(DisposerFrame {
+            operand: *slot,
+            remainder,
+        })
     } else {
         None
     };
     let end = build.emit(body, Action::None, Edges::End)?;
+    let end = match active {
+        Some(frame) => build.cleanup(body, &[frame.remainder], end)?,
+        None => end,
+    };
     let finish = build.cleanup(body, &params, end)?;
     let entry = build.statement(
         body,
@@ -425,6 +441,12 @@ type Slot = usize;
 type Pc = usize;
 
 #[derive(Clone, Copy)]
+struct DisposerFrame {
+    operand: Slot,
+    remainder: Slot,
+}
+
+#[derive(Clone, Copy)]
 struct Local<'g> {
     node: NodeId,
     owner: Slot,
@@ -439,6 +461,10 @@ struct Local<'g> {
 impl<'g> Local<'g> {
     fn storage(self, slot: Slot) -> Range<Slot> {
         slot..slot + 1 + self.fields
+    }
+
+    fn needs_boundary_cleanup(self) -> bool {
+        self.fields > 0 || self.custom_disposer.is_some()
     }
 
     fn carried_loan_root(self, slot: Slot) -> Slot {
