@@ -123,3 +123,21 @@ The locally verified correction is `c5703e7ee78c74ca584a6d79fe5c915c7e318de5`. I
 | LLVM-free compiler dependency tree and diff | Passed. The compiler depends only on the linked collection crate. |
 
 A2 still needs closed role, provider, protection and representation inventories. A3 still needs a complete staged distribution and positive typed-stage receipts in both modes. No Rill execution, ownership permission, native ABI acceptance, hosted result, full M4 acceptance or RFC status change follows from these checks.
+
+## Production-layout probe
+
+The [staging command](../../../docs/development.md#future-installed-toolchain) builds `bin/rill`, its sibling Rust runner and the ownership archive in one locked build. It installs the pinned sources, the built archive and the error-storage source. From a separate working directory, `rill --version` prints `0.1.0-dev`. The runner loads [`main.rill`](../../../tests/installed/typed/main.rill) in both modes on macOS AArch64 with empty options. The probe exercises List construction and indexing, iteration, conversion and formatting, Shared retain, Err wrapping and rendering, startup, and imported expectations.
+
+Additional installed tests check closed Err construction and propagating pipes, borrowed error observation, primitive providers, the numeric and text/byte conversion pairs, and user-defined iterator selection. The Result-use tests check original occurrences through guard commitment, projections, calls, List storage and early exits. For a known owned List traversal, breaking or returning leaves an unyielded Result at the exit; a fully drained traversal does not. An unknown generic value is not evidence for a discard or for absence.
+
+| Check at `6382b4483beb29604b96e8855a103e60206cb1f5` | Local result |
+| --- | --- |
+| `mise run test:compiler` | 416 passed. |
+| `mise run test` | 432 passed. |
+| `mise run check` and `mise run build:scaffold` | Passed. |
+| Python models | 55 passed. |
+| Staged normal mode and test mode | Both reported `Incomplete`. No typed-stage receipt; the runner exited 1. |
+
+The staged report has no scalar body findings or obligations. Result-use checking still has unresolved containment and call boundaries in loaded standard-library roots, including generic callbacks, retained causes in `intoValue`, and the native release bridges. List and iterator copy/dispose contracts and closed core inventories are still incomplete. These checks do not establish ownership, execution, ABI compatibility or hosted acceptance.
+
+This revision is locally verified but has not had an independent Standards or Spec review of the combined changes. The binary diff from `2f3c63d39865b868e92fc89f561f2aa95ef49eb5` has SHA-256 `7368b0a8b95440569f9e4cc2d1969c4be82f1c2164509c999e3e2e066b8ef69e`.
