@@ -173,20 +173,28 @@ fn initialized(state: &State, site: NodeId) -> ResultOf<&Held> {
     }
 }
 
-fn cleanup_operation(module: &Module, local: Local, state: State) -> Operation<'_> {
-    let State::Initialized(held) = state else {
-        return Operation::None;
-    };
+fn cleanup_of<'g>(module: &'g Module, local: Local, held: &Held) -> Cleanup<'g> {
     let place = site_at(module, local.node);
     if let Some(field) = held.capture_drop {
-        Operation::DropCapture {
+        Cleanup::DropCapture {
             closure: place,
             field: site_at(module, field),
         }
     } else if local.drops {
-        Operation::Drop(place)
+        Cleanup::Drop(place)
     } else {
-        Operation::None
+        Cleanup::EndStorage(place)
+    }
+}
+
+fn cleanup_operation(module: &Module, local: Local, state: State) -> Operation<'_> {
+    let State::Initialized(held) = state else {
+        return Operation::None;
+    };
+    match cleanup_of(module, local, &held) {
+        Cleanup::Drop(place) => Operation::Drop(place),
+        Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
+        Cleanup::EndStorage(_) => Operation::None,
     }
 }
 
@@ -255,17 +263,7 @@ fn cleanup_boundary<'g>(
                 }
             }
         }
-        let place = site_at(module, slots[slot].node);
-        actions.push(if let Some(field) = held.capture_drop {
-            Cleanup::DropCapture {
-                closure: place,
-                field: site_at(module, field),
-            }
-        } else if slots[slot].drops {
-            Cleanup::Drop(place)
-        } else {
-            Cleanup::EndStorage(place)
-        });
+        actions.push(cleanup_of(module, slots[slot], &held));
     }
     if actions.len() != remaining {
         let slot = scope
@@ -598,6 +596,9 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 }
             }
         };
+        if matches!(edges, Edges::Branch { .. }) {
+            budget.reserve(state.len())?;
+        }
         let mut successor = |pc, state| add(pc, state, &mut known, &mut pending, budget);
         let terminator = match edges {
             Edges::Next(next) => Terminator::Goto(successor(next, state)?),

@@ -1,7 +1,10 @@
 //! Source → installed typed receipt → ownership judgments and cleanup MIR.
+// The installed M4 profile that can issue a receipt is macOS AArch64.
+#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
+
 use compiler::analysis::AnalysisLimits;
 use compiler::analysis::ownership::{
-    Cleanup as Obligation, Completion, Operation, Terminator, lower_body,
+    Cleanup as Obligation, Completion, Mir, Operation, Terminator, lower_body,
 };
 use compiler::analysis::typed::analyze_typed;
 use compiler::loader::{self, InstalledRequest, Origin};
@@ -247,51 +250,28 @@ fn ownership_from_installed_source() {
             );
             let mir = split.mir().unwrap_or_else(|| panic!("{split:?}"));
             let mut block = mir.entry;
-            let (taken, not_taken) = loop {
-                match mir.blocks[block].terminator {
-                    Terminator::Goto(next) => block = next,
-                    Terminator::Branch { yes, no } => break (yes, no),
+            let (taken, not_taken) = (0..mir.blocks.len())
+                .find_map(|_| match mir.blocks[block].terminator {
+                    Terminator::Goto(next) => {
+                        block = next;
+                        None
+                    }
+                    Terminator::Branch { yes, no } => Some((yes, no)),
                     other => panic!("expected a branch, found {other:?}"),
-                }
-            };
-            let drops = |mir: &compiler::analysis::ownership::Mir<'_>, mut block: usize| {
-                let mut drops = Vec::new();
-                loop {
-                    let step = &mir.blocks[block];
-                    match &step.operation {
-                        Operation::Drop(local) => drops.push(local.span.bytes()),
-                        Operation::ScopeExit(obligations) => {
-                            drops.extend(obligations.iter().filter_map(|cleanup| {
-                                if let Obligation::Drop(local) = cleanup {
-                                    Some(local.span.bytes())
-                                } else {
-                                    None
-                                }
-                            }))
-                        }
-                        _ => {}
-                    }
-                    match step.terminator {
-                        Terminator::Goto(next) => block = next,
-                        Terminator::Return => {
-                            return drops
-                                .into_iter()
-                                .map(|bytes| bytes.to_vec())
-                                .collect::<Vec<_>>();
-                        }
-                        other => panic!("unexpected {other:?}"),
-                    }
-                }
-            };
-            assert_eq!(drops(mir, taken), [b"taken".as_slice()]);
-            assert_eq!(drops(mir, not_taken), [b"text: string".as_slice()]);
+                })
+                .expect("expected a reachable branch");
+            assert!(
+                matches!(path_drops(mir, taken).as_slice(), [Obligation::Drop(taken)] if taken.span.bytes() == b"taken")
+            );
+            assert!(
+                matches!(path_drops(mir, not_taken).as_slice(), [Obligation::Drop(text)] if text.span.bytes() == b"text: string")
+            );
             let leave = lower("leave");
             let mir = leave
                 .mir()
                 .unwrap_or_else(|| panic!("{:?}", leave.completion()));
-            assert_eq!(
-                drops(mir, mir.entry),
-                [b"second".as_slice(), b"first".as_slice()]
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(second), Obligation::Drop(first)] if second.span.bytes() == b"second" && first.span.bytes() == b"first")
             );
             let restore = lower("restore");
             let mir = restore
@@ -302,17 +282,18 @@ fn ownership_from_installed_source() {
                     |(i, block)| matches!(block.terminator, Terminator::Goto(next) if next < i)
                 )
             );
-            for block in &mir.blocks {
-                if matches!(block.operation, Operation::Drop(place) if place.span.bytes() == b"state")
-                {
-                    let Terminator::Goto(next) = block.terminator else {
-                        panic!("drop must continue to install");
-                    };
-                    assert!(
-                        matches!(mir.blocks[next].operation, Operation::Install { target, .. } if target.span.bytes() == b"state")
-                    );
-                }
-            }
+            let drops: Vec<_> = mir.blocks.iter().filter(|b| matches!(b.operation, Operation::Drop(place) if place.span.bytes() == b"state")).collect();
+            assert_eq!(
+                drops.len(),
+                1,
+                "replace the initialized state after exiting the loop"
+            );
+            let Terminator::Goto(next) = drops[0].terminator else {
+                panic!("drop must continue to install");
+            };
+            assert!(
+                matches!(mir.blocks[next].operation, Operation::Install { target, .. } if target.span.bytes() == b"state")
+            );
 
             let ordered = lower("ordered");
             let mir = ordered
@@ -337,21 +318,14 @@ fn ownership_from_installed_source() {
 
             let returned = lower("moved");
             let mir = returned.mir().unwrap();
-            assert!(
-                !mir.blocks
-                    .iter()
-                    .any(|b| matches!(b.operation, Operation::Drop(_)))
-            );
+            assert!(path_drops(mir, mir.entry).is_empty());
 
             let captured = lower("ownedCapture");
             let mir = captured
                 .mir()
                 .unwrap_or_else(|| panic!("{:?}", captured.completion()));
-            assert!(mir.blocks.iter().any(|block| matches!(&block.operation, Operation::ScopeExit(order) if order.iter().any(|cleanup| matches!(cleanup, Obligation::DropCapture { closure, .. } if closure.span.bytes() == b"job")))));
             assert!(
-                !mir.blocks
-                    .iter()
-                    .any(|b| matches!(b.operation, Operation::Drop(_)))
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropCapture { closure, field }] if closure.span.bytes() == b"job" && field.span.bytes() == b"text")
             );
             for name in [
                 "lastUse",
@@ -394,6 +368,33 @@ fn ownership_from_installed_source() {
             }
         }
     });
+}
+
+fn path_drops<'g>(mir: &Mir<'g>, mut block: usize) -> Vec<Obligation<'g>> {
+    let mut drops = Vec::new();
+    for _ in 0..mir.blocks.len() {
+        let step = &mir.blocks[block];
+        match &step.operation {
+            Operation::Drop(local) => drops.push(Obligation::Drop(*local)),
+            Operation::DropCapture { closure, field } => drops.push(Obligation::DropCapture {
+                closure: *closure,
+                field: *field,
+            }),
+            Operation::ScopeExit(obligations) => drops.extend(
+                obligations
+                    .iter()
+                    .copied()
+                    .filter(|op| !matches!(op, Obligation::EndStorage(_))),
+            ),
+            _ => {}
+        }
+        match step.terminator {
+            Terminator::Goto(next) => block = next,
+            Terminator::Return => return drops,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    panic!("cleanup path did not reach its return");
 }
 
 fn installed(check: impl FnOnce(InstalledRequest)) {

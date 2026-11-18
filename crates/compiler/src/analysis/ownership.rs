@@ -132,7 +132,7 @@ pub enum Operation<'g> {
     ScopeExit(Vec<Cleanup<'g>>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Cleanup<'g> {
     EndStorage(Site<'g>),
     Drop(Site<'g>),
