@@ -200,7 +200,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         });
         Ok(())
     }
-    fn block_pattern_names(
+    pub(super) fn block_pattern_names(
         &mut self,
         module: &'g Module,
         pattern: NodeId,

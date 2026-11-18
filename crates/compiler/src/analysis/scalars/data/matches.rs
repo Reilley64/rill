@@ -359,6 +359,28 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         Ok(())
     }
+    fn check_arm_source(
+        &mut self,
+        module: &'g Module,
+        arm: NodeId,
+        expected: Option<Type<'g>>,
+        scope: &mut Context<'r, 'g>,
+    ) -> Work<()> {
+        let children = &module.syntax.nodes[arm].children;
+        if children.len() == 3 {
+            let guard = module.syntax.nodes[children[1]].children[0];
+            let boolean = self.primitive("bool")?;
+            self.expression(module, guard, Some(boolean), scope)?;
+        }
+        let body = *children.last().unwrap();
+        if module.syntax.nodes[body].kind == NodeKind::Block {
+            self.statement(module, body, self.data_depth + 1, scope)?;
+        } else {
+            self.expression(module, body, expected, scope)?;
+        }
+        Ok(())
+    }
+
     fn check_match(
         &mut self,
         module: &'g Module,
@@ -375,6 +397,21 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.expression(module, scrutinee, None, context)?
         };
         let Some(value) = input else {
+            if self.integrated {
+                self.defer(module, node, ScalarUnsupported::MatchCoverage)?;
+                for &arm in &n.children[1..] {
+                    self.elab.step(1)?;
+                    let mut scope = self.arm_context(context)?;
+                    self.block_pattern_names(
+                        module,
+                        module.syntax.nodes[arm].children[0],
+                        scrutinee,
+                        false,
+                        &mut scope,
+                    )?;
+                    self.check_arm_source(module, arm, expected.clone(), &mut scope)?;
+                }
+            }
             return Ok(None);
         };
         let mut arms = Vec::new();
@@ -386,7 +423,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             let mut scope = self.arm_context(context)?;
             let mut binders = Vec::new();
             let start = self.marks();
-            let Some(pattern) = self.pattern(
+            let pattern = self.pattern(
                 module,
                 a.children[0],
                 PatternInput {
@@ -398,15 +435,21 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.data_depth + 1,
                 &mut scope,
                 &mut binders,
-            )?
-            else {
+            )?;
+            let Some(pattern) = pattern.filter(|_| start == self.marks()) else {
                 patterns_complete = false;
+                if self.integrated {
+                    self.block_pattern_names(
+                        module,
+                        a.children[0],
+                        a.children[0],
+                        false,
+                        &mut scope,
+                    )?;
+                    self.check_arm_source(module, arm, expected.clone(), &mut scope)?;
+                }
                 continue;
             };
-            if start != self.marks() {
-                patterns_complete = false;
-                continue;
-            }
             let views = self.pattern_views(module, scrutinee, &value, pattern.clone(), &scope)?;
             for view in &views {
                 if view.path.is_some() {
@@ -419,16 +462,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             let Some(irrefutable) = self.coverage(module, arm, &value.ty, vec![pattern.clone()])?
             else {
                 patterns_complete = false;
-                if let Some(guard) = guard {
-                    let boolean = self.primitive("bool")?;
-                    self.expression(module, guard, Some(boolean), &scope)?;
-                }
-                let body = *a.children.last().unwrap();
-                if module.syntax.nodes[body].kind == NodeKind::Block {
-                    self.statement(module, body, self.data_depth + 1, &mut scope)?;
-                } else {
-                    self.expression(module, body, expected.clone(), &scope)?;
-                }
+                self.check_arm_source(module, arm, expected.clone(), &mut scope)?;
                 continue;
             };
             if guard.is_none() {

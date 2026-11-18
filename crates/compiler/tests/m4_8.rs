@@ -97,6 +97,37 @@ fn missing_core_does_not_hide_independent_errors_inside_or_after_operations() {
 }
 
 #[test]
+fn pending_match_input_does_not_hide_independent_arm_checks() {
+    let fixture = Fixture::new(
+        "function probe(): bool { return match ([true]) { [item] if 1i32 => { let seen = item; let bad: bool = 2i32; return true; }, _ => missing }; }",
+    );
+    for mode in [false, true] {
+        let graph = fixture.load(mode);
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let findings = report.bodies().findings();
+        let observed: Vec<_> = findings
+            .iter()
+            .map(|f| (f.kind, f.site.span.bytes()))
+            .collect();
+        assert_eq!(
+            observed,
+            [
+                (ScalarFindingKind::TypeMismatch, &b"1i32"[..]),
+                (ScalarFindingKind::TypeMismatch, &b"2i32"[..]),
+                (ScalarFindingKind::MissingValue, &b"missing"[..]),
+            ]
+        );
+        assert!(
+            report
+                .bodies()
+                .obligations()
+                .iter()
+                .any(|o| o.reason == ScalarUnsupported::CoreAdmission)
+        );
+    }
+}
+
+#[test]
 fn invalid_payload_does_not_hide_private_siblings_or_unrelated_bodies() {
     let fixture = Fixture::new(
         "type Hidden = { x: bool }; export enum E { A([Hidden,Missing]), B(Hidden), C(Missing) } function bad(): bool { function invalid(e: E): void { } return 1i32; }",
@@ -121,7 +152,7 @@ fn invalid_payload_does_not_hide_private_siblings_or_unrelated_bodies() {
 #[test]
 fn blocked_destructuring_and_guard_do_not_hide_later_errors_or_prove_fallthrough() {
     let fixture = Fixture::new(
-        "function halt<T>(x: T): never; function probe(): void { let [a] = [true]; let knownLater: bool = 1i32; let pending = a; guard true else { halt(1i32); } guard true else { let normal = true; } } let [b] = [false]; let alsoWrong: bool = 2i32; let pending = b;",
+        "function halt<T>(x: T): never; function probe(): void { let [a] = [true]; let knownLater: bool = 1i32; let pending = a; guard true else { halt(1i32); } guard true else { a; } guard true else { let normal = true; } } let [b] = [false]; let alsoWrong: bool = 2i32; let pending = b;",
     );
     let graph = fixture.load(false);
     let report = analyze_typed(&graph, AnalysisLimits::default());

@@ -235,6 +235,8 @@ pub enum ScalarUnsupported {
     CoreAdmission,
     ConversionAdmission,
     DeclarationPrerequisite,
+    BindingType,
+    MatchCoverage,
     ImplicitCopy,
 }
 #[derive(Debug)]
@@ -1967,6 +1969,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                         && let Some(Value::Local(local)) = value
                     {
                         slot.blocked = local.ty.is_none();
+                        if self.integrated && slot.blocked {
+                            let index = self.defer(module, node, ScalarUnsupported::BindingType)?;
+                            self.facts.obligations[index].declaration = Some(local.declaration);
+                        }
                         slot.ty = local.ty;
                         if self.data {
                             slot.path = Some(data::PlacePath {
