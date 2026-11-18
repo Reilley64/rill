@@ -153,6 +153,17 @@ fn ownership_from_installed_source() {
                 return *child;
             }
             function unsupported(value: List<bool>): void { }
+            function discardOwned(text: string): void { let _ = text; }
+            function descriptorSlot(input: &bool): &&bool { return &input; }
+            function keepBacking(input: &mut bool): &bool {
+                let parent = input;
+                return freeze(parent);
+            }
+            function usePair(first: &mut bool, second: &bool): bool { return *second; }
+            function conflictingArgs(): bool {
+                let mut flag = true;
+                return usePair(&mut flag, &flag);
+            }
         "#,
         )
         .unwrap();
@@ -320,6 +331,14 @@ fn ownership_from_installed_source() {
             let mir = returned.mir().unwrap();
             assert!(path_drops(mir, mir.entry).is_empty());
 
+            let wildcard = lower("discardOwned");
+            let mir = wildcard
+                .mir()
+                .unwrap_or_else(|| panic!("{:?}", wildcard.completion()));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(value)] if value.span.bytes() == b"text")
+            );
+
             let captured = lower("ownedCapture");
             let mir = captured
                 .mir()
@@ -337,6 +356,7 @@ fn ownership_from_installed_source() {
                 "readMut",
                 "resumeParent",
                 "freeze",
+                "keepBacking",
             ] {
                 let report = lower(name);
                 assert_eq!(
@@ -356,6 +376,8 @@ fn ownership_from_installed_source() {
                 ("escapingCapture", "R0202"),
                 ("leavesScope", "R0203"),
                 ("suspendParent", "R0201"),
+                ("descriptorSlot", "R0202"),
+                ("conflictingArgs", "R0201"),
             ] {
                 let report = lower(name);
                 assert_eq!(

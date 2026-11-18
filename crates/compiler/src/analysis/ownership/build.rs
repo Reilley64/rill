@@ -99,10 +99,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 let mut locals = Vec::new();
                 for &child in children {
                     self.budget.step(1)?;
-                    if matches!(
-                        self.module.syntax.nodes[child].kind,
-                        NodeKind::Binding { .. }
-                    ) {
+                    let statement = &self.module.syntax.nodes[child];
+                    if matches!(statement.kind, NodeKind::Binding { .. })
+                        && self.module.syntax.nodes[statement.children[0]].kind
+                            != NodeKind::Wildcard
+                    {
                         let Some(NodeFactKind::Binding(binding)) =
                             self.facts.get(&child).map(|f| &f.kind)
                         else {
@@ -135,20 +136,18 @@ impl<'a, 'g> Build<'a, 'g> {
                 Ok(tail)
             }
             NodeKind::Binding { .. } => {
+                let value = *children.last().unwrap();
+                if self.module.syntax.nodes[children[0]].kind == NodeKind::Wildcard {
+                    return self.discard(node, value, next, depth + 1);
+                }
                 let Some(NodeFactKind::Binding(binding)) = self.facts.get(&node).map(|f| &f.kind)
                 else {
                     return Err(Stop::Pending(node));
                 };
                 let slot = self.locals[binding.declaration];
-                self.expression(*children.last().unwrap(), Some(slot), next, depth + 1)
+                self.expression(value, Some(slot), next, depth + 1)
             }
-            NodeKind::ExpressionStatement => {
-                let value = children[0];
-                let ty = self.value(value)?.ty.clone();
-                let slot = self.slot(value, &ty)?;
-                let end = self.emit(node, Action::End(slot), Edges::Next(next))?;
-                self.expression(value, Some(slot), end, depth + 1)
-            }
+            NodeKind::ExpressionStatement => self.discard(node, children[0], next, depth + 1),
             NodeKind::Assignment("=") => {
                 let target = self.place(children[0])?;
                 let value = children[1];
@@ -219,6 +218,19 @@ impl<'a, 'g> Build<'a, 'g> {
             NodeKind::Continue => Ok(exits.looping.ok_or(Stop::Pending(node))?.continues),
             _ => Err(Stop::Pending(node)),
         }
+    }
+
+    fn discard(
+        &mut self,
+        statement: NodeId,
+        value: NodeId,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let ty = self.value(value)?.ty.clone();
+        let slot = self.slot(value, &ty)?;
+        let end = self.emit(statement, Action::End(slot), Edges::Next(next))?;
+        self.expression(value, Some(slot), end, depth)
     }
 
     fn outcomes(&self, node: NodeId) -> ResultOf<(bool, bool)> {
