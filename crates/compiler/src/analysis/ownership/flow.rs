@@ -30,7 +30,7 @@ enum ExactTarget {
 }
 
 impl ExactTarget {
-    fn contents(self) -> Slot {
+    fn contents_slot(self) -> Slot {
         match self {
             Self::Local(slot) | Self::Caller { contents: slot, .. } => slot,
         }
@@ -119,9 +119,8 @@ fn liveness(
             } => use_one(Some(descriptor), into),
             Action::InstallThrough {
                 descriptor,
-                contents,
                 incoming,
-            } => ([Some(descriptor), Some(incoming)], Some(contents)),
+            } => ([Some(descriptor), Some(incoming)], None),
             Action::TestVariant { operand, .. } => use_one(Some(operand), None),
             Action::CopyOptionPayload { operand, into } => use_one(Some(operand), Some(into)),
             Action::ConstructVariant { payload, into, .. } => use_one(payload, Some(into)),
@@ -289,6 +288,23 @@ fn initialized(state: &State, site: NodeId) -> ResultOf<&Held> {
         }),
         State::Vacant => Err(Stop::Pending(site)),
     }
+}
+
+fn exact_target(
+    state: &[State],
+    descriptor: Slot,
+    node: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<ExactTarget> {
+    budget.step(1)?;
+    let target = initialized(&state[descriptor], node)?
+        .exact_target
+        .ok_or(Stop::Pending(node))?;
+    if let ExactTarget::Local(slot) = target {
+        budget.step(1)?;
+        initialized(&state[slot], node)?;
+    }
+    Ok(target)
 }
 
 fn require_initialized(
@@ -804,30 +820,34 @@ pub(super) fn run<'g>(
                         },
                         budget,
                     )?;
-                    let mut include = |loan: Loan, budget: &mut Budget| {
-                        insert_loan(
-                            &mut loans,
-                            Loan {
-                                kind: if loan.kind == LoanKind::Suspension {
-                                    LoanKind::Suspension
-                                } else {
-                                    LoanKind::Contents
+                    if !retained_target {
+                        // An exact access value sees the current target. Only
+                        // views without that route need a snapshot of backing.
+                        let mut include = |loan: Loan, budget: &mut Budget| {
+                            insert_loan(
+                                &mut loans,
+                                Loan {
+                                    kind: if loan.kind == LoanKind::Suspension {
+                                        LoanKind::Suspension
+                                    } else {
+                                        LoanKind::Contents
+                                    },
+                                    ..loan
                                 },
-                                ..loan
-                            },
-                            budget,
-                        )
-                    };
-                    visit_loans(&state, slots[from].storage(from), budget, &mut include)?;
-                    budget.step(1)?;
-                    if let Some(target) = initialized(&state[from], node)?.exact_target {
-                        let contents = target.contents();
-                        visit_loans(
-                            &state,
-                            slots[contents].storage(contents),
-                            budget,
-                            &mut include,
-                        )?;
+                                budget,
+                            )
+                        };
+                        visit_loans(&state, slots[from].storage(from), budget, &mut include)?;
+                        budget.step(1)?;
+                        if let Some(target) = initialized(&state[from], node)?.exact_target {
+                            let contents = target.contents_slot();
+                            visit_loans(
+                                &state,
+                                slots[contents].storage(contents),
+                                budget,
+                                &mut include,
+                            )?;
+                        }
                     }
                     state[into] = State::Initialized(Held {
                         loans: loan_set(loans, budget)?,
@@ -912,9 +932,9 @@ pub(super) fn run<'g>(
                     let call = &calls[index];
                     let mut retained = BTreeSet::new();
                     let contents = if let Some(destination) = call.destination {
-                        let (access, contents, target, stored_at) = match destination.storage {
+                        let (access, contents, target) = match destination.storage {
                             CallStorage::Local(slot) => {
-                                (slot, slot, RetainedPlace::Local(local(slot)), None)
+                                (slot, slot, RetainedPlace::Local(local(slot)))
                             }
                             CallStorage::ThroughParameter {
                                 descriptor,
@@ -923,42 +943,31 @@ pub(super) fn run<'g>(
                                 descriptor,
                                 contents,
                                 RetainedPlace::ThroughParameter(local(descriptor)),
-                                Some(node),
                             ),
                             CallStorage::ThroughAlias {
                                 descriptor,
                                 argument,
-                            } => {
-                                budget.step(1)?;
-                                let held = initialized(&state[argument], node)?;
-                                match held.exact_target.ok_or(Stop::Pending(node))? {
-                                    ExactTarget::Local(target) => {
-                                        budget.step(1)?;
-                                        initialized(&state[target], node)?;
-                                        (
-                                            descriptor,
-                                            target,
-                                            RetainedPlace::ThroughAlias {
-                                                descriptor: local(descriptor),
-                                                target: local(target),
-                                            },
-                                            None,
-                                        )
-                                    }
-                                    ExactTarget::Caller {
-                                        parameter,
-                                        contents,
-                                    } => (
-                                        descriptor,
-                                        contents,
-                                        RetainedPlace::ThroughParameterAlias {
-                                            descriptor: local(descriptor),
-                                            parameter: local(parameter),
-                                        },
-                                        Some(node),
-                                    ),
-                                }
-                            }
+                            } => match exact_target(&state, argument, node, budget)? {
+                                ExactTarget::Local(target) => (
+                                    descriptor,
+                                    target,
+                                    RetainedPlace::ThroughAlias {
+                                        descriptor: local(descriptor),
+                                        target: local(target),
+                                    },
+                                ),
+                                ExactTarget::Caller {
+                                    parameter,
+                                    contents,
+                                } => (
+                                    descriptor,
+                                    contents,
+                                    RetainedPlace::ThroughParameterAlias {
+                                        descriptor: local(descriptor),
+                                        parameter: local(parameter),
+                                    },
+                                ),
+                            },
                         };
                         initialized(&state[access], node)?;
                         initialized(&state[destination.input], node)?;
@@ -970,7 +979,12 @@ pub(super) fn run<'g>(
                         // backing source of the very descriptor it gives access to.
                         let held = Held {
                             loans: loan_set(loans, budget)?,
-                            stored_at,
+                            stored_at: matches!(
+                                target,
+                                RetainedPlace::ThroughParameter(_)
+                                    | RetainedPlace::ThroughParameterAlias { .. }
+                            )
+                            .then_some(node),
                             ..Held::default()
                         };
                         Some((target, contents, destination.input, held))
@@ -1104,12 +1118,8 @@ pub(super) fn run<'g>(
                         incoming: local(incoming),
                     }
                 }
-                Action::CopyThrough {
-                    descriptor,
-                    contents,
-                    into,
-                } => {
-                    initialized(&state[descriptor], node)?;
+                Action::CopyThrough { descriptor, into } => {
+                    let target = exact_target(&state, descriptor, node, budget)?;
                     conflict(
                         &slots,
                         &state,
@@ -1120,12 +1130,26 @@ pub(super) fn run<'g>(
                         budget,
                     )?;
                     if let Some(into) = into {
-                        let loans = match &state[contents] {
-                            State::Initialized(value) => value.loans.clone(),
-                            // Before a write, the original caller contents have
-                            // no backing in this body.
-                            State::Vacant => empty.loans.clone(),
-                            State::Moved(_) => return Err(Stop::Pending(node)),
+                        let contents = target.contents_slot();
+                        let source = slots[contents].carried_loan_root(contents);
+                        // Reference extraction still includes aggregate backing.
+                        let loans = if source != contents {
+                            let mut loans = BTreeSet::new();
+                            include_loans(
+                                &mut loans,
+                                &state,
+                                slots[source].storage(source),
+                                budget,
+                            )?;
+                            loan_set(loans, budget)?
+                        } else {
+                            match &state[contents] {
+                                State::Initialized(value) => value.loans.clone(),
+                                // No stored value in the analysis means there
+                                // has not been a local write to caller storage.
+                                State::Vacant => empty.loans.clone(),
+                                State::Moved(_) => return Err(Stop::Pending(node)),
+                            }
                         };
                         state[into] = State::Initialized(Held {
                             loans,
@@ -1139,10 +1163,9 @@ pub(super) fn run<'g>(
                 }
                 Action::InstallThrough {
                     descriptor,
-                    contents,
                     incoming,
                 } => {
-                    initialized(&state[descriptor], node)?;
+                    let target = exact_target(&state, descriptor, node, budget)?;
                     let mut value = initialized(&state[incoming], node)?.clone();
                     conflict(
                         &slots,
@@ -1153,9 +1176,9 @@ pub(super) fn run<'g>(
                         Access::Exclusive,
                         budget,
                     )?;
-                    // Overwrite the exact external contents, not the access loan.
-                    value.stored_at = Some(node);
-                    state[contents] = State::Initialized(value);
+                    // Overwrite exact contents, not the access descriptor.
+                    value.stored_at = matches!(target, ExactTarget::Caller { .. }).then_some(node);
+                    state[target.contents_slot()] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThrough {
                         descriptor: local(descriptor),

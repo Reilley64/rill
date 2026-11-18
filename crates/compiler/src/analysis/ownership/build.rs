@@ -430,11 +430,23 @@ impl<'a, 'g> Build<'a, 'g> {
         self.emit(node, Action::Cleanup(index), Edges::Next(next))
     }
 
-    fn caller_contents(&mut self, node: NodeId, root: &DeclarationId) -> ResultOf<(Slot, Slot)> {
+    fn retained_descriptor(&mut self, node: NodeId, path: &PlacePath<'g>) -> ResultOf<Slot> {
+        let dereference = self.ungroup(node)?;
+        let syntax = &self.module.syntax.nodes[dereference];
+        if syntax.kind != NodeKind::Prefix("*")
+            || path.projections.as_slice() != [PathProjection::Dereference]
+        {
+            return Err(Stop::Pending(node));
+        }
         self.budget.step(2)?;
-        let descriptor = *self.locals.get(root).ok_or(Stop::Pending(node))?;
-        let contents = *self.retained.get(&descriptor).ok_or(Stop::Pending(node))?;
-        Ok((descriptor, contents))
+        let source = self.value(syntax.children[0])?;
+        if retained_bool_contents_type(&source.ty).is_none() {
+            return Err(Stop::Pending(node));
+        }
+        self.locals
+            .get(path.root)
+            .copied()
+            .ok_or(Stop::Pending(node))
     }
 
     fn check_retained(&mut self, node: NodeId, next: Pc) -> ResultOf<Pc> {
@@ -533,14 +545,13 @@ impl<'a, 'g> Build<'a, 'g> {
                 if let Some(path) = &self.value(left)?.path
                     && path.projections.as_slice() == [PathProjection::Dereference]
                 {
-                    let (descriptor, contents) = self.caller_contents(left, path.root)?;
+                    let descriptor = self.retained_descriptor(left, path)?;
                     let ty = self.value(value)?.ty.clone();
                     let incoming = self.slot(value, &ty)?;
                     let install = self.emit(
                         node,
                         Action::InstallThrough {
                             descriptor,
-                            contents,
                             incoming,
                         },
                         Edges::Next(next),
@@ -1125,15 +1136,8 @@ impl<'a, 'g> Build<'a, 'g> {
                 let Some(path) = &facts.path else {
                     return Err(Stop::Pending(node));
                 };
-                if path.projections.as_slice() != [PathProjection::Dereference] {
-                    return Err(Stop::Pending(node));
-                }
-                let (descriptor, contents) = self.caller_contents(node, path.root)?;
-                Action::CopyThrough {
-                    descriptor,
-                    contents,
-                    into,
-                }
+                let descriptor = self.retained_descriptor(node, path)?;
+                Action::CopyThrough { descriptor, into }
             }
             NodeKind::Bracket => {
                 let into = into.ok_or(Stop::Pending(node))?;

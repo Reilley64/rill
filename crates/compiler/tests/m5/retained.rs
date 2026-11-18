@@ -1016,6 +1016,7 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                     matches!(
                         op,
                         Operation::Move { .. }
+                            | Operation::Copy { .. }
                             | Operation::Reborrow { .. }
                             | Operation::CallRetaining { .. }
                     )
@@ -1031,6 +1032,10 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                     exclusive: true,
                     ..
                 },
+                Operation::Copy {
+                    from: first_source,
+                    into: Some(first_staged),
+                },
                 Operation::CallRetaining {
                     callee: first,
                     destination:
@@ -1038,7 +1043,7 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                             descriptor: first_desc,
                             parameter: first_param,
                         },
-                    ..
+                    input: first_input,
                 },
                 Operation::Move {
                     from,
@@ -1049,6 +1054,10 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                     exclusive: true,
                     ..
                 },
+                Operation::Copy {
+                    from: next_source,
+                    into: Some(next_staged),
+                },
                 Operation::CallRetaining {
                     callee: next,
                     destination:
@@ -1056,7 +1065,7 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                             descriptor: next_desc,
                             parameter: next_param,
                         },
-                    ..
+                    input: next_input,
                 },
             ] = route.as_slice()
             else {
@@ -1064,6 +1073,10 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
             };
             assert_eq!(*first, remember);
             assert_eq!(*next, remember);
+            assert_eq!(first_source.root.span.bytes(), b"input: &bool");
+            assert_eq!(first_source.root.node, next_source.root.node);
+            assert_eq!(first_input.root.node, first_staged.root.node);
+            assert_eq!(next_input.root.node, next_staged.root.node);
             assert_eq!(original.root.span.bytes(), b"slot: &mut &bool");
             assert_eq!(original.root.node, first_param.root.node);
             assert_eq!(original.root.node, next_param.root.node);
@@ -1082,9 +1095,13 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                 (yes, b"second: &mut &bool".as_slice()),
                 (no, b"first: &mut &bool".as_slice()),
             ] {
-                assert!(linear(mir, edge).iter().any(|op| matches!(op,
-                    Operation::CallRetaining { callee, destination: RetainedPlace::ThroughParameterAlias { parameter, .. }, .. }
-                        if *callee == remember && parameter.root.span.bytes() == expected)));
+                let calls: Vec<_> = linear(mir, edge)
+                    .into_iter()
+                    .filter(|op| matches!(op, Operation::CallRetaining { .. }))
+                    .collect();
+                assert!(matches!(calls.as_slice(), [
+                    Operation::CallRetaining { callee, destination: RetainedPlace::ThroughParameterAlias { parameter, descriptor }, .. }
+                ] if *callee == remember && parameter.root.span.bytes() == expected && descriptor.root.span.bytes() == b"access"));
             }
             let valid = lower("valid");
             let mir = valid
@@ -1111,6 +1128,14 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                 };
                 assert_eq!(finding.code(), code);
                 assert_eq!(finding.related.span.bytes(), related);
+                if code == "R0202" {
+                    let store = if name == "escapeAfterMove" {
+                        b"remember(access, input)".as_slice()
+                    } else {
+                        b"remember(access, &flag)"
+                    };
+                    assert_eq!(finding.site.span.bytes(), store);
+                }
             }
             let limits = AnalysisLimits {
                 max_work: valid.statistics().work,
@@ -1137,6 +1162,93 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
 }
 
 #[test]
+fn exact_alias_reads_and_writes_keep_value_and_access_separate() {
+    probe(
+        "retained::exact_alias_reads_and_writes_keep_value_and_access_separate",
+        r#"
+            function readIncoming(slot: &mut &bool): &bool {
+                let access = slot;
+                return *access;
+            }
+            function replace(seed: &bool): bool {
+                let mut out = seed;
+                let mut other = seed;
+                let mut access = &mut other;
+                {
+                    let flag = true;
+                    out = &flag;
+                    access = &mut out;
+                    *access = seed;
+                }
+                let result = *access;
+                return *result;
+            }
+            function copyBeforeReplacement(seed: &bool): bool {
+                let mut out = seed;
+                let access = &mut out;
+                let mut saved = seed;
+                { let flag = true; *access = &flag; saved = *access; *access = seed; }
+                return *saved;
+            }
+            function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function suspended(seed: &bool): void {
+                let mut out = seed;
+                let access = &mut out;
+                remember(access, *access);
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            let incoming = lower("readIncoming");
+            let mir = incoming
+                .mir()
+                .unwrap_or_else(|| panic!("readIncoming: {:?}", incoming.completion()));
+            let ops = linear(mir, mir.entry);
+            assert!(
+                ops.iter()
+                    .any(|op| matches!(op, Operation::CopyThrough { descriptor, .. }
+                if descriptor.root.span.bytes() == b"access"))
+            );
+            assert!(ops.iter().any(|op| matches!(op, Operation::Export(_))));
+            let replaced = lower("replace");
+            let mir = replaced
+                .mir()
+                .expect("an exact overwrite retires the old backing from live access");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CopyThrough { .. } | Operation::InstallThrough { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::InstallThrough { descriptor: write, .. },
+                Operation::CopyThrough { descriptor: read, .. }] if write.root.node == read.root.node
+                && write.root.span.bytes() == b"access")
+            );
+            for (name, code) in [("copyBeforeReplacement", "R0203"), ("suspended", "R0201")] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected ownership diagnostic")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+            }
+        },
+    );
+}
+
+#[test]
 fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
     use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 
@@ -1145,6 +1257,10 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
         r#"
             function captured(slot: &mut &bool, input: &bool): mut () => void {
                 return () => { *slot = input; };
+            }
+            function writeMoved(slot: &mut &bool, input: &bool): void {
+                let access = slot;
+                *access = input;
             }
             function unknown(slot: &mut Result<bool, i32>, incoming: Result<bool, i32>): void {
                 *slot = incoming;
@@ -1155,7 +1271,11 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
             assert!(typed.core_blockers().is_empty());
             assert!(typed.receipt().is_none());
             let pending = typed.result_use().expect("Result-use evidence").pending();
-            for store in [b"*slot = input;".as_slice(), b"*slot = incoming;"] {
+            for store in [
+                b"*slot = input;".as_slice(),
+                b"*access = input;",
+                b"*slot = incoming;",
+            ] {
                 assert!(
                     pending
                         .iter()

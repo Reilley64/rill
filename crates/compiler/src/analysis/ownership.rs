@@ -645,12 +645,10 @@ enum Action<'g> {
     },
     CopyThrough {
         descriptor: Slot,
-        contents: Slot,
         into: Option<Slot>,
     },
     InstallThrough {
         descriptor: Slot,
-        contents: Slot,
         incoming: Slot,
     },
     CheckRetained,
