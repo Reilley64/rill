@@ -1,6 +1,12 @@
 use super::*;
 use ordinary::shape;
 
+struct Producer {
+    reads: BTreeSet<usize>,
+    writes: BTreeSet<usize>,
+    unavailable: bool,
+}
+
 impl<'r, 'g> Checker<'r, 'g> {
     pub(in crate::analysis::scalars) fn apply_ready_call_default(
         &mut self,
@@ -39,19 +45,15 @@ impl<'r, 'g> Checker<'r, 'g> {
         for sub in &call.fact.substitution {
             slots[sub.position] = Some(sub.argument.clone());
         }
-        for (pattern, argument) in call.parameters.iter().zip(&call.fact.arguments) {
-            self.elab.step(1)?;
-            if let Some(actual) = inference.slots[argument].ty.as_ref()
-                && primitive_name(actual) != Some("never")
-                && !self.accept_input(
-                    pattern,
-                    actual,
-                    binders,
-                    &mut slots,
-                    &call.fact.substitution,
-                )?
-            {
-                self.finding(module, *argument, ScalarFindingKind::TypeMismatch)?;
+        for (pattern, &argument) in call.parameters.iter().zip(&call.fact.arguments) {
+            if !self.source_equations(
+                inference,
+                argument,
+                pattern,
+                binders,
+                &mut slots,
+                &call.fact.substitution,
+            )? {
                 inference.slots.get_mut(&node).unwrap().blocked = true;
                 return Ok(false);
             }
@@ -67,7 +69,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let mut subs = self.slot_substitutions(binders, &slots)?;
         let applied = defaults_ready
-            && self.try_call_default(inference, &mut call, binders, &slots, &subs)?;
+            && self.try_call_default(inference, node, &mut call, binders, &slots, &subs)?;
         if applied {
             let chosen = call.fact.substitution.last().unwrap();
             slots[chosen.position] = Some(chosen.argument.clone());
@@ -75,10 +77,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.enqueue(inference, node)?;
         }
         for (pattern, &argument) in call.parameters.iter().zip(&call.fact.arguments) {
-            if self.closed(pattern, binders, &|i| slots[i].is_some(), 1)? {
-                let receiving = self.substitute(pattern, &subs, 1)?;
-                self.establish(inference, argument, receiving, true)?;
-            }
+            self.project_standalone(inference, argument, pattern, binders, &slots, &subs)?;
         }
         if subs.len() == binders.len()
             && call
@@ -104,11 +103,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(applied)
     }
 
-    // This entry currently completes defaults for simple receiving literals.
-    // Defer more complex unfinished source rather than treating it as no producer.
     fn try_call_default(
         &mut self,
-        inference: &Inference<'g>,
+        inference: &mut Inference<'g>,
+        node: NodeId,
         call: &mut PreparedCall<'g>,
         binders: &[Binder<'g>],
         slots: &[Option<Type<'g>>],
@@ -117,6 +115,22 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(header) = self.input.ordinary.unwrap().headers().get(call.fact.callee) else {
             return Ok(false);
         };
+        inference.calls_waiting_for_result.remove(&node);
+        let mut producers = Vec::new();
+        for (pattern, &argument) in call.parameters.iter().zip(&call.fact.arguments) {
+            self.source_producers(inference, argument, pattern, binders, slots, &mut producers)?;
+        }
+        let mut defaulted = BTreeSet::new();
+        for default in &header.defaults {
+            for binder in binders {
+                self.elab.step(1)?;
+                if *default.binder == binder.declaration.id {
+                    self.elab.reserve(1)?;
+                    defaulted.insert(binder.position);
+                }
+            }
+        }
+        let necessary = self.necessary_reads(&producers, slots, &defaulted)?;
         for (binder, value) in binders.iter().zip(slots) {
             self.elab.step(header.defaults.len() + 1)?;
             if value.is_some() {
@@ -136,11 +150,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             }
             let mut blocked = false;
-            for (parameter, &argument) in call.parameters.iter().zip(&call.fact.arguments) {
-                if inference.slots[&argument].ty.is_none()
-                    && !self.closed(parameter, binders, &|i| i != binder.position, 1)?
-                    && !(self.call_slot(parameter, binders)? == Some(binder.position)
-                        && inference.module.syntax.nodes[argument].kind == NodeKind::Literal)
+            for producer in &producers {
+                self.elab.step(1 + producer.reads.len())?;
+                if producer.writes.contains(&binder.position)
+                    && (producer.unavailable
+                        || !producer
+                            .reads
+                            .iter()
+                            .any(|&i| necessary[i].contains(&binder.position)))
                 {
                     blocked = true;
                     break;
@@ -162,7 +179,364 @@ impl<'r, 'g> Checker<'r, 'g> {
                 return Ok(true);
             }
         }
+        // A child standalone frame can wait on an enclosing immediate result
+        // contract. Do not mark an unknown operation or evidence as such a read.
+        if inference.slots[&node].expected.is_none() && !producers.iter().any(|p| p.unavailable) {
+            let mut result_slots = BTreeSet::new();
+            self.open_slots(&call.result, binders, slots, &mut result_slots, 1)?;
+            for position in result_slots {
+                if defaulted.contains(&position) {
+                    continue;
+                }
+                let mut required = true;
+                for producer in &producers {
+                    self.elab.step(1 + producer.reads.len())?;
+                    if producer.writes.contains(&position)
+                        && !producer
+                            .reads
+                            .iter()
+                            .any(|&i| necessary[i].contains(&position))
+                    {
+                        required = false;
+                        break;
+                    }
+                }
+                if required {
+                    self.elab.reserve(1)?;
+                    inference.calls_waiting_for_result.insert(node);
+                    break;
+                }
+            }
+        }
         Ok(false)
+    }
+
+    pub(super) fn source_leaf(&mut self, module: &Module, mut node: NodeId) -> Work<NodeId> {
+        while module.syntax.nodes[node].kind == NodeKind::Group {
+            self.elab.step(1)?;
+            node = module.syntax.nodes[node].children[0];
+        }
+        Ok(node)
+    }
+
+    fn source_equations(
+        &mut self,
+        inference: &Inference<'g>,
+        node: NodeId,
+        pattern: &Type<'g>,
+        binders: &[Binder<'g>],
+        slots: &mut [Option<Type<'g>>],
+        fixed: &[Substitution<'g>],
+    ) -> Work<bool> {
+        let module = inference.module;
+        let mut work = Vec::new();
+        self.elab.reserve(1)?;
+        work.push((node, pattern, true));
+        while let Some((node, pattern, outer)) = work.pop() {
+            let node = self.source_leaf(module, node)?;
+            let slot = &inference.slots[&node];
+            if slot.blocked {
+                return Ok(false);
+            }
+            let compatible = if let Some(actual) = &slot.ty {
+                if primitive_name(actual) == Some("never") {
+                    true
+                } else if outer {
+                    self.accept_input(pattern, actual, binders, slots, fixed)?
+                } else {
+                    // This is a fresh element, not covariance of a typed tuple.
+                    self.accept_input(pattern, actual, binders, slots, &[])?
+                }
+            } else {
+                let syntax = &module.syntax.nodes[node];
+                match (pattern.as_ref(), syntax.kind) {
+                    (TypeTerm::Tuple(types), NodeKind::Bracket) => {
+                        if types.len() != syntax.children.len() {
+                            self.finding(module, node, ScalarFindingKind::Arity)?;
+                            return Ok(false);
+                        }
+                        self.elab.reserve(types.len())?;
+                        work.extend(
+                            syntax
+                                .children
+                                .iter()
+                                .copied()
+                                .zip(types)
+                                .map(|(n, t)| (n, t, false)),
+                        );
+                    }
+                    (
+                        TypeTerm::Callable {
+                            parameters, result, ..
+                        },
+                        NodeKind::Arrow,
+                    ) => {
+                        let head = &inference.arrows[&node];
+                        if parameters.len() != head.parameters.len() {
+                            self.finding(module, node, ScalarFindingKind::Arity)?;
+                            return Ok(false);
+                        } else {
+                            for ((_, written), parameter) in head.parameters.iter().zip(parameters)
+                            {
+                                if let Some(written) = written
+                                    && !self.input_equation(
+                                        parameter,
+                                        written,
+                                        binders,
+                                        slots,
+                                        &[],
+                                        1,
+                                    )?
+                                {
+                                    self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
+                                    return Ok(false);
+                                }
+                            }
+                            if let Some(written) = &head.result
+                                && !self.input_equation(result, written, binders, slots, &[], 1)?
+                            {
+                                self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    _ => (),
+                }
+                true
+            };
+            if !compatible {
+                self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn project_standalone(
+        &mut self,
+        inference: &mut Inference<'g>,
+        node: NodeId,
+        pattern: &Type<'g>,
+        binders: &[Binder<'g>],
+        slots: &[Option<Type<'g>>],
+        subs: &[Substitution<'g>],
+    ) -> Work<()> {
+        let mut work = Vec::new();
+        self.elab.reserve(1)?;
+        work.push((node, pattern));
+        while let Some((node, pattern)) = work.pop() {
+            if self.closed(pattern, binders, &|i| slots[i].is_some(), 1)? {
+                let receiving = self.substitute(pattern, subs, 1)?;
+                self.establish(inference, node, receiving, true)?;
+                continue;
+            }
+            let node = self.source_leaf(inference.module, node)?;
+            let syntax = &inference.module.syntax.nodes[node];
+            match (pattern.as_ref(), syntax.kind) {
+                (TypeTerm::Tuple(types), NodeKind::Bracket)
+                    if types.len() == syntax.children.len() =>
+                {
+                    self.elab.reserve(types.len())?;
+                    work.extend(syntax.children.iter().copied().zip(types));
+                }
+                (
+                    TypeTerm::Callable {
+                        parameters, result, ..
+                    },
+                    NodeKind::Arrow | NodeKind::ValueReference,
+                ) => {
+                    self.elab.reserve(parameters.len())?;
+                    let mut terms = Vec::new();
+                    for parameter in parameters {
+                        terms.push(self.call_projection(parameter, binders, slots, subs)?);
+                    }
+                    let result = self.call_projection(result, binders, slots, subs)?;
+                    self.project_callable_context(
+                        inference,
+                        node,
+                        CallableContext {
+                            parameters: terms,
+                            result,
+                        },
+                    )?;
+                }
+                _ => (),
+            }
+        }
+        Ok(())
+    }
+
+    fn call_projection(
+        &mut self,
+        term: &Type<'g>,
+        binders: &[Binder<'g>],
+        slots: &[Option<Type<'g>>],
+        subs: &[Substitution<'g>],
+    ) -> Work<Option<Type<'g>>> {
+        if self.closed(term, binders, &|i| slots[i].is_some(), 1)? {
+            Ok(Some(self.substitute(term, subs, 1)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn source_producers(
+        &mut self,
+        inference: &Inference<'g>,
+        node: NodeId,
+        pattern: &Type<'g>,
+        binders: &[Binder<'g>],
+        slots: &[Option<Type<'g>>],
+        producers: &mut Vec<Producer>,
+    ) -> Work<()> {
+        let module = inference.module;
+        let mut work = Vec::new();
+        self.elab.reserve(1)?;
+        work.push((node, pattern));
+        while let Some((node, pattern)) = work.pop() {
+            let node = self.source_leaf(module, node)?;
+            let slot = &inference.slots[&node];
+            if slot.ty.is_some() {
+                continue;
+            }
+            let syntax = &module.syntax.nodes[node];
+            let mut producer = Producer {
+                reads: BTreeSet::new(),
+                writes: BTreeSet::new(),
+                unavailable: slot.blocked,
+            };
+            match (pattern.as_ref(), syntax.kind) {
+                (TypeTerm::Tuple(types), NodeKind::Bracket)
+                    if types.len() == syntax.children.len() =>
+                {
+                    self.elab.reserve(types.len())?;
+                    work.extend(syntax.children.iter().copied().zip(types));
+                    continue;
+                }
+                (
+                    TypeTerm::Callable {
+                        parameters, result, ..
+                    },
+                    NodeKind::Arrow,
+                ) => {
+                    let head = &inference.arrows[&node];
+                    for (parameter, (_, written)) in parameters.iter().zip(&head.parameters) {
+                        if written.is_none() {
+                            self.open_slots(parameter, binders, slots, &mut producer.reads, 1)?;
+                        }
+                    }
+                    if head.reads_result {
+                        self.open_slots(result, binders, slots, &mut producer.reads, 1)?;
+                    }
+                    if head.result.is_none() {
+                        self.open_slots(result, binders, slots, &mut producer.writes, 1)?;
+                    }
+                }
+                _ => {
+                    self.open_slots(pattern, binders, slots, &mut producer.writes, 1)?;
+                    let waits_for_shape = inference.arrows.get(&node).is_some_and(|head| {
+                        head.reads_result || head.parameters.iter().any(|(_, ty)| ty.is_none())
+                    });
+                    if self.needs_numeric_width(module, node, 1)?
+                        || (waits_for_shape || inference.calls_waiting_for_result.contains(&node))
+                            && self.call_slot(pattern, binders)?.is_some()
+                    {
+                        self.open_slots(pattern, binders, slots, &mut producer.reads, 1)?;
+                    } else {
+                        // Unknown source/evidence is not a proof of a mandatory read.
+                        producer.unavailable = true;
+                    }
+                }
+            }
+            if !producer.writes.is_empty() {
+                self.elab.reserve(1)?;
+                producers.push(producer);
+            }
+        }
+        Ok(())
+    }
+
+    fn open_slots(
+        &mut self,
+        term: &Type<'g>,
+        binders: &[Binder<'g>],
+        slots: &[Option<Type<'g>>],
+        out: &mut BTreeSet<usize>,
+        depth: usize,
+    ) -> Work<()> {
+        self.equation_depth(depth)?;
+        if let Some(i) = self.call_slot(term, binders)? {
+            if slots[i].is_none() && !out.contains(&i) {
+                self.elab.reserve(1)?;
+                out.insert(i);
+            }
+        } else {
+            for child in shape(term).1 {
+                self.open_slots(child, binders, slots, out, depth + 1)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn necessary_reads(
+        &mut self,
+        producers: &[Producer],
+        slots: &[Option<Type<'g>>],
+        defaulted: &BTreeSet<usize>,
+    ) -> Work<Vec<BTreeSet<usize>>> {
+        self.elab.reserve(slots.len() * 2)?;
+        let mut reads: Vec<_> = slots
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                if v.is_none() {
+                    BTreeSet::from([i])
+                } else {
+                    BTreeSet::new()
+                }
+            })
+            .collect();
+        // A prerequisite may be filled by any producer, or by a written
+        // default. Only a read common to every producer is mandatory.
+        loop {
+            let mut changed = false;
+            for i in 0..slots.len() {
+                if slots[i].is_some() || defaulted.contains(&i) {
+                    continue;
+                }
+                for (required, slot) in slots.iter().enumerate() {
+                    self.elab.step(1)?;
+                    if reads[i].contains(&required) || slot.is_some() {
+                        continue;
+                    }
+                    let mut some = false;
+                    let mut all = true;
+                    for producer in producers {
+                        self.elab.step(1 + producer.reads.len())?;
+                        if producer.writes.contains(&i) {
+                            some = true;
+                            all &= !producer.unavailable
+                                && producer.reads.iter().any(|&r| reads[r].contains(&required));
+                        }
+                    }
+                    if some && all {
+                        self.elab.reserve(1)?;
+                        reads[i].insert(required);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                return Ok(reads);
+            }
+        }
+    }
+
+    pub(in crate::analysis::scalars) fn mode_admits(
+        actual: InvocationMode,
+        required: InvocationMode,
+    ) -> bool {
+        actual == required || actual == InvocationMode::ReadOnly || required == InvocationMode::Once
     }
 
     pub(in crate::analysis::scalars) fn slot_substitutions(
@@ -199,7 +573,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(None)
     }
 
-    fn equation_depth(&mut self, depth: usize) -> Work<()> {
+    pub(super) fn equation_depth(&mut self, depth: usize) -> Work<()> {
         if depth > self.elab.limits.max_depth.min(64) {
             return Err(());
         }
@@ -254,11 +628,30 @@ impl<'r, 'g> Checker<'r, 'g> {
                 };
                 self.input_equation(receiving, actual, binders, slots, fixed, 2)
             }
+            (
+                TypeTerm::Callable {
+                    mode: pm,
+                    parameters: pp,
+                    result: pr,
+                },
+                TypeTerm::Callable {
+                    mode: am,
+                    parameters: ap,
+                    result: ar,
+                },
+            ) if Self::mode_admits(*am, *pm) && pp.len() == ap.len() => {
+                for (p, a) in pp.iter().zip(ap) {
+                    if !self.input_equation(p, a, binders, slots, fixed, 2)? {
+                        return Ok(false);
+                    }
+                }
+                self.input_equation(pr, ar, binders, slots, fixed, 2)
+            }
             _ => self.input_equation(pattern, actual, binders, slots, fixed, 1),
         }
     }
 
-    fn input_equation(
+    pub(super) fn input_equation(
         &mut self,
         pattern: &Type<'g>,
         actual: &Type<'g>,
@@ -273,7 +666,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.elab.step(fixed.len())?;
                 return if depth == 1
                     && fixed.iter().any(|s| s.position == i)
-                    && self.data_admission(actual, established)?
+                    && (self.data_admission(actual, established)?
+                        || self.callable_admission(actual, established)?)
                 {
                     Ok(true)
                 } else {

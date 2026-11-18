@@ -8,6 +8,8 @@ pub struct Arm<'g> {
     pub guard: Option<NodeId>,
     pub body: NodeId,
     pub views: Vec<Arc<Refinement<'g>>>,
+    pub guard_reachable: bool,
+    pub body_reachable: bool,
 }
 #[derive(Clone, Debug)]
 pub struct Match<'g> {
@@ -178,6 +180,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                         && self.enum_base(module, callee.children[0], context)?
                     {
                         self.constructor_type(module, n.children[0], context, None, None)?
+                    } else if self.input.ordinary.is_some()
+                        && self.value_callee(module, n.children[0], context)?
+                    {
+                        self.local_callable_result_hint(module, n.children[0], context)?
                     } else if let Some(call) = self.prepare_call(module, node, context)?
                         && !call.infer
                     {
@@ -444,6 +450,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     guard,
                     body,
                     views,
+                    guard_reachable: false,
+                    body_reachable: false,
                 },
                 scope,
                 pattern,
@@ -464,7 +472,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut flow = Flow::default();
         let mut result = None;
         let mut handled = Vec::new();
-        for (arm, mut scope, pattern) in arms {
+        for (mut arm, mut scope, pattern) in arms {
             let mut restriction = pattern.clone();
             let mut possible = value.normal;
             if let Some(boolean) = value.boolean {
@@ -528,7 +536,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             } else {
                 Some(ty)
             };
-            if available && truth.can_be_true() {
+            arm.guard_reachable = available;
+            arm.body_reachable = available && truth.can_be_true();
+            if arm.body_reachable {
                 flow = self.union(flow, &branch)?;
             }
             if !truth.can_be_false() {

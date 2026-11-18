@@ -2,6 +2,7 @@
 use super::*;
 use ordinary::{Completion, OrdinaryAnalysis};
 
+pub mod callables;
 mod calls;
 mod ordinary_calls;
 pub use ordinary_calls::{ConditionalFinding, OrdinaryCall, OrdinaryCandidate, OutputAgreement};
@@ -206,11 +207,24 @@ impl<'g> GenericReport<'g> {
         Ok(self.ordinary_calls.get(&(&module.key, node)))
     }
 
+    /// Formation facts may retain a signature and sources when mode is unresolved.
+    pub fn arrow(
+        &self,
+        module: &Module,
+        node: NodeId,
+    ) -> Result<Option<&callables::ArrowFacts<'g>>, QueryError> {
+        let module = self.check_module(module)?;
+        if node >= module.syntax.nodes.len() {
+            return Err(QueryError::InvalidRequest);
+        }
+        Ok(self.facts.arrows.get(&(&module.key, node)).map(Arc::as_ref))
+    }
+
     fn check_module(&self, module: &Module) -> Result<&'g Module, QueryError> {
         self.graph
             .modules()
             .iter()
-            .find(|m| std::ptr::eq(*m, module))
+            .find(|&m| std::ptr::eq(m, module))
             .ok_or(QueryError::InvalidRequest)
     }
 }

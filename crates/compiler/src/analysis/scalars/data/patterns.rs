@@ -152,6 +152,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     self.facts.nodes.push(NodeFacts {
                         site: Self::site(module, n.children[0]),
                         flow: flow.clone(),
+                        callable: None,
                         kind: NodeFactKind::Pattern(PatternFacts {
                             source: Self::site(module, initializer),
                             access: value.access,
@@ -191,6 +192,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.facts.nodes.push(NodeFacts {
             site: Self::site(module, node),
             flow: Flow::default(),
+            callable: None,
             kind: NodeFactKind::Coverage {
                 ty: ty.clone(),
                 coverage: coverage.clone(),
@@ -247,6 +249,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     self.facts.nodes.push(NodeFacts {
                         site: Self::site(module, name),
                         flow: Flow::default(),
+                        callable: None,
                         kind: NodeFactKind::Binding(BindingFacts {
                             declaration: &declaration.id,
                             ty: None,
@@ -305,14 +308,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         let declaration = self.elab.declaration_at(module, name)?;
         let mut bound = ty.clone();
         if access != Access::Owned {
-            let copy = match ty.as_ref() {
-                TypeTerm::Primitive(p) => p.name() != "string",
-                TypeTerm::Reference { mutable, .. } => !mutable,
-                TypeTerm::Parameter { .. } => false,
-                _ => {
-                    self.defer(module, name, ScalarUnsupported::ImplicitCopy)?;
-                    return Ok(false);
-                }
+            let Some(copy) = implicit_copy_leaf(ty) else {
+                self.defer(module, name, ScalarUnsupported::ImplicitCopy)?;
+                return Ok(false);
             };
             if !copy {
                 self.elab.reserve(1)?;
@@ -349,6 +347,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.facts.nodes.push(NodeFacts {
                 site: Self::site(module, name),
                 flow: Flow::normal(),
+                callable: None,
                 kind: NodeFactKind::Binding(BindingFacts {
                     declaration: &declaration.id,
                     ty: Some(bound),
@@ -489,6 +488,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.facts.nodes.push(NodeFacts {
                     site: Self::site(module, node),
                     flow: Flow::default(),
+                    callable: None,
                     kind: NodeFactKind::PatternLiteral {
                         ty: ty.clone(),
                         evidence: LiteralEvidence {
@@ -609,6 +609,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.facts.nodes.push(NodeFacts {
                 site: Self::site(module, node),
                 flow: Flow::default(),
+                callable: None,
                 kind: NodeFactKind::PatternLiteral {
                     ty: ty.clone(),
                     evidence,
