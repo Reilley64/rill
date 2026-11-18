@@ -589,13 +589,15 @@ impl<'g> OrdinaryAnalysis<'g> {
 /// Analyze an actual M3 capture. M3 does not carry core role/protection admission.
 /// Results remain partial, never a checked ordinary collection or source call.
 pub fn analyze_ordinary(graph: &Graph, limits: AnalysisLimits) -> OrdinaryAnalysis<'_> {
-    let mut analyzer = Analyzer {
-        graph,
-        limits,
-        statistics: Statistics::default(),
-        facts: PartialFacts::default(),
-        declarations: BTreeMap::new(),
-    };
+    analyze_ordinary_types(graph, limits, false)
+}
+
+pub(super) fn analyze_ordinary_types(
+    graph: &Graph,
+    limits: AnalysisLimits,
+    complete_defaults: bool,
+) -> OrdinaryAnalysis<'_> {
+    let mut analyzer = Analyzer::new(graph, limits, complete_defaults);
     let mut headers = BTreeMap::new();
     let elaborated = analyzer.analyze(Some(&mut headers)).is_ok();
     let mut report = OrdinaryAnalysis {

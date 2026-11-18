@@ -64,6 +64,10 @@ impl<'g> GenericReport<'g> {
         &self.facts.obligations
     }
 
+    pub fn annotations(&self) -> &PartialFacts<'g> {
+        &self.facts.annotations
+    }
+
     pub fn body(
         &self,
         module: &Module,
@@ -211,13 +215,24 @@ impl<'g> GenericReport<'g> {
     }
 }
 
-/// Check supported written bodies without rerunning declaration analysis or
-/// treating a pending ordinary role as admission.
+/// Check supported written bodies without treating a pending ordinary role as admission.
 pub fn analyze_generics<'g>(
     input: &OrdinaryAnalysis<'g>,
     limits: AnalysisLimits,
 ) -> GenericReport<'g> {
     let graph = input.graph();
+    // M4.5's bounded entry does not complete nominal defaults. When it
+    // encounters default syntax or an omitted argument, extend the type
+    // inventory over the same capture and run the same declaration checks.
+    let extended = (input.completion() != Completion::ResourceLimit
+        && input.type_facts().obligations().any(|o| {
+            matches!(
+                o.reason,
+                Unsupported::GenericDefault | Unsupported::NeedsTypeArguments
+            )
+        }))
+    .then(|| ordinary::analyze_ordinary_types(graph, limits, true));
+    let input = extended.as_ref().unwrap_or(input);
     let types = input.type_facts();
     let mut checker = Checker::new(
         BodyInput {
@@ -228,19 +243,50 @@ pub fn analyze_generics<'g>(
         limits,
         true,
     );
+    if extended.is_some() || input.completion() == Completion::ResourceLimit {
+        checker.elab.statistics = input.statistics();
+    }
     let exhausted = input.completion() == Completion::ResourceLimit
-        || (types.findings().next().is_none()
-            && !types.obligations().any(|o| {
-                !matches!(
-                    o.reason,
+        || (|| -> Work<()> {
+            for (key, finding) in &types.findings {
+                checker
+                    .elab
+                    .reserve(1 + finding.bindings.len() + finding.candidates.len())?;
+                checker.elab.facts.findings.insert(*key, finding.clone());
+            }
+            for (key, obligation) in &types.obligations {
+                if !matches!(
+                    obligation.reason,
                     Unsupported::GenericDefault | Unsupported::Requirements
-                )
-            })
-            && input.declaration_issues().is_empty()
-            && checker
-                .run()
-                .and_then(|()| checker.annotation_nodes())
-                .is_err());
+                ) {
+                    checker.elab.reserve(1)?;
+                    checker
+                        .elab
+                        .facts
+                        .obligations
+                        .insert(*key, obligation.clone());
+                }
+            }
+            for (key, use_) in &types.uses {
+                checker.elab.reserve(
+                    1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len(),
+                )?;
+                checker.elab.facts.uses.insert(*key, use_.clone());
+            }
+            if types.findings().next().is_none()
+                && !types.obligations().any(|o| {
+                    !matches!(
+                        o.reason,
+                        Unsupported::GenericDefault | Unsupported::Requirements
+                    )
+                })
+                && input.declaration_issues().is_empty()
+            {
+                checker.run()?;
+            }
+            checker.annotation_nodes()
+        })()
+        .is_err();
     checker.facts.annotations = checker.elab.facts;
     GenericReport {
         graph,

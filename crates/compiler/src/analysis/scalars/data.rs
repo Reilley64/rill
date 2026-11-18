@@ -1,6 +1,7 @@
 //! M4.4 data extensions over the existing scalar/control engine.
 use super::*;
 mod matches;
+pub(super) mod nominal;
 mod patterns;
 mod places;
 pub use matches::{Arm, Match};
@@ -21,6 +22,22 @@ pub struct Construction<'g> {
     pub arguments: Vec<NodeId>,
     pub base: Option<NodeId>,
     pub substitution: Vec<Substitution<'g>>,
+    pub argument_sources: Vec<ArgumentSource<'g>>,
+    pub bindings: Vec<&'g Binding>,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArgumentOrigin {
+    Written,
+    Expected,
+    RebuildBase,
+    Member,
+    Default,
+}
+#[derive(Clone, Debug)]
+pub struct ArgumentSource<'g> {
+    pub position: usize,
+    pub site: Site<'g>,
+    pub origin: ArgumentOrigin,
 }
 #[derive(Clone, Debug)]
 pub struct Projection<'g> {
@@ -79,6 +96,11 @@ pub(super) struct PreparedData<'g> {
     pub inputs: Vec<NodeId>,
     pub fact: DataExpression<'g>,
 }
+struct RecordInitializers<'g> {
+    fields: Vec<FieldValue<'g>>,
+    contexts: Vec<(NodeId, Type<'g>)>,
+}
+
 impl<'r, 'g> Checker<'r, 'g> {
     fn nominal_substitution(
         &mut self,
@@ -168,19 +190,39 @@ impl<'r, 'g> Checker<'r, 'g> {
             .filter(|node| !inference.data.contains_key(node))
             .collect();
         for node in pending {
+            let mut check_receivers = false;
             if !inference.slots[&node].blocked {
-                let kind = if inference.module.syntax.nodes[node].kind == NodeKind::Bracket {
-                    ScalarUnsupported::CoreAdmission
+                let module = inference.module;
+                if module.syntax.nodes[node].kind == NodeKind::Bracket {
+                    if inference.slots[&node].nominal_tuple {
+                        let inputs = self.runtime_children(inference, node)?;
+                        if !self.has_blocked_input(inference, inputs)? {
+                            self.finding(module, node, ScalarFindingKind::InsufficientContext)?;
+                        }
+                    } else {
+                        self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+                    }
+                } else if let Some(frame) = inference.nominals.get(&node) {
+                    let inputs = self.nominal_inputs(frame)?;
+                    if !self.has_blocked_input(inference, inputs)? {
+                        check_receivers = frame.arguments_closed;
+                        if !check_receivers {
+                            self.finding(module, node, ScalarFindingKind::InsufficientContext)?;
+                        }
+                    }
                 } else {
-                    ScalarUnsupported::GenericInference
-                };
-                self.defer(inference.module, node, kind)?;
+                    self.defer(module, node, ScalarUnsupported::GenericInference)?;
+                }
             }
+            inference.slots.get_mut(&node).unwrap().blocked = true;
             self.elab.reserve(1)?;
             let mut stack = vec![node];
             while let Some(child) = stack.pop() {
                 self.elab.step(1)?;
-                if let Some(slot) = inference.slots.get_mut(&child) {
+                if let Some(slot) = inference.slots.get_mut(&child)
+                    && (self.input.ordinary.is_none()
+                        || (slot.ty.is_none() && !(check_receivers && slot.expected.is_some())))
+                {
                     slot.blocked = true;
                 }
                 let children = &inference.module.syntax.nodes[child].children;
@@ -233,6 +275,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         context: &Context<'r, 'g>,
     ) -> Work<()> {
+        if self.input.ordinary.is_some() {
+            return self.nominal_step(inference, node, context);
+        }
         let module = inference.module;
         let n = &module.syntax.nodes[node];
         if !inference.data.contains_key(&node) {
@@ -308,6 +353,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 arguments,
                                 base: None,
                                 substitution,
+                                argument_sources: Vec::new(),
+                                bindings: Vec::new(),
                             })),
                         },
                     );
@@ -637,6 +684,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         context: &Context<'r, 'g>,
     ) -> Work<()> {
+        if self.input.ordinary.is_some() {
+            return self.nominal_step(inference, node, context);
+        }
         if !inference.data.contains_key(&node) {
             let before = self.marks();
             let prepared = self.prepare_construction(inference, node, context)?;
@@ -705,17 +755,51 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.finding(module, node, ScalarFindingKind::PrivateValue)?;
             return Ok(None);
         }
-        let before = self.marks();
         let substitution = self.nominal_substitution(&facts.binders, arguments)?;
+        let Some(RecordInitializers {
+            fields: written,
+            mut contexts,
+        }) = self.record_initializers(module, node, &fields, base.is_some())?
+        else {
+            return Ok(None);
+        };
+        self.elab
+            .reserve(contexts.len() + usize::from(base.is_some()) * 2)?;
+        let inputs = base
+            .into_iter()
+            .chain(contexts.iter().map(|(node, _)| *node))
+            .collect();
+        if let Some(base) = base {
+            contexts.insert(0, (base, ty.clone()));
+        }
+        Ok(Some(PreparedData {
+            flow: None,
+            ty: ty.clone(),
+            contexts,
+            inputs,
+            fact: DataExpression::Construction(Box::new(Construction {
+                ty,
+                fields: written,
+                arguments: Vec::new(),
+                base,
+                substitution,
+                argument_sources: Vec::new(),
+                bindings: Vec::new(),
+            })),
+        }))
+    }
+    fn record_initializers(
+        &mut self,
+        module: &'g Module,
+        node: NodeId,
+        fields: &[(&'g Declaration, Type<'g>)],
+        use_base: bool,
+    ) -> Work<Option<RecordInitializers<'g>>> {
+        let n = &module.syntax.nodes[node];
+        let before = self.marks();
         let mut written = Vec::new();
         let mut contexts = Vec::new();
-        let mut inputs = Vec::new();
         let mut seen = BTreeSet::new();
-        if let Some(base) = base {
-            self.elab.reserve(2)?;
-            contexts.push((base, ty.clone()));
-            inputs.push(base);
-        }
         for &initializer in &n.children[1..] {
             self.elab.step(1)?;
             let field = &module.syntax.nodes[initializer];
@@ -736,32 +820,19 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.finding(module, initializer, ScalarFindingKind::DuplicateField)?;
             }
             let value = field.children[usize::from(!shorthand)];
-            self.elab.reserve(3)?;
+            self.elab.reserve(2)?;
             contexts.push((value, expected.clone()));
-            inputs.push(value);
             written.push(FieldValue {
                 field: member,
                 expression: value,
             });
         }
-        if base.is_none() && seen.len() != fields.len() {
+        if !use_base && seen.len() != fields.len() {
             self.finding(module, node, ScalarFindingKind::MissingField)?;
         }
-        if self.marks() != before {
-            return Ok(None);
-        }
-        Ok(Some(PreparedData {
-            flow: None,
-            ty: ty.clone(),
+        Ok((self.marks() == before).then_some(RecordInitializers {
+            fields: written,
             contexts,
-            inputs,
-            fact: DataExpression::Construction(Box::new(Construction {
-                ty,
-                fields: written,
-                arguments: Vec::new(),
-                base,
-                substitution,
-            })),
         }))
     }
 }

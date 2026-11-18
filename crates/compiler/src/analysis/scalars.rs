@@ -109,12 +109,7 @@ pub struct CallFacts<'g> {
     pub arguments: Vec<NodeId>,
     pub defaults: Vec<DefaultArgumentUse<'g>>,
 }
-#[derive(Debug)]
-pub struct DefaultArgumentUse<'g> {
-    pub binder: &'g DeclarationId,
-    pub node: NodeId,
-    pub span: &'g Span,
-}
+pub use super::DefaultArgumentUse;
 #[derive(Debug)]
 pub struct BindingFacts<'g> {
     pub declaration: &'g DeclarationId,
@@ -334,6 +329,7 @@ struct Slot<'g> {
     ordinary_context: Option<ordinary::InputPremise>,
     literal: Option<LiteralEvidence<'g>>,
     blocked: bool,
+    nominal_tuple: bool,
     binding: Option<&'g DeclarationId>,
     place: Place,
     normal: bool,
@@ -392,6 +388,7 @@ struct Inference<'g> {
     data: BTreeMap<NodeId, data::PreparedData<'g>>,
     data_nodes: BTreeSet<NodeId>,
     ordinary_tuples: BTreeSet<NodeId>,
+    nominals: BTreeMap<NodeId, data::nominal::PreparedNominal<'g>>,
 }
 struct BodyInput<'r, 'g> {
     graph: &'g Graph,
@@ -415,13 +412,7 @@ struct Checker<'r, 'g> {
 impl<'r, 'g> Checker<'r, 'g> {
     fn new(input: BodyInput<'r, 'g>, limits: AnalysisLimits, data: bool) -> Self {
         Self {
-            elab: Analyzer {
-                graph: input.graph,
-                limits,
-                statistics: Statistics::default(),
-                facts: PartialFacts::default(),
-                declarations: BTreeMap::new(),
-            },
+            elab: Analyzer::new(input.graph, limits, input.ordinary.is_some()),
             input,
             facts: ScalarFacts::default(),
             data,
@@ -1516,6 +1507,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             data: BTreeMap::new(),
             data_nodes: BTreeSet::new(),
             ordinary_tuples: BTreeSet::new(),
+            nominals: BTreeMap::new(),
         };
         self.elab.reserve(1)?;
         let mut stack = vec![root];
@@ -1665,8 +1657,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
             }
         }
-        // An unsupported or previously blocked operand cannot prove missing context in its siblings.
-        if inference.slots.values().any(|s| s.blocked) {
+        // Keep independent data inputs visible in M4.6. Its data worklist
+        // distinguishes blocked inputs from missing local context at the end.
+        if (self.input.ordinary.is_none() || inference.data_nodes.is_empty())
+            && inference.slots.values().any(|s| s.blocked)
+        {
             return Ok(None);
         }
         if let Some(expected) = expected {
@@ -1757,7 +1752,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                     _ => (),
                 }
             }
-            if self.input.ordinary.is_some() && self.apply_ready_call_default(&mut inference)? {
+            if self.input.ordinary.is_some()
+                && (self.apply_ready_nominal_default(&mut inference)?
+                    || self.apply_ready_call_default(&mut inference)?)
+            {
                 continue;
             }
             self.elab.reserve(inference.slots.len())?;
@@ -2402,7 +2400,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let keys: Vec<_> = self.elab.facts.uses.keys().copied().collect();
         for key in keys {
             let use_ = &self.elab.facts.uses[&key];
-            let size = 1 + use_.bindings.len() + use_.substitution.len();
+            let size = 1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len();
             self.elab.reserve(size)?;
             let use_ = self.elab.facts.uses[&key].clone();
             self.facts.nodes.push(NodeFacts {

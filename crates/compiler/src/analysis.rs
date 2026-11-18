@@ -122,6 +122,13 @@ pub struct TypeUse<'g> {
     pub ty: Type<'g>,
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
+    pub defaults: Vec<DefaultArgumentUse<'g>>,
+}
+#[derive(Clone, Debug)]
+pub struct DefaultArgumentUse<'g> {
+    pub binder: &'g DeclarationId,
+    pub node: NodeId,
+    pub span: &'g Span,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -171,8 +178,10 @@ pub enum FindingKind {
     InvalidVariantParent,
     MissingVariant,
     AmbiguousVariant,
+    NonTrailingDefault,
+    InvalidDefaultDependency,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Finding<'g> {
     pub kind: FindingKind,
     pub span: &'g Span,
@@ -185,8 +194,9 @@ pub enum Unsupported {
     Requirements,
     Implementation,
     NeedsTypeArguments,
+    RecursiveDefault,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Obligation<'g> {
     pub reason: Unsupported,
     pub module: &'g ModuleKey,
@@ -299,14 +309,30 @@ enum NameTarget<'g> {
     Primitive(&'g Intrinsic),
     Declaration(&'g Declaration),
 }
+mod defaults;
+use defaults::ActiveDefault;
+
 struct Analyzer<'g> {
     graph: &'g Graph,
+    complete_defaults: bool,
+    active_defaults: Vec<ActiveDefault<'g>>,
     limits: AnalysisLimits,
     statistics: Statistics,
     facts: PartialFacts<'g>,
     declarations: BTreeMap<(&'g ModuleKey, NodeId), &'g Declaration>,
 }
 impl<'g> Analyzer<'g> {
+    fn new(graph: &'g Graph, limits: AnalysisLimits, complete_defaults: bool) -> Self {
+        Self {
+            graph,
+            limits,
+            complete_defaults,
+            active_defaults: Vec::new(),
+            statistics: Statistics::default(),
+            facts: PartialFacts::default(),
+            declarations: BTreeMap::new(),
+        }
+    }
     fn step(&mut self, amount: usize) -> Work<()> {
         let next = self.statistics.work.checked_add(amount).ok_or(())?;
         if next > self.limits.max_work {
@@ -432,7 +458,7 @@ impl<'g> Analyzer<'g> {
                         break;
                     }
                 }
-                if module.syntax.nodes[node].children.len() > 1 {
+                if !self.complete_defaults && module.syntax.nodes[node].children.len() > 1 {
                     self.unsupported(module, node, Unsupported::GenericDefault)?;
                 }
                 self.reserve(1)?;
@@ -469,6 +495,9 @@ impl<'g> Analyzer<'g> {
                 let Some(ty) = self.ty(module, n.children[0], binders, depth + 1)? else {
                     return Ok(None);
                 };
+                if !self.active_defaults.is_empty() {
+                    return Ok(Some(ty));
+                }
                 self.reserve(1)?;
                 self.facts.uses.insert(
                     (&module.key, n.span.start(), node),
@@ -479,6 +508,7 @@ impl<'g> Analyzer<'g> {
                         ty: ty.clone(),
                         bindings: Vec::new(),
                         substitution: Vec::new(),
+                        defaults: Vec::new(),
                     },
                 );
                 return Ok(Some(ty));
@@ -528,8 +558,11 @@ impl<'g> Analyzer<'g> {
         bindings: Vec<&'g Binding>,
     ) -> Work<Type<'g>> {
         self.reserve(2)?; // One immutable term and one written-use record.
-        let n = &module.syntax.nodes[node];
         let ty = Arc::new(term);
+        if !self.active_defaults.is_empty() {
+            return Ok(ty);
+        }
+        let n = &module.syntax.nodes[node];
         self.facts.uses.insert(
             (&module.key, n.span.start(), node),
             TypeUse {
@@ -539,6 +572,7 @@ impl<'g> Analyzer<'g> {
                 ty: ty.clone(),
                 bindings,
                 substitution,
+                defaults: Vec::new(),
             },
         );
         Ok(ty)
@@ -575,16 +609,20 @@ impl<'g> Analyzer<'g> {
         }
         unreachable!("a resolved M3 binding has an actual declaration")
     }
-    fn named_type(
+    fn named_target(
         &mut self,
         module: &'g Module,
         node: NodeId,
         binders: &[Binder<'g>],
-        depth: usize,
-    ) -> Work<Option<Type<'g>>> {
+        bindings: &mut Vec<&'g Binding>,
+    ) -> Work<Option<NameTarget<'g>>> {
         let n = &module.syntax.nodes[node];
         let path = &module.syntax.nodes[n.children[0]];
         let name = std::str::from_utf8(module.syntax.nodes[path.children[0]].span.bytes()).unwrap();
+        if self.hidden_default_binder(name)? {
+            self.finding(module, node, FindingKind::InvalidDefaultDependency)?;
+            return Ok(None);
+        }
         let mut target = None;
         for binder in binders {
             self.step(1)?;
@@ -596,7 +634,6 @@ impl<'g> Analyzer<'g> {
                 break;
             }
         }
-        let mut bindings = Vec::new();
         if target.is_none() {
             let mut binding = self.binding(&module.key, name)?;
             for position in 0..path.children.len() {
@@ -647,12 +684,20 @@ impl<'g> Analyzer<'g> {
             self.finding(module, node, FindingKind::NotAType)?;
             return Ok(None);
         }
+        Ok(Some(target))
+    }
+    fn written_arguments(
+        &mut self,
+        module: &'g Module,
+        node: NodeId,
+        binders: &[Binder<'g>],
+        depth: usize,
+    ) -> Work<Option<Vec<Type<'g>>>> {
+        let n = &module.syntax.nodes[node];
         let mut arguments = Vec::new();
-        let mut variant = None;
         let mut valid = true;
         for &child in &n.children[1..] {
             if module.syntax.nodes[child].kind == NodeKind::Name {
-                variant = Some(child);
                 continue;
             }
             for &argument in &module.syntax.nodes[child].children {
@@ -664,10 +709,31 @@ impl<'g> Analyzer<'g> {
                 }
             }
         }
-        if !valid {
+        Ok(valid.then_some(arguments))
+    }
+    fn named_type(
+        &mut self,
+        module: &'g Module,
+        node: NodeId,
+        binders: &[Binder<'g>],
+        depth: usize,
+    ) -> Work<Option<Type<'g>>> {
+        let n = &module.syntax.nodes[node];
+        let mut bindings = Vec::new();
+        let Some(target) = self.named_target(module, node, binders, &mut bindings)? else {
             return Ok(None);
-        }
+        };
+        let Some(arguments) = self.written_arguments(module, node, binders, depth)? else {
+            return Ok(None);
+        };
+        let variant = n
+            .children
+            .last()
+            .copied()
+            .filter(|&child| module.syntax.nodes[child].kind == NodeKind::Name);
+        let mut arguments = arguments;
         let mut substitution = Vec::new();
+        let mut defaults = Vec::new();
         let term = match target {
             NameTarget::Primitive(primitive) => {
                 if !arguments.is_empty() {
@@ -680,6 +746,9 @@ impl<'g> Analyzer<'g> {
                 if !arguments.is_empty() {
                     self.finding(module, node, FindingKind::ExcessArguments)?;
                     return Ok(None);
+                }
+                if let Some(ty) = self.default_argument(declaration, position) {
+                    return Ok(Some(ty));
                 }
                 TypeTerm::Parameter {
                     declaration,
@@ -705,6 +774,29 @@ impl<'g> Analyzer<'g> {
                         continue;
                     }
                     count = owner.syntax.nodes[child].children.len();
+                    if self.complete_defaults && arguments.len() < count {
+                        let nominal = self.binders(owner, declaration.node)?;
+                        for binder in nominal.iter().skip(arguments.len()) {
+                            let Some(default) = self.written_default(owner, binder) else {
+                                self.unsupported(module, node, Unsupported::NeedsTypeArguments)?;
+                                return Ok(None);
+                            };
+                            self.reserve(arguments.len() + 2)?;
+                            let established: Vec<_> = arguments.iter().cloned().map(Some).collect();
+                            let Some(ty) = self.elaborate_default(
+                                owner,
+                                &nominal,
+                                &default,
+                                &established,
+                                depth + 1,
+                            )?
+                            else {
+                                return Ok(None);
+                            };
+                            defaults.push(default);
+                            arguments.push(ty);
+                        }
+                    }
                     if count == arguments.len() {
                         for (position, &parameter) in
                             owner.syntax.nodes[child].children.iter().enumerate()
@@ -804,8 +896,15 @@ impl<'g> Analyzer<'g> {
         } else {
             term
         };
-        self.retain_type(module, node, term, substitution, bindings)
-            .map(Some)
+        let ty = self.retain_type(module, node, term, substitution, bindings)?;
+        if !defaults.is_empty() && self.active_defaults.is_empty() {
+            self.facts
+                .uses
+                .get_mut(&(&module.key, n.span.start(), node))
+                .unwrap()
+                .defaults = defaults;
+        }
+        Ok(Some(ty))
     }
     fn member_types(
         &mut self,
@@ -850,6 +949,7 @@ impl<'g> Analyzer<'g> {
                 }
                 if declaration.id.kind == DeclarationKind::Record {
                     let binders = self.binders(module, declaration.node)?;
+                    self.validate_nominal_defaults(module, &binders)?;
                     let shape = *module.syntax.nodes[declaration.node]
                         .children
                         .last()
@@ -869,6 +969,7 @@ impl<'g> Analyzer<'g> {
                 }
                 if declaration.id.kind == DeclarationKind::Enum {
                     let binders = self.binders(module, declaration.node)?;
+                    self.validate_nominal_defaults(module, &binders)?;
                     let mut variants = Vec::new();
                     let mut valid = true;
                     for &child in &module.syntax.nodes[declaration.node].children {
@@ -987,13 +1088,7 @@ pub fn analyze_declaration_types(
     graph: &Graph,
     limits: AnalysisLimits,
 ) -> Result<Receipt<'_>, Failure<'_>> {
-    let mut analyzer = Analyzer {
-        graph,
-        limits,
-        statistics: Statistics::default(),
-        facts: PartialFacts::default(),
-        declarations: BTreeMap::new(),
-    };
+    let mut analyzer = Analyzer::new(graph, limits, false);
     let kind = if analyzer.analyze(None).is_err() {
         Some(FailureKind::ResourceLimit)
     } else if !analyzer.facts.obligations.is_empty() {

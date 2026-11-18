@@ -165,7 +165,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(false)
     }
 
-    pub(super) fn slot_substitutions(
+    pub(in crate::analysis::scalars) fn slot_substitutions(
         &mut self,
         binders: &[Binder<'g>],
         slots: &[Option<Type<'g>>],
@@ -207,7 +207,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.step(1)
     }
 
-    pub(super) fn closed(
+    pub(in crate::analysis::scalars) fn closed(
         &mut self,
         term: &Type<'g>,
         binders: &[Binder<'g>],
@@ -226,7 +226,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(true)
     }
 
-    pub(super) fn accept_input(
+    pub(in crate::analysis::scalars) fn accept_input(
         &mut self,
         pattern: &Type<'g>,
         actual: &Type<'g>,
