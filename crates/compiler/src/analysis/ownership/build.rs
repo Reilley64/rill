@@ -424,6 +424,13 @@ impl<'a, 'g> Build<'a, 'g> {
         self.emit(node, Action::Cleanup(index), Edges::Next(next))
     }
 
+    fn caller_contents(&mut self, node: NodeId, root: &DeclarationId) -> ResultOf<(Slot, Slot)> {
+        self.budget.step(2)?;
+        let descriptor = *self.locals.get(root).ok_or(Stop::Pending(node))?;
+        let contents = *self.retained.get(&descriptor).ok_or(Stop::Pending(node))?;
+        Ok((descriptor, contents))
+    }
+
     fn check_retained(&mut self, node: NodeId, next: Pc) -> ResultOf<Pc> {
         if self.retained.is_empty() {
             Ok(next)
@@ -520,9 +527,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if let Some(path) = &self.value(left)?.path
                     && path.projections.as_slice() == [PathProjection::Dereference]
                 {
-                    self.budget.step(2)?;
-                    let descriptor = *self.locals.get(path.root).ok_or(Stop::Pending(left))?;
-                    let contents = *self.retained.get(&descriptor).ok_or(Stop::Pending(left))?;
+                    let (descriptor, contents) = self.caller_contents(left, path.root)?;
                     let ty = self.value(value)?.ty.clone();
                     let incoming = self.slot(value, &ty)?;
                     let install = self.emit(
@@ -1109,6 +1114,20 @@ impl<'a, 'g> Build<'a, 'g> {
                     into,
                 }
             }
+            NodeKind::Prefix("*") => {
+                let Some(path) = &facts.path else {
+                    return Err(Stop::Pending(node));
+                };
+                if path.projections.as_slice() != [PathProjection::Dereference] {
+                    return Err(Stop::Pending(node));
+                }
+                let (descriptor, contents) = self.caller_contents(node, path.root)?;
+                Action::CopyThrough {
+                    descriptor,
+                    contents,
+                    into,
+                }
+            }
             NodeKind::Bracket => {
                 let into = into.ok_or(Stop::Pending(node))?;
                 let Some(DataExpression::Tuple { elements }) = &facts.data else {
@@ -1219,7 +1238,8 @@ impl<'a, 'g> Build<'a, 'g> {
         node: NodeId,
         call: &crate::analysis::scalars::CallFacts<'g>,
         position: usize,
-    ) -> ResultOf<(Slot, usize)> {
+        args: &[Slot],
+    ) -> ResultOf<CallDestination> {
         // This contract is determined by the declaration, not by inspecting
         // its body for a narrower effect. Only one possible input is admitted.
         self.budget.step(1)?;
@@ -1255,6 +1275,21 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let argument = self.ungroup(call.arguments[position])?;
         let syntax = &self.module.syntax.nodes[argument];
+        if syntax.kind == NodeKind::ValueReference {
+            self.budget.step(1)?;
+            let Some(path) = &self.value(argument)?.path else {
+                return Err(Stop::Pending(argument));
+            };
+            if !path.projections.is_empty() {
+                return Err(Stop::Pending(argument));
+            }
+            let (place, contents) = self.caller_contents(argument, path.root)?;
+            return Ok(CallDestination {
+                place,
+                external_contents: Some(contents),
+                input: args[input],
+            });
+        }
         if syntax.kind != NodeKind::Prefix("&mut") {
             return Err(Stop::Pending(argument));
         }
@@ -1273,7 +1308,11 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         self.budget.step(1)?;
         let place = *self.locals.get(path.root).ok_or(Stop::Pending(target))?;
-        Ok((place, input))
+        Ok(CallDestination {
+            place,
+            external_contents: None,
+            input: args[input],
+        })
     }
 
     fn call(&mut self, node: NodeId, into: Option<Slot>, next: Pc, depth: usize) -> ResultOf<Pc> {
@@ -1330,17 +1369,18 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(1)?;
             let ty = self.value(arg)?.ty.clone();
             if retained_bool_contents_type(&ty).is_some() {
-                destination = Some(self.call_destination(node, call, position)?);
+                if destination.replace(position).is_some() {
+                    return Err(Stop::Pending(arg));
+                }
             } else if !self.direct_call_type(&ty) {
                 return Err(Stop::Pending(arg));
             }
             args.push(self.slot(arg, &ty)?);
         }
         let index = self.calls.len();
-        let destination = destination.map(|(place, input)| CallDestination {
-            place,
-            input: args[input],
-        });
+        let destination = destination
+            .map(|position| self.call_destination(node, call, position, &args))
+            .transpose()?;
         self.calls.push(Call {
             callee: call.callee,
             args,

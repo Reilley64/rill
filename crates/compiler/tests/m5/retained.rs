@@ -237,6 +237,7 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
                     callee,
                     destination,
                     input,
+                    through_parameter: false,
                 },
                 Operation::Dereference(read),
             ] = events.as_slice()
@@ -264,7 +265,7 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
             assert!(matches!(reverse_events.as_slice(), [
                 Operation::Borrow { source, holder, exclusive: false },
                 Operation::Borrow { source: target, exclusive: true, .. },
-                Operation::CallRetaining { callee, destination, input },
+                Operation::CallRetaining { callee, destination, input, through_parameter: false },
             ] if *callee == &declaration("inReverse").id && source.root.span.bytes() == b"flag: bool"
                 && destination.root.span.bytes() == b"out" && target.root.node == destination.root.node
                 && holder.root.node == input.root.node));
@@ -310,6 +311,215 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
                 },
             ] {
                 let limited = check("valid", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
+    probe(
+        "retained::forwarding_reborrows_the_descriptor_and_keeps_its_contents",
+        r#"
+            function remember(slot: &mut &bool, input: &bool): void {
+                let old = *slot;
+                *slot = input;
+            }
+            function savedCopy(slot: &mut &bool, input: &bool): &bool {
+                let flag = true;
+                *slot = &flag;
+                let old = *slot;
+                *slot = input;
+                return old;
+            }
+            function relay(slot: &mut &bool, input: &bool): void {
+                remember((slot), input);
+                *slot = input;
+            }
+            function readsIncoming(slot: &mut &bool, input: &bool): &bool {
+                let old = *slot;
+                *slot = input;
+                return old;
+            }
+            function suspended(slot: &mut &bool, input: &bool): void {
+                remember(slot, *slot);
+            }
+            function relayRestored(slot: &mut &bool, input: &bool): void {
+                { let flag = true; relay(slot, &flag); *slot = input; }
+            }
+            function caller(seed: &bool, flag: bool): bool {
+                let mut out = seed;
+                relay(&mut out, &flag);
+                return *out;
+            }
+            function callerExpires(seed: &bool): bool {
+                let mut out = seed;
+                { let flag = true; relay(&mut out, &flag); }
+                return *out;
+            }
+            function escapesThroughRelay(slot: &mut &bool, input: &bool): void {
+                let flag = true;
+                relay(slot, &flag);
+            }
+            function expiresBeforeOverwrite(slot: &mut &bool, input: &bool): void {
+                { let flag = true; relay(slot, &flag); }
+                *slot = input;
+            }
+            function preservesOld(slot: &mut &bool, input: &bool): void {
+                { let old = true; *slot = &old; relay(slot, input); }
+            }
+            function movedDescriptor(slot: &mut &bool, input: &bool): void {
+                let moved = slot;
+                relay(slot, input);
+            }
+            function rejectedCaller(seed: &bool): bool {
+                let mut out = seed;
+                escapesThroughRelay(&mut out, seed);
+                return *out;
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let remember = lower("remember");
+            let remember_mir = remember
+                .mir()
+                .unwrap_or_else(|| panic!("remember: {:?}", remember.completion()));
+            let reads_and_writes: Vec<_> = linear(remember_mir, remember_mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CopyThrough { .. } | Operation::InstallThrough { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(reads_and_writes.as_slice(), [
+                Operation::CopyThrough { descriptor: from, into: Some(old) },
+                Operation::InstallThrough { descriptor: into, .. },
+            ] if from.root.node == into.root.node && old.root.span.bytes() == b"old"));
+            let saved = lower("savedCopy");
+            assert_eq!(saved.completion(), Completion::SourceRejected);
+            assert!(saved.mir().is_none());
+            let [finding] = saved.findings() else {
+                panic!("expected the copied local backing to escape")
+            };
+            assert_eq!(finding.code(), "R0202");
+            assert_eq!(finding.site.span.bytes(), b"return old;");
+
+            let incoming = lower("readsIncoming");
+            let mir = incoming
+                .mir()
+                .expect("a copied caller-backed descriptor can be returned");
+            assert!(
+                linear(mir, mir.entry)
+                    .iter()
+                    .any(|op| matches!(op, Operation::Export(_)))
+            );
+
+            let relay = lower("relay");
+            let mir = relay
+                .mir()
+                .unwrap_or_else(|| panic!("relay: {:?}", relay.completion()));
+            let steps: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::CallRetaining { .. }
+                            | Operation::InstallThrough { .. }
+                    )
+                })
+                .collect();
+            let [
+                Operation::Reborrow {
+                    parent,
+                    exclusive: true,
+                    ..
+                },
+                Operation::CallRetaining {
+                    callee,
+                    destination,
+                    input,
+                    through_parameter: true,
+                },
+                Operation::InstallThrough { descriptor, .. },
+            ] = steps.as_slice()
+            else {
+                panic!("expected reborrow, retained call and resumed write: {steps:?}")
+            };
+            assert_eq!(*callee, &declaration("remember").id);
+            assert_eq!(parent.root.span.bytes(), b"slot: &mut &bool");
+            assert_eq!(parent.root.node, destination.root.node);
+            assert_eq!(parent.root.node, descriptor.root.node);
+            assert_eq!(input.root.span.bytes(), b"input");
+
+            let caller = lower("caller");
+            let mir = caller
+                .mir()
+                .expect("both the relay and its reached callee check");
+            assert!(
+                linear(mir, mir.entry).iter().any(|op| matches!(op,
+                Operation::CallRetaining { callee, destination, through_parameter: false, .. }
+                if *callee == &declaration("relay").id && destination.root.span.bytes() == b"out"))
+            );
+            let restored = lower("relayRestored");
+            let mir = restored
+                .mir()
+                .expect("a resumed exact write can remove the retained source");
+            assert!(
+                matches!(writes_on_path(mir).as_slice(), [(_, input)] if input.root.span.bytes() == b"input")
+            );
+
+            for (name, code, cause) in [
+                ("callerExpires", "R0203", b"&flag".as_slice()),
+                ("suspended", "R0201", b"slot".as_slice()),
+                ("escapesThroughRelay", "R0202", b"&flag".as_slice()),
+                ("expiresBeforeOverwrite", "R0203", b"&flag".as_slice()),
+                ("preservesOld", "R0203", b"&old".as_slice()),
+                ("movedDescriptor", "R0200", b"slot".as_slice()),
+                ("rejectedCaller", "R0202", b"&flag".as_slice()),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.related.span.bytes(), cause, "{name}");
+                if code == "R0202" {
+                    assert_eq!(finding.site.span.bytes(), b"relay(slot, &flag)");
+                }
+            }
+            let limits = AnalysisLimits {
+                max_work: caller.statistics().work,
+                max_entries: caller.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("caller", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("caller", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }

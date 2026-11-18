@@ -161,6 +161,8 @@ pub enum Operation<'g> {
         callee: &'g DeclarationId,
         destination: Place<'g>,
         input: Place<'g>,
+        /// `destination` is a parameter granting access to caller storage.
+        through_parameter: bool,
     },
     /// Select the success variant of an admitted postfix operand.
     TestVariant {
@@ -195,6 +197,11 @@ pub enum Operation<'g> {
     Install {
         target: Place<'g>,
         incoming: Place<'g>,
+    },
+    /// Copy the shared reference stored through the exclusive descriptor.
+    CopyThrough {
+        descriptor: Place<'g>,
+        into: Option<Place<'g>>,
     },
     /// Store into caller storage through the initialized exclusive descriptor.
     InstallThrough {
@@ -622,6 +629,11 @@ enum Action<'g> {
         target: Slot,
         incoming: Slot,
     },
+    CopyThrough {
+        descriptor: Slot,
+        contents: Slot,
+        into: Option<Slot>,
+    },
     InstallThrough {
         descriptor: Slot,
         contents: Slot,
@@ -688,5 +700,6 @@ struct Call<'g> {
 #[derive(Clone, Copy)]
 struct CallDestination {
     place: Slot,
+    external_contents: Option<Slot>,
     input: Slot,
 }
