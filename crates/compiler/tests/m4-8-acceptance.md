@@ -200,3 +200,9 @@ The clean code revision `9a28a54b2cc98eadb65218f03480f1c7bd909698` passed the [p
 | Exact and one-short analysis work in the installed Rust test | Receipt at the exact limit; `ResourceLimit` and no receipt one unit short. |
 
 All four mise gates passed: 423 compiler tests, 439 workspace tests, `check` and `build:scaffold`. The 55 Python model tests passed. The compiler dependency tree had no LLVM dependency, and the documentation check found zero errors across 1,834 destinations at the code revision. Workflows did not change. These results verify M4 static typing for the approved installed macOS AArch64 profile with empty options. They do not establish ownership, Rill execution, native ABI, hosted acceptance, or any RFC status change.
+
+### Hosted scaffold test-launch correction
+
+At `53365299176d1e5c6f1c03d5cef1ddf7f9352ccf`, the hosted scaffold tests hit `ExecutableFileBusy` when launching copied integration-test executables on [Linux x86-64](https://github.com/Reilley64/rill/actions/runs/44304641698/job/134802896578) and [Linux AArch64](https://github.com/Reilley64/rill/actions/runs/44304649625/job/134802923842). A concurrent fork can briefly hold another test's writable copy descriptor. The test helper now holds a lock through copying and spawning, then releases it before waiting for child output. The tests still run in parallel.
+
+The original Result suite passed all 25 serial runs and failed 12 of 25 parallel runs with the same error in a local Linux AArch64 container using Rust 1.99.1. At `2568e6f1fd0045ce89eb71960990f04e9783c900`, both the installed Result and Result-use suites passed 50 parallel runs each in that container. The full Linux compiler suite passed 421 tests. On macOS AArch64 with the pinned toolchain, the four mise gates and staged typed closeout passed again, including receipts in both modes. The fix does not change the CI workflows or the intentionally unavailable `test:runtime` result.
