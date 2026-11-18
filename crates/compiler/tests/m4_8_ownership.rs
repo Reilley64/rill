@@ -1086,6 +1086,23 @@ fn installed_receipts(request: &InstalledRequest) {
             assert!(report.receipt().is_none());
         }
 
+        fs::write(
+            &request.entry,
+            format!(
+                "{MAIN}\nfunction dormant<T>(value: &T): bool;
+                 implement<T> dormant(value: &T): bool {{ return 7i32; }}\n"
+            ),
+        )
+        .unwrap();
+        let rejected = loader::load_installed(request.clone()).unwrap();
+        let report = analyze_typed(&rejected, AnalysisLimits::default());
+        assert!(report.receipt().is_none());
+        assert!(report.bodies().findings().iter().any(|f| {
+            f.site.module.path == "main.rill"
+                && f.kind.code() == Some("R0100")
+                && f.site.span.bytes() == b"7i32"
+        }));
+
         fs::write(&request.entry, MAIN).unwrap();
         fs::write(&checks, format!("{SUPPORT}\nexpect 1i32;\n")).unwrap();
         let rejected = loader::load_installed(request).unwrap();
