@@ -221,3 +221,19 @@ Query `analysis.family(id)` for canonical implementation records, installed rout
 `select_inputs` takes established static input contracts and optional leading family arguments. Explicit input-relevant arguments filter matches. They do not change the original patterns' priority. Output-only arguments and selected requirements remain pending. This entry does not supply a source expression context or use a callee's body.
 
 M3 supplies no canonical role and protection catalogue. The report keeps those obligations and labels every settled selection hypothetical. A missing candidate, unfinished prerequisite or exhausted budget cannot establish absence. An ordinary input fact is not a checked call, a provider clearance, or completed source checking. Actual admission remains in M4.8.
+
+## M4.6 generic inference and symbolic evidence
+
+`analysis::generics::analyze_generics` uses the ordinary inventory and the shared scalar and data checker. It checks supported bodies with rigid declaration binders. Each call or nominal application has its own substitution. Independent input constraints run before a ready written default. Unsuffixed numbers still need a receiving type.
+
+| Query | Facts |
+| --- | --- |
+| `body`, `body_status`, `node` | Scope completion, supported types and callable invocations, and remaining obligations. |
+| `ordinary_call`, `ordinary_value` | Conditional input context, selection and output agreement. They cannot clear an unadmitted role. |
+| `arrow` | Signature and capture sites, original storage, access demands and any known invocation mode. An unresolved mode can leave a signature without a checked invocation. |
+| `goal`, `goals` | Exact judgments, caller assumptions, dependencies, result witnesses and blockers. `goal` rejects IDs issued by another report. |
+| `annotations`, `declaration_issues` | Captured annotation and default provenance, plus retained declaration and layout issues. |
+
+The checker keeps independent output determination separate from a request to prove a particular result. It does not try another ordinary body when selected evidence fails. A repeated active goal stays unresolved; exhaustion on a growing type is a resource limit. Neither is proof of absence.
+
+The [M4.6 verification record](tests/m4-6-acceptance.md) identifies the reviewed and tested revisions and lists the remaining inference cases. Core role and protection admission still belong to M4.8. These facts grant no ownership or execution permission.
