@@ -33,6 +33,10 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
             }
             function forward(value: [&bool, string]): &bool { return value[0]; }
             function forwardCall(value: [&bool, string]): &bool { return forward(value); }
+            function forwardLocal(p: bool): &bool {
+                let value: [&bool, string] = [&p, "tag"];
+                return forward(value);
+            }
             function borrowElement(value: [bool, bool]): bool {
                 let r = &value[0];
                 return *r;
@@ -41,13 +45,21 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
             function temporary(value: [string, string, string]): string { return pass(value)[1]; }
         "#,
         |_, module, receipt, _| {
-            let lower = |name| {
-                let decl = module
+            let declaration = |name| {
+                module
                     .declarations
                     .iter()
-                    .find(|decl| decl.name.as_deref() == Some(name))
-                    .unwrap();
-                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower = |name| {
+                lower_body(
+                    receipt,
+                    module,
+                    &declaration(name).id,
+                    AnalysisLimits::default(),
+                )
+                .unwrap()
             };
 
             let split = lower("split");
@@ -79,17 +91,25 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
 
             let constructed = lower("construct");
             let mir = constructed.mir().expect("tuple construction MIR");
-            let order: Vec<_> = mir
-                .blocks
-                .iter()
-                .filter_map(|block| match block.operation {
-                    Operation::Move {
-                        from,
-                        into: Some(into),
-                    } => into.tuple_element().map(|i| (from.root.span.bytes(), i)),
-                    _ => None,
-                })
-                .collect();
+            let mut order = Vec::new();
+            let mut pc = mir.entry;
+            for _ in 0..mir.blocks.len() {
+                let block = &mir.blocks[pc];
+                if let Operation::Move {
+                    from,
+                    into: Some(into),
+                } = block.operation
+                    && let Some(position) = into.tuple_element()
+                {
+                    order.push((from.root.span.bytes(), position));
+                }
+                match block.terminator {
+                    Terminator::Goto(next) => pc = next,
+                    Terminator::Return => break,
+                    other => panic!("expected a linear path, got {other:?}"),
+                }
+            }
+            assert!(matches!(mir.blocks[pc].terminator, Terminator::Return));
             assert_eq!(
                 order,
                 [
@@ -98,6 +118,28 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
                 ]
             );
             assert_eq!(dropped_elements(mir, mir.entry), [1, 0]);
+            let limits = AnalysisLimits {
+                max_work: constructed.statistics().work,
+                max_entries: constructed.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            let check =
+                |limits| lower_body(receipt, module, &declaration("construct").id, limits).unwrap();
+            assert!(check(limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check(short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
             let restored = lower("restore");
             let mir = restored.mir().expect("tuple replacement MIR");
             assert_eq!(dropped_elements(mir, mir.entry), [1, 0]);
@@ -131,6 +173,15 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
                     .any(|b| matches!(b.operation, Operation::Call(_)))
             );
 
+            let local = lower("forwardLocal");
+            assert_eq!(local.completion(), Completion::SourceRejected);
+            assert!(local.mir().is_none());
+            let [finding] = local.findings() else {
+                panic!("expected local reference escape")
+            };
+            assert_eq!(finding.code(), "R0202");
+            assert_eq!(finding.related.span.bytes(), b"p: bool");
+
             let borrowed = lower("borrowElement");
             assert_eq!(borrowed.completion(), Completion::Incomplete);
             assert!(borrowed.mir().is_none());
@@ -143,6 +194,16 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
                     .any(|b| matches!(b.operation, Operation::Call(_)))
             );
             assert_eq!(dropped_elements(mir, mir.entry), [2, 0]);
+            let output = mir
+                .blocks
+                .iter()
+                .find_map(|b| match b.operation {
+                    Operation::Export(place) => Some(place),
+                    _ => None,
+                })
+                .expect("return the selected element");
+            assert!(mir.blocks.iter().any(|b| matches!(b.operation, Operation::Move { from, into: Some(into) }
+                if from.tuple_element() == Some(1) && into.root.node == output.root.node && into.projection.is_none())));
         },
     );
 }

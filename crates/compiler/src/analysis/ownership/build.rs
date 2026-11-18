@@ -20,6 +20,13 @@ fn primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { referent, .. } if matches!(referent.as_ref(), TypeTerm::Primitive(_)))
 }
 
+fn direct_call_type(ty: &TypeTerm<'_>) -> bool {
+    matches!(
+        ty,
+        TypeTerm::Primitive(_) | TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
+    ) || primitive_reference(ty)
+}
+
 fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>)> {
     match &facts.data {
         Some(DataExpression::Projection(field)) => {
@@ -871,12 +878,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 if self.slots[into].members != elements.len() {
                     return Err(Stop::Pending(node));
                 }
-                let mut tail = self.emit(node, Action::Init(into), Edges::Next(next))?;
-                for (position, &value) in elements.iter().enumerate().rev() {
-                    let target = self.element(node, into, position)?;
-                    tail = self.expression(value, Some(target), tail, depth + 1)?;
-                }
-                return Ok(tail);
+                let initializers = elements
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &value)| (Projection::TupleElement(i), value));
+                return self.initialize_members(node, into, next, depth + 1, initializers);
             }
             NodeKind::Construction => {
                 let into = into.ok_or(Stop::Pending(node))?;
@@ -889,12 +895,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 {
                     return Err(Stop::Pending(node));
                 }
-                let mut tail = self.emit(node, Action::Init(into), Edges::Next(next))?;
-                for field in data.fields.iter().rev() {
-                    let target = self.field(node, into, &field.field.id)?;
-                    tail = self.expression(field.expression, Some(target), tail, depth + 1)?;
-                }
-                return Ok(tail);
+                let initializers = data
+                    .fields
+                    .iter()
+                    .map(|field| (Projection::Field(field.field), field.expression));
+                return self.initialize_members(node, into, next, depth + 1, initializers);
             }
             NodeKind::Arrow => {
                 return self.closure(node, into.ok_or(Stop::Pending(node))?, next, depth + 1);
@@ -903,6 +908,22 @@ impl<'a, 'g> Build<'a, 'g> {
             _ => return Err(Stop::Pending(node)),
         };
         self.emit(node, action, Edges::Next(next))
+    }
+
+    fn initialize_members(
+        &mut self,
+        node: NodeId,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+        initializers: impl DoubleEndedIterator<Item = (Projection<'g>, NodeId)>,
+    ) -> ResultOf<Pc> {
+        let mut tail = self.emit(node, Action::Init(into), Edges::Next(next))?;
+        for (projection, value) in initializers.rev() {
+            let target = self.member(node, into, projection)?;
+            tail = self.expression(value, Some(target), tail, depth)?;
+        }
+        Ok(tail)
     }
 
     fn closure(&mut self, node: NodeId, into: Slot, next: Pc, depth: usize) -> ResultOf<Pc> {
@@ -976,10 +997,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if call.callee.kind != DeclarationKind::Function
             || call.callee.module.origin != Origin::Application
             || !call.substitution.is_empty()
-            || !matches!(
-                facts.ty.as_ref(),
-                TypeTerm::Primitive(_) | TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
-            ) && !primitive_reference(&facts.ty)
+            || !direct_call_type(&facts.ty)
         {
             return Err(Stop::Pending(node));
         }
@@ -1002,11 +1020,7 @@ impl<'a, 'g> Build<'a, 'g> {
         for arg in call.argument_evaluation_order() {
             self.budget.step(1)?;
             let ty = self.value(arg)?.ty.clone();
-            if !matches!(
-                ty.as_ref(),
-                TypeTerm::Primitive(_) | TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
-            ) && !primitive_reference(&ty)
-            {
+            if !direct_call_type(&ty) {
                 return Err(Stop::Pending(arg));
             }
             args.push(self.slot(arg, &ty)?);
