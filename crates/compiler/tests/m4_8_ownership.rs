@@ -867,6 +867,9 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
         assert_eq!(report.native_representations().len(), 4);
         assert_eq!(report.collection_representations().count(), 4);
         assert!(report.error_representation().is_some());
+        assert!(report.core_blockers().is_empty());
+        assert_eq!(report.completion(), TypedCompletion::Incomplete);
+        assert!(report.receipt().is_none());
         let uses = report.result_use().unwrap();
         let modules = [
             "channel.rill",
