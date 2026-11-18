@@ -23,8 +23,16 @@ fn installed_result_discards_keep_original_storage_and_early_exit() {
                 return pair[0];
             }
             function observe(value: Outcome<bool>): void { isOk(&value); }
+            function inspectTemporary(): void { isOk(&make()); }
+            function inspectAlias(value: Outcome<bool>): void { let alias = &value; isOk(alias); }
             function propagate(outer: Outcome<bool>, sibling: Outcome<bool>): Outcome<bool> {
                 let b = outer?;
+                let _ = sibling;
+                return Outcome.Ok(b);
+            }
+            function relay(input: Outcome<bool>): Outcome<bool> { return input; }
+            function propagatePipe(outer: Outcome<bool>, sibling: Outcome<bool>): Outcome<bool> {
+                let b = outer |> relay?;
                 let _ = sibling;
                 return Outcome.Ok(b);
             }
@@ -48,7 +56,7 @@ fn installed_result_discards_keep_original_storage_and_early_exit() {
                     .collect();
                 assert_eq!(
                     witnesses.len(),
-                    4,
+                    5,
                     "{:?}",
                     witnesses
                         .iter()
@@ -66,8 +74,10 @@ fn installed_result_discards_keep_original_storage_and_early_exit() {
                 );
                 assert!(witnesses.iter().any(|w| w.storage_component
                     == [compiler::analysis::typed::ResultComponent::TupleElement(1)]));
-                assert!(witnesses.iter().any(|w| w.discard.span.bytes() == b"outer?"
-                    && w.origin.span.bytes().starts_with(b"sibling:")));
+                for span in [b"outer?".as_slice(), b"outer |> relay?"] {
+                    assert!(witnesses.iter().any(|w| w.discard.span.bytes() == span
+                        && w.origin.span.bytes().starts_with(b"sibling:")));
+                }
             }
         },
     );
@@ -214,6 +224,63 @@ fn installed_result_default_is_canonical_without_an_error_binding() {
                 loader::load_installed(request).unwrap_err().kind,
                 loader::FailureKind::InvalidRequest
             );
+        },
+    );
+}
+
+#[test]
+fn installed_result_guards_check_canonical_payload_and_wrapper_access() {
+    installed(
+        "installed_result_guards_check_canonical_payload_and_wrapper_access",
+        |request| {
+            fs::write(
+                &request.entry,
+                "
+            import std::result::{Result as Outcome, Err as Wrapped, value, intoValue};
+            function direct(value: &Outcome<bool, string>): bool {
+                guard value else { return false; }
+                return true;
+            }
+            function owned(input: Outcome<bool, string>): bool {
+                guard let bit = input else (failure) {
+                    let wrapper: Wrapped<string> = failure;
+                    let message: string = intoValue(wrapper);
+                    return false;
+                }
+                return bit;
+            }
+            function borrowed(input: &Outcome<string, string>): &string {
+                guard let message = input else (failure) {
+                    let wrapper: &Wrapped<string> = failure;
+                    return value(wrapper);
+                }
+                return message;
+            }
+        ",
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let report = analyze_typed(&graph, AnalysisLimits::default());
+                assert!(
+                    report.bodies().findings().is_empty(),
+                    "{:?}",
+                    report.bodies().findings()
+                );
+                assert!(
+                    !report
+                        .bodies()
+                        .obligations()
+                        .iter()
+                        .any(|o| o.site.module.origin == Origin::Application),
+                    "{:?}",
+                    report.bodies().obligations()
+                );
+            }
         },
     );
 }

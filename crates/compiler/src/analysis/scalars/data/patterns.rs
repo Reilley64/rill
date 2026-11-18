@@ -91,7 +91,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         module: &'g Module,
         pattern: NodeId,
         operand: NodeId,
-        option: &super::super::core::OptionOperand<'g>,
+        container: &super::super::core::GuardOperand<'g>,
         depth: usize,
         context: &mut Context<'r, 'g>,
     ) -> Work<Option<BooleanSet>> {
@@ -101,8 +101,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             module,
             pattern,
             PatternInput {
-                ty: &option.payload,
-                access: option.access,
+                ty: &container.payload,
+                access: container.access,
                 mutable: false,
                 emit: true,
             },
@@ -115,12 +115,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(None);
         };
         let Some(coverage) =
-            self.coverage(module, pattern, &option.payload, vec![prepared.clone()])?
+            self.coverage(module, pattern, &container.payload, vec![prepared.clone()])?
         else {
             return Ok(None);
         };
         let Some(reachable) =
-            self.coverage_within(module, pattern, &option.payload, &[], prepared)?
+            self.coverage_within(module, pattern, &container.payload, &[], prepared)?
         else {
             return Ok(None);
         };
@@ -144,8 +144,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             callable: None,
             kind: NodeFactKind::Pattern(PatternFacts {
                 source: Self::site(module, operand),
-                access: option.access,
-                ty: option.payload.clone(),
+                access: container.access,
+                ty: container.payload.clone(),
                 binders,
                 coverage,
             }),

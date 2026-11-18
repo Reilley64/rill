@@ -27,18 +27,15 @@ pub struct Propagation<'g> {
     pub error: Option<PropagationError<'g>>,
 }
 
-pub(super) struct OptionOperand<'g> {
+pub(super) struct GuardOperand<'g> {
     pub(super) payload: Type<'g>,
     pub(super) access: data::Access,
     pub(super) truth: BooleanSet,
+    error: Option<(&'g DeclarationId, Type<'g>)>,
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
-    pub(super) fn option_guard_operand(
-        &self,
-        value: &ExpressionResult<'g>,
-    ) -> Option<OptionOperand<'g>> {
-        let role = self.option?;
+    pub(super) fn guard_operand(&self, value: &ExpressionResult<'g>) -> Option<GuardOperand<'g>> {
         let (ty, access) = match value.ty.as_ref() {
             TypeTerm::Reference { mutable, referent } => (
                 referent.as_ref(),
@@ -64,22 +61,35 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             return None;
         };
-        if *declaration != &role.declaration.id {
+        let (success, failure, error) = if let Some(role) = self.option
+            && *declaration == &role.declaration.id
+        {
+            (&role.some.id, &role.none.id, None)
+        } else if let Some(role) = self.result
+            && *declaration == &role.declaration.id
+        {
+            (
+                &role.ok.id,
+                &role.err.id,
+                Some((&role.wrapper.id, arguments[1].clone())),
+            )
+        } else {
             return None;
-        }
+        };
         let truth = if !value.normal {
             BooleanSet::EMPTY
-        } else if variant == Some(&role.some.id) {
+        } else if variant == Some(success) {
             BooleanSet::TRUE
-        } else if variant == Some(&role.none.id) {
+        } else if variant == Some(failure) {
             BooleanSet::FALSE
         } else {
             BooleanSet::BOTH
         };
-        Some(OptionOperand {
+        Some(GuardOperand {
             payload: arguments[0].clone(),
             access,
             truth,
+            error,
         })
     }
 
@@ -405,43 +415,77 @@ impl<'r, 'g> Checker<'r, 'g> {
             None
         };
         let input = self.expression(module, operand, None, context)?;
-        let option = input
-            .as_ref()
-            .and_then(|value| self.option_guard_operand(value));
-        self.elab.reserve(1)?;
+        let container = input.as_ref().and_then(|value| self.guard_operand(value));
+        // Success bindings are not in scope during the failure block.
+        self.elab.reserve(2)?;
+        context.scopes.push(BTreeMap::new());
+        let pattern_truth = if let Some(container) = &container {
+            if let Some(expected) = annotation
+                && !self.same(&container.payload, &expected)?
+            {
+                self.mismatch(module, binder.children[1], &container.payload, &expected)?;
+            }
+            self.guard_payload_pattern(module, pattern, operand, container, depth + 1, context)?
+        } else {
+            self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
+            self.pending_pattern(module, pattern, context)?;
+            None
+        };
+        let success_bindings = context.scopes.pop().unwrap();
         context.scopes.push(BTreeMap::new());
         if children.len() == 3 {
-            let error = self.elab.declaration_at(module, children[1])?;
-            if option.is_some() {
-                self.finding(module, children[1], ScalarFindingKind::InvalidTarget)?;
+            let binding = self.elab.declaration_at(module, children[1])?;
+            if let Some(container) = &container {
+                if let Some((wrapper, error)) = &container.error {
+                    if pattern_truth.is_some_and(|truth| !truth.can_be_false()) {
+                        self.elab.reserve(2)?;
+                        let mut ty = Arc::new(TypeTerm::Nominal {
+                            declaration: wrapper,
+                            arguments: vec![error.clone()],
+                        });
+                        if container.access != data::Access::Owned {
+                            self.elab.reserve(1)?;
+                            ty = Arc::new(TypeTerm::Reference {
+                                mutable: container.access == data::Access::Writable,
+                                referent: ty,
+                            });
+                        }
+                        context.scopes.last_mut().unwrap().insert(
+                            binding.name.as_deref().unwrap(),
+                            Local {
+                                declaration: &binding.id,
+                                ty: Some(ty),
+                                mutable: false,
+                                boolean: None,
+                            },
+                        );
+                    } else {
+                        // An Ok-pattern mismatch cannot manufacture an Err binding.
+                        self.defer(module, node, ScalarUnsupported::MatchCoverage)?;
+                        self.pending_binder(binding, context)?;
+                    }
+                } else {
+                    self.finding(module, children[1], ScalarFindingKind::InvalidTarget)?;
+                    self.pending_binder(binding, context)?;
+                }
+            } else {
+                self.pending_binder(binding, context)?;
             }
-            self.pending_binder(error, context)?;
         }
         let failure =
             self.guard_failure(module, node, *children.last().unwrap(), depth + 1, context)?;
         context.scopes.pop();
+        context.scopes.last_mut().unwrap().extend(success_bindings);
         let mut flow = input.map_or_else(Flow::normal, |e| e.flow);
-        if let Some(option) = option {
-            if let Some(expected) = annotation
-                && !self.same(&option.payload, &expected)?
-            {
-                self.mismatch(module, binder.children[1], &option.payload, &expected)?;
-            }
-            let Some(pattern_truth) =
-                self.guard_payload_pattern(module, pattern, operand, &option, depth + 1, context)?
-            else {
-                flow.pending = true;
-                return Ok(flow);
-            };
-            flow.normal = option.truth.can_be_true() && pattern_truth.can_be_true();
-            if option.truth.can_be_false()
-                || option.truth.can_be_true() && pattern_truth.can_be_false()
+        if let (Some(container), Some(pattern_truth)) = (container, pattern_truth) {
+            flow.normal = container.truth.can_be_true() && pattern_truth.can_be_true();
+            if container.truth.can_be_false()
+                || container.truth.can_be_true() && pattern_truth.can_be_false()
             {
                 flow = self.union(flow, &failure)?;
             }
         } else {
-            self.defer(module, node, ScalarUnsupported::CoreAdmission)?;
-            self.pending_pattern(module, pattern, context)?;
+            flow.pending = true;
         }
         Ok(flow)
     }

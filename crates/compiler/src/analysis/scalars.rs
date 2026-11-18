@@ -3033,16 +3033,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                         (!direct_guard).then_some(boolean.clone()),
                         context,
                     )?;
-                    let option_truth = if direct_guard {
+                    let container_truth = if direct_guard {
                         condition
                             .as_ref()
-                            .and_then(|e| self.option_guard_operand(e))
-                            .map(|option| option.truth)
+                            .and_then(|e| self.guard_operand(e))
+                            .map(|container| container.truth)
                     } else {
                         None
                     };
                     if direct_guard
-                        && option_truth.is_none()
+                        && container_truth.is_none()
                         && let Some(value) = &condition
                         && primitive_name(&value.ty) != Some("never")
                         && !self.same(&value.ty, &boolean)?
@@ -3064,7 +3064,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                     let condition_pending =
                         self.integrated && (condition.is_none() || before != self.marks());
-                    let truth = option_truth.unwrap_or_else(|| {
+                    let truth = container_truth.unwrap_or_else(|| {
                         condition.as_ref().map_or(BooleanSet::BOTH, |e| {
                             if e.normal {
                                 e.boolean.unwrap_or(BooleanSet::BOTH)

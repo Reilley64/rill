@@ -627,21 +627,40 @@ impl<'a, 'g> Check<'a, 'g> {
         }
     }
 
-    fn borrowed_operand(
+    fn inspect_argument(
         &mut self,
+        mut state: Residence<'g>,
         node: NodeId,
-    ) -> Work<Option<(Root<'g>, Vec<ResultComponent<'g>>)>> {
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
         let syntax = &self.module.syntax.nodes[node];
-        if !matches!(syntax.kind, NodeKind::Prefix("&" | "&mut")) {
-            return Ok(None);
+        if matches!(syntax.kind, NodeKind::Prefix("&" | "&mut")) {
+            let operand = syntax.children[0];
+            if let Some(NodeFactKind::Expression(value)) = self.facts(operand)?.map(|f| &f.kind) {
+                if let Some((root, component)) = self.exact_path(value.path.as_ref())? {
+                    state.observe(root, &component, self.budget)?;
+                    return self.singleton(state);
+                }
+                if value.path.is_none() {
+                    let root = Root::Temporary(operand);
+                    let mut alternatives = self.expression(operand, state, depth)?;
+                    for state in &mut alternatives {
+                        state.observe(root, &[], self.budget)?;
+                        let remaining = state.take(root, &[], self.budget)?;
+                        self.discard(remaining, root, node, ResultDiscardKind::Expression)?;
+                    }
+                    return Ok(alternatives);
+                }
+            }
         }
-        let path = self
-            .facts(syntax.children[0])?
-            .and_then(|facts| match &facts.kind {
-                NodeFactKind::Expression(value) => value.path.as_ref(),
-                _ => None,
-            });
-        self.exact_path(path)
+        let mut alternatives = self.expression(node, state, depth)?;
+        for state in &mut alternatives {
+            if state.has_values() {
+                self.pending(node, ResultUseBlocker::Storage)?;
+                *state = Residence::default();
+            }
+        }
+        Ok(alternatives)
     }
 
     fn propagate(
@@ -755,16 +774,12 @@ impl<'a, 'g> Check<'a, 'g> {
         for arg in call.argument_evaluation_order() {
             let mut next = Vec::new();
             for state in alternatives {
+                if Some(call.callee) == self.outcome_observer {
+                    next.extend(self.inspect_argument(state, arg, depth + 1)?);
+                    continue;
+                }
                 let mut evaluated = self.expression(arg, state, depth + 1)?;
-                let observed = if Some(call.callee) == self.outcome_observer {
-                    self.borrowed_operand(arg)?
-                } else {
-                    None
-                };
                 for state in &mut evaluated {
-                    if let Some((root, component)) = &observed {
-                        state.observe(*root, component, self.budget)?;
-                    }
                     let root = Root::Temporary(arg);
                     let passed = state.take(root, &[], self.budget)?;
                     if !passed.is_empty() {
@@ -783,7 +798,19 @@ impl<'a, 'g> Check<'a, 'g> {
             self.pending(node, ResultUseBlocker::CallBoundary)?;
             return Ok(alternatives);
         }
-        if matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "never") {
+        if let Some(DataExpression::Propagation(branch)) = &value.data {
+            // The checked call creates the container, and this pipe immediately
+            // observes it. Only its success payload can become a new residence.
+            if branch.can_return {
+                for state in &alternatives {
+                    let returned = state.fork(self.budget)?;
+                    self.exit(returned, node)?;
+                }
+            }
+            if !branch.can_continue {
+                return Ok(Vec::new());
+            }
+        } else if matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "never") {
             return Ok(Vec::new());
         }
         for state in &mut alternatives {
