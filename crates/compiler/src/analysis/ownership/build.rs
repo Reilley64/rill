@@ -430,7 +430,7 @@ impl<'a, 'g> Build<'a, 'g> {
         self.emit(node, Action::Cleanup(index), Edges::Next(next))
     }
 
-    fn retained_descriptor(&mut self, node: NodeId, path: &PlacePath<'g>) -> ResultOf<Slot> {
+    fn bool_deref_descriptor_slot(&mut self, node: NodeId, path: &PlacePath<'g>) -> ResultOf<Slot> {
         let dereference = self.ungroup(node)?;
         let syntax = &self.module.syntax.nodes[dereference];
         if syntax.kind != NodeKind::Prefix("*")
@@ -545,7 +545,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if let Some(path) = &self.value(left)?.path
                     && path.projections.as_slice() == [PathProjection::Dereference]
                 {
-                    let descriptor = self.retained_descriptor(left, path)?;
+                    let descriptor = self.bool_deref_descriptor_slot(left, path)?;
                     let ty = self.value(value)?.ty.clone();
                     let incoming = self.slot(value, &ty)?;
                     let install = self.emit(
@@ -1136,7 +1136,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 let Some(path) = &facts.path else {
                     return Err(Stop::Pending(node));
                 };
-                let descriptor = self.retained_descriptor(node, path)?;
+                let descriptor = self.bool_deref_descriptor_slot(node, path)?;
                 Action::CopyThrough { descriptor, into }
             }
             NodeKind::Bracket => {

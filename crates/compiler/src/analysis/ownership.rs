@@ -201,7 +201,8 @@ pub enum Operation<'g> {
         descriptor: Place<'g>,
         into: Option<Place<'g>>,
     },
-    /// Store into caller storage through the initialized exclusive descriptor.
+    /// Replace the contents of an exact local or caller destination through
+    /// its initialized exclusive access descriptor.
     InstallThrough {
         descriptor: Place<'g>,
         incoming: Place<'g>,

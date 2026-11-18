@@ -1190,6 +1190,27 @@ fn exact_alias_reads_and_writes_keep_value_and_access_separate() {
                 { let flag = true; *access = &flag; saved = *access; *access = seed; }
                 return *saved;
             }
+            type Holder = { value: &bool; sibling: &bool; }
+            function futureFieldCopy(seed: &bool): bool {
+                let mut holder = Holder { value: seed, sibling: seed };
+                let access = &mut holder.value;
+                { let flag = true; holder.sibling = &flag; }
+                let value = *access;
+                return *value;
+            }
+            function copiedFieldEscape(seed: &bool): &bool {
+                let flag = true;
+                let mut holder = Holder { value: seed, sibling: &flag };
+                let access = &mut holder.value;
+                return *access;
+            }
+            function withWrite(value: &mut bool, seed: &bool): &bool { return seed; }
+            function beforeCommit(seed: &bool): void {
+                let mut flag = true;
+                let mut out = &flag;
+                let access = &mut out;
+                *access = withWrite(&mut flag, seed);
+            }
             function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
             function suspended(seed: &bool): void {
                 let mut out = seed;
@@ -1198,44 +1219,141 @@ fn exact_alias_reads_and_writes_keep_value_and_access_separate() {
             }
         "#,
         |_, module, receipt| {
-            let lower = |name| {
+            let check = |name, limits| {
                 let decl = module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap();
-                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+                lower_body(receipt, module, &decl.id, limits).unwrap()
             };
+            let lower = |name| check(name, AnalysisLimits::default());
             let incoming = lower("readIncoming");
             let mir = incoming
                 .mir()
                 .unwrap_or_else(|| panic!("readIncoming: {:?}", incoming.completion()));
-            let ops = linear(mir, mir.entry);
-            assert!(
-                ops.iter()
-                    .any(|op| matches!(op, Operation::CopyThrough { descriptor, .. }
-                if descriptor.root.span.bytes() == b"access"))
-            );
-            assert!(ops.iter().any(|op| matches!(op, Operation::Export(_))));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::CopyThrough { .. } | Operation::Export(_)))
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::CopyThrough { descriptor, into: Some(copied) },
+                Operation::Export(exported),
+            ] if descriptor.root.span.bytes() == b"access" && copied.root.node == exported.root.node));
+
             let replaced = lower("replace");
             let mir = replaced
                 .mir()
                 .expect("an exact overwrite retires the old backing from live access");
-            let route: Vec<_> = linear(mir, mir.entry)
-                .into_iter()
+            let ops = linear(mir, mir.entry);
+            let route: Vec<_> = ops
+                .iter()
+                .copied()
                 .filter(|op| {
                     matches!(
                         op,
-                        Operation::CopyThrough { .. } | Operation::InstallThrough { .. }
+                        Operation::InstallThrough { .. }
+                            | Operation::CopyThrough { .. }
+                            | Operation::Dereference(_)
                     )
                 })
                 .collect();
-            assert!(
-                matches!(route.as_slice(), [Operation::InstallThrough { descriptor: write, .. },
-                Operation::CopyThrough { descriptor: read, .. }] if write.root.node == read.root.node
-                && write.root.span.bytes() == b"access")
+            let [
+                Operation::InstallThrough {
+                    descriptor: write,
+                    incoming,
+                },
+                Operation::CopyThrough {
+                    descriptor: read,
+                    into: Some(copied),
+                },
+                Operation::Dereference(used),
+            ] = route.as_slice()
+            else {
+                panic!("expected alias write, copy and use: {route:?}");
+            };
+            assert_eq!(write.root.span.bytes(), b"access");
+            assert_eq!(write.root.node, read.root.node);
+            assert_eq!(copied.root.node, used.root.node);
+            let (before_write, _) = ops.split_at(
+                ops.iter()
+                    .position(|op| matches!(op, Operation::InstallThrough { .. }))
+                    .unwrap(),
             );
-            for (name, code) in [("copyBeforeReplacement", "R0203"), ("suspended", "R0201")] {
+            let transfers: Vec<_> = before_write
+                .iter()
+                .copied()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow {
+                            exclusive: true,
+                            ..
+                        } | Operation::Install { .. }
+                            | Operation::Copy { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(transfers.as_slice(), [..,
+                Operation::Borrow { source, holder, exclusive: true },
+                Operation::Install { target, incoming: access },
+                Operation::Copy { from, into: Some(staged) },
+            ] if source.root.span.bytes() == b"out" && holder.root.node == access.root.node && target.root.node == write.root.node
+                && from.root.span.bytes() == b"seed: &bool" && staged.root.node == incoming.root.node));
+
+            let limits = AnalysisLimits {
+                max_work: replaced.statistics().work,
+                max_entries: replaced.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(check("replace", limits).completion(), Completion::Checked);
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let short = check("replace", short);
+                assert_eq!(short.completion(), Completion::ResourceLimit);
+                assert!(short.mir().is_none());
+            }
+            for (name, code, site, related) in [
+                (
+                    "futureFieldCopy",
+                    "R0203",
+                    b"{ let flag = true; holder.sibling = &flag; }".as_slice(),
+                    b"&flag".as_slice(),
+                ),
+                (
+                    "copiedFieldEscape",
+                    "R0202",
+                    b"return *access;".as_slice(),
+                    b"flag".as_slice(),
+                ),
+                (
+                    "beforeCommit",
+                    "R0201",
+                    b"&mut flag".as_slice(),
+                    b"&flag".as_slice(),
+                ),
+                (
+                    "copyBeforeReplacement",
+                    "R0203",
+                    b"{ let flag = true; *access = &flag; saved = *access; *access = seed; }"
+                        .as_slice(),
+                    b"&flag".as_slice(),
+                ),
+                (
+                    "suspended",
+                    "R0201",
+                    b"*access".as_slice(),
+                    b"access".as_slice(),
+                ),
+            ] {
                 let report = lower(name);
                 assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
                 assert!(report.mir().is_none());
@@ -1243,6 +1361,16 @@ fn exact_alias_reads_and_writes_keep_value_and_access_separate() {
                     panic!("{name}: expected ownership diagnostic")
                 };
                 assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(
+                    std::str::from_utf8(finding.site.span.bytes()),
+                    std::str::from_utf8(site),
+                    "{name} primary"
+                );
+                assert_eq!(
+                    std::str::from_utf8(finding.related.span.bytes()),
+                    std::str::from_utf8(related),
+                    "{name} related"
+                );
             }
         },
     );

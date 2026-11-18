@@ -202,34 +202,34 @@ fn conflict(
     access: Access,
     budget: &mut Budget,
 ) -> ResultOf<()> {
+    let check = |loan: Loan, _: &mut Budget| -> ResultOf<()> {
+        let blocks = match access {
+            Access::Observe => loan.exclusive,
+            Access::Exclusive => true,
+            Access::EndScope => loan.kind != LoanKind::Suspension,
+        };
+        if blocks && overlap(slots, loan.source, source) {
+            return Err(Stop::Rejected {
+                site,
+                related: loan.site,
+                kind,
+            });
+        }
+        Ok(())
+    };
     for &holder in live {
         budget.step(1)?;
         if let State::Initialized(held) = &state[holder] {
-            // A live alias can still read the target's current contents, not
-            // only the contents present when its access was acquired.
-            let contents = if let Some(ExactTarget::Local(target)) = held.exact_target {
+            for &loan in held.loans.iter() {
                 budget.step(1)?;
-                match &state[target] {
-                    State::Initialized(value) => value.loans.as_ref(),
-                    _ => &[],
-                }
-            } else {
-                &[]
-            };
-            for loan in held.loans.iter().chain(contents) {
+                check(loan, budget)?;
+            }
+            // The alias may later extract a carried reference. Keep the
+            // target's current aggregate backing live until that use.
+            if let Some(ExactTarget::Local(target)) = held.exact_target {
                 budget.step(1)?;
-                let blocks = match access {
-                    Access::Observe => loan.exclusive,
-                    Access::Exclusive => true,
-                    Access::EndScope => loan.kind != LoanKind::Suspension,
-                };
-                if blocks && overlap(slots, loan.source, source) {
-                    return Err(Stop::Rejected {
-                        site,
-                        related: loan.site,
-                        kind,
-                    });
-                }
+                let root = slots[target].carried_loan_root(target);
+                visit_loans(state, slots[root].storage(root), budget, check)?;
             }
         }
     }
@@ -276,6 +276,21 @@ fn include_loans(
 fn loan_set(loans: BTreeSet<Loan>, budget: &mut Budget) -> ResultOf<Arc<[Loan]>> {
     budget.reserve(loans.len())?;
     Ok(Arc::from_iter(loans))
+}
+
+fn aggregate_carried_loans(
+    state: &[State],
+    slots: &[Local<'_>],
+    member: Slot,
+    budget: &mut Budget,
+) -> ResultOf<Option<Arc<[Loan]>>> {
+    let root = slots[member].carried_loan_root(member);
+    if root == member {
+        return Ok(None);
+    }
+    let mut loans = BTreeSet::new();
+    include_loans(&mut loans, state, slots[root].storage(root), budget)?;
+    Ok(Some(loan_set(loans, budget)?))
 }
 
 fn initialized(state: &State, site: NodeId) -> ResultOf<&Held> {
@@ -685,11 +700,8 @@ pub(super) fn run<'g>(
                     {
                         return Err(Stop::Pending(node));
                     }
-                    let owner = slots[from].carried_loan_root(from);
-                    let carried = if into.is_some() && owner != from {
-                        let mut carried = BTreeSet::new();
-                        include_loans(&mut carried, &state, slots[owner].storage(owner), budget)?;
-                        Some(loan_set(carried, budget)?)
+                    let carried = if into.is_some() {
+                        aggregate_carried_loans(&state, &slots, from, budget)?
                     } else {
                         None
                     };
@@ -841,12 +853,8 @@ pub(super) fn run<'g>(
                         budget.step(1)?;
                         if let Some(target) = initialized(&state[from], node)?.exact_target {
                             let contents = target.contents_slot();
-                            visit_loans(
-                                &state,
-                                slots[contents].storage(contents),
-                                budget,
-                                &mut include,
-                            )?;
+                            let root = slots[contents].carried_loan_root(contents);
+                            visit_loans(&state, slots[root].storage(root), budget, &mut include)?;
                         }
                     }
                     state[into] = State::Initialized(Held {
@@ -1131,17 +1139,11 @@ pub(super) fn run<'g>(
                     )?;
                     if let Some(into) = into {
                         let contents = target.contents_slot();
-                        let source = slots[contents].carried_loan_root(contents);
                         // Reference extraction still includes aggregate backing.
-                        let loans = if source != contents {
-                            let mut loans = BTreeSet::new();
-                            include_loans(
-                                &mut loans,
-                                &state,
-                                slots[source].storage(source),
-                                budget,
-                            )?;
-                            loan_set(loans, budget)?
+                        let loans = if let Some(loans) =
+                            aggregate_carried_loans(&state, &slots, contents, budget)?
+                        {
+                            loans
                         } else {
                             match &state[contents] {
                                 State::Initialized(value) => value.loans.clone(),
