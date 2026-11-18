@@ -264,6 +264,21 @@ Spec found that liveness killed the old stored loan before a future overwrite an
 
 At `343ff58` and `3ff970b`, all four local gates and the whitespace check passed (432 compiler tests and 448 workspace tests). The staged positive M4 runner issued both receipts. No workflow changed; `check:ci` was not run. No Rill program ran.
 
+## Scalar retained destinations across direct calls
+
+[#69](https://github.com/Reilley64/rill/issues/69) now covers a nongeneric application call returning `void` with exactly one `&mut &bool` and one `&bool` parameter, in either order. The destination argument must be a fresh exclusive borrow of a named owned descriptor. The [approved call contract](https://github.com/Reilley64/rill/issues/15#issuecomment-6853088155) uses the declared types, not a guess from the callee's body. The call keeps the old contents and possible compatible input sources, not the temporary access loan. The reached callee still has to pass its own exit checks.
+
+The `direct_calls_retain_compatible_inputs_not_the_access_loan` probe first stopped at Result-use `Storage` for `&mut out` when `out` already carried a known local alias. The typed pass can now forget stale alias facts at the exact shared-bool descriptor address. It cannot discard Result or unknown residences. At `f569302b3a213b504c2309bcc34253fa8ea194e8`, both installed modes verify the following:
+
+| Cases | Observed compiler and MIR obligations |
+| --- | --- |
+| `valid`, `reverse` | Stage the two arguments in written order. `CallRetaining` identifies the declared callee, actual destination, and compatible input. Read the destination after the temporary exclusive access ends. |
+| `expires`, `maybeExpires`, `keepsOld` | Reject with `R0203` when a still-used destination can retain a source whose scope ends. A call on just one branch suffices. A clear-like callee does not prove the old contents dead. |
+| `replaced`, `dead`, `checkedCallee` | An explicit local overwrite or a dead destination permits cleanup. Calling a callee that retains its own local backing still rejects with `R0202` in that callee and publishes no caller MIR. |
+| Exact and one-short limits | The exact work and entry limits pass. A one-short limit publishes no MIR. |
+
+At `f569302`, `mise run test:compiler` passed 434 tests and `mise run test` passed 450. `mise run check`, `mise run build:scaffold`, and the whitespace check passed with a fresh short `TMPDIR` on macOS AArch64. The staged M4 replay issued both receipts. Independent reviews were requested. A separate caller that forwards an existing destination via `relay(slot, input)` has both typed receipts only. Existing descriptor aliases, more general input sets, imported or erased contracts, and cancellation remain outside this slice. No workflow changed. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
