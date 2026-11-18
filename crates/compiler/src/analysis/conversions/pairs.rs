@@ -28,6 +28,7 @@ pub enum PairBlocker {
     Representation,
     RequiredIdentityProvider,
     RequiredNumericProvider,
+    RequiredCoreProvider,
     PotentialProtectedPair,
     EndpointContext,
     Registration,
@@ -289,28 +290,13 @@ pub(in crate::analysis) fn protected_pair<'g>(
 
 // Numeric protection uses complete base ranges, not literal values.
 fn numeric_infallible(destination: &Type<'_>, source: &Type<'_>) -> bool {
-    fn integer(ty: &Type<'_>) -> Option<(bool, u16)> {
-        let TypeTerm::Primitive(id) = ty.as_ref() else {
-            unreachable!("numeric endpoint")
-        };
-        let (kind, width) = id.name().split_at(1);
-        match kind {
-            "i" => Some((true, width.parse().unwrap())),
-            "u" => Some((false, width.parse().unwrap())),
-            _ => None,
-        }
-    }
-    match (integer(destination), integer(source)) {
-        (None, _) => true,
-        (Some(_), None) => false,
-        (Some((d_signed, d)), Some((s_signed, s))) => {
-            if d_signed == s_signed {
-                d >= s
-            } else {
-                d_signed && d > s
-            }
-        }
-    }
+    use crate::analysis::typed::{InfallibleNumericContract as Contract, Primitive};
+    let primitive = |ty: &Type<'_>| match ty.as_ref() {
+        TypeTerm::Primitive(id) => Primitive::named(id.name()).expect("numeric endpoint"),
+        _ => unreachable!("numeric endpoint"),
+    };
+    Contract::for_pair(primitive(destination), primitive(source))
+        == Some(Contract::RequiredProvider)
 }
 
 pub(in crate::analysis) fn find_matches<'g>(

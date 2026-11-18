@@ -1,0 +1,42 @@
+import std::collection::{List};
+import std::convert::{into, tryInto};
+import std::result::{Result};
+import std::string::{Utf8Error};
+
+enum BytesStorage {}
+export type Bytes = { private storage: BytesStorage; };
+
+function textBytes(input: &string): &Bytes;
+implement into<&Bytes>(input: &string): &Bytes {
+    return textBytes(input);
+}
+
+function decodeOwned(input: &Bytes): Result<string, Utf8Error>;
+implement tryInto<string>(input: &Bytes): Result<string, Utf8Error> {
+    return decodeOwned(input);
+}
+
+function decodeView(input: &Bytes): Result<&string, Utf8Error>;
+implement tryInto<&string>(input: &Bytes): Result<&string, Utf8Error> {
+    return decodeView(input);
+}
+
+function takeList(input: List<u8>): Bytes;
+implement into<Bytes>(input: List<u8>): Bytes {
+    return takeList(input);
+}
+
+function copyList(input: &List<u8>): Bytes;
+implement into<Bytes>(input: &List<u8>): Bytes {
+    return copyList(input);
+}
+
+function takeBytes(input: Bytes): List<u8>;
+implement into<List<u8>>(input: Bytes): List<u8> {
+    return takeBytes(input);
+}
+
+function copyBytes(input: &Bytes): List<u8>;
+implement into<List<u8>>(input: &Bytes): List<u8> {
+    return copyBytes(input);
+}

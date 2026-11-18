@@ -178,6 +178,10 @@ fn installed_ownership_requires_the_built_archive() {
         "iter.rill",
         "format.rill",
         "convert.rill",
+        "number.rill",
+        "char.rill",
+        "bytes.rill",
+        "string.rill",
     ] {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();
     }

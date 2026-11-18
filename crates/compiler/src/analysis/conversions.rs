@@ -44,6 +44,18 @@ pub enum RegistrationIssueKind {
     UnderdeterminedError,
 }
 
+impl RegistrationIssueKind {
+    /// Code for the settled collection issue; hypotheses still do not emit source diagnostics.
+    pub fn code(self) -> Option<&'static str> {
+        match self {
+            Self::DuplicatePair => Some("R0310"),
+            Self::ProtectedIdentity | Self::ProtectedNumericPair => Some("R0311"),
+            Self::OutsideEndpointOwners => Some("R0312"),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RegistrationIssue<'g> {
     pub kind: RegistrationIssueKind,

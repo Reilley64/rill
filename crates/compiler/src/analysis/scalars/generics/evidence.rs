@@ -114,6 +114,8 @@ pub struct GoalFacts<'g> {
     pub selection: Option<GoalSelection<'g>>,
     pub conversion_outcome: Option<crate::analysis::conversions::PairOutcome<'g>>,
     pub conversion_parameter: Option<Type<'g>>,
+    pub conversion_protection: Option<crate::analysis::typed::ConversionProtection>,
+    pub conversion_provider: Option<crate::analysis::typed::ConversionProvider>,
     pub output: Option<GoalOutput<'g>>,
     /// Written output defaults actually taken at a source instantiation.
     pub defaults: Vec<DefaultArgumentUse<'g>>,
@@ -258,6 +260,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.reserve(1)?;
         self.elab.reserve(routes.len())?;
         let role = match judgment.target() {
+            RequirementTarget::Family(id) if self.installed_conversion(id) => None,
             RequirementTarget::Family(id) if self.conversion_family(id).is_some() => {
                 Some(InputPremise::HypotheticalConversionRole)
             }
@@ -312,6 +315,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             selection: None,
             conversion_outcome: None,
             conversion_parameter: None,
+            conversion_protection: None,
+            conversion_provider: None,
             output: None,
             defaults: Vec::new(),
             equalities: Vec::new(),
@@ -447,8 +452,17 @@ impl<'r, 'g> Checker<'r, 'g> {
         } else {
             false
         };
-        let admitted = (self.ordinary_scalar_role(&source.family).is_some() || primitive)
-            && body.compatibility == ordinary::Compatibility::Compatible;
+        let mut conversion = self.installed_conversion(&source.family);
+        if conversion && let Some(family) = self.conversion_family(&source.family) {
+            self.elab.step(family.issues.len())?;
+            conversion = family
+                .issues
+                .iter()
+                .all(|issue| issue.declaration != &declaration.id);
+        }
+        let admitted = conversion
+            || (self.ordinary_scalar_role(&source.family).is_some() || primitive)
+                && body.compatibility == ordinary::Compatibility::Compatible;
         Ok(Some((&body.header, admitted)))
     }
 

@@ -70,27 +70,50 @@ impl InstalledProfile {
                         )
                     },
                     dependencies: &[],
-                    families: &[],
+                    registrations: &[],
                 },
                 MetadataEdge {
                     path: "collection.rill",
                     triggered_by: |kind| matches!(kind, NodeKind::Bracket | NodeKind::Index),
                     dependencies: &[("option", "option.rill")],
-                    families: &["get", "first"],
+                    registrations: &[("collection.rill", &["get", "first"])],
                 },
                 MetadataEdge {
                     path: "iter.rill",
                     triggered_by: |kind| kind == NodeKind::For,
                     dependencies: &[("option", "option.rill"), ("collection", "collection.rill")],
-                    families: &["iterate", "next"],
+                    registrations: &[("iter.rill", &["iterate", "next"])],
                 },
                 MetadataEdge {
                     path: "format.rill",
                     triggered_by: |kind| kind == NodeKind::TemplateHole,
                     dependencies: &[],
-                    families: &["show"],
+                    registrations: &[("format.rill", &["show"])],
+                },
+                MetadataEdge {
+                    path: "string.rill",
+                    triggered_by: |_| false,
+                    dependencies: &[("option", "option.rill"), ("error", "error.rill")],
+                    registrations: &[("error.rill", &["display"])],
+                },
+                MetadataEdge {
+                    path: "bytes.rill",
+                    triggered_by: |_| false,
+                    dependencies: &[
+                        ("collection", "collection.rill"),
+                        ("convert", "convert.rill"),
+                        ("result", "result.rill"),
+                        ("string", "string.rill"),
+                    ],
+                    registrations: &[("convert.rill", &["into", "tryInto"])],
                 },
             ],
+        }
+    }
+
+    pub(super) fn conversion_metadata(self) -> &'static [&'static str] {
+        match self {
+            Self::DarwinArm64 => &["bytes.rill"],
         }
     }
 
@@ -111,6 +134,18 @@ impl InstalledProfile {
             }
             (Self::DarwinArm64, "convert.rill") => {
                 Some(include_bytes!("../../../../stdlib/convert.rill"))
+            }
+            (Self::DarwinArm64, "number.rill") => {
+                Some(include_bytes!("../../../../stdlib/number.rill"))
+            }
+            (Self::DarwinArm64, "char.rill") => {
+                Some(include_bytes!("../../../../stdlib/char.rill"))
+            }
+            (Self::DarwinArm64, "bytes.rill") => {
+                Some(include_bytes!("../../../../stdlib/bytes.rill"))
+            }
+            (Self::DarwinArm64, "string.rill") => {
+                Some(include_bytes!("../../../../stdlib/string.rill"))
             }
             (Self::DarwinArm64, "format.rill") => {
                 Some(include_bytes!("../../../../stdlib/format.rill"))
@@ -151,7 +186,7 @@ pub(super) struct MetadataEdge {
     pub path: &'static str,
     pub triggered_by: fn(NodeKind) -> bool,
     pub dependencies: &'static [(&'static str, &'static str)],
-    pub families: &'static [&'static str],
+    pub registrations: &'static [(&'static str, &'static [&'static str])],
 }
 
 /// Load using the standard root beside the running toolchain executable.

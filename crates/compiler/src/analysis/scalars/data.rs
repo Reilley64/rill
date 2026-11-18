@@ -82,6 +82,7 @@ pub enum DataExpression<'g> {
     CanonicalCall(generics::GoalId),
     NumericInto(crate::analysis::typed::NumericConversion),
     NativeOwnership(Arc<crate::analysis::typed::NativeOwnershipCall<'g>>),
+    Conversion(crate::analysis::typed::ConversionProvider),
 }
 #[derive(Debug)]
 pub struct DataReceipt<'r, 'g>(ScalarReceipt<'r, 'g>);

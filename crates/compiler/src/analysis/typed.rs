@@ -18,14 +18,19 @@ pub use collections::{
     CollectionOperation, CollectionOverlap, CollectionProtection, CollectionProvider,
     CollectionRepresentation, CollectionStorage, ListRole, ListTraversal,
 };
+pub(super) use core::PrimitiveCore;
 pub use core::{
     DisplayProtection, ErrorOperation, ErrorProviders, ErrorRepresentation, OptionRole,
     PrimitiveBinding, PrimitiveCoverage, PrimitiveOverlap, PrimitiveProtection, PrimitiveProvider,
     PrimitiveRole, ResultRole,
 };
-pub(super) use core::{IntoAdmission, PrimitiveCore};
 pub use interfaces::{PublicInterfaceFinding, PublicInterfaceKind};
-pub use numeric::{InfallibleNumericContract, NumericConversion, NumericConversionError};
+pub(in crate::analysis) use numeric::ConversionCore;
+pub use numeric::values as conversion_values;
+pub use numeric::{
+    ConversionProtection, ConversionProvider, DecimalParse, DecimalParseError,
+    InfallibleNumericContract, NumericConversion, NumericConversionError, RegisteredConversion,
+};
 pub use ownership::{
     NativeOwnershipAction, NativeOwnershipCall, NativeOwnershipProvider, NativeRepresentation,
     NativeRepresentationKind, OwnershipCoverage, OwnershipOverlap, OwnershipProtection,
@@ -132,12 +137,53 @@ impl<'g> TypedReport<'g> {
 
     /// The validated canonical infallible conversion family.
     pub fn into_role(&self) -> Option<&'g super::Declaration> {
-        self.core.into.as_ref().map(|into| into.declaration)
+        self.core.conversions.into
+    }
+
+    pub fn try_into_role(&self) -> Option<&'g super::Declaration> {
+        self.core.conversions.try_into
     }
 
     /// Checks of the captured pair registrations, independent of selected providers.
     pub fn into_registration_issues(&self) -> Option<&[super::conversions::RegistrationIssue<'g>]> {
-        self.core.into.as_ref().map(|into| into.issues.as_slice())
+        Some(
+            &self
+                .core
+                .conversions
+                .families
+                .get(&self.into_role()?.id)?
+                .issues,
+        )
+    }
+
+    pub fn try_into_registration_issues(
+        &self,
+    ) -> Option<&[super::conversions::RegistrationIssue<'g>]> {
+        Some(
+            &self
+                .core
+                .conversions
+                .families
+                .get(&self.try_into_role()?.id)?
+                .issues,
+        )
+    }
+
+    /// The captured registration and its separately validated linked provider.
+    pub fn conversion_provider(
+        &self,
+        implementation: &super::DeclarationId,
+    ) -> Result<Option<RegisteredConversion<'g>>, super::QueryError> {
+        if implementation.kind != crate::loader::DeclarationKind::Implementation {
+            return Err(super::QueryError::InvalidRequest);
+        }
+        self.inventory.header_metadata(implementation)?;
+        Ok(self
+            .core
+            .conversions
+            .registered
+            .get(implementation)
+            .copied())
     }
 
     /// The checked delivered inspection implementation, separate from the enum schema.
@@ -231,16 +277,10 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     } else {
         Err(())
     };
-    let into = if show.is_ok() {
-        core::check_into(&inventory, &mut budget)
-    } else {
-        Err(())
-    };
-    let exhausted = into.is_err();
+    let exhausted = show.is_err();
     let mut core = core::InstalledCore {
         option: roles.unwrap_or_default(),
         show: show.unwrap_or_default(),
-        into: into.unwrap_or_default(),
         ..Default::default()
     };
     let result_roles = match core.option {
@@ -267,6 +307,16 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
                 &mut budget,
                 &mut collection_overlaps,
             )
+            .is_err()
+        || core
+            .conversions
+            .check(
+                &inventory,
+                core.result,
+                core.option,
+                collections.list,
+                &mut budget,
+            )
             .is_err();
     let bodies = analyze_integrated_bodies(
         &inventory,
@@ -276,7 +326,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             result: core.result,
             show: core.show,
             primitives: Some(&core.primitives),
-            into: core.into.as_ref(),
+            conversions: Some(&core.conversions),
             collections,
             native_ownership: &ownership.protection,
             exhausted: authority_exhausted,
@@ -331,7 +381,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         && core.primitives.copy.is_none()
         && core.primitives.dispose.is_none()
         && core.primitives.equality.is_none()
-        && core.into.is_none()
+        && core.conversions.families.is_empty()
         && ownership.protection.iter().all(|p| p.provider.is_none())
     {
         not_performed.push(Stage::CoreAdmission);

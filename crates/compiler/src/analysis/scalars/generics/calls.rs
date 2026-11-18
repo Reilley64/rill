@@ -26,8 +26,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             .collect();
         for node in waiting {
             let callee = inference.calls[&node].fact.callee;
-            if self.is_installed_into(callee) {
-                if self.explicit_into_source_context(inference, node)? {
+            if self.installed_conversion(callee) {
+                if self.explicit_conversion_source_context(inference, node)? {
                     return Ok(true);
                 }
                 continue;

@@ -641,7 +641,7 @@ fn plain_header(
             .is_some_and(|header| header.defaults.is_empty() && header.requirements.is_empty()))
 }
 
-fn private_bridge<'a, 'g>(
+pub(super) fn private_bridge<'a, 'g>(
     inventory: &'a OrdinaryAnalysis<'g>,
     module: &'g Module,
     name: &str,

@@ -12,7 +12,9 @@ pub struct ConversionUse<'g> {
     pub site: Site<'g>,
     pub family: &'g DeclarationId,
     pub role: RoleHypothesis<'g>,
-    pub premise: InputPremise,
+    pub premise: Option<InputPremise>,
+    pub provider: Option<crate::analysis::typed::ConversionProvider>,
+    pub protection: Option<crate::analysis::typed::ConversionProtection>,
     pub routes: Vec<&'g Binding>,
     pub destination: Option<Type<'g>>,
     pub actual_source: Option<Type<'g>>,
@@ -26,6 +28,19 @@ pub struct ConversionUse<'g> {
     pub result_agreement: Option<bool>,
     pub descriptor: Option<Type<'g>>,
     pub descriptor_agreement: Option<bool>,
+}
+
+impl<'g> ConversionUse<'g> {
+    fn record_operation(&self, inference: &mut Inference<'g>, node: NodeId) {
+        use crate::analysis::typed::ConversionProvider;
+        inference.slots.get_mut(&node).unwrap().installed_operation =
+            self.provider.map(|provider| match provider {
+                ConversionProvider::NumericInto(operation) => {
+                    data::DataExpression::NumericInto(operation)
+                }
+                _ => data::DataExpression::Conversion(provider),
+            });
+    }
 }
 
 struct UseContext<'a, 'g> {
@@ -47,13 +62,20 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         finalizing: bool,
     ) -> Work<()> {
-        let call = inference.calls.remove(&node).unwrap();
+        let mut call = inference.calls.remove(&node).unwrap();
         let module = inference.module;
+        let installed = self.installed_conversion(call.fact.callee);
         let argument = match call.fact.arguments.as_slice() {
             [argument] => Some(*argument),
             _ => None,
         };
-        if let Some(argument) = argument
+        if installed && argument.is_none() {
+            self.finding(module, node, ScalarFindingKind::Arity)?;
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(());
+        }
+        if !installed
+            && let Some(argument) = argument
             && let Some(filter) = call.fact.substitution.get(1)
             && inference.slots[&argument].ty.is_none()
             && inference.slots[&argument].expected.is_none()
@@ -61,7 +83,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.conditional_context(inference, argument, filter.argument.clone(), PREMISE)?;
         }
         let source = argument
-            .and_then(|argument| inference.slots[&argument].ty.clone())
+            .and_then(|argument| {
+                let slot = &inference.slots[&argument];
+                if installed && slot.blocked {
+                    None
+                } else {
+                    slot.ty.clone()
+                }
+            })
             .filter(|t| primitive_name(t) != Some("never"));
         let use_ = self.conversion_use(
             UseContext {
@@ -88,8 +117,25 @@ impl<'r, 'g> Checker<'r, 'g> {
                 && !matches!(use_.error_agreement, ErrorAgreement::Disagrees { .. })
                 && use_.result_agreement != Some(false)
             {
+                if installed && use_.premise.is_none() {
+                    self.record_callee(module, call.callee_node, call.fact.callee)?;
+                    call.fact.substitution = self.selected_conversion_substitution(&use_)?;
+                    call.parameters[0] = use_
+                        .selected_parameter
+                        .clone()
+                        .unwrap_or_else(|| use_.actual_source.clone().unwrap());
+                    call.result = result.clone();
+                    call.infer = false;
+                    call.family = false;
+                    self.elab.reserve(1)?;
+                    inference.calls.insert(node, call);
+                    use_.record_operation(inference, node);
+                }
                 self.conversion_type(inference, node, result.clone(), use_.premise)?;
             } else {
+                if installed {
+                    self.conversion_failure(inference, node, &use_)?;
+                }
                 inference.slots.get_mut(&node).unwrap().blocked = true;
             }
             self.elab.reserve(1)?;
@@ -139,8 +185,23 @@ impl<'r, 'g> Checker<'r, 'g> {
             && use_.descriptor_agreement != Some(false)
             && !matches!(use_.error_agreement, ErrorAgreement::Disagrees { .. })
         {
+            if self.installed_conversion(written.declaration) && use_.premise.is_none() {
+                self.elab.reserve(written.bindings.len() + 1)?;
+                let substitution = self.selected_conversion_substitution(&use_)?;
+                inference.slots.get_mut(&node).unwrap().function_value =
+                    Some(Arc::new(FunctionValueFacts {
+                        declaration: written.declaration,
+                        bindings: written.bindings.clone(),
+                        substitution,
+                        defaults: Vec::new(),
+                    }));
+                use_.record_operation(inference, node);
+            }
             self.conversion_type(inference, node, descriptor.clone(), use_.premise)?;
         } else {
+            if self.installed_conversion(written.declaration) {
+                self.conversion_failure(inference, node, &use_)?;
+            }
             inference.slots.get_mut(&node).unwrap().blocked = true;
         }
         self.elab.reserve(1)?;
@@ -169,7 +230,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         let calls: Vec<_> = inference
             .calls
             .iter()
-            .filter_map(|(&node, c)| self.conversion_family(c.fact.callee).map(|_| node))
+            .filter_map(|(&node, c)| {
+                (c.family && self.conversion_family(c.fact.callee).is_some()).then_some(node)
+            })
             .collect();
         for node in calls {
             self.with_node_premise(inference, node, |checker, inference| {
@@ -195,11 +258,83 @@ impl<'r, 'g> Checker<'r, 'g> {
         inference: &mut Inference<'g>,
         node: NodeId,
         ty: Type<'g>,
-        premise: InputPremise,
+        premise: Option<InputPremise>,
     ) -> Work<()> {
         // Send the type to waiting equations without qualifying unrelated siblings.
-        self.mark_conversion_dependency(inference, node, premise, true)?;
+        if let Some(premise) = premise {
+            self.mark_conversion_dependency(inference, node, premise, true)?;
+        }
         self.establish(inference, node, ty, false)
+    }
+
+    fn selected_conversion_substitution(
+        &mut self,
+        use_: &ConversionUse<'g>,
+    ) -> Work<Vec<Substitution<'g>>> {
+        let header = &self
+            .input
+            .ordinary
+            .unwrap()
+            .captured_family(use_.family)
+            .unwrap()
+            .header;
+        let arguments = &self
+            .evidence
+            .get(use_.goal.as_ref().unwrap())
+            .unwrap()
+            .output
+            .as_ref()
+            .unwrap()
+            .arguments;
+        self.elab.reserve(arguments.len())?;
+        Ok(header
+            .binders
+            .iter()
+            .zip(arguments)
+            .map(|(binder, argument)| Substitution {
+                binder: &binder.declaration.id,
+                position: binder.position,
+                argument: if binder.position == 1 {
+                    use_.selected_parameter.as_ref().unwrap_or(argument).clone()
+                } else {
+                    argument.clone()
+                },
+            })
+            .collect())
+    }
+
+    fn conversion_failure(
+        &mut self,
+        inference: &Inference<'g>,
+        node: NodeId,
+        use_: &ConversionUse<'g>,
+    ) -> Work<()> {
+        let module = inference.module;
+        let finding = if use_.premise.is_some() {
+            None
+        } else if matches!(use_.error_agreement, ErrorAgreement::Disagrees { .. }) {
+            Some(ScalarFindingKind::ConversionErrorMismatch)
+        } else if use_.result_agreement == Some(false) || use_.descriptor_agreement == Some(false) {
+            Some(ScalarFindingKind::TypeMismatch)
+        } else {
+            match use_.outcome {
+                Some(PairOutcome::NoMatch) => Some(ScalarFindingKind::MissingConversionPair),
+                Some(PairOutcome::NumericGap) => Some(ScalarFindingKind::ProtectedNumericGap),
+                Some(PairOutcome::Ambiguous) => Some(ScalarFindingKind::AmbiguousConversionPair),
+                _ if use_.destination.is_none() && use_.actual_source.is_some() => {
+                    Some(ScalarFindingKind::InsufficientContext)
+                }
+                _ => None,
+            }
+        };
+        if let Some(finding) = finding {
+            self.finding(module, node, finding)
+        } else if use_.actual_source.is_some() {
+            self.defer(module, node, ScalarUnsupported::ConversionAdmission)
+                .map(|_| ())
+        } else {
+            Ok(()) // The source expression owns a missing type or failure.
+        }
     }
 
     fn conversion_use(
@@ -249,17 +384,24 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         self.elab.reserve(routes.len())?;
         let source_filter = written.get(1).map(|s| s.argument.clone());
-        let premise = [self.arrow_premise, premise]
+        let installed = self.installed_conversion(family);
+        let premise = [self.arrow_premise, premise, (!installed).then_some(PREMISE)]
             .into_iter()
             .flatten()
-            .fold(PREMISE, InputPremise::combine);
-        let role_blockers = pairs::role_blockers(role);
+            .reduce(InputPremise::combine);
+        let role_blockers = if installed {
+            &[][..]
+        } else {
+            pairs::role_blockers(role)
+        };
         self.elab.reserve(role_blockers.len() + 1)?;
         let mut facts = ConversionUse {
             site,
             family,
             role,
             premise,
+            provider: None,
+            protection: None,
             routes: routes.to_vec(),
             destination,
             actual_source: source,
@@ -303,10 +445,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             routes,
             None,
         )?;
-        self.add_goal_premise(&goal, premise);
+        if let Some(premise) = premise {
+            self.add_goal_premise(&goal, premise);
+        }
         self.solve_goal(&goal)?;
         let proof = self.evidence.get(&goal).unwrap();
-        facts.premise = proof.premise.unwrap_or(PREMISE);
+        facts.premise = proof.premise;
+        facts.provider = proof.conversion_provider;
+        facts.protection = proof.conversion_protection;
         facts.outcome = proof.conversion_outcome;
         if let GoalState::Unresolved(GoalBlocker::ConversionPair(reason)) = proof.state {
             facts.blockers.push(reason);

@@ -1,0 +1,7 @@
+import std::error::display;
+
+export enum ScalarError { InvalidScalar }
+
+implement display(input: &ScalarError): string {
+    return "Invalid Unicode scalar value";
+}

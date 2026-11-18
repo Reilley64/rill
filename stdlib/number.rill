@@ -1,0 +1,18 @@
+import std::error::display;
+
+export enum ConversionError { OutOfRange, NotFinite }
+export enum ParseError { InvalidSyntax, OutOfRange }
+
+implement display(input: &ConversionError): string {
+    return match (input) {
+        ConversionError.OutOfRange => "Numeric conversion is out of range",
+        ConversionError.NotFinite => "Numeric conversion requires a finite value",
+    };
+}
+
+implement display(input: &ParseError): string {
+    return match (input) {
+        ParseError.InvalidSyntax => "Invalid decimal syntax",
+        ParseError.OutOfRange => "Parsed number is out of range",
+    };
+}

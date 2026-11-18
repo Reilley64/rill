@@ -44,6 +44,7 @@ pub(in crate::analysis) fn check_pair_candidates<'g>(
 pub(in crate::analysis::scalars) struct ConversionWork<'r, 'g> {
     family: &'r ConversionFamily<'g>,
     complete: bool,
+    required_provider: bool,
     candidates: Vec<(PairMatch<'g>, CandidateWork<'r, 'g>)>,
     settled: Vec<PairMatch<'g>>,
 }
@@ -405,13 +406,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             };
             let id = self.issue_goal(judgment, work.site, source, &clause.routes, false)?;
-            let f = &mut self.evidence.goals[id.index];
-            f.premise = Some(
-                f.premise
-                    .map_or(InputPremise::HypotheticalConversionRole, |p| {
-                        p.combine(InputPremise::HypotheticalConversionRole)
-                    }),
-            );
+            let owner = &work.body.source.family;
+            if !self.installed_conversion(owner) {
+                self.add_goal_premise(&id, InputPremise::HypotheticalConversionRole);
+            }
             self.elab.reserve(1)?;
             candidate.requirements.push(id.clone());
             work.taken[i] = true;
@@ -485,22 +483,39 @@ impl<'r, 'g> Checker<'r, 'g> {
         let [destination, source] = inputs else {
             return Ok(blocked(PairBlocker::EndpointContext));
         };
-        if !family.issues.is_empty() {
-            return Ok(blocked(PairBlocker::Registration));
-        }
         let infallible = matches!(family.premise, RoleHypothesis::Infallible(_));
         let GoalJudgment::Determine { family: id, .. } = self.evidence.goals[goal].judgment else {
             unreachable!()
         };
         let header = self.evidence_family(id)?.unwrap();
         let filter = filters.first().map(|s| &s.argument);
+        let installed = self.installed_conversion(id);
+        if installed
+            && let Some(state) = self.installed_protected_goal(
+                goal,
+                &header.header,
+                !infallible,
+                destination,
+                source,
+                filter,
+                family.issues.is_empty(),
+            )?
+        {
+            return Ok(state);
+        }
+        if !family.issues.is_empty() {
+            return Ok(blocked(PairBlocker::Registration));
+        }
         let mut budget = self.conversion_budget();
         let pair = patterns::PairDomain::new(inputs.iter(), filter, &mut budget);
         self.elab.statistics = budget.statistics;
         let pair = pair?;
         let mut budget = self.conversion_budget();
-        let protected =
-            pairs::protected_pair(family.premise, destination, source, &pair, &mut budget);
+        let protected = if installed {
+            Ok(None)
+        } else {
+            pairs::protected_pair(family.premise, destination, source, &pair, &mut budget)
+        };
         self.elab.statistics = budget.statistics;
         if let Some(protected) = protected? {
             return Ok(match protected {
@@ -562,15 +577,93 @@ impl<'r, 'g> Checker<'r, 'g> {
             let work = self.conversion_candidate(family, &m)?;
             candidates.push((m, work));
         }
+        let required_provider = installed
+            && self
+                .installed_conversions
+                .unwrap()
+                .promises_registered_pair(destination, source, !infallible)
+            && match filter {
+                Some(filter) => self.same(filter, source)?,
+                None => true,
+            };
         let work = ConversionWork {
             family,
             complete,
+            required_provider,
             candidates,
             settled: Vec::new(),
         };
         Ok(self
             .advance_conversion_goal(goal, work)?
             .unwrap_or(GoalState::Proved))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn installed_protected_goal(
+        &mut self,
+        goal: usize,
+        header: &DeclarationFacts<'g>,
+        fallible: bool,
+        destination: &Type<'g>,
+        source: &Type<'g>,
+        filter: Option<&Type<'g>>,
+        registration_valid: bool,
+    ) -> Work<Option<GoalState>> {
+        use crate::analysis::typed::ConversionProtection;
+        let Some(protected) = self.protected_conversion(fallible, destination, source)? else {
+            return Ok(None);
+        };
+        self.evidence.goals[goal].conversion_protection = Some(protected.protection);
+        let numeric_error = self.installed_conversions.unwrap().numeric_error;
+        if !registration_valid {
+            // A linked operation may be known without proving it is the call's winner.
+            if !fallible || numeric_error.is_some() {
+                self.evidence.goals[goal].conversion_provider = protected.provider;
+            }
+            return Ok(Some(blocked(PairBlocker::Registration)));
+        }
+        if protected.protection == ConversionProtection::ProhibitedNumeric {
+            self.evidence.goals[goal].conversion_outcome = Some(PairOutcome::NumericGap);
+            return Ok(Some(GoalState::Disproved));
+        }
+        if let Some(filter) = filter
+            && !self.same(filter, source)?
+        {
+            self.evidence.goals[goal].conversion_outcome = Some(PairOutcome::NoMatch);
+            return Ok(Some(GoalState::Disproved));
+        }
+        let Some(provider) = protected.provider else {
+            return Ok(Some(blocked(PairBlocker::RequiredNumericProvider)));
+        };
+        self.elab.reserve(2 + usize::from(fallible) * 2)?;
+        let mut arguments = vec![destination.clone(), source.clone()];
+        let result = if fallible {
+            let Some(error) = numeric_error else {
+                return Ok(Some(blocked(PairBlocker::RequiredNumericProvider)));
+            };
+            let error = Arc::new(TypeTerm::Nominal {
+                declaration: &error.id,
+                arguments: Vec::new(),
+            });
+            arguments.push(error.clone());
+            Arc::new(TypeTerm::Nominal {
+                declaration: &self.result.unwrap().declaration.id,
+                arguments: vec![destination.clone(), error],
+            })
+        } else {
+            destination.clone()
+        };
+        let module = self.evidence_module(&header.declaration.id.module)?;
+        let site = Self::site(module, header.declaration.node);
+        let facts = &mut self.evidence.goals[goal];
+        facts.conversion_provider = Some(provider);
+        facts.conversion_parameter = Some(source.clone());
+        facts.output = Some(GoalOutput {
+            arguments,
+            result,
+            site,
+        });
+        Ok(Some(GoalState::Proved))
     }
 
     fn conversion_budget(&self) -> declarations::Budget {
@@ -689,6 +782,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         let ranked = pairs::rank(work.family, &work.settled, &mut Vec::new(), &mut budget);
         self.elab.statistics = budget.statistics;
         let ranked = ranked?;
+        if work.required_provider
+            && let Some(core) = self.installed_conversions
+            && matches!(ranked, Some(PairOutcome::NoMatch | PairOutcome::Winner(_)))
+            && !matches!(ranked, Some(PairOutcome::Winner(id)) if core.registered.contains_key(id))
+        {
+            // A missing required provider does not license another winner or a gap.
+            return Ok(Some(blocked(PairBlocker::RequiredCoreProvider)));
+        }
         let winner = match ranked {
             Some(PairOutcome::Winner(id)) => id,
             Some(PairOutcome::NoMatch | PairOutcome::Ambiguous) => {
@@ -713,6 +814,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut arguments = inputs.clone();
         arguments.extend(candidate.error);
         facts.conversion_outcome = ranked;
+        facts.conversion_provider = self
+            .installed_conversions
+            .and_then(|core| core.registered.get(winner))
+            .map(|r| r.operation);
         facts.conversion_parameter = Some(signature.parameter);
         facts.output = Some(GoalOutput {
             arguments,

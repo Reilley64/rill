@@ -41,7 +41,19 @@ fn installed_formatting_and_conversions() {
         fs::create_dir_all(root.join(dir)).unwrap();
     }
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
-    for file in ["core.rill", "format.rill", "convert.rill"] {
+    for file in [
+        "core.rill",
+        "format.rill",
+        "convert.rill",
+        "result.rill",
+        "error.rill",
+        "option.rill",
+        "number.rill",
+        "char.rill",
+        "bytes.rill",
+        "string.rill",
+        "collection.rill",
+    ] {
         fs::copy(source.join(file), root.join("lib/rill/std").join(file)).unwrap();
     }
     fs::write(

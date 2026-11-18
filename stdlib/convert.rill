@@ -1,3 +1,80 @@
-// The compiler supplies the protected numeric pairs. Other providers are separate.
+import std::result::Result;
+import std::number::ParseError;
+import std::char::ScalarError;
+
+// Protected identity and numeric providers are compiler operations.
 export function into<To, From>(value: From): To;
-export import convert::{into as from};
+export function tryInto<To, From, E>(value: From): Result<To, E>;
+export import convert::{into as from, tryInto as tryFrom};
+
+// Primitive-only pairs are registered at their family owner.
+function codePoint(input: char): u32;
+implement into<u32>(input: char): u32 {
+    return codePoint(input);
+}
+
+function unicodeScalar(input: u32): Result<char, ScalarError>;
+implement tryInto<char>(input: u32): Result<char, ScalarError> {
+    return unicodeScalar(input);
+}
+
+// Each registration is bound to its own linked strict-decimal operation.
+function parseI8(text: &string): Result<i8, ParseError>;
+implement tryInto<i8>(text: &string): Result<i8, ParseError> {
+    return parseI8(text);
+}
+
+function parseI16(text: &string): Result<i16, ParseError>;
+implement tryInto<i16>(text: &string): Result<i16, ParseError> {
+    return parseI16(text);
+}
+
+function parseI32(text: &string): Result<i32, ParseError>;
+implement tryInto<i32>(text: &string): Result<i32, ParseError> {
+    return parseI32(text);
+}
+
+function parseI64(text: &string): Result<i64, ParseError>;
+implement tryInto<i64>(text: &string): Result<i64, ParseError> {
+    return parseI64(text);
+}
+
+function parseI128(text: &string): Result<i128, ParseError>;
+implement tryInto<i128>(text: &string): Result<i128, ParseError> {
+    return parseI128(text);
+}
+
+function parseU8(text: &string): Result<u8, ParseError>;
+implement tryInto<u8>(text: &string): Result<u8, ParseError> {
+    return parseU8(text);
+}
+
+function parseU16(text: &string): Result<u16, ParseError>;
+implement tryInto<u16>(text: &string): Result<u16, ParseError> {
+    return parseU16(text);
+}
+
+function parseU32(text: &string): Result<u32, ParseError>;
+implement tryInto<u32>(text: &string): Result<u32, ParseError> {
+    return parseU32(text);
+}
+
+function parseU64(text: &string): Result<u64, ParseError>;
+implement tryInto<u64>(text: &string): Result<u64, ParseError> {
+    return parseU64(text);
+}
+
+function parseU128(text: &string): Result<u128, ParseError>;
+implement tryInto<u128>(text: &string): Result<u128, ParseError> {
+    return parseU128(text);
+}
+
+function parseF32(text: &string): Result<f32, ParseError>;
+implement tryInto<f32>(text: &string): Result<f32, ParseError> {
+    return parseF32(text);
+}
+
+function parseF64(text: &string): Result<f64, ParseError>;
+implement tryInto<f64>(text: &string): Result<f64, ParseError> {
+    return parseF64(text);
+}

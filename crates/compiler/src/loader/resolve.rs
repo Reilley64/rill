@@ -155,7 +155,7 @@ impl Engine {
             }
             self.imports.extend(imports);
         }
-        self.capture_installed_metadata()?;
+        let metadata = self.capture_installed_metadata()?;
         self.imports
             .sort_by(|a, b| (&a.module, a.span.start()).cmp(&(&b.module, b.span.start())));
         let (facts, names, public_names) = self.seeds()?;
@@ -372,6 +372,43 @@ impl Engine {
             dispose: select(&prelude_keys[1], &selectors[1])?,
         };
         let implementations = self.attach_implementations(&bindings, &prelude)?;
+        if let Some(profile) = self.installed {
+            for implementation in &implementations {
+                self.host.charge(1)?;
+                let owner = &implementation.declaration.module;
+                if owner.origin != Origin::Standard || !metadata.contains(owner.path.as_str()) {
+                    continue;
+                }
+                let edges = profile.metadata();
+                self.host.charge(edges.len())?;
+                let edge = edges.iter().find(|edge| edge.path == owner.path).unwrap();
+                let slot = &implementation.family.module;
+                self.host.charge(edge.registrations.len())?;
+                let mut allowed = false;
+                if slot.origin == Origin::Standard
+                    && let Some((_, families)) = edge
+                        .registrations
+                        .iter()
+                        .find(|(path, _)| *path == slot.path)
+                {
+                    let declarations = &self.modules[slot].declarations;
+                    self.host.charge(declarations.len() + families.len())?;
+                    allowed = declarations.iter().any(|d| {
+                        d.id == implementation.family
+                            && d.scope.is_none()
+                            && d.name
+                                .as_deref()
+                                .is_some_and(|name| families.contains(&name))
+                    });
+                }
+                if !allowed {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "installed metadata exceeds its declared registration scope",
+                    ));
+                }
+            }
+        }
         self.capture_error_storage()?;
         let mut archive = None;
         if let Some(prefix) = prefix.filter(|_| self.installed.is_some()) {
@@ -604,9 +641,10 @@ impl Engine {
         Ok(privacy)
     }
 
-    fn capture_installed_metadata(&mut self) -> Result<()> {
+    fn capture_installed_metadata(&mut self) -> Result<BTreeSet<&'static str>> {
+        let mut captured = BTreeSet::new();
         let Some(profile) = self.installed else {
-            return Ok(());
+            return Ok(captured);
         };
         let root = self.roots[&Origin::Standard].clone();
         let edges = profile.metadata();
@@ -619,6 +657,26 @@ impl Engine {
                         requested.insert(edge.path);
                     }
                 }
+            }
+        }
+        let conversion = profile.conversion_metadata();
+        for import in &self.imports {
+            self.host
+                .charge(1 + conversion.len() + import.starts.len())?;
+            // Provider modules bind their own registrations with explicit source imports.
+            // Those imports are not an application request for the rest of the closure.
+            if import.module.origin == Origin::Standard
+                && conversion.contains(&import.module.path.as_str())
+            {
+                continue;
+            }
+            if import
+                .starts
+                .iter()
+                .any(|(key, _)| key.origin == Origin::Standard && key.path == "convert.rill")
+            {
+                requested.extend(conversion.iter().copied());
+                break;
             }
         }
         // The table lists dependencies before dependents. Walk it backwards
@@ -658,32 +716,17 @@ impl Engine {
                 ));
             }
             let loaded = self.add_module(Origin::Standard, probe.path)?;
+            captured.insert(edge.path);
             let pending = self.pending.pop_front();
             debug_assert_eq!(pending.as_ref(), Some(&loaded));
             let module = self.modules.get_mut(&loaded).unwrap();
             let mut imports = collect::collect(module, &mut self.host)?;
             for declaration in &module.declarations {
                 self.host.charge(1)?;
-                let in_scope = match declaration.id.kind {
-                    DeclarationKind::Startup | DeclarationKind::Expectation => false,
-                    DeclarationKind::Implementation => {
-                        self.host
-                            .charge(edge.families.len() + module.declarations.len())?;
-                        let signature = module.syntax.nodes[declaration.node].children[0];
-                        let name = collect::signature_name(&module.syntax, signature);
-                        edge.families.iter().any(|family| {
-                            module.syntax.nodes[name].span.bytes() == family.as_bytes()
-                        }) && module.declarations.iter().any(|d| {
-                            d.id.kind == DeclarationKind::Family
-                                && d.scope.is_none()
-                                && d.name.as_deref().is_some_and(|s| {
-                                    s.as_bytes() == module.syntax.nodes[name].span.bytes()
-                                })
-                        })
-                    }
-                    _ => true,
-                };
-                if !in_scope {
+                if matches!(
+                    declaration.id.kind,
+                    DeclarationKind::Startup | DeclarationKind::Expectation
+                ) {
                     return Err(failure(
                         FailureKind::InvalidRequest,
                         "installed metadata exceeds its declared scope",
@@ -719,7 +762,7 @@ impl Engine {
             }
             self.imports.extend(imports);
         }
-        Ok(())
+        Ok(captured)
     }
 
     fn require_source(&mut self, origin: Origin, path: PathBuf) -> Result<ModuleKey> {

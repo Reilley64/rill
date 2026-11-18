@@ -106,9 +106,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let module = inference.module;
         let ordinary = self.input.ordinary.unwrap();
         let family = ordinary.captured_family(&declaration.id);
-        let reason = if self.is_installed_into(&declaration.id) {
-            Some(ScalarUnsupported::ConversionAdmission)
-        } else if declaration.id.kind != DeclarationKind::Function && family.is_none() {
+        let reason = if declaration.id.kind != DeclarationKind::Function && family.is_none() {
             Some(ScalarUnsupported::FamilySelection)
         } else if family.is_none()
             && ordinary

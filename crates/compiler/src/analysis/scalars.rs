@@ -204,6 +204,8 @@ pub enum ScalarFindingKind {
     MissingValue,
     MissingRequirement,
     MissingConversionPair,
+    ConversionErrorMismatch,
+    AmbiguousConversionPair,
     ProtectedNumericGap,
     PrivateValue,
     StartupCapture,
@@ -228,6 +230,8 @@ impl ScalarFindingKind {
             Self::MissingValue => Some("R0400"),
             Self::MissingRequirement => Some("R0302"),
             Self::MissingConversionPair | Self::ProtectedNumericGap => Some("R0314"),
+            Self::ConversionErrorMismatch => Some("R0313"),
+            Self::AmbiguousConversionPair => Some("R0303"),
             Self::PrivateValue => Some("R0401"),
             Self::StartupCapture => Some("R0502"),
             Self::ExpectationBoolean => Some("R0101"),
@@ -484,7 +488,7 @@ struct Checker<'r, 'g> {
     result: Option<super::typed::ResultRole<'g>>,
     show: Option<&'g Declaration>,
     primitives: Option<&'r super::typed::PrimitiveCore<'g>>,
-    installed_into: Option<&'r super::typed::IntoAdmission<'g>>,
+    installed_conversions: Option<&'r super::typed::ConversionCore<'g>>,
     collections: CollectionCore<'g>,
     native_ownership: &'r [super::typed::OwnershipProtection<'g>],
     data_depth: usize,
@@ -519,7 +523,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             result: None,
             show: None,
             primitives: None,
-            installed_into: None,
+            installed_conversions: None,
             collections: Default::default(),
             native_ownership: &[],
             data_depth: 0,
@@ -2233,8 +2237,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                             let id = inference.calls[&node].fact.callee;
                             if self.canonical_scalar_call(&inference, node) {
                                 self.canonical_call_step(&mut inference, node)?;
-                            } else if self.is_installed_into(id) {
-                                self.numeric_into_step(&mut inference, node)?;
                             } else if self.conversion_family(id).is_some() {
                                 self.conversion_call_step(&mut inference, node, false)?;
                             } else {
@@ -2390,7 +2392,6 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
         }
         if self.input.ordinary.is_some() {
-            self.finish_installed_into(&mut inference)?;
             self.finish_conversion_uses(&mut inference)?;
             self.defer_ordinary_calls(&mut inference)?;
         }
@@ -2618,6 +2619,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         for (&node, slot) in &inference.slots {
             self.elab.step(1)?;
             if self.conversions.is_some()
+                && !self.integrated
                 && (self.conversion_uses.contains_key(&(&module.key, node))
                     || inference.conversion_clause_calls.contains(&node))
             {
@@ -3284,7 +3286,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         if let Some(ordinary) = self.input.ordinary
             && let Some(metadata) = ordinary.headers().get(&declaration.id)
         {
-            if !pending_role {
+            if !pending_role && declaration.id.kind != DeclarationKind::Implementation {
                 self.add_body_assumptions(module, node, &declaration.id, &[])?;
             }
             if metadata.defaults.iter().any(|d| d.ty.is_none()) {
