@@ -41,16 +41,16 @@ impl<'a, 'g> Build<'a, 'g> {
 
     fn slot(&mut self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<Slot> {
         let slot = self.slots.len();
-        let (moves, drops, fields, has_custom_disposer) = match ty {
+        let (moves, drops, fields, custom_disposer) = match ty {
             TypeTerm::Primitive(_) => {
                 let owned = owns_text(ty);
-                (owned, owned, &[][..], false)
+                (owned, owned, &[][..], None)
             }
-            TypeTerm::Reference { mutable, .. } => (*mutable, false, &[][..], false),
-            TypeTerm::Callable { .. } => (true, false, &[][..], false),
+            TypeTerm::Reference { mutable, .. } => (*mutable, false, &[][..], None),
+            TypeTerm::Callable { .. } => (true, false, &[][..], None),
             TypeTerm::Nominal { .. } => {
                 let (fields, custom) = self.record_layout(node, ty)?;
-                (custom, false, fields, custom)
+                (custom.is_some(), false, fields, custom)
             }
             _ => return Err(Stop::Pending(node)),
         };
@@ -61,13 +61,13 @@ impl<'a, 'g> Build<'a, 'g> {
             field: None,
             fields: fields.len(),
             reference_field: false,
-            has_custom_disposer,
+            custom_disposer,
             moves,
             drops,
         });
         for field in fields {
             self.budget.step(1)?;
-            let reference_field = !has_custom_disposer
+            let reference_field = custom_disposer.is_none()
                 && primitive_reference(&field.ty)
                 && matches!(
                     field.ty.as_ref(),
@@ -84,7 +84,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 field: Some(field.declaration),
                 fields: 0,
                 reference_field,
-                has_custom_disposer: false,
+                custom_disposer: None,
                 moves: owned,
                 drops: owned,
             });
@@ -96,7 +96,7 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         node: NodeId,
         ty: &TypeTerm<'g>,
-    ) -> ResultOf<(&'a [MemberType<'g>], bool)> {
+    ) -> ResultOf<(&'a [MemberType<'g>], Option<&'g DeclarationId>)> {
         let TypeTerm::Nominal {
             declaration,
             arguments,
@@ -126,7 +126,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let viable =
             ordinary::source::project(family, &[Some(Arc::new(ty.clone()))], &[], self.budget)?;
         match ordinary::source::rank(family, &viable, self.budget)? {
-            Some(HypotheticalOutcome::NoMatch) => Ok((fields, false)),
+            Some(HypotheticalOutcome::NoMatch) => Ok((fields, None)),
             Some(HypotheticalOutcome::Winner(winner)) => {
                 // A selected but conditional implementation is not proof of a
                 // custom disposer. Keep substitution/evidence-dependent cases open.
@@ -144,7 +144,7 @@ impl<'a, 'g> Build<'a, 'g> {
                             .is_some_and(|h| h.requirements.is_empty())
                     })
                 {
-                    Ok((fields, true))
+                    Ok((fields, Some(winner)))
                 } else {
                     Err(Stop::Pending(node))
                 }
@@ -370,7 +370,7 @@ impl<'a, 'g> Build<'a, 'g> {
     ) -> ResultOf<Pc> {
         let ty = self.value(value)?.ty.clone();
         let slot = self.slot(value, &ty)?;
-        let end = if self.slots[slot].fields > 0 {
+        let end = if self.slots[slot].fields > 0 || self.slots[slot].custom_disposer.is_some() {
             self.cleanup(statement, &[slot], next)?
         } else {
             self.emit(statement, Action::End(slot), Edges::Next(next))?

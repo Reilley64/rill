@@ -77,7 +77,7 @@ The [record tests](m5/records.rs) run in both installed load modes:
 | `splitField`, `movedField`, `movedWhole` | One path consumes `first`, the other keeps it. Both can return `second`. Reading the moved field or whole record rejects with `R0200`, with `pack.first` as the transfer witness. |
 | `construct`, `restoreField`, `replaceField`, `replacePartial`, `temporaryField`, `copyRecord` | Written move order differs from reverse declaration cleanup order. Restoring a moved field does not dispose its old value again. Replacement of an initialized field drops it before installation. Whole replacement cleans only the old live fields. Returning a temporary's field transfers it and cleans the other fields. An eligible record copies and leaves both owners initialized. |
 | `disjointFields`, `sameField`, `overlappingWhole`, `escapingField` | An exclusive loan of `first` does not block moving `second`. It does block replacing `first`, with the loan as a witness. A live whole-record loan rejects the overlapping move. A field borrow cannot escape the body-local record. |
-| `customPartial`, `customConditional`, `customWhole`, `customCleanup`, `borrowedFieldMove` | The compiler rejects a move from a record awaiting its custom disposer, and a move of non-copying data through a borrow. It permits whole transfer without local disposal. A required outer disposer returns `Incomplete`, never default cleanup MIR. That incomplete exit does not hide a definite forbidden move on a different reached path. |
+| `customPartial`, `customConditional`, `customWhole`, `customCleanup`, `borrowedFieldMove` | The compiler rejects a move from a record awaiting its custom disposer, and a move of non-copying data through a borrow. It permits whole transfer without local disposal. At this record-place revision, a required outer disposer returns `Incomplete`, never default cleanup MIR. That incomplete exit does not hide a definite forbidden move on a different reached path. The later normal-edge disposer increment below replaces this limitation for the supported shape. |
 
 A monomorphic application disposer for its own record previously blocked the installed M4 receipt. The typed handoff now checks that body under the closed installed role inventory. Canonical identity, ordinary placement and compatibility, duplicate detection and the separate protection gate still apply. The alias in the fixture exercises the canonical family. A separate capture with a second implementation under the canonical name produces `R0304` without a call and has no receipt. The M4 receipt still grants no ownership permission.
 
@@ -123,10 +123,29 @@ With the default host `TMPDIR`, an earlier `check` failed in the unchanged M3 `l
 
 No workflow changed, so `check:ci` was not run. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM and provider ABI acceptance were not run.
 
+## Normal-edge custom disposer cleanup
+
+[#72](https://github.com/Reilley64/rill/issues/72) starts at M5 publication `d5bfb60849f3b801377556d005ac167303fa02ff` on the same verified M4 input. The [approved RFC 0007 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379) and [#23 remaining-field decision](https://github.com/Reilley64/rill/issues/23#issuecomment-6872129850) govern this slice. The scope is monomorphic application records with primitive fields and a proved unconditional canonical disposer. An aliased registration identifies the same canonical family. The implementation neither substitutes a source name for the selected implementation nor trusts an opaque payload.
+
+A normal cleanup boundary transfers a complete value to its selected outer disposer. The caller's MIR names that implementation and does not also drop its fields. The checker starts the disposer with an active outer value. A field move or explicit primitive disposal consumes only that field. Moving the complete active value within its body preserves the active state. Attempting to pass it as a fresh owned argument rejects. Normal exits clean only the remaining initialized fields, in reverse declaration order. They do not invoke the active outer disposer again.
+
+The root MIR exposes reached disposer bodies by implementation identity. The bounded worklist validates direct calls and selected disposers before publishing any MIR. An incomplete, rejected or resource-limited body prevents publication. This is a normal-edge check, not a cancellation, unwinding, ABI or execution claim.
+
+The [disposer tests](m5/disposers.rs) require installed typed receipts in both modes:
+
+| Case | Checked source or MIR obligation |
+| --- | --- |
+| `normal`, `customCleanup` | An inner local cleans before parameters. Reverse parameter order puts the later independent owner before the selected outer disposer. Its body drops the moved local once and skips the explicitly disposed field. An empty disposer still cleans its remaining fields. |
+| `replace`, `split` | On replacement, invoke the old value's disposer before installing the new value. On the active body's early return, skip the field moved on that edge. The other edge cleans both initialized fields. |
+| `triesEscape`, `triesInvalid`, `liveFieldLoan` | Reject consuming the active outer value after a local move, rereading a moved field inside a reached disposer, and leaving a still-live field borrow at cleanup. No MIR is published. |
+| `protectedCleanup`, one-short work | A `LockGuard` wrapper does not get successful cleanup from an empty custom body. The protected payload remains incomplete. An exhausted query does not expose a partial disposer graph. |
+
+Explicit custom-disposer dispatch, non-primitive and protected payloads, partial construction interrupts, and cancellation remain outside this slice. The [retained-destination typed blocker](https://github.com/Reilley64/rill/issues/69#issuecomment-6982582460) does not block these normal-edge checks.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
-- Aggregate initialization, pattern and guard commitment, partial moves, iteration, rebuilding and custom-disposer bodies. Confirm remaining-field cleanup without repeating moved fields or invoking the outer disposer again.
+- General aggregate initialization, pattern and guard commitment, partial moves, iteration and rebuilding. Extend the demonstrated remaining-field cleanup to custom disposers over non-primitive fields and to protected obligations.
 - Callable invocation, borrowed passing and scoped jobs, multiple or computed captures, and erased/generic evidence. A known single captured value does not prove these modes.
 - Typed propagation/wrapping exits, statement-temporary dependencies, protected actions, cancellation edge obligations, and full graph coverage of bodies, startup and expectations. Pending call and provider contracts cannot produce a program receipt.
 

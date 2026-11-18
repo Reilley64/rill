@@ -223,9 +223,16 @@ fn owned_record_projections() {
                 .mir()
                 .unwrap_or_else(|| panic!("{:?}", transferred.completion()));
             assert!(path_drops(mir, mir.entry).is_empty());
-            let pending = lower("customCleanup");
-            assert_eq!(pending.completion(), Completion::Incomplete);
-            assert!(pending.mir().is_none());
+            let checked = lower("customCleanup");
+            let mir = checked
+                .mir()
+                .expect("checked outer disposer and default field cleanup");
+            let operations = path_drops(mir, mir.entry);
+            let [Obligation::InvokeDisposer { implementation, .. }] = operations.as_slice() else {
+                panic!("expected only an outer disposer at the caller boundary: {operations:?}");
+            };
+            let active = mir.disposer(implementation).unwrap();
+            assert_eq!(dropped_fields(active), ["remaining", "text"]);
 
             for (name, code) in [
                 ("overlappingWhole", "R0203"),

@@ -16,6 +16,8 @@ enum State {
 struct Held {
     loans: Arc<[Loan]>,
     capture_drop: Option<NodeId>,
+    /// The original parameter of an already-running outer disposer.
+    disposal_started_at: Option<NodeId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -250,9 +252,35 @@ fn require_initialized(
     Ok(())
 }
 
-fn forbid_custom_partial(slots: &[Local<'_>], slot: Slot, node: NodeId) -> ResultOf<()> {
+fn active_disposer(state: &State) -> Option<NodeId> {
+    match state {
+        State::Initialized(held) => held.disposal_started_at,
+        _ => None,
+    }
+}
+
+fn forbid_active_escape(state: &State, site: NodeId) -> ResultOf<()> {
+    if let Some(related) = active_disposer(state) {
+        return Err(Stop::Rejected {
+            site,
+            related,
+            kind: Conflict::ForbiddenMove,
+        });
+    }
+    Ok(())
+}
+
+fn forbid_custom_partial(
+    slots: &[Local<'_>],
+    state: &[State],
+    slot: Slot,
+    node: NodeId,
+) -> ResultOf<()> {
     let owner = slots[slot].owner;
-    if owner != slot && slots[owner].has_custom_disposer {
+    if owner != slot
+        && slots[owner].custom_disposer.is_some()
+        && active_disposer(&state[owner]).is_none()
+    {
         return Err(Stop::Rejected {
             site: node,
             related: slots[owner].node,
@@ -284,6 +312,9 @@ fn cleanup_operation<'g>(module: &'g Module, local: Local<'g>, state: State) -> 
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
         Cleanup::EndStorage(_) => Operation::None,
+        Cleanup::InvokeDisposer { .. } => {
+            unreachable!("local storage cleanup cannot invoke an outer disposer")
+        }
     }
 }
 
@@ -314,9 +345,6 @@ fn cleanup_boundary<'g>(
         budget.step(1)?;
         if !matches!(state[slot], State::Initialized(_)) {
             continue;
-        }
-        if slots[slot].has_custom_disposer {
-            return Err(Stop::Pending(node));
         }
         remaining += 1;
         conflict(
@@ -358,6 +386,21 @@ fn cleanup_boundary<'g>(
             Ok(())
         })?;
         scheduled += 1;
+        if let Some(implementation) = slots[slot].custom_disposer
+            && active_disposer(&state[slot]).is_none()
+        {
+            require_initialized(slots, state, slot, node, budget)?;
+            // The selected body owns the record and runs its remaining-field
+            // cleanup. This boundary must not repeat it.
+            actions.push(Cleanup::InvokeDisposer {
+                operand: slots[slot].place(module),
+                implementation,
+            });
+            let storage = slots[slot].storage(slot);
+            budget.step(storage.len())?;
+            state[storage].fill(State::Vacant);
+            continue;
+        }
         for member in slots[slot].storage(slot).rev() {
             budget.step(1)?;
             if let State::Initialized(held) = std::mem::replace(&mut state[member], State::Vacant) {
@@ -418,7 +461,12 @@ fn retire_loans(
     Ok(())
 }
 
-pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> ResultOf<Mir<'g>> {
+pub(super) fn run<'g>(
+    build: Build<'_, 'g>,
+    entry: Pc,
+    params: &[Slot],
+    active: Option<Slot>,
+) -> ResultOf<Mir<'g>> {
     let Build {
         module,
         slots,
@@ -464,6 +512,12 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
     }
+    if let Some(slot) = active {
+        state[slot] = State::Initialized(Held {
+            disposal_started_at: Some(slots[slot].node),
+            ..Held::default()
+        });
+    }
     let entry = add(entry, state, &mut known, &mut pending, budget)?;
     let mut blocked = None;
     while blocks.len() < pending.len() {
@@ -492,7 +546,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     require_initialized(&slots, &state, from, node, budget)?;
                     let moves = slots[from].moves;
                     if moves {
-                        forbid_custom_partial(&slots, from, node)?;
+                        forbid_custom_partial(&slots, &state, from, node)?;
                     }
                     let kind = if moves {
                         Conflict::Release
@@ -611,7 +665,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     })?;
                     state[into] = State::Initialized(Held {
                         loans: loan_set(loans, budget)?,
-                        capture_drop: None,
+                        ..Held::default()
                     });
                     Operation::Borrow {
                         source: local(from),
@@ -662,7 +716,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     };
                     state[into] = State::Initialized(Held {
                         loans,
-                        capture_drop: None,
+                        ..Held::default()
                     });
                     Operation::Reborrow {
                         parent: local(parent),
@@ -691,6 +745,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     let mut retained = BTreeSet::new();
                     for &arg in &call.args {
                         require_initialized(&slots, &state, arg, node, budget)?;
+                        forbid_active_escape(&state[arg], node)?;
                         let storage = slots[arg].storage(arg);
                         if call.retains && call.into.is_some() {
                             include_loans(&mut retained, &state, storage.clone(), budget)?;
@@ -701,7 +756,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     if let Some(into) = call.into {
                         state[into] = State::Initialized(Held {
                             loans: loan_set(retained, budget)?,
-                            capture_drop: None,
+                            ..Held::default()
                         });
                     }
                     Operation::Call(call.callee)
@@ -723,7 +778,8 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 }
                 Action::Dispose(slot) => {
                     initialized(&state[slot], node)?;
-                    forbid_custom_partial(&slots, slot, node)?;
+                    forbid_custom_partial(&slots, &state, slot, node)?;
+                    forbid_active_escape(&state[slot], node)?;
                     conflict(
                         &slots,
                         &state,
@@ -741,7 +797,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                     }
                 }
                 Action::Displace { target, .. }
-                    if slots[target].fields > 0 || slots[target].has_custom_disposer =>
+                    if slots[target].fields > 0 || slots[target].custom_disposer.is_some() =>
                 {
                     cleanup_boundary(
                         module,
@@ -756,7 +812,8 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 Action::Displace { target, .. } => {
                     let owner = slots[target].owner;
                     if owner != target
-                        && (slots[owner].has_custom_disposer
+                        && (slots[owner].custom_disposer.is_some()
+                            && active_disposer(&state[owner]).is_none()
                             || !matches!(state[owner], State::Initialized(_)))
                     {
                         return Err(Stop::Pending(node));
@@ -794,6 +851,7 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 }
                 Action::Export(slot) => {
                     require_initialized(&slots, &state, slot, node, budget)?;
+                    forbid_active_escape(&state[slot], node)?;
                     let mut escape: Option<Loan> = None;
                     visit_loans(&state, slots[slot].storage(slot), budget, |loan, _| {
                         if loan.kind != LoanKind::Suspension
@@ -830,9 +888,6 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
                 )?,
                 Action::End(slot) => {
                     if matches!(state[slot], State::Initialized(_)) {
-                        if slots[slot].has_custom_disposer {
-                            return Err(Stop::Pending(node));
-                        }
                         conflict(
                             &slots,
                             &state,
@@ -888,5 +943,9 @@ pub(super) fn run<'g>(build: Build<'_, 'g>, entry: Pc, params: &[Slot]) -> Resul
     if let Some(node) = blocked {
         return Err(Stop::Pending(node));
     }
-    Ok(Mir { entry, blocks })
+    Ok(Mir {
+        entry,
+        blocks,
+        disposer_bodies: BTreeMap::new(),
+    })
 }

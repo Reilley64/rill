@@ -81,6 +81,14 @@ impl<'g> Report<'g> {
 pub struct Mir<'g> {
     pub entry: usize,
     pub blocks: Vec<Block<'g>>,
+    disposer_bodies: BTreeMap<&'g DeclarationId, Mir<'g>>,
+}
+
+impl<'g> Mir<'g> {
+    /// A checked active disposer reached from this query's entry body.
+    pub fn disposer(&self, implementation: &DeclarationId) -> Option<&Mir<'g>> {
+        self.disposer_bodies.get(implementation)
+    }
 }
 
 #[derive(Debug)]
@@ -147,7 +155,14 @@ pub enum Operation<'g> {
 pub enum Cleanup<'g> {
     EndStorage(Place<'g>),
     Drop(Place<'g>),
-    DropCapture { closure: Site<'g>, field: Site<'g> },
+    DropCapture {
+        closure: Site<'g>,
+        field: Site<'g>,
+    },
+    InvokeDisposer {
+        operand: Place<'g>,
+        implementation: &'g DeclarationId,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -157,7 +172,7 @@ pub enum Terminator {
     Return,
 }
 
-/// Lower the selected body after validating its supported direct call graph.
+/// Lower the selected body after validating reached direct calls and disposers.
 /// A body MIR is not a whole-capture ownership receipt or evidence of execution.
 pub fn lower_body<'g>(
     receipt: &TypedReceipt<'_, 'g>,
@@ -241,24 +256,38 @@ fn checked_graph<'g>(
      -> ResultOf<()> {
         for block in &mir.blocks {
             budget.step(1)?;
-            let Operation::Call(callee) = block.operation else {
-                continue;
+            let call = match block.operation {
+                Operation::Call(callee) => Some(callee),
+                _ => None,
             };
-            if seen.contains(callee) {
-                continue;
-            }
-            let mut target = None;
-            for candidate in typed.inventory().graph().modules() {
-                budget.step(1)?;
-                if candidate.key == callee.module {
-                    target = Some(candidate);
-                    break;
+            let cleanup = match &block.operation {
+                Operation::Cleanup(actions) => actions.as_slice(),
+                _ => &[],
+            };
+            budget.step(cleanup.len())?;
+            for callee in call
+                .into_iter()
+                .chain(cleanup.iter().filter_map(|action| match action {
+                    Cleanup::InvokeDisposer { implementation, .. } => Some(*implementation),
+                    _ => None,
+                }))
+            {
+                if seen.contains(callee) {
+                    continue;
                 }
+                let mut target = None;
+                for candidate in typed.inventory().graph().modules() {
+                    budget.step(1)?;
+                    if candidate.key == callee.module {
+                        target = Some(candidate);
+                        break;
+                    }
+                }
+                let target = target.ok_or(Stop::Pending(block.site.node))?;
+                budget.reserve(2)?;
+                seen.insert(callee);
+                pending.push_back((target, callee));
             }
-            let target = target.ok_or(Stop::Pending(block.site.node))?;
-            budget.reserve(2)?;
-            seen.insert(callee);
-            pending.push_back((target, callee));
         }
         Ok(())
     };
@@ -266,18 +295,35 @@ fn checked_graph<'g>(
     budget.reserve(1).map_err(|()| (module, Stop::Limit))?;
     let mut seen = BTreeSet::from([&header.declaration.id]);
     let mut pending = VecDeque::new();
-    let root = lower(typed, module, header, budget).map_err(|stop| (module, stop))?;
+    let mut root = lower(typed, module, header, budget).map_err(|stop| (module, stop))?;
     reached(&root, &mut pending, &mut seen, budget).map_err(|stop| (module, stop))?;
     while let Some((target, id)) = pending.pop_front() {
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
-        let header = typed
-            .inventory()
-            .type_facts()
-            .declarations
-            .get(id)
-            .ok_or((module, Stop::Pending(header.declaration.node)))?;
-        let mir = lower(typed, target, header, budget).map_err(|stop| (target, stop))?;
+        let missing = (module, Stop::Pending(header.declaration.node));
+        let is_disposer = id.kind == DeclarationKind::Implementation;
+        let selected = if is_disposer {
+            let family = typed
+                .dispose_role()
+                .and_then(|role| typed.inventory().captured_family(&role.id))
+                .ok_or_else(|| (module, Stop::Pending(header.declaration.node)))?;
+            budget
+                .step(family.implementations.len())
+                .map_err(|()| (target, Stop::Limit))?;
+            family
+                .implementations
+                .iter()
+                .find(|body| body.source.declaration == *id)
+                .map(|body| &body.header)
+        } else {
+            typed.inventory().type_facts().declarations.get(id)
+        }
+        .ok_or(missing)?;
+        let mir = lower(typed, target, selected, budget).map_err(|stop| (target, stop))?;
         reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
+        if is_disposer {
+            budget.reserve(1).map_err(|()| (target, Stop::Limit))?;
+            root.disposer_bodies.insert(id, mir);
+        }
     }
     Ok(root)
 }
@@ -327,6 +373,17 @@ fn lower<'g>(
         )?;
         params.push(slot);
     }
+    let active = if header.declaration.id.kind == DeclarationKind::Implementation {
+        let [slot] = params.as_slice() else {
+            return Err(Stop::Pending(entry_site));
+        };
+        if build.slots[*slot].custom_disposer != Some(&header.declaration.id) {
+            return Err(Stop::Pending(entry_site));
+        }
+        Some(*slot)
+    } else {
+        None
+    };
     let end = build.emit(body, Action::None, Edges::End)?;
     let finish = build.cleanup(body, &params, end)?;
     let entry = build.statement(
@@ -338,7 +395,7 @@ fn lower<'g>(
         },
         1,
     )?;
-    flow::run(build, entry, &params)
+    flow::run(build, entry, &params, active)
 }
 
 fn site_at(module: &Module, node: NodeId) -> Site<'_> {
@@ -374,7 +431,7 @@ struct Local<'g> {
     field: Option<&'g Declaration>,
     fields: usize,
     reference_field: bool,
-    has_custom_disposer: bool,
+    custom_disposer: Option<&'g DeclarationId>,
     moves: bool,
     drops: bool,
 }
