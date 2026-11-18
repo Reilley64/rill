@@ -87,7 +87,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             let Some(output) = header.iter().find(|s| s.binder == default.binder) else {
                 continue;
             };
-            if self.closed(&output.argument, binders, &|i| slots[i].is_some(), 1)? {
+            // A written default supplies a complete term, not a projection
+            // onto its currently free leaves.
+            if !self.closed(&output.argument, binders, &|i| !pending.contains(&i), 1)?
+                || self.closed(&output.argument, binders, &|i| slots[i].is_some(), 1)?
+            {
                 continue;
             }
             let Some(ty) = &default.ty else {

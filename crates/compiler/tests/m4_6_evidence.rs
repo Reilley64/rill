@@ -205,6 +205,37 @@ fn a_free_source_output_resumes_a_dependency_without_setting_its_output() {
 }
 
 #[test]
+fn a_contextual_family_value_resumes_the_same_selected_output_work() {
+    use compiler::analysis::generics::OutputAgreement;
+    let fixture = Fixture::new(
+        "function seed<V,W>(value: V): W;
+         implement seed(value: bool): i32 { return 1i32; }
+         function open<T,V,W>(value: T): [V,W];
+         implement<U,V,W> open(value: U): [V,W] where seed(V,W) { while (true) {} }
+         let pending: (bool) => [bool,i32] = open;",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::ValueReference && n.span.bytes() == b"open")
+        .unwrap();
+    let value = report.ordinary_value(module, node).unwrap().unwrap();
+    assert!(matches!(value.output_agreement, OutputAgreement::Agrees));
+    assert!(report.goal(&value.goal).unwrap().output.is_none());
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
 fn a_later_default_can_read_the_output_determined_after_an_earlier_default() {
     let fixture = Fixture::new(
         "function seed<V,W>(value: V): W;
@@ -244,6 +275,102 @@ fn a_later_default_can_read_the_output_determined_after_an_earlier_default() {
         [&b"bool"[..], &b"W"[..]]
     );
     assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
+fn a_compound_written_default_cannot_partially_bind_a_selected_output() {
+    let fixture = Fixture::new(
+        "function seed<V,W>(value: V): W;
+         implement seed(value: bool): i32 { return 1i32; }
+         function open<T,S = [bool,u8]>(value: T): S;
+         implement<U,V,W> open(value: U): [V,W] where seed(V,W) { while (true) {} }
+         let pending = open(true);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert!(call.defaults.is_empty() && call.selected_result.is_none());
+    let use_goal = report.goal(call.instantiation.as_ref().unwrap()).unwrap();
+    assert!(use_goal.output.is_none() && use_goal.hypothetical.is_none());
+}
+
+#[test]
+fn a_cycle_does_not_prevent_an_independent_waiting_output_from_resuming() {
+    let fixture = Fixture::new(
+        "function seed<V,W>(value: V): W;
+         implement seed(value: bool): i32 { return 1i32; }
+         function cycling<T,K>(value: T): K;
+         implement<T,K> cycling(value: T): K where cycling(T,K) { while (true) {} }
+         function open<T,V,W,K>(value: T): [V,W,K];
+         implement<U,V,W,K> open(value: U): [V,W,K] where cycling(U,K), seed(V,W) { while (true) {} }
+         let pending: [bool,i32,u8] = open(true);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    let use_goal = report.goal(call.instantiation.as_ref().unwrap()).unwrap();
+    assert_eq!(use_goal.state, GoalState::Unresolved(GoalBlocker::Cycle));
+    assert!(use_goal.output.is_none() && use_goal.hypothetical.is_none());
+    let seed = use_goal
+        .dependencies
+        .iter()
+        .map(|id| report.goal(id).unwrap())
+        .find(|g| g.source.span.bytes() == b"seed(V,W)")
+        .unwrap();
+    assert!(seed.output.is_some());
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
+fn a_settled_nonmatching_symbolic_argument_is_not_pending() {
+    use compiler::analysis::scalars::{ScalarFindingKind, ScalarUnsupported};
+    let fixture = Fixture::new(
+        "function run<F>(cb: F, value: bool): bool
+             where callable(F,[i32],bool) { return cb(value); }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    assert!(
+        report
+            .findings()
+            .iter()
+            .any(|f| f.kind == ScalarFindingKind::TypeMismatch
+                && f.site.span.bytes() == b"cb(value)")
+    );
+    assert!(
+        !report
+            .obligations()
+            .iter()
+            .any(|o| o.reason == ScalarUnsupported::CallableInvocation)
+    );
 }
 
 #[test]

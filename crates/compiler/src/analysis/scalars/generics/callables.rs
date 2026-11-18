@@ -807,6 +807,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                 inference.pending_invocations.remove(&node);
                 assumption = Some(goal);
                 descriptor
+            } else if let Some(kind) = contract.rejection {
+                inference.pending_invocations.remove(&node);
+                self.finding(module, node, kind)?;
+                inference.slots.get_mut(&node).unwrap().blocked = true;
+                return Ok(());
             } else {
                 if !inference.pending_invocations.contains(&node) {
                     self.elab.reserve(1)?;

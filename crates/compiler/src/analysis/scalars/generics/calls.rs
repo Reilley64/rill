@@ -56,18 +56,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         for sub in &call.fact.substitution {
             slots[sub.position] = Some(sub.argument.clone());
         }
-        for (pattern, &argument) in call.parameters.iter().zip(&call.fact.arguments) {
-            if !self.source_equations(
-                inference,
-                argument,
-                pattern,
-                binders,
-                &mut slots,
-                &call.fact.substitution,
-            )? {
-                inference.slots.get_mut(&node).unwrap().blocked = true;
-                return Ok(false);
-            }
+        if !self.source_equations(inference, &call, binders, &mut slots)? {
+            inference.slots.get_mut(&node).unwrap().blocked = true;
+            return Ok(false);
         }
         self.apply_callable_equations(&[(call.fact.callee, &[])], binders, &mut slots)?;
         if let Some(expected) = &inference.slots[&node].expected
@@ -216,19 +207,24 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(node)
     }
 
-    fn source_equations(
+    pub(super) fn source_equations(
         &mut self,
         inference: &Inference<'g>,
-        node: NodeId,
-        pattern: &Type<'g>,
+        call: &PreparedCall<'g>,
         binders: &[Binder<'g>],
         slots: &mut [Option<Type<'g>>],
-        fixed: &[Substitution<'g>],
     ) -> Work<bool> {
         let module = inference.module;
-        let mut work = Vec::new();
-        self.elab.reserve(1)?;
-        work.push((node, pattern, true));
+        self.elab.reserve(call.parameters.len())?;
+        let mut work: Vec<_> = call
+            .fact
+            .arguments
+            .iter()
+            .copied()
+            .zip(&call.parameters)
+            .rev()
+            .map(|(node, pattern)| (node, pattern, true))
+            .collect();
         while let Some((node, pattern, outer)) = work.pop() {
             let node = self.source_leaf(module, node)?;
             let slot = &inference.slots[&node];
@@ -239,7 +235,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if primitive_name(actual) == Some("never") {
                     true
                 } else if outer {
-                    self.accept_input(pattern, actual, binders, slots, fixed)?
+                    self.accept_input(pattern, actual, binders, slots, &call.fact.substitution)?
                 } else {
                     // This is a fresh element, not covariance of a typed tuple.
                     self.accept_input(pattern, actual, binders, slots, &[])?
@@ -249,6 +245,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 match (pattern.as_ref(), syntax.kind) {
                     (TypeTerm::Tuple(types), NodeKind::Bracket) => {
                         if types.len() != syntax.children.len() {
+                            // The ordinary bracket pass owns the conditional arity finding.
+                            if call.family {
+                                continue;
+                            }
                             self.finding(module, node, ScalarFindingKind::Arity)?;
                             return Ok(false);
                         }
@@ -267,7 +267,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                             parameters, result, ..
                         },
                         NodeKind::Arrow,
-                    ) => {
+                    ) if !call.family => {
                         let head = &inference.arrows[&node];
                         if parameters.len() != head.parameters.len() {
                             self.finding(module, node, ScalarFindingKind::Arity)?;
@@ -302,7 +302,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 true
             };
             if !compatible {
-                self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
+                if !call.family {
+                    self.finding(module, node, ScalarFindingKind::TypeMismatch)?;
+                }
                 return Ok(false);
             }
         }

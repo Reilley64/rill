@@ -201,6 +201,7 @@ impl Predicate {
 pub(super) struct SymbolicCallable<'g> {
     pub receiving: Vec<Option<Type<'g>>>,
     pub selected: Option<(Type<'g>, GoalId)>,
+    pub rejection: Option<ScalarFindingKind>,
 }
 
 enum GoalChoice<'g> {
@@ -466,6 +467,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut matching: Option<(InvocationMode, Type<'g>, Type<'g>, GoalId)> = None;
         let mut receiving: Vec<Option<Type<'g>>> = Vec::new();
         let mut conflicting = false;
+        let mut has_contract = false;
+        let mut has_arity = false;
         for i in 0..self.evidence.assumptions.len() {
             self.elab.step(1)?;
             let id = self.evidence.assumptions[i].clone();
@@ -486,9 +489,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             let TypeTerm::Tuple(fields) = inputs.as_ref() else {
                 continue;
             };
-            if fields.len() != actual.len() || !self.same(&subject, receiver)? {
+            if !self.same(&subject, receiver)? {
                 continue;
             }
+            has_contract = true;
+            if fields.len() != actual.len() {
+                continue;
+            }
+            has_arity = true;
             let mut fits = true;
             for (argument, parameter) in actual.iter().zip(fields) {
                 self.elab.step(1)?;
@@ -525,6 +533,15 @@ impl<'r, 'g> Checker<'r, 'g> {
             matching = Some((mode, inputs, output, id));
         }
         self.elab.step(actual.len())?;
+        let rejection = if has_contract && matching.is_none() {
+            Some(if has_arity {
+                ScalarFindingKind::TypeMismatch
+            } else {
+                ScalarFindingKind::Arity
+            })
+        } else {
+            None
+        };
         let selected = if let Some((mode, inputs, result, id)) = matching
             && !conflicting
             && actual.iter().all(Option::is_some)
@@ -547,6 +564,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(SymbolicCallable {
             receiving,
             selected,
+            rejection,
         })
     }
 

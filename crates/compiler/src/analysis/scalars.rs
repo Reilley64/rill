@@ -1525,6 +1525,22 @@ impl<'r, 'g> Checker<'r, 'g> {
         context: &Context<'r, 'g>,
     ) -> Work<Option<ExpressionResult<'g>>> {
         let finding_start = self.facts.findings.len();
+        let result = self.expression_work(module, root, expected, context, finding_start);
+        if result.is_err() && self.input.ordinary.is_some() {
+            // An interrupted expression has not classified its staged findings by premise.
+            self.facts.findings.truncate(finding_start);
+        }
+        result
+    }
+
+    fn expression_work(
+        &mut self,
+        module: &'g Module,
+        root: NodeId,
+        expected: Option<Type<'g>>,
+        context: &Context<'r, 'g>,
+        finding_start: usize,
+    ) -> Work<Option<ExpressionResult<'g>>> {
         let mut inference = Inference {
             module,
             slots: BTreeMap::new(),
@@ -1764,11 +1780,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                         }
                     }
                     NodeKind::Bracket if self.data => {
-                        self.tuple_step(&mut inference, node)?;
-                        if inference.ordinary_tuples.contains(&node)
-                            && !inference.data.contains_key(&node)
-                        {
-                            self.gather_ordinary_tuple(&mut inference, node)?;
+                        if inference.ordinary_tuples.contains(&node) {
+                            if !inference.data.contains_key(&node) {
+                                self.gather_ordinary_tuple(&mut inference, node)?;
+                            }
+                        } else {
+                            self.tuple_step(&mut inference, node)?;
                         }
                     }
                     NodeKind::Literal if slot.ty.is_none() => {

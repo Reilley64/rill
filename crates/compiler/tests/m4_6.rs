@@ -613,6 +613,38 @@ fn nested_tuple_callbacks_get_the_contract_at_each_committed_path() {
 }
 
 #[test]
+fn a_typed_tuple_sibling_anchors_the_nested_callback_parameter() {
+    let fixture = Fixture::new(
+        "function visit<T,F,R>(tasks: [T,[F]]): R where callable(F,[T],R);
+         implement<T,F,R> visit(tasks: [T,[F]]): R { while (true) {} }
+         let pending = visit([1i32,[(x) => x == 2i32]]);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert!(
+        matches!(call.callbacks[0].parameters[0].as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "i32")
+    );
+    assert!(
+        matches!(call.selected_result.as_deref(), Some(TypeTerm::Primitive(id)) if id.name() == "bool")
+    );
+    assert!(report.node(module, node).unwrap().is_none());
+}
+
+#[test]
 fn nested_tuple_arity_filters_only_after_category_agrees() {
     use compiler::analysis::ordinary::HypotheticalOutcome;
     let fixture = Fixture::new(
@@ -669,6 +701,110 @@ fn nested_tuple_arity_filters_only_after_category_agrees() {
             .iter()
             .any(|o| o.reason == ScalarUnsupported::CoreAdmission)
     );
+}
+
+#[test]
+fn a_bad_nested_tuple_cannot_become_a_typed_input_under_exhaustion_or_projection() {
+    let fixture = Fixture::new(
+        "function visit<C>(value: C): bool;
+         implement visit(value: [[i32,(i32) => bool]]): bool { return true; }
+         let wrong = visit([[true]]);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    let report = analyze_generics(&ordinary, limits);
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert!(call.inputs[0].is_none() && call.outcome.is_none() && call.goal.is_none());
+    assert!(
+        report
+            .conditional_findings()
+            .iter()
+            .any(|f| f.finding.kind == ScalarFindingKind::Arity
+                && f.finding.site.span.bytes() == b"[true]")
+    );
+    for max_entries in 320..=520 {
+        let report = analyze_generics(
+            &ordinary,
+            AnalysisLimits {
+                max_entries,
+                ..limits
+            },
+        );
+        assert!(
+            !report
+                .findings()
+                .iter()
+                .any(|f| f.kind == ScalarFindingKind::Arity),
+            "{max_entries}"
+        );
+    }
+}
+
+#[test]
+fn read_only_invocation_inside_a_projected_arrow_keeps_the_premise() {
+    let fixture = Fixture::new(
+        "function visit<F,R>(value: [[F]]): R where callable(F,[&(once () => i32)],R);
+         implement<F,R> visit(value: [[F]]): R { while (true) {} }
+         let pending = visit([[(f) => f()]]);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    assert!(
+        !report
+            .findings()
+            .iter()
+            .any(|f| f.kind == ScalarFindingKind::ReadOnly)
+    );
+    assert!(
+        report
+            .conditional_findings()
+            .iter()
+            .any(|f| f.finding.kind == ScalarFindingKind::ReadOnly
+                && f.finding.site.span.bytes() == b"f()")
+    );
+}
+
+#[test]
+fn conflicting_nested_callback_receivers_cannot_supply_a_parameter() {
+    let fixture = Fixture::new(
+        "function visit<C>(value: C): bool;
+         implement visit(value: [[(i32) => bool]]): bool { return true; }
+         implement visit(value: [[(u8) => bool]]): bool { return false; }
+         let pending = visit([[(x) => x == 1i32]]);",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let report = analyze_generics(&ordinary, limits);
+    let module = graph
+        .modules()
+        .iter()
+        .find(|m| m.key.path == "main.rill")
+        .unwrap();
+    let node = module
+        .syntax
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Call)
+        .unwrap();
+    let call = report.ordinary_call(module, node).unwrap().unwrap();
+    assert!(call.callbacks.iter().all(|c| c.parameters[0].is_none()));
+    assert_eq!(call.candidates.len(), 2);
+    assert!(call.inputs[0].is_none() && call.outcome.is_none());
 }
 
 #[test]
