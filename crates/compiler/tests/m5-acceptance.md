@@ -178,12 +178,16 @@ The installed probe `patterns::owned_tuple_binding_transfers_and_cleans_initiali
 
 | Cases | Observed compiler and MIR obligations |
 | --- | --- |
-| `unpack` | Call the initializer once. Move positions 0 and 2 to `first` and `third`. At statement exit, drop positions 3 and 1. At scope exit, drop `third` then `first`. A one-short work budget returns no MIR. |
+| `unpack` | Call the initializer once. Move positions 0 and 2 to `first` and `third`. At statement exit, drop positions 3 and 1. At scope exit, drop `third` then `first`. At the corrected revision, the exact work and entry budgets pass. Reducing either by one returns no MIR. |
 | `reuse`, `alreadyPartial` | Reject a subsequent read from the moved source and reject whole initialization from an already partial tuple. Both return `R0200` and no MIR. |
 | `copyPair` | Copy the eligible element into `first`. The original tuple stays readable. |
 | `forward`, `expires` | Returning a stored caller reference is valid. The wildcard string still drops at the binding statement. Returning a reference to a by-value parameter through the same route rejects with `R0202` and publishes no MIR. |
 
 At that revision, `mise run test:compiler` passed 429 tests and `mise run test` passed 445. `mise run check`, `mise run build:scaffold`, and `git diff --check` passed on macOS AArch64 with a fresh short `TMPDIR` under `/tmp`. The staged M4 replay issued both typed receipts. Independent #75 reviews were requested at `163338c`. The earlier #74 Standards and Spec retries failed again with HTTP 429.
+
+Standards found no rule breaches at `163338c`. The correction at `b34174532de1442ad4f423fa265568a4e114c320` shares binding classification between the two passes, checks order along MIR terminators, and adds the exact and one-short entry-budget cases. The binary correction diff has SHA-256 `b9f235b5ceb35c14cacefa605a718f535e41670388e44417dd132760431b7ec5`. All four local gates and the whitespace check passed at that code revision (429 compiler tests and 445 workspace tests). Spec review is still open at recording time.
+
+All four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44345742575) passed at the earlier publication `95639ebffce69b3911cf2eb553970b92d3f3e35e`. The [native acceptance profiles](https://github.com/Reilley64/rill/actions/runs/44345742930) failed on the unavailable `test:runtime` entry point. Those jobs do not establish runtime acceptance.
 
 Separate installed preflights for an owned record pattern, a borrowed tuple pattern and an `Option` propagation exit issued both M4 receipts. This increment does not claim an ownership result for those cases. Guard commitment, nested patterns, iterators and cancellation remain open. No workflow changed; `check:ci` was not run. No Rill program ran.
 
