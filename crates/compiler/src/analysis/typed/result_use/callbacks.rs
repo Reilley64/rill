@@ -192,6 +192,7 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         if self.proving_callable || call.selection.is_some() {
             for argument in &call.arguments {
+                self.budget.step(1)?;
                 if state.owes_under(Root::Temporary(*argument), self.budget)? {
                     return self.prove_named(target, substitution, depth);
                 }
