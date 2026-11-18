@@ -27,6 +27,7 @@ pub enum PairBlocker {
     Protection,
     RequiredIdentityProvider,
     RequiredNumericProvider,
+    PotentialProtectedPair,
     EndpointContext,
     Registration,
     SourceAdmission,
@@ -44,6 +45,7 @@ pub enum Applicability {
 pub struct PairMatch<'g> {
     pub implementation: &'g DeclarationId,
     pub alternative: usize,
+    pub covers: bool,
     pub substitution: Vec<Substitution<'g>>,
     pub applicability: Applicability,
     pub requirements: Vec<GoalId>,
@@ -132,7 +134,7 @@ impl<'g> ConversionReport<'_, 'g> {
         output: &mut PairReport<'g>,
         budget: &mut Budget,
     ) -> Work<Result<(), QueryError>> {
-        let graph = self.input.graph();
+        let graph = self.input().graph();
         if id.kind != DeclarationKind::Family
             || selection::declaration(graph, id, budget)?.is_none_or(|(_, d)| d.scope.is_some())
         {
@@ -175,18 +177,13 @@ impl<'g> ConversionReport<'_, 'g> {
             output.blockers.push(PairBlocker::Registration);
             return Ok(Ok(()));
         }
-        let actual = patterns::ground([request.destination, request.source].into_iter(), budget)?;
-        let filter = request
-            .source_filter
-            .map(|t| patterns::ground(std::iter::once(t), budget))
-            .transpose()?;
-        if infallible && actual.equal_pair_endpoints(budget)? {
-            let filter_conflict = if let Some(filter) = &filter {
-                let identity = patterns::ground(std::iter::once(request.source), budget)?;
-                !identity.same(filter, budget)?
-            } else {
-                false
-            };
+        let pair = patterns::PairDomain::new(
+            [request.destination, request.source].into_iter(),
+            request.source_filter,
+            budget,
+        )?;
+        if infallible && pair.identity_intersects(budget)? {
+            let filter_conflict = !pair.identity_filter_agrees(budget)?;
             budget.reserve(1)?;
             output.blockers.push(PairBlocker::RequiredIdentityProvider);
             output.outcome = Some(PairOutcome::RequiredIdentity { filter_conflict });
@@ -201,16 +198,7 @@ impl<'g> ConversionReport<'_, 'g> {
             }
             return Ok(Ok(()));
         }
-        let declared = self.input.captured_family(id).unwrap();
-        compare_pair(
-            self.input,
-            declared,
-            family,
-            &actual,
-            filter.as_ref(),
-            output,
-            budget,
-        )?;
+        compare_pair(self.input(), &self.families, family, &pair, output, budget)?;
         if let Some(PairOutcome::Winner(winner)) = output.outcome {
             budget.step(output.matches.len())?;
             let candidate = output
@@ -239,7 +227,7 @@ impl<'g> ConversionReport<'_, 'g> {
 }
 
 // Numeric protection uses complete base ranges, not literal values.
-fn numeric_infallible(destination: &Type<'_>, source: &Type<'_>) -> bool {
+pub(in crate::analysis) fn numeric_infallible(destination: &Type<'_>, source: &Type<'_>) -> bool {
     fn integer(ty: &Type<'_>) -> Option<(bool, u16)> {
         let TypeTerm::Primitive(id) = ty.as_ref() else {
             unreachable!("numeric endpoint")
@@ -264,16 +252,13 @@ fn numeric_infallible(destination: &Type<'_>, source: &Type<'_>) -> bool {
     }
 }
 
-fn compare_pair<'g>(
-    input: &OrdinaryAnalysis<'g>,
+pub(in crate::analysis) fn find_matches<'g>(
     declared: &ordinary::FamilyFacts<'g>,
     family: &ConversionFamily<'g>,
-    actual: &InputKey<'g>,
-    filter: Option<&InputKey<'g>>,
-    output: &mut PairReport<'g>,
+    pair: &patterns::PairDomain<'g>,
+    matches: &mut Vec<PairMatch<'g>>,
     budget: &mut Budget,
-) -> Work<()> {
-    let mut matched = Vec::new();
+) -> Work<bool> {
     let mut missing_admission = false;
     for entry in &family.registrations {
         budget.step(1)?;
@@ -287,47 +272,78 @@ fn compare_pair<'g>(
             .iter()
             .find(|b| b.source.declaration == entry.source.declaration)
             .unwrap();
-        let Some((alternative, substitution)) = patterns::match_pair(
+        let Some(projected) = pair.project(
             &entry.key,
             alternatives,
             &entry.variables,
             &body.header.binders,
-            actual,
-            filter,
             budget,
         )?
         else {
             continue;
         };
-        budget.reserve(2)?;
-        matched.push(alternatives);
-        output.matches.push(PairMatch {
+        budget.reserve(1)?;
+        matches.push(PairMatch {
             implementation: &entry.source.declaration,
-            alternative,
-            substitution,
+            alternative: projected.alternative,
+            covers: projected.covers,
+            substitution: projected.substitution,
             applicability: Applicability::Unresolved,
             requirements: Vec::new(),
             error: None,
         });
     }
-    let (evidence, evaluated) =
-        generics::check_pair_candidates(input, family, &mut output.matches, budget);
-    output.evidence = evidence;
-    evaluated?;
-    if missing_admission {
-        budget.reserve(1)?;
-        output.blockers.push(PairBlocker::SourceAdmission);
-        return Ok(());
-    }
-    rank(&matched, output, budget)
+    Ok(!missing_admission)
 }
 
-fn rank<'g>(
-    alternatives: &[&Vec<InputKey<'g>>],
-    report: &mut PairReport<'g>,
+fn compare_pair<'g>(
+    input: &OrdinaryAnalysis<'g>,
+    families: &BTreeMap<&'g DeclarationId, ConversionFamily<'g>>,
+    family: &ConversionFamily<'g>,
+    pair: &patterns::PairDomain<'g>,
+    output: &mut PairReport<'g>,
     budget: &mut Budget,
 ) -> Work<()> {
-    let matches = &report.matches;
+    let (binding, _) = family.premise.bindings();
+    let Target::Declaration(id) = &binding.target else {
+        unreachable!()
+    };
+    let declared = input.captured_family(id).unwrap();
+    let complete = find_matches(declared, family, pair, &mut output.matches, budget)?;
+    let (evidence, evaluated) =
+        generics::check_pair_candidates(input, families, family, &mut output.matches, budget);
+    output.evidence = evidence;
+    evaluated?;
+    if !complete {
+        budget.reserve(1)?;
+        output.blockers.push(PairBlocker::SourceAdmission);
+    } else {
+        output.outcome = rank(family, &output.matches, &mut output.comparisons, budget)?;
+        if output.outcome.is_none() {
+            budget.reserve(1)?;
+            output.blockers.push(PairBlocker::Applicability);
+        }
+    }
+    Ok(())
+}
+
+pub(in crate::analysis) fn rank<'g>(
+    family: &ConversionFamily<'g>,
+    matches: &[PairMatch<'g>],
+    comparisons: &mut Vec<ordinary::Comparison<'g>>,
+    budget: &mut Budget,
+) -> Work<Option<PairOutcome<'g>>> {
+    budget.reserve(matches.len())?;
+    let mut alternatives = Vec::with_capacity(matches.len());
+    for m in matches {
+        budget.step(family.registrations.len())?;
+        let registered = family
+            .registrations
+            .iter()
+            .find(|r| r.source.declaration == *m.implementation)
+            .unwrap();
+        alternatives.push(registered.alternatives.as_ref().unwrap());
+    }
     budget.reserve(matches.len())?;
     let mut dominated = vec![false; matches.len()];
     for (i, a) in alternatives.iter().enumerate() {
@@ -335,9 +351,9 @@ fn rank<'g>(
             budget.step(1)?;
             let left_in_right = patterns::included(a, b, budget)?;
             let right_in_left = patterns::included(b, a, budget)?;
-            let intersection = Some((matches[i].alternative, matches[j].alternative));
+            let intersection = patterns::intersection(a, b, budget)?;
             budget.reserve(1)?;
-            report.comparisons.push(ordinary::Comparison {
+            comparisons.push(ordinary::Comparison {
                 left: matches[i].implementation,
                 right: matches[j].implementation,
                 left_in_right,
@@ -358,18 +374,15 @@ fn rank<'g>(
         .zip(&dominated)
         .any(|(m, d)| !d && m.applicability == Applicability::Unresolved)
     {
-        budget.reserve(1)?;
-        report.blockers.push(PairBlocker::Applicability);
-        return Ok(());
+        return Ok(None);
     }
     budget.step(matches.len())?;
     let mut maxima = matches.iter().zip(dominated).filter_map(|(m, d)| {
         (!d && m.applicability == Applicability::Proved).then_some(m.implementation)
     });
-    report.outcome = Some(match (maxima.next(), maxima.next()) {
+    Ok(Some(match (maxima.next(), maxima.next()) {
         (None, _) => PairOutcome::NoMatch,
         (Some(id), None) => PairOutcome::Winner(id),
         (Some(_), Some(_)) => PairOutcome::Ambiguous,
-    });
-    Ok(())
+    }))
 }

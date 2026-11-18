@@ -149,7 +149,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if before == self.marks() {
                     self.elab
                         .reserve(1 + binders.len() + flow.breaks.len() + flow.continues.len())?;
-                    self.facts.nodes.push(NodeFacts {
+                    self.record_node(NodeFacts {
                         site: Self::site(module, n.children[0]),
                         flow: flow.clone(),
                         callable: None,
@@ -189,7 +189,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .sum()
         });
         self.elab.reserve(1 + size)?;
-        self.facts.nodes.push(NodeFacts {
+        self.record_node(NodeFacts {
             site: Self::site(module, node),
             flow: Flow::default(),
             callable: None,
@@ -246,7 +246,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     b.blocked_by = Some(Self::site(module, cause));
                 } else {
                     self.elab.reserve(1)?;
-                    self.facts.nodes.push(NodeFacts {
+                    self.record_node(NodeFacts {
                         site: Self::site(module, name),
                         flow: Flow::default(),
                         callable: None,
@@ -344,7 +344,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             mutable,
         });
         if emit {
-            self.facts.nodes.push(NodeFacts {
+            self.record_node(NodeFacts {
                 site: Self::site(module, name),
                 flow: Flow::normal(),
                 callable: None,
@@ -485,7 +485,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             self.elab.reserve(2)?;
             if emit {
-                self.facts.nodes.push(NodeFacts {
+                self.record_node(NodeFacts {
                     site: Self::site(module, node),
                     flow: Flow::default(),
                     callable: None,
@@ -606,7 +606,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         self.elab.reserve(2)?;
         if emit {
-            self.facts.nodes.push(NodeFacts {
+            self.record_node(NodeFacts {
                 site: Self::site(module, node),
                 flow: Flow::default(),
                 callable: None,

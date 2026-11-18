@@ -592,6 +592,22 @@ pub fn analyze_ordinary(graph: &Graph, limits: AnalysisLimits) -> OrdinaryAnalys
     analyze_ordinary_types(graph, limits, false)
 }
 
+// Complete M4.6 nominal type uses on the same immutable graph. This
+// does not take defaults for a family argument or an implementation equation.
+pub(super) fn extend_nominal_types<'g>(
+    input: &OrdinaryAnalysis<'g>,
+    limits: AnalysisLimits,
+) -> Option<OrdinaryAnalysis<'g>> {
+    (input.completion() != Completion::ResourceLimit
+        && input.type_facts().obligations().any(|o| {
+            matches!(
+                o.reason,
+                Unsupported::GenericDefault | Unsupported::NeedsTypeArguments
+            )
+        }))
+    .then(|| analyze_ordinary_types(input.graph(), limits, true))
+}
+
 pub(super) fn analyze_ordinary_types(
     graph: &Graph,
     limits: AnalysisLimits,

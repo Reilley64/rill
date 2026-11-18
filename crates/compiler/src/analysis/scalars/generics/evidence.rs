@@ -1,6 +1,9 @@
 use super::*;
 
+mod conversions;
 mod output;
+pub(in crate::analysis::scalars) use conversions::ConversionWork;
+pub(in crate::analysis) use conversions::check_pair_candidates;
 use ordinary::{InputPremise, RequirementMetadata, RequirementTarget};
 
 /// An identity issued by one generic analysis report, not a proof input.
@@ -42,6 +45,7 @@ pub enum GoalBlocker {
     MissingAssumption,
     OrdinaryAdmission,
     ConversionAdmission,
+    ConversionPair(crate::analysis::conversions::PairBlocker),
     InputSelection,
     ConflictingAssumptions,
     SelectedOutput,
@@ -107,6 +111,8 @@ pub struct GoalFacts<'g> {
     /// A verdict only under the retained role and protection premise.
     pub hypothetical: Option<GoalVerdict>,
     pub selection: Option<GoalSelection<'g>>,
+    pub conversion_outcome: Option<crate::analysis::conversions::PairOutcome<'g>>,
+    pub conversion_parameter: Option<Type<'g>>,
     pub output: Option<GoalOutput<'g>>,
     /// Written output defaults actually taken at a source instantiation.
     pub defaults: Vec<DefaultArgumentUse<'g>>,
@@ -228,6 +234,17 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<GoalId> {
         self.elab.reserve(1)?;
         self.elab.reserve(routes.len())?;
+        let role = match judgment.target() {
+            RequirementTarget::Family(id) if self.conversion_family(id).is_some() => {
+                Some(InputPremise::HypotheticalConversionRole)
+            }
+            RequirementTarget::Family(_) => Some(InputPremise::HypotheticalOrdinaryRole),
+            _ => None,
+        };
+        let premise = match (self.arrow_premise, role) {
+            (Some(a), Some(b)) => Some(a.combine(b)),
+            (a, b) => a.or(b),
+        };
         let evidence = &mut self.evidence;
         let id = GoalId {
             report: evidence.report.clone(),
@@ -242,7 +259,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                 evidence.assumptions.clone(),
             )
         };
-        let target = judgment.target();
         evidence.goals.push(GoalFacts {
             id: id.clone(),
             judgment,
@@ -250,13 +266,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             source,
             routes: routes.to_vec(),
             state,
-            premise: self.arrow_premise.or_else(|| {
-                matches!(target, RequirementTarget::Family(_))
-                    .then_some(InputPremise::HypotheticalOrdinaryRole)
-            }),
+            premise,
             arrow_origin: None,
             hypothetical: None,
             selection: None,
+            conversion_outcome: None,
+            conversion_parameter: None,
             output: None,
             defaults: Vec::new(),
             equalities: Vec::new(),
@@ -275,17 +290,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(target) = requirement.target else {
             return Ok(None);
         };
-        let arity = match target {
-            RequirementTarget::Predicate(id) => match Predicate::of(id) {
-                Predicate::Callable(_) => 3,
-                _ => 1,
-            },
-            RequirementTarget::Family(id) => {
-                let Some(family) = self.evidence_family(id)? else {
-                    return Ok(None);
-                };
-                family.header.binders.len()
-            }
+        let Some(arity) = self.requirement_arity(target)? else {
+            return Ok(None);
         };
         if requirement.arguments.len() != arity {
             return Ok(None);
@@ -298,12 +304,28 @@ impl<'r, 'g> Checker<'r, 'g> {
             };
             arguments.push(self.substitute(argument, substitutions, 1)?);
         }
-        if matches!(target, RequirementTarget::Predicate(id) if matches!(Predicate::of(id), Predicate::Callable(_)))
-            && !matches!(arguments[1].as_ref(), TypeTerm::Tuple(_))
-        {
-            return Ok(None);
-        }
-        Ok(Some(GoalJudgment::Requirement { target, arguments }))
+        Ok(Self::requirement_shape(target, &arguments)
+            .then_some(GoalJudgment::Requirement { target, arguments }))
+    }
+
+    fn requirement_arity(&mut self, target: RequirementTarget<'g>) -> Work<Option<usize>> {
+        Ok(Some(match target {
+            RequirementTarget::Predicate(id) => match Predicate::of(id) {
+                Predicate::Callable(_) => 3,
+                _ => 1,
+            },
+            RequirementTarget::Family(id) => {
+                let Some(family) = self.evidence_family(id)? else {
+                    return Ok(None);
+                };
+                family.header.binders.len()
+            }
+        }))
+    }
+
+    fn requirement_shape(target: RequirementTarget<'g>, arguments: &[Type<'g>]) -> bool {
+        !matches!(target, RequirementTarget::Predicate(id) if matches!(Predicate::of(id), Predicate::Callable(_)))
+            || matches!(arguments[1].as_ref(), TypeTerm::Tuple(_))
     }
 
     fn evidence_family(
@@ -357,7 +379,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(substitutions) = &body.substitution else {
             return Ok(None);
         };
-        if body.placement == ordinary::Placement::OutsideOwners {
+        if body.placement == ordinary::Placement::OutsideOwners
+            && self.conversion_family(&source.family).is_none()
+        {
             return Ok(None);
         }
         self.add_body_assumptions(module, source.body_node, &source.family, substitutions)?;
@@ -679,13 +703,21 @@ impl<'r, 'g> Checker<'r, 'g> {
                     Some(GoalVerdict::Disproved) => GoalState::Disproved,
                     None => child.state,
                 };
-                let premise = child.premise;
-                if premise.is_some() {
-                    self.evidence.goals[goal].premise = premise;
+                if let Some(premise) = child.premise {
+                    let parent = &mut self.evidence.goals[goal].premise;
+                    *parent = Some(parent.map_or(premise, |p| p.combine(premise)));
                 }
-                frame.state = join(frame.state, state);
+                if !self.conversion_work.contains_key(&goal) {
+                    frame.state = join(frame.state, state);
+                }
                 frame.next += 1;
             } else {
+                if let Some(work) = self.conversion_work.remove(&goal) {
+                    let Some(state) = self.advance_conversion_goal(goal, work)? else {
+                        continue;
+                    };
+                    frame.state = state;
+                }
                 if let Some(equation) = self.evidence.output_equations.remove(&goal) {
                     frame.state = join(frame.state, self.resume_selected_output(goal, equation)?);
                     if frame.next < self.evidence.goals[goal].dependencies.len() {
@@ -706,9 +738,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                     };
                     if self.evidence.goals[goal].hypothetical.is_some() {
                         state = GoalState::Unresolved(match self.evidence.goals[goal].premise {
-                            Some(InputPremise::HypotheticalConversionRole) => {
-                                GoalBlocker::ConversionAdmission
-                            }
+                            Some(
+                                InputPremise::HypotheticalConversionRole
+                                | InputPremise::HypotheticalOrdinaryAndConversionRoles,
+                            ) => GoalBlocker::ConversionAdmission,
                             _ => GoalBlocker::OrdinaryAdmission,
                         });
                     }
@@ -737,7 +770,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                     {
                         fact.hypothetical = Some(GoalVerdict::Proved);
                     }
-                    GoalState::Unresolved(GoalBlocker::OrdinaryAdmission)
+                    GoalState::Unresolved(match fact.premise {
+                        Some(
+                            InputPremise::HypotheticalConversionRole
+                            | InputPremise::HypotheticalOrdinaryAndConversionRoles,
+                        ) => GoalBlocker::ConversionAdmission,
+                        _ => GoalBlocker::OrdinaryAdmission,
+                    })
                 } else {
                     GoalState::Proved
                 };
@@ -859,8 +898,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         arguments: Vec<Type<'g>>,
     ) -> Work<GoalState> {
         let header = &self.evidence_family(family)?.unwrap().header;
-        let substitutions = self.family_substitutions(header, &arguments)?;
-        let (inputs, filters) = self.family_inputs(header, &substitutions)?;
+        let (inputs, filters) = if self.conversion_family(family).is_some() {
+            self.elab.reserve(2)?;
+            (arguments[..2].to_vec(), Vec::new())
+        } else {
+            let substitutions = self.family_substitutions(header, &arguments)?;
+            self.family_inputs(header, &substitutions)?
+        };
         let parent = &self.evidence.goals[goal];
         let child = self.issue_determination(
             GoalJudgment::Determine {
@@ -904,6 +948,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             unreachable!("determination judgment")
         };
+        if let Some(family) = self.conversion_family(id) {
+            return self.begin_conversion_goal(goal, family, &inputs, &filters);
+        }
         let prelude = self.input.graph.prelude();
         if *id == prelude.copy || *id == prelude.dispose {
             return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
@@ -1366,6 +1413,25 @@ impl<'r, 'g> Checker<'r, 'g> {
             actual_site,
         )?;
         Ok(Some(agrees))
+    }
+
+    pub(super) fn record_conversion_equality(
+        &mut self,
+        goal: &GoalId,
+        position: Option<usize>,
+        requested: Type<'g>,
+        actual: Type<'g>,
+        requested_site: Site<'g>,
+        actual_site: Site<'g>,
+    ) -> Work<bool> {
+        self.goal_equality(
+            goal.index,
+            position,
+            requested,
+            actual,
+            requested_site,
+            actual_site,
+        )
     }
 
     fn goal_equality(

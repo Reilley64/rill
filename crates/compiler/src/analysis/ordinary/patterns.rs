@@ -1,10 +1,12 @@
 use super::*;
 
 mod admissions;
+mod pairs;
 mod relations;
 mod source;
 pub(super) use admissions::alternatives;
 pub(in crate::analysis) use admissions::conversion_alternatives;
+pub(in crate::analysis) use pairs::PairDomain;
 pub(in crate::analysis) use relations::{included, intersection};
 pub(super) use source::project;
 
@@ -128,58 +130,6 @@ pub(super) fn first_match<'g>(
         if agrees {
             return Ok(Some(index));
         }
-    }
-    Ok(None)
-}
-
-pub(in crate::analysis) fn match_pair<'g>(
-    key: &InputKey<'g>,
-    alternatives: &[InputKey<'g>],
-    variables: &[Option<usize>],
-    binders: &[Binder<'g>],
-    actual: &InputKey<'g>,
-    filter: Option<&InputKey<'g>>,
-    budget: &mut Budget,
-) -> Work<Option<(usize, Vec<Substitution<'g>>)>> {
-    for (index, alternative) in alternatives.iter().enumerate() {
-        budget.step(1)?;
-        let mut captured = BTreeMap::new();
-        if !relations::match_vector(&alternative.nodes, &actual.nodes, &mut captured, budget)? {
-            continue;
-        }
-        if let Some(filter) = filter
-            && !relations::match_vector(
-                terms(&key.nodes).nth(1).unwrap(),
-                &filter.nodes,
-                &mut captured,
-                budget,
-            )?
-        {
-            continue;
-        }
-        let mut substitutions = Vec::new();
-        let solved = BTreeMap::new();
-        for (binder, variable) in binders.iter().zip(variables) {
-            budget.step(1)?;
-            if let Some(variable) = variable {
-                let term = captured[variable];
-                let argument = source::materialize(
-                    relations::Site { side: false, term },
-                    &solved,
-                    &[],
-                    budget,
-                    1,
-                )?
-                .expect("established actual pair uses only fixed heads");
-                budget.reserve(1)?;
-                substitutions.push(Substitution {
-                    binder: &binder.declaration.id,
-                    position: binder.position,
-                    argument,
-                });
-            }
-        }
-        return Ok(Some((index, substitutions)));
     }
     Ok(None)
 }

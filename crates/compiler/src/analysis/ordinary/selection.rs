@@ -32,6 +32,24 @@ pub struct InputMatch<'g> {
 pub enum InputPremise {
     HypotheticalOrdinaryRole,
     HypotheticalConversionRole,
+    HypotheticalOrdinaryAndConversionRoles,
+}
+
+impl InputPremise {
+    pub(in crate::analysis) fn has_conversion(self) -> bool {
+        matches!(
+            self,
+            Self::HypotheticalConversionRole | Self::HypotheticalOrdinaryAndConversionRoles
+        )
+    }
+
+    pub(in crate::analysis) fn combine(self, other: Self) -> Self {
+        if self == other {
+            self
+        } else {
+            Self::HypotheticalOrdinaryAndConversionRoles
+        }
+    }
 }
 
 #[derive(Debug)]

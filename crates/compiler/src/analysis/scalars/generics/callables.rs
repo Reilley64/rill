@@ -160,7 +160,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             }
             if fact.declaration.kind == DeclarationKind::Family {
-                if self.ordinary_value_step(inference, node, &fact)? {
+                let formed = if self.conversion_family(fact.declaration).is_some() {
+                    self.conversion_value_step(inference, node, &fact, false)?
+                } else {
+                    self.ordinary_value_step(inference, node, &fact)?
+                };
+                if formed {
                     return Ok(true);
                 }
                 inference.function_values.insert(node, fact);
@@ -460,7 +465,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             {
                 continue;
             }
-            let premise = slot.ordinary_context;
+            let inherited = self.arrow_premise.filter(|p| p.has_conversion());
+            let premise = match (inherited, slot.ordinary_context) {
+                (Some(a), Some(b)) => Some(a.combine(b)),
+                (a, b) => a.or(b),
+            };
             let first = self.facts.findings.len();
             let previous = std::mem::replace(&mut self.arrow_premise, premise);
             let checked = self.arrow_step(inference, node, context);
@@ -491,7 +500,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let module = inference.module;
         let expected = slot.expected.clone();
-        let premise = slot.ordinary_context;
+        let premise = self.arrow_premise;
         let callable = inference.callable_contexts.get(&node).cloned();
         let callable = callable.as_deref();
         let (receiving_parameters, receiving_result) = match expected.as_deref() {

@@ -4,8 +4,11 @@ use ordinary::{Completion, OrdinaryAnalysis};
 
 pub mod callables;
 mod calls;
-mod conversion_proof;
-pub(in crate::analysis) use conversion_proof::check_pair_candidates;
+mod conversion_uses;
+use crate::analysis::conversions::ConversionReport;
+pub use conversion_uses::ConversionUse;
+pub(super) use evidence::ConversionWork;
+pub(in crate::analysis) use evidence::check_pair_candidates;
 mod ordinary_callbacks;
 mod ordinary_calls;
 pub use ordinary_callbacks::OrdinaryCallbackContext;
@@ -45,6 +48,8 @@ pub struct GenericReport<'g> {
     ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryCall<'g>>,
     ordinary_values: BTreeMap<(&'g ModuleKey, NodeId), OrdinaryValue<'g>>,
     conditional_findings: Vec<ConditionalFinding<'g>>,
+    conversion_uses: BTreeMap<(&'g ModuleKey, NodeId), ConversionUse<'g>>,
+    conditional_conversion_nodes: BTreeMap<(&'g ModuleKey, NodeId), NodeFacts<'g>>,
     declaration_issues: Vec<ordinary::DeclarationIssue<'g>>,
 }
 
@@ -232,6 +237,32 @@ impl<'g> GenericReport<'g> {
         Ok(self.ordinary_values.get(&(&module.key, node)))
     }
 
+    /// Conditional endpoints and selection for an original conversion call or function value.
+    pub fn conversion_use(
+        &self,
+        module: &Module,
+        node: NodeId,
+    ) -> Result<Option<&ConversionUse<'g>>, QueryError> {
+        let module = self.check_module(module)?;
+        if node >= module.syntax.nodes.len() {
+            return Err(QueryError::InvalidRequest);
+        }
+        Ok(self.conversion_uses.get(&(&module.key, node)))
+    }
+
+    /// An expression fact available only under its retained conversion premise.
+    pub fn conditional_conversion_node(
+        &self,
+        module: &Module,
+        node: NodeId,
+    ) -> Result<Option<&NodeFacts<'g>>, QueryError> {
+        let module = self.check_module(module)?;
+        if node >= module.syntax.nodes.len() {
+            return Err(QueryError::InvalidRequest);
+        }
+        Ok(self.conditional_conversion_nodes.get(&(&module.key, node)))
+    }
+
     /// Formation facts may retain a signature and sources when mode is unresolved.
     pub fn arrow(
         &self,
@@ -259,18 +290,16 @@ pub fn analyze_generics<'g>(
     input: &OrdinaryAnalysis<'g>,
     limits: AnalysisLimits,
 ) -> GenericReport<'g> {
+    analyze_with_conversions(input, None, limits)
+}
+
+pub(in crate::analysis) fn analyze_with_conversions<'g>(
+    input: &OrdinaryAnalysis<'g>,
+    conversions: Option<&ConversionReport<'_, 'g>>,
+    limits: AnalysisLimits,
+) -> GenericReport<'g> {
     let graph = input.graph();
-    // M4.5's bounded entry does not complete nominal defaults. When it
-    // encounters default syntax or an omitted argument, extend the type
-    // inventory over the same capture and run the same declaration checks.
-    let extended = (input.completion() != Completion::ResourceLimit
-        && input.type_facts().obligations().any(|o| {
-            matches!(
-                o.reason,
-                Unsupported::GenericDefault | Unsupported::NeedsTypeArguments
-            )
-        }))
-    .then(|| ordinary::analyze_ordinary_types(graph, limits, true));
+    let extended = ordinary::extend_nominal_types(input, limits);
     let input = extended.as_ref().unwrap_or(input);
     let types = input.type_facts();
     let mut checker = Checker::new(
@@ -285,6 +314,7 @@ pub fn analyze_generics<'g>(
     if extended.is_some() || input.completion() == Completion::ResourceLimit {
         checker.elab.statistics = input.statistics();
     }
+    checker.conversions = conversions.map(|r| &r.families);
     let mut declaration_issues = Vec::new();
     let exhausted = (|| -> Work<()> {
         use ordinary::DeclarationIssue;
@@ -297,7 +327,9 @@ pub fn analyze_generics<'g>(
             checker.elab.reserve(1 + extra)?;
             declaration_issues.push(issue.clone());
         }
-        if input.completion() == Completion::ResourceLimit {
+        if input.completion() == Completion::ResourceLimit
+            || conversions.is_some_and(|r| r.completion() == Completion::ResourceLimit)
+        {
             return Err(());
         }
         for (key, finding) in &types.findings {
@@ -348,6 +380,8 @@ pub fn analyze_generics<'g>(
         ordinary_calls: checker.ordinary_calls,
         ordinary_values: checker.ordinary_values,
         conditional_findings: checker.conditional_findings,
+        conversion_uses: checker.conversion_uses,
+        conditional_conversion_nodes: checker.conditional_conversion_nodes,
         declaration_issues,
         completion: if exhausted {
             ScalarFailureKind::ResourceLimit

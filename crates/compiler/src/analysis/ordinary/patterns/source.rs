@@ -10,26 +10,11 @@ pub(in crate::analysis::ordinary) fn project<'r, 'g>(
     keep_domain: bool,
     budget: &mut Budget,
 ) -> Work<Vec<SourceCandidate<'r, 'g>>> {
-    let mut rigids = Vec::new();
-    let mut rigid_indices = BTreeMap::new();
-    let domain = flatten(
+    let (domain, rigids) = rigid_domain(
         inputs
             .iter()
             .filter_map(Option::as_ref)
             .chain(filters.iter().map(|(_, t)| *t)),
-        |head, budget| {
-            if let Constructor::Parameter(id, position) = head {
-                if let Some(&index) = rigid_indices.get(&(id, position)) {
-                    return Ok(Head::Variable(index));
-                }
-                budget.reserve(2)?;
-                let index = rigids.len();
-                rigid_indices.insert((id, position), index);
-                rigids.push((id, position));
-                return Ok(Head::Variable(index));
-            }
-            Ok(Head::Fixed(head))
-        },
         budget,
     )?;
     let mut out = Vec::new();
@@ -107,7 +92,33 @@ pub(in crate::analysis::ordinary) fn project<'r, 'g>(
     Ok(out)
 }
 
-fn restricted_domain<'g>(
+pub(super) fn rigid_domain<'a, 'g: 'a>(
+    types: impl Iterator<Item = &'a Type<'g>>,
+    budget: &mut Budget,
+) -> Work<(InputKey<'g>, Vec<(&'g DeclarationId, usize)>)> {
+    let mut rigids = Vec::new();
+    let mut rigid_indices = BTreeMap::new();
+    let domain = flatten(
+        types,
+        |head, budget| {
+            if let Constructor::Parameter(id, position) = head {
+                if let Some(&index) = rigid_indices.get(&(id, position)) {
+                    return Ok(Head::Variable(index));
+                }
+                budget.reserve(2)?;
+                let index = rigids.len();
+                rigid_indices.insert((id, position), index);
+                rigids.push((id, position));
+                return Ok(Head::Variable(index));
+            }
+            Ok(Head::Fixed(head))
+        },
+        budget,
+    )?;
+    Ok((domain, rigids))
+}
+
+pub(super) fn restricted_domain<'g>(
     domain: &InputKey<'g>,
     columns: usize,
     solved: &Solution<'_, 'g>,

@@ -70,7 +70,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.elab.step(1)?;
             let syntax = &module.syntax.nodes[node];
             let children = &syntax.children;
-            let node_fact = |node| facts.get(&node).map(|&i| &self.facts.nodes[i]);
+            let node_fact = |node| {
+                facts.get(&node).map(|&i| &self.facts.nodes[i]).or_else(|| {
+                    self.arrow_premise.filter(|p| p.has_conversion())?;
+                    self.conditional_conversion_nodes.get(&(&module.key, node))
+                })
+            };
             let expression = |node| {
                 node_fact(node).and_then(|fact| match &fact.kind {
                     NodeFactKind::Expression(expr) => Some(expr),
@@ -198,11 +203,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 // The typed stable path already accounts for its entire base.
                 continue;
             }
-            let normal = |id| {
-                facts
-                    .get(&id)
-                    .is_none_or(|&i| self.facts.nodes[i].flow.normal)
-            };
+            let normal = |id| node_fact(id).is_none_or(|f| f.flow.normal);
             let truth = |id| {
                 if normal(id) {
                     expression(id)

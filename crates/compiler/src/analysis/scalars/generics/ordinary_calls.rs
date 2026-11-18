@@ -255,7 +255,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             if let Some(ty) = context.clone() {
                 let leaf = self.source_leaf(module, call.fact.arguments[i])?;
                 if !inference.ordinary_tuples.contains(&leaf) {
-                    self.conditional_context(inference, call.fact.arguments[i], ty)?;
+                    self.conditional_context(inference, call.fact.arguments[i], ty, PREMISE)?;
                 }
             }
         }
@@ -576,7 +576,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.agreed_path_receiving(viable, path)?
             };
             if let Some(ty) = context {
-                self.conditional_context(inference, path.node, ty)?;
+                self.conditional_context(inference, path.node, ty, PREMISE)?;
             }
         }
         Ok(Some(leaves))
@@ -1089,11 +1089,12 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(OutputAgreement::Agrees)
     }
 
-    fn conditional_context(
+    pub(super) fn conditional_context(
         &mut self,
         inference: &mut Inference<'g>,
         node: NodeId,
         ty: Type<'g>,
+        premise: InputPremise,
     ) -> Work<()> {
         self.elab.reserve(1)?;
         let mut pending = vec![node];
@@ -1103,7 +1104,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             if slot.ty.is_some() {
                 continue;
             }
-            slot.ordinary_context = Some(PREMISE);
+            slot.ordinary_context = Some(
+                slot.ordinary_context
+                    .map_or(premise, |p| p.combine(premise)),
+            );
             let children = self.runtime_children(inference, child)?;
             self.elab.reserve(children.len())?;
             pending.extend(children);

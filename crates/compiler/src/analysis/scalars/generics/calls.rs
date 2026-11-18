@@ -25,6 +25,12 @@ impl<'r, 'g> Checker<'r, 'g> {
             .filter_map(|(&node, call)| call.infer.then_some(node))
             .collect();
         for node in waiting {
+            if self
+                .conversion_family(inference.calls[&node].fact.callee)
+                .is_some()
+            {
+                continue;
+            }
             let advanced = if inference.calls[&node].family {
                 self.ordinary_call_step(inference, node, true)?
             } else {

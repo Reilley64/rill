@@ -219,6 +219,7 @@ pub enum ScalarUnsupported {
     Formatting,
     Requirements,
     CoreAdmission,
+    ConversionAdmission,
     ImplicitCopy,
 }
 #[derive(Debug)]
@@ -424,6 +425,8 @@ struct Checker<'r, 'g> {
     data: bool,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
+    conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
+    conversion_work: BTreeMap<usize, generics::ConversionWork<'r, 'g>>,
     arrow_depth: usize,
     arrow_premise: Option<ordinary::InputPremise>,
     arrow_bindings: BTreeMap<&'g DeclarationId, Arc<ArrowFacts<'g>>>,
@@ -434,6 +437,8 @@ struct Checker<'r, 'g> {
     ordinary_calls: BTreeMap<(&'g ModuleKey, NodeId), generics::OrdinaryCall<'g>>,
     ordinary_values: BTreeMap<(&'g ModuleKey, NodeId), generics::OrdinaryValue<'g>>,
     conditional_findings: Vec<generics::ConditionalFinding<'g>>,
+    conversion_uses: BTreeMap<(&'g ModuleKey, NodeId), generics::ConversionUse<'g>>,
+    conditional_conversion_nodes: BTreeMap<(&'g ModuleKey, NodeId), NodeFacts<'g>>,
 }
 impl<'r, 'g> Checker<'r, 'g> {
     fn new(input: BodyInput<'r, 'g>, limits: AnalysisLimits, data: bool) -> Self {
@@ -444,6 +449,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             data,
             data_depth: 0,
             evidence: generics::Evidence::default(),
+            conversions: None,
+            conversion_work: BTreeMap::new(),
             arrow_depth: 0,
             arrow_premise: None,
             arrow_bindings: BTreeMap::new(),
@@ -454,6 +461,17 @@ impl<'r, 'g> Checker<'r, 'g> {
             ordinary_calls: BTreeMap::new(),
             ordinary_values: BTreeMap::new(),
             conditional_findings: Vec::new(),
+            conversion_uses: BTreeMap::new(),
+            conditional_conversion_nodes: BTreeMap::new(),
+        }
+    }
+
+    fn record_node(&mut self, fact: NodeFacts<'g>) {
+        if self.arrow_premise.is_some_and(|p| p.has_conversion()) {
+            self.conditional_conversion_nodes
+                .insert((fact.site.module, fact.site.node), fact);
+        } else {
+            self.facts.nodes.push(fact);
         }
     }
 
@@ -1459,7 +1477,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         declaration: &'g DeclarationId,
     ) -> Work<()> {
         self.elab.reserve(1)?;
-        self.facts.nodes.push(NodeFacts {
+        self.record_node(NodeFacts {
             site: Self::site(module, node),
             flow: Flow::normal(),
             kind: NodeFactKind::Callee { declaration },
@@ -1525,7 +1543,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         context: &Context<'r, 'g>,
     ) -> Work<Option<ExpressionResult<'g>>> {
         let finding_start = self.facts.findings.len();
+        let premise = self.arrow_premise;
         let result = self.expression_work(module, root, expected, context, finding_start);
+        self.arrow_premise = premise;
         if result.is_err() && self.input.ordinary.is_some() {
             // An interrupted expression has not classified its staged findings by premise.
             self.facts.findings.truncate(finding_start);
@@ -1541,6 +1561,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         context: &Context<'r, 'g>,
         finding_start: usize,
     ) -> Work<Option<ExpressionResult<'g>>> {
+        let inherited_conversion =
+            self.arrow_depth > 0 && self.arrow_premise.is_some_and(|p| p.has_conversion());
+        let earlier_uses = self.conversion_uses.len();
         let mut inference = Inference {
             module,
             slots: BTreeMap::new(),
@@ -1797,7 +1820,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                         if inference.data_nodes.contains(&node) {
                             self.variant_step(&mut inference, node, context)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.family) {
-                            self.ordinary_call_step(&mut inference, node, false)?;
+                            let id = inference.calls[&node].fact.callee;
+                            if self.conversion_family(id).is_some() {
+                                self.conversion_call_step(&mut inference, node, false)?;
+                            } else {
+                                self.ordinary_call_step(&mut inference, node, false)?;
+                            }
                         } else if inference.value_calls.contains(&node) {
                             self.invocation_step(&mut inference, node)?;
                         } else if inference.calls.get(&node).is_some_and(|c| c.infer) {
@@ -1907,6 +1935,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
         }
         if self.input.ordinary.is_some() {
+            self.finish_conversion_uses(&mut inference)?;
             self.defer_ordinary_calls(&mut inference)?;
         }
         if self.data {
@@ -2080,6 +2109,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut result = None;
         for (&node, slot) in &inference.slots {
             self.elab.step(1)?;
+            if self.conversions.is_some() && self.conversion_uses.contains_key(&(&module.key, node))
+            {
+                self.defer(module, node, ScalarUnsupported::ConversionAdmission)?;
+            }
             if slot.blocked
                 || module.syntax.nodes[node]
                     .children
@@ -2105,7 +2138,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else {
                     None
                 };
-                self.facts.nodes.push(NodeFacts {
+                let premise = match (
+                    self.arrow_premise.filter(|p| p.has_conversion()),
+                    slot.ordinary_context,
+                ) {
+                    (Some(a), Some(b)) => Some(a.combine(b)),
+                    (a, b) => a.or(b),
+                };
+                let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),
                     callable,
@@ -2115,7 +2155,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         literal: slot.literal,
                         binding: slot.binding,
                         call: inference.calls.remove(&node).map(|c| c.fact),
-                        ordinary_context: slot.ordinary_context,
+                        ordinary_context: premise,
                         place: slot.place,
                         boolean: slot.boolean,
                         data: inference.data.remove(&node).map(|p| p.fact),
@@ -2125,7 +2165,18 @@ impl<'r, 'g> Checker<'r, 'g> {
                         read_only_projection: slot.read_only_projection,
                         access: slot.access,
                     }),
-                });
+                };
+                if premise.is_some_and(|p| p.has_conversion()) {
+                    self.conditional_conversion_nodes
+                        .insert((&module.key, node), facts);
+                    // A source argument may be checked inside an already conditional
+                    // arrow. Only its local equations can use these provisional facts.
+                    if !inherited_conversion || earlier_uses != self.conversion_uses.len() {
+                        continue;
+                    }
+                } else {
+                    self.facts.nodes.push(facts);
+                }
                 if node == root {
                     result = Some(ExpressionResult {
                         ty: ty.clone(),
@@ -2352,7 +2403,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 boolean,
                             });
                         self.elab.reserve(1)?;
-                        self.facts.nodes.push(NodeFacts {
+                        self.record_node(NodeFacts {
                             site: Self::site(module, node),
                             flow: flow.clone(),
                             callable: None,
@@ -2551,7 +2602,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         if before == self.marks() && !matches!(n.kind, NodeKind::Binding { .. }) {
             self.elab
                 .reserve(1 + flow.breaks.len() + flow.continues.len())?;
-            self.facts.nodes.push(NodeFacts {
+            self.record_node(NodeFacts {
                 site: Self::site(module, node),
                 kind,
                 flow: flow.clone(),

@@ -5,11 +5,12 @@ use super::*;
 use crate::loader::{Implementation, Origin};
 
 mod output;
-mod pairs;
+pub(in crate::analysis) mod pairs;
 pub use output::{DeterminationRoute, OutputDetermination};
 pub use pairs::{
     Applicability, ErrorAgreement, PairBlocker, PairMatch, PairOutcome, PairReport, PairRequest,
 };
+pub use scalars::generics::ConversionUse;
 
 #[derive(Clone, Copy, Debug)]
 pub enum RoleHypothesis<'g> {
@@ -21,7 +22,7 @@ pub enum RoleHypothesis<'g> {
 }
 
 impl<'g> RoleHypothesis<'g> {
-    fn bindings(self) -> (&'g Binding, Option<&'g Binding>) {
+    pub(in crate::analysis) fn bindings(self) -> (&'g Binding, Option<&'g Binding>) {
         match self {
             Self::Infallible(family) => (family, None),
             Self::Fallible { family, result } => (family, Some(result)),
@@ -60,7 +61,7 @@ pub struct Registration<'g> {
     pub error: Option<Type<'g>>,
     pub output: OutputDetermination,
     pub routes: Vec<DeterminationRoute<'g>>,
-    alternatives: Option<Vec<InputKey<'g>>>,
+    pub(in crate::analysis) alternatives: Option<Vec<InputKey<'g>>>,
     variables: Vec<Option<usize>>,
 }
 
@@ -75,14 +76,24 @@ pub struct ConversionFamily<'g> {
 #[derive(Debug)]
 pub struct ConversionReport<'r, 'g> {
     input: &'r OrdinaryAnalysis<'g>,
-    families: BTreeMap<&'g DeclarationId, ConversionFamily<'g>>,
+    extended: Option<OrdinaryAnalysis<'g>>,
+    pub(in crate::analysis) families: BTreeMap<&'g DeclarationId, ConversionFamily<'g>>,
     completion: ordinary::Completion,
     statistics: Statistics,
 }
 
 impl<'g> ConversionReport<'_, 'g> {
+    fn input(&self) -> &OrdinaryAnalysis<'g> {
+        self.extended.as_ref().unwrap_or(self.input)
+    }
+
     pub fn completion(&self) -> ordinary::Completion {
         self.completion
+    }
+
+    /// Inspect all supported captured bodies using this conversion inventory.
+    pub fn bodies(&self, limits: AnalysisLimits) -> scalars::generics::GenericReport<'g> {
+        scalars::generics::analyze_with_conversions(self.input(), Some(self), limits)
     }
 
     pub fn statistics(&self) -> Statistics {
@@ -90,7 +101,7 @@ impl<'g> ConversionReport<'_, 'g> {
     }
 
     pub fn family(&self, id: &DeclarationId) -> Result<Option<&ConversionFamily<'g>>, QueryError> {
-        self.input.family(id)?;
+        self.input().family(id)?;
         Ok(self.families.get(id))
     }
 }
@@ -330,15 +341,20 @@ pub fn analyze_conversions<'r, 'g>(
         return Err(QueryError::InvalidRequest);
     }
     let graph = input.graph();
+    let extended = ordinary::extend_nominal_types(input, limits);
+    let complete = extended.as_ref().unwrap_or(input);
     let mut report = ConversionReport {
         input,
+        extended: None,
         families: BTreeMap::new(),
-        completion: input.completion(),
+        completion: complete.completion(),
         statistics: Statistics::default(),
     };
     let mut budget = Budget {
         limits,
-        statistics: Statistics::default(),
+        statistics: extended
+            .as_ref()
+            .map_or(Statistics::default(), OrdinaryAnalysis::statistics),
     };
     for &premise in roles {
         let (binding, result) = premise.bindings();
@@ -362,7 +378,7 @@ pub fn analyze_conversions<'r, 'g>(
         {
             return Err(QueryError::InvalidRequest);
         }
-        let Some(ordinary) = input.captured_family(id) else {
+        let Some(ordinary) = complete.captured_family(id) else {
             continue;
         };
         let mut family = ConversionFamily {
@@ -375,7 +391,7 @@ pub fn analyze_conversions<'r, 'g>(
             report.completion = ordinary::Completion::ResourceLimit;
             break;
         }
-        let collected = collect(input, ordinary, &mut family, &mut budget);
+        let collected = collect(complete, ordinary, &mut family, &mut budget);
         report.families.insert(id, family);
         if collected.is_err() {
             report.completion = ordinary::Completion::ResourceLimit;
@@ -383,5 +399,6 @@ pub fn analyze_conversions<'r, 'g>(
         }
     }
     report.statistics = budget.statistics;
+    report.extended = extended;
     Ok(report)
 }
