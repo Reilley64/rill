@@ -1488,12 +1488,33 @@ fn direct_calls_with_two_tuple_descriptors_keep_both_restrictions() {
                 second[1] = "new";
                 return bit;
             }
-            function mixedShape(first: &[[bool, string], bool], second: &[bool, string]): &string {
+            function mixedShape(first: &[[bool, string], bool], second: &[bool, string], leaf: &string): &string {
                 let [[_, text], _] = first;
                 return text;
             }
-            function nestedAndFlat(first: &[[bool, string], bool], second: &[bool, string]): &string {
-                return mixedShape(first, second);
+            function nestedAndFlat(first: &[[bool, string], bool], second: &[bool, string], leaf: &string): &string {
+                return mixedShape(first, second, leaf);
+            }
+            function narrow(first: &[bool, string], second: &[bool, bool]): bool { return true; }
+            function wide(first: &[bool, string], second: &[bool, bool, bool, bool]): bool { return true; }
+            function callNarrowSecond(first: &[bool, string], second: &[bool, bool]): bool { return narrow(first, second); }
+            function callWideSecond(first: &[bool, string], second: &[bool, bool, bool, bool]): bool { return wide(first, second); }
+            function resumesParents(first: &mut [bool, string], second: &mut [bool, string]): bool {
+                let bit = snapshot(first, second);
+                let text = view(first, second);
+                let _ = text;
+                let _ = snapshot(first, second);
+                return bit;
+            }
+            function firstSuspended(first: &mut [bool, string], second: &mut [bool, string]): void {
+                let text = view(first, second);
+                let [bit, _] = &mut *first;
+                let _ = text;
+            }
+            function secondSuspended(first: &mut [bool, string], second: &mut [bool, string]): void {
+                let text = view(first, second);
+                let [bit, _] = &mut *second;
+                let _ = text;
             }
             function keepsFirst(left: [bool, string], right: [bool, string]): void {
                 let mut first = left;
@@ -1645,13 +1666,43 @@ fn direct_calls_with_two_tuple_descriptors_keep_both_restrictions() {
             assert!(
                 matches!(route.as_slice(), [
                 Operation::Copy { from: first, into: Some(first_arg) }, Operation::Copy { from: second, into: Some(second_arg) },
-                Operation::Call(callee), Operation::Export(output),
+                Operation::Copy { from: leaf, into: Some(third_arg) }, Operation::Call(callee), Operation::Export(output),
             ] if first.root.span.bytes() == b"first: &[[bool, string], bool]" && second.root.span.bytes() == b"second: &[bool, string]"
                 && first_arg.root.span.bytes() == b"first" && second_arg.root.span.bytes() == b"second"
-                && **callee == declaration("mixedShape").id && output.root.span.bytes() == b"mixedShape(first, second)"),
+                && leaf.root.span.bytes() == b"leaf: &string" && third_arg.root.span.bytes() == b"leaf"
+                && **callee == declaration("mixedShape").id && output.root.span.bytes() == b"mixedShape(first, second, leaf)"),
+                "{route:?}"
+            );
+            let narrow = check("callNarrowSecond");
+            let wide = check("callWideSecond");
+            assert!(narrow.mir().is_some() && wide.mir().is_some());
+            // Two more leaves in only the second descriptor contribute to its scan and comparison.
+            assert!(wide.statistics().work >= narrow.statistics().work + 4);
+            let resumes = check("resumesParents");
+            let mir = resumes
+                .mir()
+                .expect("both incoming parents resume after scalar calls and last use");
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Reborrow { .. } | Operation::Call(_) => true,
+                    Operation::Copy { from, .. } => from.root.span.bytes() == b"text",
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [a, b, Operation::Call(snapshot), c, d, Operation::Call(view), Operation::Copy { .. }, e, f, Operation::Call(again)]
+                if **snapshot == declaration("snapshot").id && **view == declaration("view").id && snapshot == again
+                && [a, c, e].iter().all(|op| matches!(op, Operation::Reborrow { parent, exclusive: true, .. }
+                    if parent.root.span.bytes() == b"first: &mut [bool, string]"))
+                && [b, d, f].iter().all(|op| matches!(op, Operation::Reborrow { parent, exclusive: true, .. }
+                    if parent.root.span.bytes() == b"second: &mut [bool, string]"))),
                 "{route:?}"
             );
             for (name, code, site, related) in [
+                ("firstSuspended", "R0201", "&mut *first", "first"),
+                ("secondSuspended", "R0201", "&mut *second", "second"),
                 ("keepsFirst", "R0203", "first[1] = \"blocked\";", "&first"),
                 (
                     "keepsSecond",
