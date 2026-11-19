@@ -2116,6 +2116,22 @@ fn single_edge_arguments_do_not_lower_an_unreachable_call_path() {
                 dispose(owner);
                 return Option.Some(bit);
             }
+            function short(first: string, bit: bool): bool { dispose(first); dispose(first); return bit; }
+            function failureShort(first: string, input: Option<bool>.None, last: string, owner: string): Option<bool> {
+                let bit = short(before(first), input?);
+                dispose(owner);
+                return Option.Some(bit);
+            }
+            function pair(first: bool, second: bool): bool { return first; }
+            function identity(value: bool): bool { return value; }
+            function deeper(input: Option<bool>.None, other: Option<bool>): Option<bool> {
+                let _ = pair(input?, identity(other?));
+                return Option.Some(true);
+            }
+            function deeperKnown(input: Option<bool>.None, other: Option<bool>.Some): Option<bool> {
+                let _ = pair(input?, identity(other?));
+                return Option.Some(true);
+            }
             function onlyErr(input: Result<bool, i32>.Err): Result<bool, i32>.Err { return input; }
             function failurePipe(first: string, input: Result<bool, i32>.Err, last: string): Result<i32, i32> {
                 let _ = unreachable(before(first), (input |> onlyErr?), late<string>(last));
@@ -2129,6 +2145,17 @@ fn single_edge_arguments_do_not_lower_an_unreachable_call_path() {
             function emptyPrefix(input: Option<bool>.None, last: string): Option<bool> {
                 let _ = firstArgument(input?, late<string>(last));
                 return Option.Some(true);
+            }
+            function withPrefix(first: string, second: string, bit: bool, last: string): bool { dispose(last); dispose(second); dispose(first); return bit; }
+            function error(message: string): i32 { dispose(message); return 14i32; }
+            function failureWrap(input: Result<bool, i32>.Err, first: string, second: string, last: string, message: string, owner: string): Result<i32, i32> {
+                let _ = withPrefix(before(first), before(second), (input ? error(message)), late<string>(last));
+                return Result.Ok(1i32);
+            }
+            function number(value: i32): i32 { return value; }
+            function deeperWrap(input: Result<bool, i32>.Ok, first: string, last: string): Result<i32, i32> {
+                let _ = consume(first, (input ? number(Result<i32, i32>.Ok(1i32)?)), last);
+                return Result.Ok(1i32);
             }
             function badRhs(message: string): i32 { dispose(message); dispose(message); return 14i32; }
             function successWrap(input: Result<bool, i32>.Ok, first: string, last: string, message: string): Result<i32, i32> {
@@ -2187,6 +2214,39 @@ fn single_edge_arguments_do_not_lower_an_unreachable_call_path() {
                     | Operation::CopyOptionPayload { .. }
                     | Operation::Dispose { .. }
             )));
+            let short = check("failureShort");
+            let mir = short
+                .mir()
+                .expect("the shorter call has the same reached prefix");
+            assert_eq!(calls_on_path(mir, []), [&declaration("before").id]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"before(first)", b"owner: string", b"last: string"],
+            );
+            assert_eq!(
+                failed.statistics().entries,
+                short.statistics().entries,
+                "a dead suffix must not reserve a stage or call entry"
+            );
+            for (name, site) in [
+                ("deeper", "pair(input?, identity(other?))"),
+                ("deeperKnown", "pair(input?, identity(other?))"),
+                (
+                    "deeperWrap",
+                    "consume(first, (input ? number(Result<i32, i32>.Ok(1i32)?)), last)",
+                ),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
             let route = check("failurePipe");
             let mir = route
                 .mir()
@@ -2255,6 +2315,34 @@ fn single_edge_arguments_do_not_lower_an_unreachable_call_path() {
                 "{stages:?}"
             );
             assert_return(&ops, &option.some.id, true, &[]);
+            let wrapping_failure = check("failureWrap");
+            let mir = wrapping_failure
+                .mir()
+                .expect("the known failure evaluates only the prefix and RHS");
+            assert_eq!(
+                calls_on_path(mir, []),
+                [
+                    &declaration("before").id,
+                    &declaration("before").id,
+                    &declaration("error").id
+                ]
+            );
+            let ops = linear(mir, mir.entry);
+            assert_export(
+                &ops,
+                &[
+                    b"before(second)",
+                    b"before(first)",
+                    b"owner: string",
+                    b"last: string",
+                ],
+                |op, out| {
+                    matches!(op,
+                Operation::WrapResultFailure { operand, payload, into, origin, .. }
+                if operand.root.span.bytes() == b"input" && payload.root.span.bytes() == b"error(message)"
+                    && into.root.node == out.root.node && origin.bytes() == b"?")
+                },
+            );
             let wrap = check("successWrap");
             let mir = wrap
                 .mir()

@@ -789,7 +789,8 @@ impl<'a, 'g> Build<'a, 'g> {
                     self.budget.step(1)?;
                     if let Some(fact) = self.facts.get(&initializer).copied()
                         && let NodeFactKind::Expression(facts) = &fact.kind
-                        && let Some(argument) = self.propagating_argument(initializer, facts)?
+                        && let Some(argument) =
+                            self.propagating_argument(initializer, facts, depth + 1)?
                     {
                         let into = match binding {
                             Binding::Discard => None,
@@ -1568,10 +1569,25 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
+    fn contains_propagation(&mut self, node: NodeId, depth: usize) -> ResultOf<bool> {
+        self.depth(depth)?;
+        if self.propagates_directly(node)? {
+            return Ok(true);
+        }
+        self.budget.step(1)?;
+        for &child in &self.module.syntax.nodes[node].children {
+            if self.contains_propagation(child, depth + 1)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn propagating_argument(
         &mut self,
         node: NodeId,
         facts: &ExpressionFacts<'g>,
+        depth: usize,
     ) -> ResultOf<Option<PropagatingArgument>> {
         let Some(call) = facts.call.as_deref() else {
             return Ok(None);
@@ -1599,9 +1615,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 });
             }
         }
-        if argument.is_none() {
+        let Some(argument) = argument else {
             return Ok(None);
-        }
+        };
         if call.pipe_input.is_some()
             || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
         {
@@ -1619,7 +1635,27 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             }
         }
-        Ok(argument)
+        // Skipped expressions are not lowered, but must not hide a second
+        // propagation outside this single-argument route.
+        let skipped = if !argument.can_continue {
+            &call.arguments[argument.position + 1..]
+        } else if !argument.can_return {
+            self.budget.step(1)?;
+            let syntax = &self.module.syntax.nodes[argument.root];
+            if syntax.kind == NodeKind::Wrap {
+                &syntax.children[1..]
+            } else {
+                &[]
+            }
+        } else {
+            &[]
+        };
+        for &node_in_suffix in skipped {
+            if self.contains_propagation(node_in_suffix, depth + 1)? {
+                return Err(Stop::Pending(node));
+            }
+        }
+        Ok(Some(argument))
     }
 
     fn propagating_pipe_result(
