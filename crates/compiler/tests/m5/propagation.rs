@@ -5351,7 +5351,7 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
                 return Option.Some(next);
             }
             function returnSome(value: string): Option<string>.Some { return Option<string>.Some(value); }
-            function skippedDeeper(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
+            function skippedComposition(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
                 let _ = stage(before) |> invalid(gate?, ((input?) |> returnSome?), _)?;
                 return Option.Some(true);
             }
@@ -5517,12 +5517,16 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
                 if *callee == id("after") && matches!(actions.as_slice(), [Obligation::Drop(place)] if place.root.node == into.root.node)),
                 "{order:?}"
             );
-            let skipped_deeper = lower("skippedDeeper", default);
-            assert_eq!(skipped_deeper.completion(), Completion::Incomplete);
-            assert!(skipped_deeper.mir().is_none());
-            assert_eq!(
-                skipped_deeper.blocked_at().unwrap().span.bytes(),
-                b"stage(before) |> invalid(gate?, ((input?) |> returnSome?), _)?"
+            let skipped = lower("skippedComposition", default);
+            let mir = skipped
+                .mir()
+                .expect("skip the written composition and invalid outer step");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"input: Option<string>"],
             );
             let exact = AnalysisLimits {
                 max_work: composed.statistics().work,
@@ -5585,6 +5589,28 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
             }
             function skipped(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
                 let _ = laterString(stage(before), gate?, ((input?) |> bounce?));
+                return Option.Some(true);
+            }
+            function skipPlainCarrier(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
+                let _ = laterString(stage(before), gate?, (stage(before) |> bounce?));
+                return Option.Some(true);
+            }
+            function skipDeep(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
+                let _ = laterString(stage(before), gate?, (((input?) |> bounce?) |> bounce?));
+                return Option.Some(true);
+            }
+            function pick(bit: i32, input: string): Option<string> { return Option.Some(input); }
+            function skipBadCarrier(before: string, gate: Option<bool>.None): Option<bool> {
+                let _ = laterString(stage(before), gate?, (stage(before) |> pick(Option<i32>.Some(1i32)?, _)?));
+                return Option.Some(true);
+            }
+            function skipInvalid(before: string, first: Option<bool>.None, input: Option<string>, inside: string, gate: Option<bool>): Option<bool> {
+                let _ = laterString(stage(before), first?, ((input?) |> invalidInner(stage(inside), gate?, _)?));
+                return Option.Some(true);
+            }
+            function choose(bit: bool, carrier: Option<bool>): Option<bool> { return carrier; }
+            function skipNonPrimitive(first: Option<bool>.None, second: Option<bool>, carried: Option<bool>): Option<bool> {
+                let _ = both(first?, ((second?) |> choose(carried)?));
                 return Option.Some(true);
             }
             function twoPlain(left: string, right: string): Option<bool> {
@@ -5759,30 +5785,85 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
                 false,
                 &[],
             );
-            for name in ["tooDeep", "skipped"] {
+            let skipped = lower("skipped", default);
+            let mir = skipped
+                .mir()
+                .unwrap_or_else(|| panic!("skipped composition: {:?}", skipped.completion()));
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"input: Option<string>"],
+            );
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(_), Obligation::DropOptionPayload { operand, some }]
+                if operand.root.span.bytes() == b"input: Option<string>" && *some == &option.some.id)
+            );
+            let plain = lower("skipPlainCarrier", default);
+            assert_eq!(mir.blocks.len(), plain.mir().unwrap().blocks.len());
+            assert_eq!(skipped.statistics().entries, plain.statistics().entries);
+            let invalid = lower("skipInvalid", default);
+            let mir = invalid
+                .mir()
+                .expect("the skipped inner callee is not ownership checked");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[
+                    b"stage(before)",
+                    b"inside: string",
+                    b"input: Option<string>",
+                ],
+            );
+            for name in ["tooDeep", "skipDeep", "skipBadCarrier", "skipNonPrimitive"] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert!(report.mir().is_none());
+                assert!(report.mir().is_none(), "{name}");
             }
-            let exact = AnalysisLimits {
-                max_work: nested.statistics().work,
-                max_entries: nested.statistics().entries,
-                ..default
-            };
-            assert!(lower("nested", exact).mir().is_some());
-            for short in [
-                AnalysisLimits {
-                    max_work: exact.max_work - 1,
-                    ..exact
-                },
-                AnalysisLimits {
-                    max_entries: exact.max_entries - 1,
-                    ..exact
-                },
-            ] {
-                let limited = lower("nested", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+            assert_eq!(
+                lower("skipBadCarrier", default)
+                    .blocked_at()
+                    .unwrap()
+                    .span
+                    .bytes(),
+                b"Option<i32>.Some(1i32)?"
+            );
+            assert_eq!(
+                lower("skipNonPrimitive", default)
+                    .blocked_at()
+                    .unwrap()
+                    .span
+                    .bytes(),
+                b"(second?) |> choose(carried)?"
+            );
+            for (name, report) in [("nested", nested), ("skipInvalid", invalid)] {
+                let exact = AnalysisLimits {
+                    max_work: report.statistics().work,
+                    max_entries: report.statistics().entries,
+                    max_depth: report.statistics().max_depth,
+                };
+                assert!(lower(name, exact).mir().is_some());
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = lower(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none());
+                }
             }
         },
     );
@@ -5947,11 +6028,19 @@ fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
                 &[b"stage(inside)", b"(right?)", left_stage, b"tail: string"],
             );
             let skipped = lower("skipped", default);
-            assert_eq!(skipped.completion(), Completion::Incomplete);
-            assert!(skipped.mir().is_none());
-            assert_eq!(
-                skipped.blocked_at().unwrap().span.bytes(),
-                b"useAll(((left?) |> first?), ((right?) |> first?), true)"
+            let mir = skipped
+                .mir()
+                .expect("the wholly skipped sibling must remain lexical");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"right: Option<string>"],
+            );
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
+                if operand.root.span.bytes() == b"right: Option<string>" && *some == &option.some.id)
             );
             let invalid = lower("invalid", default);
             assert_eq!(invalid.completion(), Completion::SourceRejected);
@@ -6237,11 +6326,19 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
                 [id("present"), id("stage"), id("finish"), id("useAll")]
             );
             let skipped = lower("skippedSibling", default);
-            assert_eq!(skipped.completion(), Completion::Incomplete);
-            assert!(skipped.mir().is_none());
-            assert_eq!(
-                skipped.blocked_at().unwrap().span.bytes(),
-                b"((input?) |> present?) |> useAll(((written?) |> present?), true, _)"
+            let mir = skipped
+                .mir()
+                .expect("skip the wholly unexecuted written composition");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"written: Option<string>"],
+            );
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
+                if operand.root.span.bytes() == b"written: Option<string>" && *some == &option.some.id)
             );
             let exact = AnalysisLimits {
                 max_work: written.statistics().work,
@@ -6545,11 +6642,19 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                 [id("present"), id("stage"), id("finish"), id("outer")]
             );
             let skipped = lower("skippedSibling", default);
-            assert_eq!(skipped.completion(), Completion::Incomplete);
-            assert!(skipped.mir().is_none());
-            assert_eq!(
-                skipped.blocked_at().unwrap().span.bytes(),
-                b"((input?) |> present?) |> outer(((written?) |> present?), true, _)?"
+            let mir = skipped
+                .mir()
+                .expect("skip the written composition and the outer carrier");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"written: Option<string>"],
+            );
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
+                if operand.root.span.bytes() == b"written: Option<string>" && *some == &option.some.id)
             );
             let deeper = lower("tooDeep", default);
             assert_eq!(deeper.completion(), Completion::Incomplete);
@@ -6697,7 +6802,8 @@ fn assert_export<'g>(
             Operation::Cleanup(cleanup) => {
                 for action in cleanup {
                     match action {
-                        Obligation::Drop(place) => {
+                        Obligation::Drop(place)
+                        | Obligation::DropOptionPayload { operand: place, .. } => {
                             assert!(index > export, "export the value before exit cleanup");
                             drops.push(place.root.span.bytes());
                         }

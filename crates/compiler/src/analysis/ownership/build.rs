@@ -1854,6 +1854,109 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(false)
     }
 
+    fn check_skipped_argument(
+        &mut self,
+        enclosing: NodeId,
+        mut arg: NodeId,
+        root: Option<NodeId>,
+        allows_composed_pipe: bool,
+        mut depth: usize,
+    ) -> ResultOf<()> {
+        if let Some(root) = root {
+            // The caller found the root by peeling groups. Charge their depth
+            // without visiting the same operand subtree twice.
+            while arg != root {
+                self.depth(depth)?;
+                self.budget.step(1)?;
+                arg = self.module.syntax.nodes[arg].children[0];
+                depth += 1;
+            }
+            self.depth(depth)?;
+            self.budget.step(2)?;
+            let facts = self.value(root)?;
+            let checked = self.checked_propagation(root, facts)?;
+            if let Some(wrap) = checked.wrap
+                && checked.exit.can_return
+            {
+                self.checked_wrap_failure(root, wrap)?;
+            }
+            if let Some(fresh) = checked.fresh {
+                self.checked_scalar_error(root, facts, fresh)?;
+            }
+            if allows_composed_pipe && checked.piped && checked.fresh.is_none() {
+                let call = facts.call.as_deref().ok_or(Stop::Pending(root))?;
+                return self.check_skipped_pipe(
+                    enclosing,
+                    root,
+                    call,
+                    checked.option_text.is_some(),
+                    depth,
+                );
+            }
+        }
+        if self.contains_unadmitted_propagation(arg, root, depth)? {
+            return Err(Stop::Pending(enclosing));
+        }
+        Ok(())
+    }
+
+    fn check_skipped_pipe(
+        &mut self,
+        enclosing: NodeId,
+        root: NodeId,
+        call: &CallFacts<'g>,
+        primitive_arguments_checked: bool,
+        depth: usize,
+    ) -> ResultOf<()> {
+        // Only the input and written argument slots can contain checked roots.
+        // Neither the callable nor a subtree inside an operand receives an exemption.
+        self.budget.step(3)?;
+        let [input, step] = self.module.syntax.nodes[root].children[..] else {
+            return Err(Stop::Pending(root));
+        };
+        self.depth(depth + 1)?;
+        let (callable, arguments) = match self.module.syntax.nodes[step].children[..] {
+            [callable] => (callable, None),
+            [callable, arguments] => (callable, Some(arguments)),
+            _ => return Err(Stop::Pending(root)),
+        };
+        self.check_skipped_argument(enclosing, callable, None, false, depth + 2)?;
+        let check_operand = |this: &mut Self, arg, depth| -> ResultOf<bool> {
+            let root = this.ungroup(arg)?;
+            let direct = this.propagates_directly(root)?;
+            this.check_skipped_argument(enclosing, arg, direct.then_some(root), false, depth)?;
+            Ok(direct)
+        };
+        let mut has_propagating_argument = check_operand(self, input, depth + 1)?;
+        if let Some(arguments) = arguments {
+            self.depth(depth + 2)?;
+            self.budget.step(1)?;
+            for &arg in &self.module.syntax.nodes[arguments].children {
+                has_propagating_argument |= check_operand(self, arg, depth + 3)?;
+            }
+        }
+        if has_propagating_argument && !primitive_arguments_checked {
+            self.check_primitive_pipe_arguments(root, call)?;
+        }
+        Ok(())
+    }
+
+    fn check_primitive_pipe_arguments(
+        &mut self,
+        node: NodeId,
+        call: &CallFacts<'g>,
+    ) -> ResultOf<()> {
+        // The step signature already matched the actual arguments.
+        // Composition is narrower: every argument must be primitive.
+        for &arg in &call.arguments {
+            self.budget.step(1)?;
+            if !matches!(self.value(arg)?.ty.as_ref(), TypeTerm::Primitive(_)) {
+                return Err(Stop::Pending(node));
+            }
+        }
+        Ok(())
+    }
+
     fn check_value_call_propagation(
         &mut self,
         node: NodeId,
@@ -2015,14 +2118,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 primitive_arguments: false,
                 ..
             } => {
-                // The step signature already matched the actual arguments.
-                // Composition is narrower: every argument must be primitive.
-                for &arg in &call.arguments {
-                    self.budget.step(1)?;
-                    if !matches!(self.value(arg)?.ty.as_ref(), TypeTerm::Primitive(_)) {
-                        return Err(Stop::Pending(node));
-                    }
-                }
+                self.check_primitive_pipe_arguments(node, call)?;
             }
         }
         // A known failure skips the suffix, but only a checked complete
@@ -2036,24 +2132,13 @@ impl<'a, 'g> Build<'a, 'g> {
                 let admitted_root = skipped
                     .next_if(|argument| argument.evaluation_position == position)
                     .map(|argument| argument.root);
-                if self.contains_unadmitted_propagation(arg, admitted_root, depth + 1)? {
-                    return Err(Stop::Pending(node));
-                }
-                if let Some(root) = admitted_root {
-                    // Check the same carrier and constructor contracts without
-                    // allocating slots or lowering any skipped expression.
-                    self.budget.step(2)?;
-                    let facts = self.value(root)?;
-                    let checked = self.checked_propagation(root, facts)?;
-                    if let Some(wrap) = checked.wrap
-                        && checked.exit.can_return
-                    {
-                        self.checked_wrap_failure(root, wrap)?;
-                    }
-                    if let Some(fresh) = checked.fresh {
-                        self.checked_scalar_error(root, facts, fresh)?;
-                    }
-                }
+                self.check_skipped_argument(
+                    node,
+                    arg,
+                    admitted_root,
+                    allows_composed_pipe,
+                    depth + 1,
+                )?;
             }
             roots.truncate(index);
             Some(terminal)
