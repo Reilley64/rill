@@ -276,13 +276,14 @@ impl<'a, 'g> Build<'a, 'g> {
     fn direct_tuple_borrow_argument(
         &mut self,
         call: &crate::analysis::scalars::CallFacts<'g>,
+        position: usize,
         argument: &Type<'g>,
         result: &Type<'g>,
     ) -> ResultOf<bool> {
-        // A primitive tuple has no stored reference destination. Reuse
-        // the existing leaf-result contract for one exact tuple argument.
-        if call.arguments.len() != 1
-            || call.pipe_input.is_some()
+        // This tuple and the other leaf inputs have no retained destination.
+        // The existing leaf-result contract keeps all possible input backing.
+        if call.pipe_input.is_some()
+            || !call.defaults.is_empty()
             || !(matches!(result.as_ref(), TypeTerm::Primitive(_)) || primitive_reference(result))
         {
             return Ok(false);
@@ -315,10 +316,37 @@ impl<'a, 'g> Build<'a, 'g> {
         else {
             return Ok(false);
         };
-        Ok(
-            matches!(&function.shape, DeclarationShape::Function { parameters, result: output }
-            if matches!(parameters.as_slice(), [formal] if formal.ty == *argument) && output == result),
-        )
+        let DeclarationShape::Function {
+            parameters,
+            result: output,
+        } = &function.shape
+        else {
+            return Ok(false);
+        };
+        if parameters.len() != call.arguments.len()
+            || output != result
+            || !parameters
+                .get(position)
+                .is_some_and(|formal| formal.ty == *argument)
+        {
+            return Ok(false);
+        }
+        self.budget.step(parameters.len())?;
+        for (index, (formal, &actual)) in parameters.iter().zip(&call.arguments).enumerate() {
+            if index == position {
+                continue;
+            }
+            if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
+                && !shared_primitive_reference(formal.ty.as_ref())
+            {
+                return Ok(false);
+            }
+            self.budget.step(2)?;
+            if self.value(actual)?.ty != formal.ty {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn direct_call_type(&self, ty: &TypeTerm<'g>) -> bool {
@@ -2114,7 +2142,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     return Err(Stop::Pending(arg));
                 }
             } else if !self.direct_call_type(&ty)
-                && !self.direct_tuple_borrow_argument(call, &ty, &facts.ty)?
+                && !self.direct_tuple_borrow_argument(call, position, &ty, &facts.ty)?
             {
                 return Err(Stop::Pending(arg));
             }

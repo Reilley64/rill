@@ -770,11 +770,6 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 let child = &*parent;
                 let _ = child;
             }
-            function twoArgs(parent: &mut [bool, string], bit: bool): bool { return bit; }
-            function unsupportedSecondArg(seed: [bool, string]): bool {
-                let mut owner = seed;
-                return twoArgs(&mut owner, true);
-            }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -968,7 +963,6 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 ("unsupportedReborrowContents", "*parent"),
                 ("unsupportedSharedReborrow", "*parent"),
                 ("unsupportedAnnotatedPattern", "[[first, _], bit]"),
-                ("unsupportedSecondArg", "&mut owner"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
@@ -1049,8 +1043,6 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             function unsupportedOuterReference(value: &[&bool, [bool, bool]]): bool { return outerReference(value); }
             function innerReference(value: &[[&bool, string], bool]): bool { return false; }
             function unsupportedInnerReference(value: &[[&bool, string], bool]): bool { return innerReference(value); }
-            function extra(value: &[[bool, string], bool], bit: bool): bool { return bit; }
-            function unsupportedExtra(value: &[[bool, string], bool]): bool { return extra(value, true); }
             function unsupportedPipe(value: &[[bool, string], bool]): &string { return value |> nestedView; }
             function narrow(value: &[[bool, bool], bool]): bool { return true; }
             function wide(value: &[[bool, bool, bool, bool], bool]): bool { return true; }
@@ -1218,7 +1210,6 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
                 "unsupportedResult",
                 "unsupportedOuterReference",
                 "unsupportedInnerReference",
-                "unsupportedExtra",
                 "unsupportedPipe",
             ] {
                 let report = check(name);
@@ -1232,6 +1223,214 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
                 assert_eq!(
                     report.blocked_at().unwrap().span.bytes(),
                     site.as_bytes(),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
+    probe(
+        "tuples::tuple_calls_with_leaf_arguments_keep_all_possible_backing",
+        r#"
+            function choose(flag: bool, value: &[bool, string], fallback: &string): &string {
+                let [_, text] = value;
+                if (flag) { return text; }
+                return fallback;
+            }
+            function nestedChoice(value: &[[bool, string], bool], flag: bool, fallback: &string): &string {
+                let [[_, text], _] = value;
+                if (flag) { return text; }
+                return fallback;
+            }
+            function forward(value: &[[bool, string], bool], flag: bool, fallback: &string): &string {
+                return nestedChoice(value, flag, fallback);
+            }
+            function view(value: &mut [bool, string], fallback: &string): &string {
+                let [_, text] = &mut *value;
+                return &*text;
+            }
+            function reversed(fallback: &string, value: &mut [bool, string]): &string {
+                let [_, text] = &mut *value;
+                return &*text;
+            }
+            function scalar(flag: bool, value: &mut [bool, string], fallback: &string): bool {
+                let [bit, _] = &mut *value;
+                return bit;
+            }
+            function resumes(seed: [bool, string], fallback: string, flag: bool): bool {
+                let mut owner = seed;
+                let bit = scalar(flag, &mut owner, &fallback);
+                owner[1] = "staged";
+                let text = choose(flag, &owner, &fallback);
+                let _ = text;
+                owner[1] = "replaced";
+                dispose(fallback);
+                return bit;
+            }
+            function keepsTuple(seed: [bool, string], fallback: &string): void {
+                let mut owner = seed;
+                let text = choose(false, &owner, fallback);
+                owner[1] = "blocked";
+                let _ = text;
+            }
+            function keepsFallback(seed: [bool, string], fallback: string): void {
+                let mut owner = seed;
+                let text = view(&mut owner, &fallback);
+                dispose(fallback);
+                let _ = text;
+            }
+            function escapedFallback(value: &mut [bool, string]): &string {
+                let fallback = "local";
+                return view(value, &fallback);
+            }
+            function keepsExclusive(seed: [bool, string], fallback: &string): bool {
+                let mut owner = seed;
+                let text = view(&mut owner, fallback);
+                let bit = owner[0];
+                let _ = text;
+                return bit;
+            }
+            function laterShared(seed: [bool, string]): void {
+                let mut owner = seed;
+                let _ = view(&mut owner, &owner[1]);
+            }
+            function laterExclusive(seed: [bool, string]): void {
+                let mut owner = seed;
+                let _ = reversed(&owner[1], &mut owner);
+            }
+            function mutableExtra(value: &[bool, string], extra: &mut bool): bool { return false; }
+            function unsupportedMutable(value: &[bool, string], extra: &mut bool): bool { return mutableExtra(value, extra); }
+            function secondTuple(value: &[bool, string], other: &[bool, bool]): bool { return false; }
+            function unsupportedSecond(value: &[bool, string], other: &[bool, bool]): bool { return secondTuple(value, other); }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let forward = check("forward");
+            let mir = forward
+                .mir()
+                .unwrap_or_else(|| panic!("forward: {:?}", forward.completion()));
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. } | Operation::Call(_) | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Copy { from: value, into: Some(first) },
+                Operation::Copy { from: flag, into: Some(second) },
+                Operation::Copy { from: fallback, into: Some(third) },
+                Operation::Call(callee), Operation::Export(result),
+            ] if value.root.span.bytes() == b"value: &[[bool, string], bool]" && first.root.span.bytes() == b"value"
+                && flag.root.span.bytes() == b"flag: bool" && second.root.span.bytes() == b"flag"
+                && fallback.root.span.bytes() == b"fallback: &string" && third.root.span.bytes() == b"fallback"
+                && **callee == declaration("nestedChoice").id && result.root.span.bytes() == b"nestedChoice(value, flag, fallback)"),
+                "{route:?}"
+            );
+            let limits = AnalysisLimits {
+                max_work: forward.statistics().work,
+                max_entries: forward.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("forward", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("forward", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            let resumes = check("resumes");
+            let mir = resumes
+                .mir()
+                .expect("scalar and reference results release their loans at different points");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Borrow { .. }
+                    | Operation::Call(_)
+                    | Operation::Drop(_)
+                    | Operation::Install { .. }
+                    | Operation::Dispose { .. } => true,
+                    Operation::Copy { from, .. } => from.root.span.bytes() == b"text",
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source: owner, exclusive: true, .. },
+                Operation::Borrow { source: first_leaf, exclusive: false, .. },
+                Operation::Call(scalar), Operation::Drop(first), Operation::Install { target: staged, .. },
+                Operation::Borrow { source: same_owner, exclusive: false, .. },
+                Operation::Borrow { source: second_leaf, exclusive: false, .. },
+                Operation::Call(choose), Operation::Copy { from: text, .. },
+                Operation::Drop(second), Operation::Install { target: replaced, .. },
+                Operation::Dispose { operand, .. },
+            ] if owner.projection.is_none() && same_owner.projection.is_none() && owner.root.node == same_owner.root.node
+                && [first, staged, second, replaced].iter().all(|place| place.root.node == owner.root.node && place.tuple_element() == Some(1))
+                && first_leaf.root.span.bytes() == b"fallback: string" && first_leaf.root.node == second_leaf.root.node
+                && first_leaf.root.node == operand.root.node && text.root.span.bytes() == b"text"
+                && **scalar == declaration("scalar").id && **choose == declaration("choose").id),
+                "{route:?}"
+            );
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(first), Obligation::Drop(second), Obligation::Drop(last)]
+                if first.root.node == second.root.node && second.root.node == last.root.node && first.root.span.bytes() == b"owner"
+                    && [first, second, last].iter().all(|place| place.tuple_element() == Some(1)))
+            );
+            for (name, code, site, related) in [
+                ("keepsTuple", "R0203", "owner[1] = \"blocked\";", "&owner"),
+                ("keepsFallback", "R0203", "dispose(fallback)", "&fallback"),
+                (
+                    "escapedFallback",
+                    "R0202",
+                    "return view(value, &fallback);",
+                    "fallback",
+                ),
+                ("keepsExclusive", "R0201", "owner[0]", "&mut owner"),
+                ("laterShared", "R0201", "&owner[1]", "&mut owner"),
+                ("laterExclusive", "R0201", "&mut owner", "&owner[1]"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            for name in ["unsupportedMutable", "unsupportedSecond"] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    b"value",
                     "{name}"
                 );
             }
