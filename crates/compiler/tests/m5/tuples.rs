@@ -761,11 +761,6 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 let child = &mut *parent;
                 let _ = child;
             }
-            function unsupportedAnnotatedPattern(parent: &mut [[bool, string], bool]): bool {
-                let [[first, _], bit]: &mut [[bool, string], bool] = &mut *parent;
-                let _ = first;
-                return bit;
-            }
             function unsupportedSharedReborrow(parent: &mut [bool, string]): void {
                 let child = &*parent;
                 let _ = child;
@@ -962,7 +957,6 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 ("unsupportedIndirect", "**parent"),
                 ("unsupportedReborrowContents", "*parent"),
                 ("unsupportedSharedReborrow", "*parent"),
-                ("unsupportedAnnotatedPattern", "[[first, _], bit]"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");

@@ -161,7 +161,7 @@ fn product_member<'g>(
         [
             PatternProjection::TupleElement(outer),
             PatternProjection::TupleElement(inner),
-        ] if access == Access::ReadOnly => Some(ProductMember::NestedTupleElement {
+        ] if access != Access::Owned => Some(ProductMember::NestedTupleElement {
             outer: *outer,
             inner: *inner,
         }),
@@ -180,6 +180,7 @@ enum Binding<'a, 'g> {
         shape: NodeId,
         facts: &'a PatternFacts<'g>,
         access: Access,
+        nested_reborrow: Option<&'a PlacePath<'g>>,
     },
 }
 
@@ -916,9 +917,12 @@ impl<'a, 'g> Build<'a, 'g> {
                         };
                         self.stage_value(value, into, tail, temporary, depth + 1)
                     }
-                    Binding::IrrefutableProduct { facts, access, .. } => {
-                        self.bind_product(node, facts, access, next, depth + 1)
-                    }
+                    Binding::IrrefutableProduct {
+                        facts,
+                        access,
+                        nested_reborrow,
+                        ..
+                    } => self.bind_product(node, facts, access, nested_reborrow, next, depth + 1),
                 }
             }
             NodeKind::ExpressionStatement => {
@@ -1127,6 +1131,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if facts.access != Access::Owned || !facts.coverage.exhaustive() {
                     return Err(Stop::Pending(pattern));
                 }
+                let mut nested_reborrow = None;
                 let access = match (kind, facts.ty.as_ref()) {
                     (NodeKind::BracketPattern, TypeTerm::Tuple(_))
                     | (NodeKind::RecordPattern, TypeTerm::Nominal { .. }) => Access::Owned,
@@ -1172,7 +1177,8 @@ impl<'a, 'g> Build<'a, 'g> {
                             referent,
                         },
                     ) if let TypeTerm::Tuple(elements) = referent.as_ref() => {
-                        self.check_exclusive_pattern_source(pattern, facts, elements)?;
+                        nested_reborrow =
+                            self.check_exclusive_pattern_source(pattern, facts, elements)?;
                         Access::Writable
                     }
                     _ => return Err(Stop::Pending(pattern)),
@@ -1181,6 +1187,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     shape,
                     facts,
                     access,
+                    nested_reborrow,
                 })
             }
             _ => {
@@ -1203,8 +1210,7 @@ impl<'a, 'g> Build<'a, 'g> {
         operand: NodeId,
         result: &Type<'g>,
     ) -> ResultOf<Option<&'a PlacePath<'g>>> {
-        let syntax = &self.module.syntax.nodes[operand];
-        if syntax.kind != NodeKind::Prefix("*") {
+        if self.module.syntax.nodes[operand].kind != NodeKind::Prefix("*") {
             return Ok(None);
         }
         let TypeTerm::Reference {
@@ -1217,14 +1223,24 @@ impl<'a, 'g> Build<'a, 'g> {
         let TypeTerm::Tuple(elements) = referent.as_ref() else {
             return Ok(None);
         };
-        let name = self.ungroup(syntax.children[0])?;
-        if self.module.syntax.nodes[name].kind != NodeKind::ValueReference
-            || !self.primitive_tuple_elements(elements)?
-        {
+        if !self.primitive_tuple_elements(elements)? {
             return Ok(None);
         }
-        // Compare only after proving the result has no nested members.
-        self.budget.step(1 + elements.len())?;
+        self.named_exclusive_tuple_parent(operand, result, elements.len())
+    }
+
+    fn named_exclusive_tuple_parent(
+        &mut self,
+        operand: NodeId,
+        result: &Type<'g>,
+        width: usize,
+    ) -> ResultOf<Option<&'a PlacePath<'g>>> {
+        let name = self.ungroup(self.module.syntax.nodes[operand].children[0])?;
+        if self.module.syntax.nodes[name].kind != NodeKind::ValueReference {
+            return Ok(None);
+        }
+        // Compare only after the caller has proved and metered the tuple shape.
+        self.budget.step(1 + width)?;
         let input = self.value(name)?;
         if input.access != Access::Owned || *result != input.ty {
             return Ok(None);
@@ -1242,7 +1258,7 @@ impl<'a, 'g> Build<'a, 'g> {
         pattern: NodeId,
         facts: &PatternFacts<'g>,
         elements: &[Type<'g>],
-    ) -> ResultOf<()> {
+    ) -> ResultOf<Option<&'a PlacePath<'g>>> {
         let source = self.ungroup(facts.source.node)?;
         let syntax = &self.module.syntax.nodes[source];
         if syntax.kind != NodeKind::Prefix("&mut") {
@@ -1250,12 +1266,28 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let operand = self.ungroup(syntax.children[0])?;
         self.budget.step(facts.binders.len())?;
-        if self.module.syntax.nodes[operand].kind == NodeKind::Prefix("*") {
-            if self
-                .exclusive_tuple_reborrow_path(operand, &facts.ty)?
-                .is_none()
-            {
-                return Err(Stop::Pending(pattern));
+        let nested_reborrow = if self.module.syntax.nodes[operand].kind == NodeKind::Prefix("*") {
+            if self.primitive_tuple_elements(elements)? {
+                self.named_exclusive_tuple_parent(operand, &facts.ty, elements.len())?
+                    .ok_or(Stop::Pending(pattern))?;
+                None
+            } else {
+                let mut width = elements.len();
+                self.budget.step(width)?;
+                for element in elements {
+                    match element.as_ref() {
+                        TypeTerm::Primitive(_) => {}
+                        TypeTerm::Tuple(inner) if self.primitive_tuple_elements(inner)? => {
+                            width = width.checked_add(inner.len()).ok_or(Stop::Limit)?;
+                        }
+                        _ => return Err(Stop::Pending(pattern)),
+                    }
+                }
+                Some(
+                    self.named_exclusive_tuple_parent(operand, &facts.ty, width)?
+                        .filter(|path| path.root.kind == DeclarationKind::Parameter)
+                        .ok_or(Stop::Pending(pattern))?,
+                )
             }
         } else {
             self.budget.step(1)?;
@@ -1268,7 +1300,8 @@ impl<'a, 'g> Build<'a, 'g> {
             {
                 return Err(Stop::Pending(pattern));
             }
-        }
+            None
+        };
         let supported = match facts.binders.as_slice() {
             [binder] => matches!(
                 borrowed_binding_mode(Access::Writable, binder),
@@ -1282,7 +1315,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if !supported {
             return Err(Stop::Pending(pattern));
         }
-        Ok(())
+        Ok(nested_reborrow)
     }
 
     fn declare_binding(&mut self, node: NodeId, locals: &mut Vec<Slot>) -> ResultOf<()> {
@@ -1328,9 +1361,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     };
                     let name = self.ungroup(component)?;
                     let syntax = &self.module.syntax.nodes[name];
-                    if !record
-                        && access == Access::ReadOnly
-                        && syntax.kind == NodeKind::BracketPattern
+                    if !record && access != Access::Owned && syntax.kind == NodeKind::BracketPattern
                     {
                         for (inner, &child) in syntax.children.iter().enumerate() {
                             self.budget.step(1)?;
@@ -1394,6 +1425,7 @@ impl<'a, 'g> Build<'a, 'g> {
         node: NodeId,
         facts: &PatternFacts<'g>,
         access: Access,
+        nested_reborrow: Option<&PlacePath<'g>>,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
@@ -1475,7 +1507,31 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
-        self.expression(source, Some(scratch), tail, depth)
+        if let Some(path) = nested_reborrow {
+            // Only this pattern route has proved a nested parent; a general
+            // expression still uses the flat exclusive reborrow check.
+            let mut at = source;
+            let mut level = depth;
+            while self.module.syntax.nodes[at].kind == NodeKind::Group {
+                self.depth(level)?;
+                at = self.module.syntax.nodes[at].children[0];
+                level += 1;
+            }
+            self.depth(level)?;
+            let parent = self.resolve_place(at, path)?;
+            self.emit(
+                at,
+                Action::Reborrow {
+                    parent,
+                    into: scratch,
+                    exclusive: true,
+                    suspends: true,
+                },
+                Edges::Next(tail),
+            )
+        } else {
+            self.expression(source, Some(scratch), tail, depth)
+        }
     }
 
     fn propagates_directly(&mut self, node: NodeId) -> ResultOf<bool> {

@@ -1507,6 +1507,242 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
 }
 
 #[test]
+fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
+    use compiler::analysis::ownership::{
+        BorrowedMemberBinding::{CopyScalar, ExclusiveView},
+        Projection,
+    };
+
+    probe(
+        "patterns::nested_exclusive_patterns_keep_the_incoming_parent_suspended",
+        r#"
+            function touch(view: &mut string): void {}
+            function incoming(parent: &mut [bool, [i32, string]]): &mut string {
+                let [_, ([_, view])] = &mut *(parent);
+                return view;
+            }
+            function resumes(parent: &mut [[bool, string], i32]): bool {
+                let [[_, view], _] = &mut *parent;
+                touch(view);
+                let [[bit, _], number]: &mut [[bool, string], i32] = &mut *(parent);
+                let moved = parent;
+                return bit;
+            }
+            function allWildcards(parent: &mut [[bool, string], i32]): void {
+                let [[_, _], _] = (&mut *(parent));
+                let moved = parent;
+            }
+            function blocked(parent: &mut [[bool, string], i32]): bool {
+                let [[_, view], _] = &mut *parent;
+                let viewMoved = view;
+                let [[bit, _], _] = &mut *(parent);
+                touch(viewMoved);
+                return bit;
+            }
+            function blockedMove(parent: &mut [[bool, string], i32]): void {
+                let [[_, view], _] = &mut *parent;
+                let moved = parent;
+                touch(view);
+            }
+            function movedParent(parent: &mut [[bool, string], i32]): void {
+                let moved = parent;
+                let [[_, view], _] = &mut *parent;
+                touch(view);
+            }
+            function bare(parent: &mut [[bool, string], i32]): &mut string {
+                let [[_, view], _] = parent;
+                return view;
+            }
+            function expressionOnly(parent: &mut [[bool, string], i32]): void {
+                let alias = &mut *parent;
+            }
+            function localHolder(parent: &mut [[bool, string], i32]): &mut string {
+                let alias = parent;
+                let [[_, view], _] = &mut *alias;
+                return view;
+            }
+            function referenceLeaf(parent: &mut [[bool, &string], i32]): bool {
+                let [[bit, _], _] = &mut *parent;
+                return bit;
+            }
+            function wholeMember(parent: &mut [[bool, string], i32]): void {
+                let [member, _] = &mut *parent;
+            }
+            function deeper(parent: &mut [[[bool, string]], i32]): void {
+                let [[[_, view]], _] = &mut *parent;
+                touch(view);
+            }
+            function multiple(parent: &mut [[bool, string], i32]): bool {
+                let [[bit, view], _] = &mut *parent;
+                touch(view);
+                return bit;
+            }
+        "#,
+        |_, module, receipt| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let incoming = lower("incoming", default);
+            let mir = incoming
+                .mir()
+                .unwrap_or_else(|| panic!("nested incoming: {:?}", incoming.completion()));
+            let ops = linear(mir, mir.entry);
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = ops
+                .iter()
+                .copied()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::BindBorrowedMember { .. }
+                            | Operation::Move { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            let [
+                Operation::Reborrow {
+                    parent,
+                    holder,
+                    exclusive: true,
+                },
+                Operation::BindBorrowedMember {
+                    descriptor,
+                    projection: Projection::NestedTupleElement { outer: 1, inner: 1 },
+                    into: view,
+                    binding: ExclusiveView,
+                },
+                Operation::Move {
+                    from,
+                    into: Some(staged),
+                },
+                Operation::Export(output),
+            ] = route.as_slice()
+            else {
+                panic!("unexpected nested return route")
+            };
+            assert_eq!(
+                parent.root.span.bytes(),
+                b"parent: &mut [bool, [i32, string]]"
+            );
+            assert_eq!(descriptor.root.node, holder.root.node);
+            assert_eq!(view.root.node, from.root.node);
+            assert_eq!(staged.root.node, output.root.node);
+            assert!(!ops.iter().any(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::EndStorage(place) if place.root.node == holder.root.node)))));
+            let resumes = lower("resumes", default);
+            let mir = resumes
+                .mir()
+                .expect("the same incoming parent resumes after the leaf's last use");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::BindBorrowedMember { .. }
+                            | Operation::Call(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Reborrow { parent, holder, exclusive: true },
+                Operation::BindBorrowedMember { descriptor: view_stage, projection: Projection::NestedTupleElement { outer: 0, inner: 1 }, into: view, binding: ExclusiveView },
+                Operation::Reborrow { parent: passed, exclusive: true, .. },
+                Operation::Call(callee),
+                Operation::Reborrow { parent: resumed, holder: scalar_stage, exclusive: true },
+                Operation::BindBorrowedMember { descriptor: scalar_a, projection: Projection::NestedTupleElement { outer: 0, inner: 0 }, binding: CopyScalar, .. },
+                Operation::BindBorrowedMember { descriptor: scalar_b, projection: Projection::TupleElement(1), binding: CopyScalar, .. },
+            ] if holder.root.node == view_stage.root.node && passed.root.node == view.root.node && *callee == id("touch")
+                && parent.root.node == resumed.root.node && scalar_stage.root.node == scalar_a.root.node && scalar_stage.root.node == scalar_b.root.node));
+            let wildcards = lower("allWildcards", default);
+            let mir = wildcards
+                .mir()
+                .expect("wildcards end the stage without binding any leaf");
+            let ops = linear(mir, mir.entry);
+            assert!(path_drops(mir, mir.entry).is_empty());
+            assert!(
+                !ops.iter()
+                    .any(|op| matches!(op, Operation::BindBorrowedMember { .. }))
+            );
+            let route: Vec<_> = ops
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Reborrow { .. } | Operation::Move { .. }))
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::Reborrow { parent, holder, exclusive: true }, Operation::Move { from, .. }]
+                if parent.root.node == from.root.node && holder.root.span.bytes() == b"(&mut *(parent))")
+            );
+            for (name, code, site, subject) in [
+                (
+                    "blocked",
+                    "R0201",
+                    b"&mut *(parent)".as_slice(),
+                    b"&mut *parent".as_slice(),
+                ),
+                ("blockedMove", "R0203", b"parent", b"&mut *parent"),
+                ("movedParent", "R0200", b"&mut *parent", b"parent"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), subject);
+            }
+            for (name, site) in [
+                ("bare", b"[[_, view], _]".as_slice()),
+                ("expressionOnly", b"*parent"),
+                ("localHolder", b"[[_, view], _]"),
+                ("referenceLeaf", b"[[bit, _], _]"),
+                ("wholeMember", b"[member, _]"),
+                ("deeper", b"[[[_, view]], _]"),
+                ("multiple", b"[[bit, view], _]"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site, "{name}");
+            }
+            let exact = AnalysisLimits {
+                max_work: resumes.statistics().work,
+                max_entries: resumes.statistics().entries,
+                max_depth: resumes.statistics().max_depth,
+            };
+            assert!(lower("resumes", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let report = lower("resumes", short);
+                assert_eq!(report.completion(), Completion::ResourceLimit);
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
     use compiler::analysis::ownership::{
         BorrowedMemberBinding::{CopyScalar, SharedView},
@@ -1556,10 +1792,6 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
             function nestedReference(value: &[[&bool, bool], bool]): &bool {
                 let [[saved, _], _] = value;
                 return saved;
-            }
-            function exclusive(value: &mut [[bool, string], bool]): &mut string {
-                let [[_, text], _] = &mut *value;
-                return text;
             }
         "#,
         |_, module, receipt| {
@@ -1716,7 +1948,6 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
                 ("deeper", "[[[bit, _], _], _]"),
                 ("nestedReference", "[[saved, _], _]"),
                 ("mixedReference", "[saved, [bit, _]]"),
-                ("exclusive", "[[_, text], _]"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
