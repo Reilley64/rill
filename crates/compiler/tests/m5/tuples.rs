@@ -1716,6 +1716,40 @@ fn nested_tuple_calls_keep_each_staged_parent_restriction() {
                 let local = first;
                 return second |> view(local, _);
             }
+            function secondAlias(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): &string {
+                let local = second;
+                return view(first, local);
+            }
+            function mixedLast(other: &[bool, string], first: &mut [[bool, string], i32]): &string {
+                return mixed(first, other);
+            }
+            function scalarLast(other: &[bool, string], first: &mut [[bool, string], i32]): bool {
+                let [[bit, _], _] = &mut *first;
+                return bit;
+            }
+            function expiresOther(first: &mut [[bool, string], i32], fallback: &string): void {
+                let mut output = fallback;
+                { let owner: [bool, string] = [true, "local"]; output = first |> mixedLast(&owner, _); }
+                touch(output);
+            }
+            function releasesOther(first: &mut [[bool, string], i32]): bool {
+                let mut bit = false;
+                { let owner: [bool, string] = [true, "local"]; bit = first |> scalarLast(&owner, _); }
+                let moved = first;
+                return bit;
+            }
+            function asNN(first: &mut [[bool], i32], second: &mut [[bool], i32]): bool { return true; }
+            function asWN(first: &mut [[bool, i32, bool], i32], second: &mut [[bool], i32]): bool { return true; }
+            function asNW(first: &mut [[bool], i32], second: &mut [[bool, i32, bool], i32]): bool { return true; }
+            function asWW(first: &mut [[bool, i32, bool], i32], second: &mut [[bool, i32, bool], i32]): bool { return true; }
+            function directNN(first: &mut [[bool], i32], second: &mut [[bool], i32]): bool { return asNN(first, second); }
+            function directWN(first: &mut [[bool, i32, bool], i32], second: &mut [[bool], i32]): bool { return asWN(first, second); }
+            function directNW(first: &mut [[bool], i32], second: &mut [[bool, i32, bool], i32]): bool { return asNW(first, second); }
+            function directWW(first: &mut [[bool, i32, bool], i32], second: &mut [[bool, i32, bool], i32]): bool { return asWW(first, second); }
+            function pipeNN(first: &mut [[bool], i32], second: &mut [[bool], i32]): bool { return second |> asNN(first, _); }
+            function pipeWN(first: &mut [[bool, i32, bool], i32], second: &mut [[bool], i32]): bool { return second |> asWN(first, _); }
+            function pipeNW(first: &mut [[bool], i32], second: &mut [[bool, i32, bool], i32]): bool { return second |> asNW(first, _); }
+            function pipeWW(first: &mut [[bool, i32, bool], i32], second: &mut [[bool, i32, bool], i32]): bool { return second |> asWW(first, _); }
             function bad(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): &string {
                 let owner = "local";
                 return &owner;
@@ -1735,16 +1769,24 @@ fn nested_tuple_calls_keep_each_staged_parent_restriction() {
             };
             let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
             let default = AnalysisLimits::default();
+            let first_parameter = b"first: &mut [[bool, string], i32]".as_slice();
+            let second_parameter = b"second: &mut [[bool, string], i32]".as_slice();
             for (name, source, order) in [
                 (
                     "direct",
                     b"view((first), second)".as_slice(),
-                    [b"(first)".as_slice(), b"second"],
+                    [
+                        (first_parameter, b"(first)".as_slice()),
+                        (second_parameter, b"second"),
+                    ],
                 ),
                 (
                     "piped",
                     b"second |> view((first), _)",
-                    [b"second".as_slice(), b"(first)"],
+                    [
+                        (second_parameter, b"second".as_slice()),
+                        (first_parameter, b"(first)"),
+                    ],
                 ),
             ] {
                 let report = lower(name, default);
@@ -1784,22 +1826,13 @@ fn nested_tuple_calls_keep_each_staged_parent_restriction() {
                         .iter()
                         .all(|place| place.projection.is_none())
                 );
-                let parent_order: [&[u8]; 2] = if name == "direct" {
-                    [
-                        b"first: &mut [[bool, string], i32]",
-                        b"second: &mut [[bool, string], i32]",
-                    ]
-                } else {
-                    [
-                        b"second: &mut [[bool, string], i32]",
-                        b"first: &mut [[bool, string], i32]",
-                    ]
-                };
                 assert_eq!(
-                    [parent.root.span.bytes(), second.root.span.bytes()],
-                    parent_order
+                    [
+                        (parent.root.span.bytes(), holder.root.span.bytes()),
+                        (second.root.span.bytes(), other.root.span.bytes()),
+                    ],
+                    order
                 );
-                assert_eq!([holder.root.span.bytes(), other.root.span.bytes()], order);
                 assert_eq!(*callee, id("view"));
                 assert_eq!(output.root.span.bytes(), source);
             }
@@ -1864,6 +1897,7 @@ fn nested_tuple_calls_keep_each_staged_parent_restriction() {
                     b"owner",
                 ),
                 ("reachedBad", "R0202", b"return &owner;", b"owner"),
+                ("expiresOther", "R0203", b"{ let owner: [bool, string] = [true, \"local\"]; output = first |> mixedLast(&owner, _); }", b"&owner"),
             ] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
@@ -1874,15 +1908,45 @@ fn nested_tuple_calls_keep_each_staged_parent_restriction() {
                 assert_eq!(finding.code(), code);
                 assert_eq!(finding.site.span.bytes(), site);
                 assert_eq!(finding.related.span.bytes(), cause);
-                assert!(finding.related.span.start() < finding.site.span.start());
+                if name != "expiresOther" {
+                    assert!(finding.related.span.start() < finding.site.span.start());
+                }
             }
-            let alias = lower("alias", default);
-            assert_eq!(alias.completion(), Completion::Incomplete);
-            assert!(alias.mir().is_none());
-            assert_eq!(
-                alias.blocked_at().unwrap().span.bytes(),
-                b"second |> view(local, _)"
+            let scalar_other = lower("releasesOther", default);
+            let mir = scalar_other
+                .mir()
+                .expect("a scalar result releases the fresh flat borrow before its scope ends");
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(cleared)]
+                if cleared.root.span.bytes() == b"owner" && cleared.tuple_element() == Some(1))
             );
+            for (name, span) in [
+                ("alias", b"second |> view(local, _)".as_slice()),
+                ("secondAlias", b"first"),
+            ] {
+                let alias = lower(name, default);
+                assert_eq!(alias.completion(), Completion::Incomplete);
+                assert!(alias.mir().is_none());
+                assert_eq!(alias.blocked_at().unwrap().span.bytes(), span);
+            }
+            for cases in [
+                ["directNN", "directWN", "directNW", "directWW"],
+                ["pipeNN", "pipeWN", "pipeNW", "pipeWW"],
+            ] {
+                let [base, first, second, both] = cases.map(|name| {
+                    let report = lower(name, default);
+                    assert!(report.mir().is_some(), "{name}");
+                    report.statistics()
+                });
+                let first_delta = first.work - base.work;
+                let second_delta = second.work - base.work;
+                assert!(first_delta >= 4 && second_delta >= 4);
+                assert_eq!(both.work - base.work, first_delta + second_delta);
+                for wider in [first, second, both] {
+                    assert_eq!(wider.entries, base.entries);
+                    assert_eq!(wider.max_depth, base.max_depth);
+                }
+            }
             assert_exact_tuple_call_limits(&releases, |limits| lower("releases", limits));
         },
     );
