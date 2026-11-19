@@ -164,7 +164,7 @@ pub enum Operation<'g> {
         destination: RetainedPlace<'g>,
         input: Place<'g>,
     },
-    /// Select the success variant of an admitted postfix operand.
+    /// Select the success variant of a staged propagation or wrapping operand.
     TestVariant {
         operand: Place<'g>,
         success: &'g DeclarationId,
@@ -199,9 +199,11 @@ pub enum Operation<'g> {
         variant: &'g DeclarationId,
         wrapper: &'g DeclarationId,
     },
-    /// Consume the failed Result as the complete cause of a new Result.Err.
-    /// The staged outer payload is consumed; only the new wrapper gets the
-    /// original question-mark token's origin. The inner i32 uses scalar cleanup.
+    /// Consume the staged failed Result and outer payload into a new
+    /// `Result.Err` in `into`. The cause keeps the inner origin and chain;
+    /// only the outer wrapper gets `origin`. `cause_display` names the
+    /// retained renderer, not a call during wrapping. The inner i32 uses
+    /// scalar cleanup.
     WrapResultFailure {
         operand: Place<'g>,
         payload: Place<'g>,

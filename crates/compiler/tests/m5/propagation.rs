@@ -194,9 +194,27 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
         r#"
             function left(input: Result<bool, i32>): Result<bool, i32> { return input; }
             function outer(message: string): i32 { dispose(message); return 42i32; }
-            function paths(input: Result<bool, i32>, message: string, owner: string): Result<i32, i32> {
+            function paths(input: Result<bool, i32>, message: string, owner: string): Result<bool, i32> {
                 let bit = left(input) ? outer(message);
-                return Result.Ok(7i32);
+                return Result.Ok(bit);
+            }
+            function pair(message: string): [string, i32] { return [message, 9i32]; }
+            function projected(input: Result<i32, i32>, message: string, owner: string): Result<i32, i32> {
+                let number = input ? pair(message)[1];
+                return Result.Ok(number);
+            }
+            function badOuter(message: string): i32 {
+                dispose(message);
+                dispose(message);
+                return 5i32;
+            }
+            function reachesBad(input: Result<bool, i32>, message: string): Result<bool, i32> {
+                let bit = input ? badOuter(message);
+                return Result.Ok(bit);
+            }
+            function skipsBad(input: Result<bool, i32>.Ok, message: string): Result<bool, i32> {
+                let bit = input ? badOuter(message);
+                return Result.Ok(bit);
             }
             function knownOk(input: Result<bool, i32>.Ok, message: string): Result<i32, i32> {
                 dispose(message);
@@ -235,6 +253,12 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
                 |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
             let lower = |name| check(name, AnalysisLimits::default());
             let role = typed.result_role().unwrap();
+            let projected = lower("projected");
+            assert_eq!(
+                projected.completion(),
+                Completion::Checked,
+                "stage RHS temporary projection"
+            );
             let report = lower("paths");
             let mir = report.mir().expect("both infix routes lower");
             let prefix = straight_blocks(mir, mir.entry);
@@ -266,14 +290,24 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
                 op,
                 Operation::WrapResultFailure { .. } | Operation::ForwardResultFailure { .. }
             )));
-            let copies: Vec<_> = success
+            let success_transfers: Vec<_> = success
                 .iter()
                 .copied()
-                .filter(|op| matches!(op, Operation::TakeResultSuccess { .. }))
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::TakeResultSuccess { .. }
+                            | Operation::Copy { .. }
+                            | Operation::ConstructVariant { .. }
+                    )
+                })
                 .collect();
-            assert!(matches!(copies.as_slice(), [
-                Operation::TakeResultSuccess { operand, into: Some(bit) }
-            ] if operand.root.node == staged_left.root.node && bit.root.span.bytes() == b"bit"));
+            assert!(matches!(success_transfers.as_slice(), [
+                Operation::TakeResultSuccess { operand, into: Some(bit) },
+                Operation::Copy { from, into: Some(payload) },
+                Operation::ConstructVariant { payload: Some(used), .. },
+            ] if operand.root.node == staged_left.root.node && bit.root.span.bytes() == b"bit"
+                && from.root.node == bit.root.node && payload.root.node == used.root.node));
             assert_return(
                 &success,
                 &role.ok.id,
@@ -292,15 +326,22 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
                 .filter(|b| {
                     matches!(
                         b.operation,
-                        Operation::Call(_)
+                        Operation::Move { .. }
+                            | Operation::Call(_)
                             | Operation::WrapResultFailure { .. }
                             | Operation::Export(_)
                     )
                 })
                 .collect();
-            let [rhs, wrap, export] = route.as_slice() else {
-                panic!("expected one RHS call, then wrap and export");
+            let [transfer, rhs, wrap, export] = route.as_slice() else {
+                panic!("expected to move the RHS argument, call, wrap and export");
             };
+            assert!(
+                matches!(&transfer.operation, Operation::Move { from, into: Some(arg) }
+                if from.root.span.bytes() == b"message: string" && arg.root.span.bytes() == b"message"
+                    && arg.root.span.start() > rhs.site.span.start() && arg.root.span.end() < rhs.site.span.end())
+            );
+            assert!(matches!(export.operation, Operation::Export(_)));
             let Operation::WrapResultFailure {
                 operand,
                 payload,
@@ -313,9 +354,6 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
             else {
                 panic!("expected to wrap the staged failure")
             };
-            assert!(
-                matches!(&export.operation, Operation::Export(result) if result.root.node == into.root.node)
-            );
             assert_eq!(rhs.site.span.bytes(), b"outer(message)");
             assert_eq!(rhs.site.node, payload.root.node);
             assert_eq!(staged_left.root.node, operand.root.node);
@@ -360,9 +398,62 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
             )));
             assert_export(&failure_ops, &[b"owner: string"], |op, output| {
                 matches!(op,
-                    Operation::WrapResultFailure { into, .. } if into.root.node == output.root.node
+                    Operation::WrapResultFailure { into: emitted, .. }
+                        if emitted.root.node == into.root.node && into.root.node == output.root.node
                 )
             });
+
+            let projected = projected.mir().unwrap();
+            let (ok, err) = branch_targets(projected);
+            assert!(calls_on_path(projected, [true]).is_empty());
+            assert_eq!(calls_on_path(projected, [false]), [&declaration("pair").id]);
+            assert_return(
+                &linear(projected, ok),
+                &role.ok.id,
+                true,
+                &[b"owner: string", b"message: string"],
+            );
+            let mut stages = Vec::new();
+            for block in straight_blocks(projected, err) {
+                match &block.operation {
+                    Operation::Call(_) => stages.push(("call", block.site.node, None)),
+                    Operation::Copy {
+                        from,
+                        into: Some(staged),
+                    } if from.tuple_element() == Some(1) => {
+                        stages.push(("project", from.root.node, Some(staged.root.node)));
+                    }
+                    Operation::WrapResultFailure { payload, into, .. } => {
+                        stages.push(("wrap", payload.root.node, Some(into.root.node)));
+                    }
+                    Operation::Export(output) => stages.push(("export", output.root.node, None)),
+                    Operation::Cleanup(cleanup) => {
+                        for action in cleanup {
+                            if let Obligation::Drop(place) = action {
+                                let label = if place.tuple_element() == Some(0)
+                                    && place.root.span.bytes() == b"pair(message)"
+                                {
+                                    "temporary"
+                                } else if place.root.span.bytes() == b"owner: string" {
+                                    "owner"
+                                } else {
+                                    panic!("unexpected drop {place:?}");
+                                };
+                                stages.push((label, place.root.node, None));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            assert!(matches!(stages.as_slice(), [
+                ("call", call, None),
+                ("project", tuple, Some(staged)),
+                ("wrap", payload, Some(result)),
+                ("temporary", sibling, None),
+                ("export", exported, None),
+                ("owner", _, None),
+            ] if call == tuple && tuple == sibling && staged == payload && result == exported));
 
             let known = lower("knownOk");
             let mir = known.mir().expect("known success skips the moved RHS");
@@ -433,6 +524,27 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
                 );
                 assert!(finding.related.span.start() < finding.site.span.start());
             }
+            let bad = lower("reachesBad");
+            assert_eq!(bad.completion(), Completion::SourceRejected);
+            assert!(bad.mir().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected the reached RHS rejection")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(message)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(message)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let skipped = lower("skipsBad");
+            let mir = skipped
+                .mir()
+                .expect("an infeasible RHS does not reach its callee");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &role.ok.id,
+                true,
+                &[b"message: string"],
+            );
             let unsupported = lower("otherType");
             assert_eq!(unsupported.completion(), Completion::Incomplete);
             assert!(unsupported.mir().is_none());

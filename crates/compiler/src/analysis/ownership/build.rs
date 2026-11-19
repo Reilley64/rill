@@ -1021,6 +1021,13 @@ impl<'a, 'g> Build<'a, 'g> {
             .ok_or(Stop::Pending(node))?
             .span;
         let payload = self.slot(right, &data.payload)?;
+        let source = self.ungroup(right)?;
+        let temporary = self.temporary_projection(source, false)?;
+        let next = if let Some(temp) = temporary {
+            self.cleanup(node, &[temp.scratch], next)?
+        } else {
+            next
+        };
         let wrap = self.emit(
             node,
             Action::WrapResultFailure {
@@ -1034,7 +1041,7 @@ impl<'a, 'g> Build<'a, 'g> {
             },
             Edges::Next(next),
         )?;
-        self.expression(right, Some(payload), wrap, depth)
+        self.stage_value(right, payload, wrap, temporary, depth)
     }
 
     fn construct_variant(
