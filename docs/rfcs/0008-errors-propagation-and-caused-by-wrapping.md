@@ -283,6 +283,25 @@ The proposed property derivation for `Err<E>` must include E, SourceLocation and
 
 A candidate internal representation uses compiler-generated typed nodes owning payload, location and next link. Typed metadata supplies rendering and release operations without exposing type erasure publicly. This is an implementation sketch, not an accepted ABI or completed safety argument.
 
+#### Post-M6 `wrapErr` and postfix propagation
+
+The owner requested this change in [#78](https://github.com/Reilley64/rill/issues/78). M5 and M6 use the infix rules above. After M6, replace infix `?` with `std::result::wrapErr` and keep `?` for postfix propagation only.
+
+`wrapErr` takes an owned Result and an owned zero-argument factory. It returns `Result<T, D>` for an input `Result<T, E>` and a factory that returns `D`. On success, transfer the success payload without invoking the factory. On failure, invoke the factory once. Construct the outer `Err<D>` and retain the complete original `Err<E>` as its cause. Apply the existing display and retained-cause requirements. Do not change the original origin or cause chain.
+
+The call returns a Result. It does not itself return from the enclosing function. Use postfix `?` to propagate the new Result. Unlike `mapErr`, `wrapErr` inserts a new cause layer.
+
+Post-M6 example, not checked:
+
+```rill
+let config = readConfig(&path)
+  |> wrapErr(() => ConfigLoadFailed {})?;
+```
+
+The pipe passes the whole Result to `wrapErr`. Call arguments still evaluate before the call. The factory body runs only on failure, but closure formation can move or borrow captures on either path. A factory that does not run still needs normal cleanup. Use an explicit guard when construction must inspect the original error or acquire a capture only on failure.
+
+The ordinary origin rules apply to library construction. Before implementation, confirm the outer error's source attribution. Do not assume that an ordinary helper records the caller's location. The [post-M6 syntax note in RFC 0003](0003-expressions-bindings-and-control-flow.md#precedence-and-question-mark-parsing) records the parser change.
+
 ### Consuming combinators and borrowed queries
 
 | Operation | Signature and callback requirement |
@@ -383,7 +402,7 @@ The report can retain operand, result, origin, branch and evidence facts. It can
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Moves, source routes, callable captures, initialized cleanup and deferred cancellation. | Five policies are confirmed. Complete dependency/cleanup judgments remain incomplete. |
 | [Draft RFC 0009](0009-user-implementable-conversions.md) | Endpoint keys, selection, coherence and preserved selected E. | Proposed, not accepted. Complete pair/applicability/determination judgments remain incomplete. This RFC adds no automatic error adapter or universal conversion error. |
 | Runtime, concurrency and trusted admission | Actual sealed storage, source maps, callback dispatch, child/native completion and bounded-stack cleanup. | No complete RFC assigned. An internal typed-node sketch is not validated storage or target support. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with full LSP still missing. | Dependency explanations, source snapshots, code meanings and inert bounded observations. | Reporting is proposed, not accepted. Complete source/driver and observation procedures remain incomplete. [#42](https://github.com/Reilley64/rill/issues/42) retains complete editor delivery. |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md) | Dependency explanations, source snapshots, code meanings and inert bounded observations. | Reporting is proposed, not accepted. Complete source/driver and observation procedures remain incomplete. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -601,7 +620,7 @@ These gaps prevent the [canonical readiness review](README.md#canonical-reviewre
 
 Implement the parser/type/evidence rules, wrapper storage, source maps, combinators and renderer. Validate actual cleanup and target behavior rather than counting document examples as passes.
 
-This RFC adds no exceptions/catch, automatic propagation reports, public reflection/downcasts, universal error conversion or recoverable Rill allocator. It adds no new driver status or compiler/LSP report schema.
+This RFC adds no exceptions/catch, automatic propagation reports, public reflection/downcasts, universal error conversion or recoverable Rill allocator. It adds no new driver status or compiler report schema.
 
 ## Decision and change history
 

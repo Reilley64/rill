@@ -1,14 +1,16 @@
 # Rill examples and case notes
 
-[Rill sources and fixtures](../../prototypes/) are design examples, not an implemented compiler or standard library. Their case notes distinguish expected behavior from checks actually performed. Use the [RFC evidence labels](../rfcs/README.md#examples-and-evidence) when recording results.
+[Rill sources and fixtures](../../prototypes/) are maintained examples. Use the language rules and API names for the current milestone. When an approved change lands, update the affected examples. Keep old source and observed results at their recorded revisions. Use the [RFC evidence labels](../rfcs/README.md#examples-and-evidence) to distinguish expected behavior from verified behavior.
 
-The [consolidation record](consolidation.md) maps combined examples to their original purposes. Independent rejection snippets intentionally contain invalid code; they are not additions to an intended-valid program.
+The [consolidation record](consolidation.md) maps combined examples to their original purposes. Independent rejection snippets intentionally contain invalid code. Do not include them as entry files in the prototype build.
+
+[M6 #77](https://github.com/Reilley64/rill/issues/77) tracks the first [prototype build and test targets](../../tests/README.md#prototype-build-and-test-targets). Add intended-valid entry files as their required features become available. Record why a program is not yet in that set. Do not report it as passing.
 
 ## Core conversion interface migration
 
 The [2026-11-16 interface direction](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) consolidates core conversions under into/tryInto. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) records the current matrix and migration rules. Strict numeric parsing selects ParseError; strict UTF-8 decoding selects Utf8Error.
 
-Sources and authored reports retain old parseNumber/decodeUtf8, byte/List, view and code-point helper spellings as historical evidence. They require interface migration before current compiler acceptance can be claimed. Their recorded purposes and expected value behavior remain intact. No historical source or report is relabeled as executed or silently rewritten.
+Some maintained sources still use old `parseNumber`, `decodeUtf8` or other conversion helpers. Migrate them to the canonical interface before executable acceptance. Preserve the examples' intended behavior. Keep obsolete spellings in revision history and recorded reports, not in maintained examples. Changes to the sources do not change earlier verification results.
 
 ## Numbering
 

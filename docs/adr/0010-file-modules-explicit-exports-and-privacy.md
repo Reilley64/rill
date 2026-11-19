@@ -42,7 +42,7 @@ No exported runtime `let` bindings or implicit module initializers in v0. Named 
 
 ## Editor context is not a module-loading rule
 
-[ADR 0016](0016-structured-diagnostics-and-complete-openidea-lsp.md) / #24 retain entry-directory origins, std isolation and loaded-graph family collection for editor analysis. A workspace search index cannot add implementations to a program. Explicit entry/target/options contexts stay separate; named loose application files can be identified standalone entries, but installed toolchain source keeps its read-only std origin. Editor settings are not a new Rill manifest.
+[ADR 0016](0016-structured-diagnostics.md) / #24 retain entry-directory origins, std isolation and loaded-graph family collection for editor analysis. A workspace search index cannot add implementations to a program. Explicit entry/target/options contexts stay separate; named loose application files can be identified standalone entries, but installed toolchain source keeps its read-only std origin. Editor settings are not a new Rill manifest.
 
 Organize-imports preserves loaded modules, implementations, public bindings and expectations, not merely textual references. Navigation/rename respects canonical aliases, both namespaces, privacy and search bounds; viewing a private declaration is not permission to construct/use its representation. Full selected-client LSP delivery remains #42, not an implemented resolver or blanket visibility exception.
 

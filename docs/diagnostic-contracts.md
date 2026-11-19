@@ -1,6 +1,6 @@
 # Rill diagnostic and expectation-report contracts
 
-[#24](https://github.com/Reilley64/rill/issues/24) confirms this design; [ADR 0016](adr/0016-structured-diagnostics-and-complete-openidea-lsp.md) records it. These are approved design inputs, not implemented diagnostics, accepted feature RFCs or a checker proof. [LSP contracts](lsp-contracts.md) and [delivery gate #42](https://github.com/Reilley64/rill/issues/42) cover editor delivery; #28/#30 retain checking/backend validation. [Prototype 21](prototypes/21-diagnostics.md) is hand-authored, not emitted by a compiler.
+[#24](https://github.com/Reilley64/rill/issues/24) confirms this design; [ADR 0016](adr/0016-structured-diagnostics.md) records it. These are approved design inputs, not implemented diagnostics, accepted feature RFCs or a checker proof. [Language server contract](lsp-contracts.md) and [tooling issue #42](https://github.com/Reilley64/rill/issues/42) cover editor support; #28/#30 retain checking/backend validation. [Prototype 21](prototypes/21-diagnostics.md) is hand-authored, not emitted by a compiler.
 
 ## 1. Current source semantics
 
@@ -16,7 +16,7 @@ Driver/configuration failures need no fake file/line. The LSP uses supported ope
 
 ### Locations
 
-Canonical ranges are original-source UTF-8 byte offsets with exclusive ends and source snapshot identity. Human lines and Unicode-scalar columns are one-based. Terminal visual alignment separately expands tabs and accounts for displayed widths. LSP positions are zero-based in the negotiated encoding, UTF-16 for OpenIDEA v0.1.44. Preserve maps through CRLF and literal decoding. Do not split encoded scalars, wrap/clamp unrepresentable positions or mislabel bytes as editor columns; report a tooling limit if necessary. Invalid source encoding can retain a byte location while unavailable decoded coordinates are omitted.
+Canonical ranges are original-source UTF-8 byte offsets with exclusive ends and source snapshot identity. Human lines and Unicode-scalar columns are one-based. Terminal visual alignment separately expands tabs and accounts for displayed widths. The [language server contract](lsp-contracts.md#diagnostics-and-positions) owns projection to protocol positions. Preserve maps through CRLF and literal decoding. Do not split encoded scalars, wrap/clamp unrepresentable positions or mislabel bytes as editor columns; report a tooling limit if necessary. Invalid source encoding can retain a byte location while unavailable decoded coordinates are omitted.
 
 Human paths are context-relative where useful; machine locations are canonical encoded URIs with original source identity. This does not add public coordinate fields to #23's opaque runtime SourceLocation or parse `formatLocation` text into tool data.
 
@@ -88,4 +88,4 @@ Statuses are `captured`, `notEvaluated`, `unavailable`, `truncated`; distinguish
 
 ## 6. Evidence and handoff
 
-#24 approves this design only. #28 specifies exact grammar/inference/identity/cleanup/observation/lowering and adversarial tests. #30 validates pinned backends. #42 implements and validates the complete LSP matrix. Its completion is not a prerequisite for drafting RFCs. Current fixtures are independently checked text/data calculations, not emitted diagnostics, Rill execution, safety proofs or client acceptance.
+#24 approves this design only. #28 specifies exact grammar/inference/identity/cleanup/observation/lowering and adversarial tests. #30 validates pinned backends. #42 tracks standards-based editor support when the shared analysis can support it. Current fixtures are independently checked text/data calculations, not emitted diagnostics, Rill execution, safety proofs or client acceptance.

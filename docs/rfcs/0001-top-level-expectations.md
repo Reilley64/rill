@@ -250,7 +250,7 @@ The drafting agent hand-checked E1 through E8 on 2026-11-16 against the named so
 
 The ordinary checker applies in both modes. An invalid individual literal remains a static error in a skipped operand. A well-typed division by zero traps only if evaluated. Warnings cannot change these rules.
 
-Test-only imports can contribute implementations to canonical families. Import cleanup and executable-code elimination must preserve the checked graph. An editor cannot discard expectations or change family collection when removing an apparently unused import. This does not permit editor requests to execute tests or application code. #42 owns full LSP delivery.
+Test-only imports can contribute implementations to canonical families. Import cleanup and executable-code elimination must preserve the checked graph. Removing an apparently unused import must not discard expectations or change family collection. Source inspection does not execute tests or application code.
 
 Test mode is not a general sandbox or deterministic runtime. `std::env` must skip actual host argument and environment capture and supply empty inputs. Tests construct synthetic inputs with `fromParts`. Secure randomness retains real provider behavior. There is no automatic seed, provider replacement or guaranteed uniqueness or nonzero output. Standard-library companion RFCs must own these API rules.
 
@@ -347,7 +347,7 @@ These items prevent ReviewReady. A proposed change to a confirmed guarantee need
 
 ### Implementation/validation gates
 
-The parser, checker, graph, ownership model, runner, trusted observation and report emitter remain unimplemented. Their execution and target tests have not passed. #28 retains formalization and production acceptance. #42 retains full applicable LSP delivery. It is not a prerequisite for drafting.
+The parser, checker, graph, ownership model, runner, trusted observation and report emitter remain unimplemented. Their execution and target tests have not passed. #28 retains formalization and production acceptance.
 
 Historical #30 mechanism experiments are supporting evidence only. They do not implement expectations or certify backend support.
 

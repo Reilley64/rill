@@ -923,7 +923,7 @@ Runtime representations, capture storage, target limits and bounded cleanup rema
 - Model inline-parameter summaries and graph construction independently before implementing the compiler phase.
 - Check target representation limits separately from recursive layout.
 - Validate borrowed payloads and rebuilding against the ownership companion.
-- Check real diagnostics and editor type information without revealing private representations.
+- Check real diagnostics without revealing private representations.
 
 Native and WebAssembly acceptance need real compiler/runtime implementations and profile-specific tests. No target or client support follows from this draft.
 

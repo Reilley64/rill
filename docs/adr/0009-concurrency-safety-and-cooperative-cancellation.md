@@ -97,9 +97,9 @@ The explicitly confirmed raw write-half disposer attempts local send-direction r
 
 ## Diagnostic observation does not change ownership
 
-[ADR 0016](0016-structured-diagnostics-and-complete-openidea-lsp.md) / #24 require expectation snapshots to retain diagnostic data only: no additional user formatter/copy/iterator/disposer/comparison calls, owner moves, program loans, early unlock or lifetime extension. Resource/synchronization internals stay opaque; no hidden lock to print a value. The current #23 remaining-initialized-field cleanup and retained-cause evidence contracts still apply. False expectation cleanup is ordinary execution, not panic unwinding or a cancellation shortcut.
+[ADR 0016](0016-structured-diagnostics.md) / #24 require expectation snapshots to retain diagnostic data only: no additional user formatter/copy/iterator/disposer/comparison calls, owner moves, program loans, early unlock or lifetime extension. Resource/synchronization internals stay opaque; no hidden lock to print a value. The current #23 remaining-initialized-field cleanup and retained-cause evidence contracts still apply. False expectation cleanup is ordinary execution, not panic unwinding or a cancellation shortcut.
 
-Sequential tests do not isolate explicit background work, roll back filesystem effects or add a global join. Fatal execution may prevent any final report. Trusted snapshot/noninterference and client freshness/refactor safety are unvalidated implementation obligations, not proofs from the examples; #42 carries complete LSP delivery and #28/#30 retain checker/runtime/backend gates.
+Sequential tests do not isolate explicit background work, roll back filesystem effects or add a global join. Fatal execution may prevent any final report. Trusted snapshot/noninterference and client freshness/refactor safety are unvalidated implementation obligations, not proofs from the examples; #42 tracks language server support and #28/#30 retain checker/runtime/backend gates.
 
 ## Alternatives and validation
 

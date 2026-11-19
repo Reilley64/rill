@@ -95,6 +95,8 @@ Write `copy(&value)`, not the historical `copy(value)` convenience. Copy returns
 
 Retain the existing implicit-copy scalar/read-only-view/record/tuple classification. Extend it structurally to enum variants and parents: a parent needs every possible payload to qualify, not just its current runtime variant. Strings, owned collections, counted handles and exclusive references gain no implicit-copy exception. A static unit variant can qualify independently of a wider non-copying parent enum.
 
+M5 and M6 keep this classification. After M6, all duplication uses explicit `copy`. The [ownership amendment](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#post-m6-explicit-copying) distinguishes copying from a move or a read. The change does not grant copy permission to non-copyable resources.
+
 ### Remaining-field cleanup and protected operations
 
 This is a newly confirmed #23 rule, not a claim that #17 already specified it. A custom disposer performs extra cleanup; afterward the compiler disposes remaining initialized owned fields in normal established cleanup order. Moved/explicitly disposed fields are not disposed twice. The outer disposer is not recursively invoked on its own consumed parameter. An empty custom wrapper disposer cannot suppress a contained guard/owner/native obligation. Partial initialization, moves, branches and replacement slots must be tracked. Fatal panic still promises no cleanup; normal cancellation stays deferred through required disposal/installation/join work.
@@ -220,6 +222,8 @@ In std::result: `map<T,U,E,F>(Result<T,E>,F):Result<U,E>` requires callableOnce(
 
 `isOk(&Result<T,E>):bool`, `ok(&Result<T,E>):Option<&T>`, and `err(&Result<T,E>):Option<&Err<E>>` inspect without moving/cloning. Do not invent a borrowed Result rewrap that would require copying the unique cause. Canonical private implementations can preserve envelope fields; callers need no representation privileges. Generic requirements and output dependencies remain explicit before monomorphization.
 
+After M6, `std::result::wrapErr` replaces infix wrapping. See [RFC 0008](rfcs/0008-errors-propagation-and-caused-by-wrapping.md#post-m6-wraperr-and-postfix-propagation) for its owned input, error factory and retained cause rules. This does not change `mapErr`.
+
 ## 5. Shared ownership, mutexes and native retention
 
 ```rill
@@ -264,6 +268,16 @@ Schemas require sendable for each whole job result; their T/E components must su
 all chooses its first observed failure unchanged, cancels/joins others, or returns all successes in input order. race chooses the first completion even if R is Result and it is Err. any chooses the first success, canceling/joining remaining work; if all fail, it constructs a new AllFailed<E> aggregate preserving every original Err<E> in input order. AllFailed is an opaque named record; `failures<E>(&AllFailed<E>):&List<Err<E>>` inspects it, and its display implementation formats the preserved entries. Simultaneous ready outcomes have no specified winner. Losing results/closures are disposed under normal ownership. Fatal panic is not caught as Result.
 
 There is no hidden runtime dispatcher based on callback result types. The required v0 interface includes no variadic generics or dynamic-sized work-list helpers. Nested fixed groups and explicit worker queues remain possible. Cleanup/join latency is not bounded; timeout races are not hard deadlines. Worklists/explicit error data may grow; that is not hidden activation growth or a total-memory quota.
+
+### Post-M6 scoped routine names
+
+The owner approved these changes for [post-M6 #78](https://github.com/Reilley64/rill/issues/78). M5 and M6 retain the names and behavior above.
+
+Rename `all` to `tryJoin` without changing its contract. If all jobs succeed, return their values in input order. On failure, keep the first observed `Err` unchanged. Request cancellation of unfinished jobs and wait for their cleanup before returning.
+
+Remove `allSettled` without an alias. Use `join` to keep each job's `Result` unchanged, including results with different error types. An `Err` in one result does not cancel a sibling. Keep `race` and `any` unchanged. All scoped helpers still wait for child execution and cleanup before returning.
+
+See the [naming comparison](research/scoped-join-api-names.md) for the rationale and migration checks.
 
 ## 7. Channels, selection and timers
 

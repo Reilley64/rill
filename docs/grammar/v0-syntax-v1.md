@@ -257,7 +257,7 @@ The computed expression FIRST set matched the specified 16 token classes/spellin
 
 Before claiming implementation, test every commitment with valid/rejected neighbors and exact source spans. Include comments/newlines, nested generic closers, arrows, conditional branches, templates and pipe suffixes. Resource limits must not turn incomplete parsing into source success.
 
-No new parser-recovery, incremental AST or public compiler API contract is supplied. A later parser can retain partial/error nodes without accepting malformed source. Full LSP recovery/client workflows remain separate under #42.
+No new parser-recovery, incremental AST or public compiler API contract is supplied. A later parser can retain partial/error nodes without accepting malformed source. Editor protocol recovery is outside the grammar contract.
 
 The drafting agent applied unslop after the prose review. Sentence/paragraph and document-structure checks passed. Formal ASD-STE100 dictionary compliance remains unverified.
 
