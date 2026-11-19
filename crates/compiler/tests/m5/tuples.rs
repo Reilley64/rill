@@ -1052,6 +1052,10 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             function extra(value: &[[bool, string], bool], bit: bool): bool { return bit; }
             function unsupportedExtra(value: &[[bool, string], bool]): bool { return extra(value, true); }
             function unsupportedPipe(value: &[[bool, string], bool]): &string { return value |> nestedView; }
+            function narrow(value: &[[bool, bool], bool]): bool { return true; }
+            function wide(value: &[[bool, bool, bool, bool], bool]): bool { return true; }
+            function callNarrow(value: &[[bool, bool], bool]): bool { return narrow(value); }
+            function callWide(value: &[[bool, bool, bool, bool], bool]): bool { return wide(value); }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -1105,18 +1109,45 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
+            let narrow = check("callNarrow");
+            let wide = check("callWide");
+            assert!(narrow.mir().is_some() && wide.mir().is_some());
+            // Two more leaves must contribute to both the shape scan and type equality.
+            assert!(wide.statistics().work >= narrow.statistics().work + 4);
+
             let scoped = check("forwardsAlias");
             let mir = scoped
                 .mir()
                 .expect("the returned view does not borrow the local descriptor slot");
-            let ops = linear(mir, mir.entry);
-            let ended = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action|
+            let blocks = straight_blocks(mir, mir.entry);
+            let ended = blocks.iter().position(|block| matches!(&block.operation, Operation::Cleanup(actions) if actions.iter().any(|action|
                 matches!(action, Obligation::EndStorage(place) if place.root.span.bytes() == b"alias")))).unwrap();
-            assert!(ops[..ended].iter().any(|op| matches!(op, Operation::Call(callee) if **callee == declaration("nestedView").id)));
+            let transfer: Vec<_> = blocks[..ended]
+                .iter()
+                .copied()
+                .filter(|block| {
+                    matches!(
+                        block.operation,
+                        Operation::Call(_) | Operation::Install { .. }
+                    )
+                })
+                .collect();
+            let [called, stored] = transfer.as_slice() else {
+                panic!("expected call and installation before alias cleanup")
+            };
             assert!(
-                matches!(ops[ended + 1..].iter().copied().filter(|op| matches!(op, Operation::Copy { .. } | Operation::Export(_))).collect::<Vec<_>>().as_slice(), [
+                matches!(called.operation, Operation::Call(callee) if *callee == declaration("nestedView").id)
+            );
+            let Operation::Install { target, incoming } = stored.operation else {
+                panic!("expected installation of the view")
+            };
+            assert_eq!(incoming.root.node, called.site.node);
+            assert_eq!(target.root.span.bytes(), b"out");
+            assert!(
+                matches!(blocks[ended + 1..].iter().map(|block| &block.operation)
+                .filter(|op| matches!(op, Operation::Copy { .. } | Operation::Export(_))).collect::<Vec<_>>().as_slice(), [
                 Operation::Copy { from, into: Some(result) }, Operation::Export(out)
-            ] if from.root.span.bytes() == b"out" && result.root.node == out.root.node)
+            ] if from.root.node == target.root.node && result.root.node == out.root.node)
             );
             let resumes = check("resumes");
             let mir = resumes
