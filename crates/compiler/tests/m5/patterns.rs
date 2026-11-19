@@ -814,58 +814,129 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                 let route: Vec<_> = linear(mir, mir.entry)
                     .into_iter()
                     .filter(|op| match op {
-                        Operation::BindSharedMember { .. } | Operation::Export(_) => true,
+                        Operation::Borrow { .. }
+                        | Operation::BindSharedMember { .. }
+                        | Operation::Export(_) => true,
                         Operation::Move {
                             into: Some(into), ..
                         } => into.root.span.bytes() == b"moved",
-                        Operation::Copy { from, .. } => {
-                            matches!(from.root.span.bytes(), b"view" | b"saved")
-                        }
+                        Operation::Copy { from, .. } => matches!(
+                            from.root.span.bytes(),
+                            b"alias" | b"value: &Carrier" | b"view" | b"saved"
+                        ),
                         _ => false,
                     })
                     .collect();
+                let bind = route
+                    .iter()
+                    .position(|op| matches!(op, Operation::BindSharedMember { .. }))
+                    .unwrap();
+                let (stage, uses) = route.split_at(bind);
                 let [
                     Operation::BindSharedMember {
+                        descriptor,
                         projection,
                         into: bound,
                         binding: CopyReference,
-                        ..
                     },
                     remaining @ ..,
-                ] = route.as_slice()
+                ] = uses
                 else {
                     panic!("{name}: expected a stored reference copy")
                 };
-                if name == "tupleForward" {
-                    assert!(matches!(projection, Projection::TupleElement(0)));
-                } else {
-                    let saved = module
+                let owner = match (name, stage) {
+                    (
+                        "tupleForward",
+                        [
+                            Operation::Borrow {
+                                source,
+                                holder,
+                                exclusive: false,
+                            },
+                            Operation::Copy {
+                                from: alias,
+                                into: Some(staged),
+                            },
+                        ],
+                    ) => {
+                        assert!(matches!(projection, Projection::TupleElement(0)));
+                        assert_eq!(source.root.span.bytes(), b"pair");
+                        assert_eq!(alias.root.node, holder.root.node);
+                        assert_eq!(staged.root.node, descriptor.root.node);
+                        Some(source)
+                    }
+                    (
+                        "recordForward",
+                        [
+                            Operation::Borrow {
+                                source,
+                                holder,
+                                exclusive: false,
+                            },
+                        ],
+                    ) => {
+                        assert_eq!(source.root.span.bytes(), b"value");
+                        assert_eq!(holder.root.node, descriptor.root.node);
+                        Some(source)
+                    }
+                    (
+                        "throughParameter",
+                        [
+                            Operation::Copy {
+                                into: Some(staged), ..
+                            },
+                        ],
+                    ) => {
+                        assert_eq!(staged.root.node, descriptor.root.node);
+                        None
+                    }
+                    _ => panic!("{name}: expected the original descriptor stage"),
+                };
+                let field = |name| {
+                    module
                         .declarations
                         .iter()
                         .find(|d| {
                             d.id.kind == loader::DeclarationKind::Field
-                                && d.name.as_deref() == Some("saved")
+                                && d.name.as_deref() == Some(name)
                         })
-                        .unwrap();
-                    assert!(matches!(projection, Projection::Field(field) if field.id == saved.id));
+                        .unwrap()
+                };
+                if name != "tupleForward" {
+                    assert!(
+                        matches!(projection, Projection::Field(declaration) if declaration.id == field("saved").id)
+                    );
                 }
-                let rest = if name == "throughParameter" {
-                    assert!(path_drops(mir, mir.entry).is_empty());
-                    remaining
-                } else {
+                let rest = if let Some(owner) = owner {
                     let [
                         Operation::Move {
-                            into: Some(owner), ..
+                            from,
+                            into: Some(destination),
                         },
                         rest @ ..,
                     ] = remaining
                     else {
                         panic!("{name}: expected a move after binding")
                     };
-                    assert!(
-                        matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)] if place.root.node == owner.root.node)
-                    );
+                    assert_eq!(from.root.node, owner.root.node);
+                    let drops = path_drops(mir, mir.entry);
+                    let [Obligation::Drop(place)] = drops.as_slice() else {
+                        panic!("{name}: expected one cleanup")
+                    };
+                    assert_eq!(place.root.node, destination.root.node);
+                    if name == "tupleForward" {
+                        assert_eq!(place.tuple_element(), Some(1));
+                    } else {
+                        assert!(
+                            place
+                                .field()
+                                .is_some_and(|member| member.id == field("tag").id)
+                        );
+                    }
                     rest
+                } else {
+                    assert!(path_drops(mir, mir.entry).is_empty());
+                    remaining
                 };
                 assert!(
                     matches!(rest, [Operation::Copy { from, into: Some(result) }, Operation::Export(output)]

@@ -27,9 +27,12 @@ fn primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { referent, .. } if matches!(referent.as_ref(), TypeTerm::Primitive(_)))
 }
 
+fn shared_primitive_reference(ty: &TypeTerm<'_>) -> bool {
+    matches!(ty, TypeTerm::Reference { mutable: false, .. }) && primitive_reference(ty)
+}
+
 fn shared_pattern_member_type(ty: &TypeTerm<'_>) -> bool {
-    matches!(ty, TypeTerm::Primitive(_))
-        || matches!(ty, TypeTerm::Reference { mutable: false, .. }) && primitive_reference(ty)
+    matches!(ty, TypeTerm::Primitive(_)) || shared_primitive_reference(ty)
 }
 
 fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>)> {
@@ -352,9 +355,7 @@ impl<'a, 'g> Build<'a, 'g> {
         });
         for (projection, ty) in members {
             self.budget.step(1)?;
-            let reference_member = custom_disposer.is_none()
-                && primitive_reference(ty)
-                && matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, .. });
+            let reference_member = custom_disposer.is_none() && shared_primitive_reference(ty);
             let cleanup = if owns_text(ty) {
                 StorageCleanup::Drop
             } else if reference_member || matches!(ty.as_ref(), TypeTerm::Primitive(_)) {
@@ -1022,7 +1023,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     _ => return Err(Stop::Pending(site)),
                 };
                 let binding = if binder.ty == binder.source_type {
-                    if primitive_reference(binder.ty.as_ref()) {
+                    if shared_primitive_reference(binder.ty.as_ref()) {
                         SharedMemberBinding::CopyReference
                     } else {
                         SharedMemberBinding::CopyScalar
