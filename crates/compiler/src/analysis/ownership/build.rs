@@ -827,43 +827,22 @@ impl<'a, 'g> Build<'a, 'g> {
                         PropagationSite::StatementRoot,
                     );
                 }
-                self.budget.step(1)?;
-                if matches!(
-                    self.module.syntax.nodes[initializer].kind,
-                    NodeKind::Call | NodeKind::Pipe
-                ) {
-                    self.budget.step(1)?;
-                    if let Some(fact) = self.facts.get(&initializer).copied()
-                        && let NodeFactKind::Expression(facts) = &fact.kind
-                        && let Some(call) = facts.call.as_deref()
-                        && let Some(arguments) = self.propagating_arguments(
-                            initializer,
-                            PropagatingCallOutput::Value(&facts.ty),
-                            call,
-                            exits.returning,
-                            depth + 1,
-                        )?
-                    {
-                        let into = match binding {
-                            Binding::Discard => None,
-                            Binding::Name { declaration, .. } => Some(self.locals[declaration]),
-                            _ => return Err(Stop::Pending(node)),
-                        };
-                        if fact.flow.pending
-                            || fact.flow.normal != arguments.terminal_failure.is_none()
-                            || fact.flow.returns != arguments.can_return
-                        {
-                            return Err(Stop::Pending(initializer));
-                        }
-                        return self.call_with_propagating_arguments(
-                            initializer,
-                            call,
-                            into,
-                            next,
-                            depth + 1,
-                            arguments,
-                        );
-                    }
+                if let Some((call, arguments)) =
+                    self.scalar_call_with_propagation(initializer, exits.returning, depth + 1)?
+                {
+                    let into = match binding {
+                        Binding::Discard => None,
+                        Binding::Name { declaration, .. } => Some(self.locals[declaration]),
+                        _ => return Err(Stop::Pending(node)),
+                    };
+                    return self.call_with_propagating_arguments(
+                        initializer,
+                        call,
+                        into,
+                        next,
+                        depth + 1,
+                        arguments,
+                    );
                 }
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
@@ -893,6 +872,17 @@ impl<'a, 'g> Build<'a, 'g> {
                         exits.returning,
                         depth + 1,
                         PropagationSite::StatementRoot,
+                    )
+                } else if let Some((call, arguments)) =
+                    self.scalar_call_with_propagation(expression, exits.returning, depth + 1)?
+                {
+                    self.call_with_propagating_arguments(
+                        expression,
+                        call,
+                        None,
+                        next,
+                        depth + 1,
+                        arguments,
                     )
                 } else {
                     self.discard(node, value, next, depth + 1)
@@ -1693,6 +1683,48 @@ impl<'a, 'g> Build<'a, 'g> {
             }
         }
         Ok(false)
+    }
+
+    fn scalar_call_with_propagation(
+        &mut self,
+        node: NodeId,
+        returning: Pc,
+        depth: usize,
+    ) -> ResultOf<
+        Option<(
+            &'a crate::analysis::scalars::CallFacts<'g>,
+            PropagatingArguments,
+        )>,
+    > {
+        self.budget.step(1)?;
+        if !matches!(
+            self.module.syntax.nodes[node].kind,
+            NodeKind::Call | NodeKind::Pipe
+        ) {
+            return Ok(None);
+        }
+        self.budget.step(1)?;
+        if let Some(fact) = self.facts.get(&node).copied()
+            && let NodeFactKind::Expression(facts) = &fact.kind
+            && let Some(call) = facts.call.as_deref()
+            && let Some(arguments) = self.propagating_arguments(
+                node,
+                PropagatingCallOutput::Value(&facts.ty),
+                call,
+                returning,
+                depth,
+            )?
+        {
+            if fact.flow.pending
+                || fact.flow.normal != arguments.terminal_failure.is_none()
+                || fact.flow.returns != arguments.can_return
+            {
+                return Err(Stop::Pending(node));
+            }
+            Ok(Some((call, arguments)))
+        } else {
+            Ok(None)
+        }
     }
 
     fn propagating_arguments(
