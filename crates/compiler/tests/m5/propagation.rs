@@ -6317,6 +6317,17 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                 let bit = stage(prefix) |> boolStep(((input?) |> present?), true, _)?;
                 return Option.Some(bit);
             }
+            function borrowedStep(value: string, bit: &bool, prefix: string): Option<bool>.Some {
+                dispose(value); dispose(prefix); return Option<bool>.Some(*bit);
+            }
+            function borrowed(prefix: string, input: Option<string>, bit: &bool): Option<bool> {
+                let bit = stage(prefix) |> borrowedStep(((input?) |> present?), bit, _)?;
+                return Option.Some(bit);
+            }
+            function siblings(input: Option<string>, written: Option<string>, inside: string, gate: Option<bool>): Option<bool> {
+                let output = ((input?) |> present?) |> outer(((written?) |> finish(stage(inside), gate?, _)?), true, _)?;
+                return Option.Some(true);
+            }
             function skippedSibling(input: Option<string>.None, written: Option<string>): Option<bool> {
                 let _ = ((input?) |> present?) |> outer(((written?) |> present?), true, _)?;
                 return Option.Some(true);
@@ -6431,9 +6442,22 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                 &[b"stage(between)", b"((input?) |> present?)"],
             );
             assert_return(&linear(mir, outer_no), &option.none.id, false, &[]);
+            let success: Vec<_> = linear(mir, outer_yes)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::TakeOptionPayload { .. } => true,
+                    Operation::Cleanup(actions) => actions
+                        .iter()
+                        .any(|action| matches!(action, Obligation::Drop(_))),
+                    Operation::Call(callee) => *callee == id("after"),
+                    _ => false,
+                })
+                .collect();
             assert!(
-                matches!(path_drops(mir, outer_yes).as_slice(), [Obligation::Drop(result)]
-                if result.root.span.bytes() == b"((input?) |> present?) |> outer(stage(between), later?, _)?")
+                matches!(success.as_slice(), [Operation::TakeOptionPayload { into, .. }, Operation::Cleanup(actions), Operation::Call(_)]
+                if into.root.span.bytes() == b"((input?) |> present?) |> outer(stage(between), later?, _)?"
+                    && matches!(actions.as_slice(), [Obligation::Drop(place)] if place.root.node == into.root.node)),
+                "{success:?}"
             );
             assert_eq!(
                 calls_on_path(mir, [true, true, true]),
@@ -6479,6 +6503,47 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                 calls_on_path(mir, [true]),
                 [id("stage"), id("present"), id("boolStep")]
             );
+            let borrowed = lower("borrowed", default);
+            assert_eq!(borrowed.completion(), Completion::Incomplete);
+            assert!(borrowed.mir().is_none());
+            assert_eq!(
+                borrowed.blocked_at().unwrap().span.bytes(),
+                b"stage(prefix) |> borrowedStep(((input?) |> present?), bit, _)?"
+            );
+            let siblings = lower("siblings", default);
+            let mir = siblings
+                .mir()
+                .expect("both siblings can stage before a propagating step");
+            let (yes, _) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (written_yes, written_no) = variant_edges(mir, yes, &option.some.id, b"written");
+            let (gate_yes, gate_no) = variant_edges(mir, written_yes, &option.some.id, b"gate");
+            let (inner_yes, inner_no) = variant_edges(
+                mir,
+                gate_yes,
+                &option.some.id,
+                b"(written?) |> finish(stage(inside), gate?, _)?",
+            );
+            let (step_yes, step_no) = variant_edges(mir, inner_yes, &option.some.id, b"((input?) |> present?) |> outer(((written?) |> finish(stage(inside), gate?, _)?), true, _)?");
+            let staged = b"((input?) |> present?)";
+            assert_return(
+                &linear(mir, written_no),
+                &option.none.id,
+                false,
+                &[staged, b"inside: string"],
+            );
+            assert_return(
+                &linear(mir, gate_no),
+                &option.none.id,
+                false,
+                &[b"stage(inside)", b"(written?)", staged],
+            );
+            assert_return(&linear(mir, inner_no), &option.none.id, false, &[staged]);
+            assert_return(&linear(mir, step_no), &option.none.id, false, &[]);
+            assert_return(&linear(mir, step_yes), &option.some.id, true, &[b"output"]);
+            assert_eq!(
+                calls_on_path(mir, [true, true, true, true, true]),
+                [id("present"), id("stage"), id("finish"), id("outer")]
+            );
             let skipped = lower("skippedSibling", default);
             assert_eq!(skipped.completion(), Completion::Incomplete);
             assert!(skipped.mir().is_none());
@@ -6496,7 +6561,7 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
             let exact = AnalysisLimits {
                 max_work: written.statistics().work,
                 max_entries: written.statistics().entries,
-                ..default
+                max_depth: written.statistics().max_depth,
             };
             assert!(lower("written", exact).mir().is_some());
             for short in [
@@ -6513,6 +6578,15 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
+            let too_shallow = lower(
+                "written",
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            );
+            assert_eq!(too_shallow.completion(), Completion::ResourceLimit);
+            assert!(too_shallow.mir().is_none());
         },
     );
 }
