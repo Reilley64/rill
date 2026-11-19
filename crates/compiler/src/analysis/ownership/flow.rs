@@ -1218,7 +1218,7 @@ pub(super) fn run<'g>(
                     }
                 }
                 Action::CheckRetained => {
-                    let mut suspended_input = None;
+                    let mut unhandled_restriction = None;
                     for &contents in retained.values() {
                         budget.step(1)?;
                         let State::Initialized(value) = &state[contents] else {
@@ -1229,7 +1229,7 @@ pub(super) fn run<'g>(
                             budget.step(1)?;
                             if !loan.kind.borrows_local_storage() {
                                 if !retains_exclusive_bool {
-                                    suspended_input.get_or_insert(site);
+                                    unhandled_restriction.get_or_insert(site);
                                 }
                             } else {
                                 return Err(Stop::Rejected {
@@ -1243,7 +1243,7 @@ pub(super) fn run<'g>(
                     // A suspension restricts the local access holder. Its
                     // incoming backing can survive that holder and needs a
                     // supported outward contract. Local backing still rejects.
-                    if let Some(site) = suspended_input {
+                    if let Some(site) = unhandled_restriction {
                         return Err(Stop::Pending(site));
                     }
                     Operation::None

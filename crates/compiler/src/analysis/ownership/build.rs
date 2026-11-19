@@ -1411,9 +1411,20 @@ impl<'a, 'g> Build<'a, 'g> {
                 NodeKind::Prefix("&mut")
             );
             next = if existing_exclusive {
-                // The retained source and the destination may both be
-                // exclusive arguments. Reborrow each argument's own place.
-                let parent = self.place(root)?;
+                // Only reuse the checked descriptor for the destination.
+                // A retained exclusive source reborrows its own place.
+                let parent = match destination {
+                    Some(CallDestination {
+                        storage:
+                            CallStorage::ThroughParameter { descriptor, .. }
+                            | CallStorage::ThroughAlias { descriptor, .. },
+                        input,
+                    }) if input != slot => descriptor,
+                    _ => {
+                        self.budget.step(1)?;
+                        self.place(root)?
+                    }
+                };
                 self.emit(
                     arg,
                     Action::Reborrow {

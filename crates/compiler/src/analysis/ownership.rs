@@ -156,7 +156,8 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
-    /// A direct call may retain the shared input in the destination's contents.
+    /// A direct call may retain an input's backing in the destination's
+    /// contents, including the exclusive restriction on a shared view.
     CallRetaining {
         callee: &'g DeclarationId,
         destination: RetainedPlace<'g>,

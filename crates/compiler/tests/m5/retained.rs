@@ -538,6 +538,16 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 let pending = lower(name);
                 assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
                 assert!(pending.mir().is_none(), "{name}");
+                let store = if name == "broaderMoved" {
+                    "*access = &*holder;"
+                } else {
+                    "*slot = &*src;"
+                };
+                assert_eq!(
+                    std::str::from_utf8(pending.blocked_at().unwrap().span.bytes()),
+                    Ok(store),
+                    "{name}"
+                );
             }
 
             let limits = AnalysisLimits {
@@ -1395,6 +1405,7 @@ fn retained_shared_view_preserves_incoming_exclusive_access() {
         r#"
             function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
             function stash(slot: &mut &bool, src: &mut bool): void { *slot = &*src; }
+            function both(slot: &mut &bool, src: &mut bool): void { stash(slot, src); }
             function forward(src: &mut bool, slot: &mut &bool): void {
                 { let access = src; remember(slot, &*access); }
             }
@@ -1461,6 +1472,28 @@ fn retained_shared_view_preserves_incoming_exclusive_access() {
                 Operation::InstallThrough { descriptor, incoming },
             ] if parent.root.span.bytes() == b"src: &mut bool" && descriptor.root.span.bytes() == b"slot: &mut &bool"
                 && holder.root.node == incoming.root.node));
+            let both = lower("both");
+            let mir = both
+                .mir()
+                .expect("the source and destination can reborrow distinct arguments");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::CallRetaining { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Reborrow { parent: out, exclusive: true, .. },
+                Operation::Reborrow { parent: src, holder, exclusive: true },
+                Operation::CallRetaining {
+                    callee, destination: RetainedPlace::ThroughParameter(destination), input,
+                },
+            ] if out.root.span.bytes() == b"slot: &mut &bool" && src.root.span.bytes() == b"src: &mut bool"
+                && destination.root.node == out.root.node && holder.root.node == input.root.node
+                && *callee == &declaration("stash").id));
             let forward = lower("forward");
             let mir = forward
                 .mir()
