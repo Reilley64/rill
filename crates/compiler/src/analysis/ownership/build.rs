@@ -21,18 +21,26 @@ use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
-enum CallPropagation<'a, 'g> {
-    PipeCarrier(&'a Type<'g>),
-    Arguments {
-        arguments: PropagatingArguments,
-        returning: Pc,
-    },
-}
-
 struct PropagatingArguments {
     continuing: Vec<PropagatingArgument>,
     terminal_failure: Option<PropagatingArgument>,
     can_return: bool,
+    pipe_position: Option<usize>,
+    returning: Pc,
+}
+
+fn argument_staging_order(
+    arguments: &[NodeId],
+    pipe_position: Option<usize>,
+) -> impl DoubleEndedIterator<Item = (usize, NodeId)> + ExactSizeIterator + Clone {
+    (0..arguments.len()).map(move |position| {
+        let formal = match pipe_position {
+            Some(pipe) if position == 0 => pipe,
+            Some(pipe) if position <= pipe => position - 1,
+            _ => position,
+        };
+        (formal, arguments[formal])
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -802,12 +810,21 @@ impl<'a, 'g> Build<'a, 'g> {
                     return self.propagate(initializer, into, next, exits.returning, depth + 1);
                 }
                 self.budget.step(1)?;
-                if self.module.syntax.nodes[initializer].kind == NodeKind::Call {
+                if matches!(
+                    self.module.syntax.nodes[initializer].kind,
+                    NodeKind::Call | NodeKind::Pipe
+                ) {
                     self.budget.step(1)?;
                     if let Some(fact) = self.facts.get(&initializer).copied()
                         && let NodeFactKind::Expression(facts) = &fact.kind
-                        && let Some(arguments) =
-                            self.propagating_arguments(initializer, facts, depth + 1)?
+                        && let Some(call) = facts.call.as_deref()
+                        && let Some(arguments) = self.propagating_arguments(
+                            initializer,
+                            facts,
+                            call,
+                            exits.returning,
+                            depth + 1,
+                        )?
                     {
                         let into = match binding {
                             Binding::Discard => None,
@@ -820,16 +837,13 @@ impl<'a, 'g> Build<'a, 'g> {
                         {
                             return Err(Stop::Pending(initializer));
                         }
-                        return self.call(
+                        return self.call_with_propagating_arguments(
                             initializer,
-                            facts,
+                            call,
                             into,
                             next,
                             depth + 1,
-                            Some(CallPropagation::Arguments {
-                                arguments,
-                                returning: exits.returning,
-                            }),
+                            arguments,
                         );
                     }
                 }
@@ -1599,14 +1613,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if let Some(construction) = fresh {
             self.construct_scalar_error(node, facts, construction, scratch, split, depth)
         } else if piped {
-            self.call(
-                node,
-                facts,
-                Some(scratch),
-                split,
-                depth,
-                Some(CallPropagation::PipeCarrier(operand)),
-            )
+            self.call(node, facts, Some(scratch), split, depth, Some(operand))
         } else {
             self.expression(source, Some(scratch), split, depth)
         }
@@ -1635,18 +1642,34 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         node: NodeId,
         facts: &ExpressionFacts<'g>,
+        call: &crate::analysis::scalars::CallFacts<'g>,
+        returning: Pc,
         depth: usize,
     ) -> ResultOf<Option<PropagatingArguments>> {
-        let Some(call) = facts.call.as_deref() else {
-            return Ok(None);
+        let pipe_position = if let Some(input) = call.pipe_input {
+            let mut position = None;
+            for (i, &arg) in call.arguments.iter().enumerate() {
+                self.budget.step(1)?;
+                if arg == input {
+                    position = Some(i);
+                    break;
+                }
+            }
+            Some(position.ok_or(Stop::Pending(node))?)
+        } else {
+            None
         };
+        let order = || argument_staging_order(&call.arguments, pipe_position).enumerate();
         let mut roots = Vec::new();
         let mut terminal_root_index = None;
         let mut can_return = false;
-        for (position, &arg) in call.arguments.iter().enumerate() {
+        for (position, (_, arg)) in order() {
             self.budget.step(1)?;
             let root = self.ungroup(arg)?;
             if self.propagates_directly(root)? {
+                if position == 0 && pipe_position.is_some() {
+                    return Err(Stop::Pending(node));
+                }
                 self.budget.step(1)?;
                 let exit = match &self.value(root)?.data {
                     Some(DataExpression::Propagation(exit)) => exit.as_ref(),
@@ -1674,8 +1697,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if roots.is_empty() {
             return Ok(None);
         }
-        if call.pipe_input.is_some()
-            || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
+        if !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
         {
             return Err(Stop::Pending(node));
         }
@@ -1697,12 +1719,7 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(1)?;
             let terminal = roots[index];
             let mut skipped = roots[index + 1..].iter().peekable();
-            for (position, &arg) in call
-                .arguments
-                .iter()
-                .enumerate()
-                .skip(terminal.position + 1)
-            {
+            for (position, (_, arg)) in order().skip(terminal.position + 1) {
                 self.budget.step(1)?;
                 let admitted_root = skipped
                     .next_if(|argument| argument.position == position)
@@ -1748,6 +1765,8 @@ impl<'a, 'g> Build<'a, 'g> {
             continuing: roots,
             terminal_failure,
             can_return,
+            pipe_position,
+            returning,
         }))
     }
 
@@ -2486,6 +2505,91 @@ impl<'a, 'g> Build<'a, 'g> {
             .map(Some)
     }
 
+    fn call_with_propagating_arguments(
+        &mut self,
+        node: NodeId,
+        call: &crate::analysis::scalars::CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+        arguments: PropagatingArguments,
+    ) -> ResultOf<Pc> {
+        if Some(call.callee) == self.dispose
+            || into.is_some_and(|slot| self.slots[slot].contains_guard())
+        {
+            return Err(Stop::Pending(node));
+        }
+        let PropagatingArguments {
+            continuing,
+            terminal_failure,
+            pipe_position,
+            returning,
+            ..
+        } = arguments;
+        let reached = terminal_failure.map_or(call.arguments.len(), |arg| arg.position);
+        let order = argument_staging_order(&call.arguments, pipe_position).take(reached);
+        self.budget
+            .reserve(reached + usize::from(terminal_failure.is_none()))?;
+        let mut args = Vec::with_capacity(reached);
+        for (_, arg) in order.clone() {
+            self.budget.step(1)?;
+            let ty = &self.value(arg)?.ty;
+            args.push(self.slot(arg, ty)?);
+        }
+        self.budget.reserve(continuing.len())?;
+        let mut argument_exits = Vec::with_capacity(continuing.len());
+        for argument in continuing {
+            self.budget.step(1)?;
+            // These slots are still in evaluation order, not formal order.
+            let failure_cleanup = if argument.can_return {
+                self.cleanup(argument.root, &args[..argument.position], returning)?
+            } else {
+                returning
+            };
+            argument_exits.push((argument, failure_cleanup));
+        }
+        let (call_index, mut entry) = if let Some(argument) = terminal_failure {
+            let failure_cleanup = self.cleanup(argument.root, &args, returning)?;
+            (
+                None,
+                self.lower_propagating_argument(argument, None, next, failure_cleanup, depth)?,
+            )
+        } else {
+            if let Some(pipe) = pipe_position {
+                // Restore formal order after using evaluation order for cleanup.
+                self.budget.step(pipe + 1)?;
+                args[..=pipe].rotate_left(1);
+            }
+            let index = self.calls.len();
+            self.calls.push(Call {
+                callee: call.callee,
+                args: std::mem::take(&mut args),
+                into,
+                retains_result: false,
+                destination: None,
+            });
+            (
+                Some(index),
+                self.emit(node, Action::Call(index), Edges::Next(next))?,
+            )
+        };
+        for (position, (formal, arg)) in order.enumerate().rev() {
+            self.budget.step(1)?;
+            let slot = match call_index {
+                Some(index) => self.calls[index].args[formal],
+                None => args[position],
+            };
+            entry = if let Some(early) =
+                self.stage_propagating_argument(&mut argument_exits, position, slot, entry, depth)?
+            {
+                early
+            } else {
+                self.expression(arg, Some(slot), entry, depth + 1)?
+            };
+        }
+        Ok(entry)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -2493,7 +2597,7 @@ impl<'a, 'g> Build<'a, 'g> {
         into: Option<Slot>,
         next: Pc,
         depth: usize,
-        propagation: Option<CallPropagation<'_, 'g>>,
+        pipe_carrier: Option<&Type<'g>>,
     ) -> ResultOf<Pc> {
         let Some(call) = facts.call.as_deref() else {
             return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next);
@@ -2532,10 +2636,7 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             return self.emit(node, Action::Dispose(operand), Edges::Next(next));
         }
-        let result = match propagation {
-            Some(CallPropagation::PipeCarrier(carrier)) => carrier,
-            _ => &facts.ty,
-        };
+        let result = pipe_carrier.unwrap_or(&facts.ty);
         if !Self::direct_application_call(call)
             || !self.direct_call_type(result)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())
@@ -2544,7 +2645,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let piped = call.pipe_input.is_some();
         // A propagating pipe already passed its exact carrier signature check.
-        let ordinary_pipe = piped && propagation.is_none();
+        let ordinary_pipe = piped && pipe_carrier.is_none();
         let mut tuple_or_leaf_admitted =
             ordinary_pipe && self.admits_direct_tuple_or_leaf_call(call, result)?;
         let mut pipe_retention = None;
@@ -2585,31 +2686,14 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
             }
         }
-        let argument_flow = match propagation {
-            Some(CallPropagation::Arguments {
-                arguments,
-                returning,
-            }) => Some((arguments, returning)),
-            _ => None,
-        };
-        let failure_only = argument_flow.as_ref().and_then(|(arguments, returning)| {
-            arguments
-                .terminal_failure
-                .map(|argument| (argument, *returning))
-        });
-        let staged = match failure_only {
-            Some((argument, _)) => &call.arguments[..argument.position],
-            None => call.arguments.as_slice(),
-        };
-        self.budget
-            .reserve(staged.len() + usize::from(failure_only.is_none()))?;
-        let mut args = Vec::with_capacity(staged.len());
+        self.budget.reserve(call.arguments.len() + 1)?;
+        let mut args = Vec::with_capacity(call.arguments.len());
         let mut destination = None;
-        let mut pipe_argument = None;
-        for (position, &arg) in staged.iter().enumerate() {
+        let mut pipe_position = None;
+        for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
             if Some(arg) == call.pipe_input {
-                pipe_argument = Some((position, arg));
+                pipe_position = Some(position);
             }
             let ty = self.value(arg)?.ty.clone();
             if retained_bool_contents_type(&ty).is_some() {
@@ -2627,42 +2711,6 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(arg));
             }
             args.push(slot);
-        }
-        let mut argument_exits = Vec::new();
-        if let Some((arguments, returning)) = argument_flow {
-            self.budget.reserve(arguments.continuing.len())?;
-            argument_exits = Vec::with_capacity(arguments.continuing.len());
-            for argument in arguments.continuing {
-                self.budget.step(1)?;
-                // Each feasible failure owns the prefix reached at that argument.
-                let failure_cleanup = if argument.can_return {
-                    self.cleanup(argument.root, &args[..argument.position], returning)?
-                } else {
-                    returning
-                };
-                argument_exits.push((argument, failure_cleanup));
-            }
-        }
-        if let Some((argument, returning)) = failure_only {
-            // No success edge exists. Do not lower the suffix or emit a call.
-            let failure_cleanup = self.cleanup(argument.root, &args, returning)?;
-            let mut entry =
-                self.lower_propagating_argument(argument, None, next, failure_cleanup, depth)?;
-            for (position, (&node, slot)) in staged.iter().zip(args).enumerate().rev() {
-                self.budget.step(1)?;
-                entry = if let Some(early) = self.stage_propagating_argument(
-                    &mut argument_exits,
-                    position,
-                    slot,
-                    entry,
-                    depth,
-                )? {
-                    early
-                } else {
-                    self.expression(node, Some(slot), entry, depth + 1)?
-                };
-            }
-            return Ok(entry);
         }
         let index = self.calls.len();
         let retention = match (pipe_retention, destination) {
@@ -2685,22 +2733,8 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;
         // Slots follow parameter order. Build edges backwards so the
         // pipe input runs once, ahead of all written arguments.
-        for (i, arg) in call
-            .arguments
-            .iter()
-            .copied()
-            .enumerate()
-            .rev()
-            .filter(|&(_, arg)| Some(arg) != call.pipe_input)
-            .chain(pipe_argument)
-        {
+        for (i, arg) in argument_staging_order(&call.arguments, pipe_position).rev() {
             let slot = self.calls[index].args[i];
-            if let Some(early) =
-                self.stage_propagating_argument(&mut argument_exits, i, slot, next, depth)?
-            {
-                next = early;
-                continue;
-            }
             let root = self.ungroup(arg)?;
             let existing_exclusive = matches!(
                 self.value(arg)?.ty.as_ref(),

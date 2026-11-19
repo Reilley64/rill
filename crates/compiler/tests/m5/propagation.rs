@@ -1863,10 +1863,6 @@ fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
                 let _ = consume(first, input ? error(first), last);
                 return Result.Ok(7i32);
             }
-            function outerPipe(input: Option<bool>, first: string, last: string): Option<bool> {
-                let bit = first |> consume(input?, last);
-                return Option.Some(bit);
-            }
             function pair(first: bool, second: bool): bool { return first; }
             function pass(input: Option<bool>): Option<bool> { return input; }
             function identity(value: bool): bool { return value; }
@@ -2042,19 +2038,13 @@ fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
             assert_eq!(finding.site.span.bytes(), b"first");
             assert_eq!(finding.related.span.bytes(), b"first");
             assert!(finding.related.span.start() < finding.site.span.start());
-            for (name, site) in [
-                ("unsupported", "pair(first?, identity(second |> pass?))"),
-                ("outerPipe", "first |> consume(input?, last)"),
-            ] {
-                let report = check(name);
-                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert_eq!(
-                    report.blocked_at().unwrap().span.bytes(),
-                    site.as_bytes(),
-                    "{name}"
-                );
-                assert!(report.mir().is_none());
-            }
+            let unsupported = check("unsupported");
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert_eq!(
+                unsupported.blocked_at().unwrap().span.bytes(),
+                b"pair(first?, identity(second |> pass?))"
+            );
+            assert!(unsupported.mir().is_none());
             let limits = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,
@@ -2917,6 +2907,153 @@ fn wider_propagating_calls_keep_each_reached_prefix() {
                 let limited = check("three", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn outer_pipes_stage_the_input_before_propagating_written_arguments() {
+    probe_with_typed(
+        "propagation::outer_pipes_stage_the_input_before_propagating_written_arguments",
+        r#"
+            function input(value: string): string { return value; }
+            function middle(value: string): string { return value; }
+            function after(value: bool): bool { return value; }
+            function consume(a: bool, mid: string, b: bool, tail: bool, owner: string): bool {
+                dispose(owner); dispose(mid); return a;
+            }
+            function rejected(a: bool, mid: string, b: bool, tail: bool, owner: string): bool {
+                dispose(owner); dispose(owner); dispose(mid); return a;
+            }
+            function pipe(owner: string, first: Option<bool>, mid: string, second: Option<bool>): Option<bool> {
+                let bit = input(owner) |> consume(first?, middle(mid), second?, after(true), _);
+                return Option.Some(bit);
+            }
+            function stop(owner: string, first: Option<bool>, mid: string, second: Option<bool>.None): Option<bool> {
+                let _ = input(owner) |> rejected(first?, middle(mid), second?, after(true), _);
+                return Option.Some(false);
+            }
+            function implicit(owner: string, first: Option<bool>): Option<bool> {
+                let bit = input(owner) |> head(first?);
+                return Option.Some(bit);
+            }
+            function moved(owner: string, first: Option<bool>, second: Option<bool>): Option<bool> {
+                let bit = input(owner) |> consume(first?, middle(owner), second?, after(true), _);
+                return Option.Some(bit);
+            }
+            function head(owner: string, bit: bool): bool { dispose(owner); return bit; }
+            function identity(bit: bool): bool { return bit; }
+            function unsupportedInput(input: Option<bool>): Option<bool> {
+                let bit = (input?) |> identity;
+                return Option.Some(bit);
+            }
+            function pass(owner: string, bit: bool): Option<bool> { dispose(owner); return Option.Some(bit); }
+            function unsupportedStep(owner: string, input: Option<bool>): Option<bool> {
+                let bit = owner |> pass(input?)?;
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let check = |name| lower(name, default);
+            let option = typed.option_role().unwrap();
+            let report = check("pipe");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("pipe: {:?}", report.completion()));
+            let (first, no_first) = variant_edges(mir, mir.entry, &option.some.id, b"first");
+            let (second, no_second) = variant_edges(mir, first, &option.some.id, b"second");
+            assert_return(
+                &linear(mir, no_first),
+                &option.none.id,
+                false,
+                &[b"input(owner)", b"mid: string"],
+            );
+            assert_return(
+                &linear(mir, no_second),
+                &option.none.id,
+                false,
+                &[b"middle(mid)", b"input(owner)"],
+            );
+            assert_return(&linear(mir, second), &option.some.id, true, &[]);
+            assert_eq!(calls_on_path(mir, [false]), [id("input")]);
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("input"), id("middle")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("input"), id("middle"), id("after"), id("consume")]
+            );
+            let stopped = check("stop");
+            let mir = stopped
+                .mir()
+                .expect("known second failure still evaluates a later placeholder first");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"first");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"input(owner)", b"mid: string"],
+            );
+            assert_return(
+                &linear(mir, yes),
+                &option.none.id,
+                false,
+                &[b"middle(mid)", b"input(owner)"],
+            );
+            assert_eq!(calls_on_path(mir, [true]), [id("input"), id("middle")]);
+            let implicit = check("implicit");
+            let mir = implicit
+                .mir()
+                .expect("implicit first parameter with a written propagation");
+            let (_, no) = variant_edges(mir, mir.entry, &option.some.id, b"first");
+            assert_return(&linear(mir, no), &option.none.id, false, &[b"input(owner)"]);
+            assert_eq!(calls_on_path(mir, [true]), [id("input"), id("head")]);
+            let moved = check("moved");
+            assert_eq!(moved.completion(), Completion::SourceRejected);
+            assert!(moved.mir().is_none());
+            let [finding] = moved.findings() else {
+                panic!("expected one moved-input finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"owner");
+            assert_eq!(finding.related.span.bytes(), b"owner");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let exact = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..default
+            };
+            assert!(lower("pipe", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("pipe", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            for name in ["unsupportedInput", "unsupportedStep"] {
+                let blocked = check(name);
+                assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");
+                assert!(blocked.mir().is_none());
             }
         },
     );
