@@ -216,7 +216,7 @@ impl<'a, 'g> Check<'a, 'g> {
         self.prove_actual(values, mode, depth)
     }
 
-    fn prove_actual(
+    pub(super) fn prove_actual(
         &mut self,
         values: Vec<Located<'g>>,
         mode: InvocationMode,

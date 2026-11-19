@@ -447,6 +447,22 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 let old = job;
                 return result;
             }
+            function repeated(left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let _ = job();
+                return job();
+            }
+            function conditionalRepeat(flag: bool, first: string, second: string): [string, string] {
+                let job: once () => [string, string] = () => [first, second];
+                if (flag) { let _ = job(); }
+                return job();
+            }
+            function restored(first: string, second: string, third: string, fourth: string): [string, string] {
+                let mut job: once () => [string, string] = () => [first, second];
+                let _ = job();
+                job = () => [fourth, third];
+                return job();
+            }
             function liveReceiver(left: string, right: string): [string, string] {
                 let job: once () => [string, string] = () => [left, right];
                 let view = &job;
@@ -465,7 +481,7 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 return job();
             }
         "#,
-        |_, module, receipt, typed| {
+        |request, module, receipt, typed| {
             use compiler::analysis::InvocationMode;
             use compiler::analysis::scalars::data::Access;
 
@@ -656,6 +672,60 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
             assert_eq!(finding.code(), "R0200");
             assert_eq!(finding.site.span.bytes(), b"job");
             assert_eq!(finding.related.span.bytes(), b"job()");
+            for name in ["repeated", "conditionalRepeat"] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected a consumed receiver")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), b"job()");
+                assert_eq!(finding.related.span.bytes(), b"job()");
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+            let restored = lower("restored");
+            let mir = restored
+                .mir()
+                .expect("replacing a consumed binding installs a new environment");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::FormClosurePair { .. }
+                            | Operation::InvokeClosurePair { .. }
+                            | Operation::Install { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::FormClosurePair { closure: old, .. },
+                Operation::InvokeClosurePair { receiver: first, origin: first_origin, into: discarded },
+                Operation::FormClosurePair { closure: new, .. },
+                Operation::Install { target, incoming },
+                Operation::InvokeClosurePair { receiver: second, origin: second_origin, into },
+                Operation::Export(output),
+            ] if first.root.node == old.node && second.root.node == target.root.node && target.root.node == old.node
+                && incoming.root.node == new.node && first_origin.span.bytes() == b"() => [first, second]"
+                && second_origin.span.bytes() == b"() => [fourth, third]" && into.root.node == output.root.node
+                && discarded.root.node != into.root.node));
+            let [
+                _,
+                Operation::InvokeClosurePair {
+                    into: discarded, ..
+                },
+                ..,
+            ] = route.as_slice()
+            else {
+                unreachable!()
+            };
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(last), Obligation::Drop(first)]
+                if last.root.node == discarded.root.node && first.root.node == discarded.root.node
+                    && last.tuple_element() == Some(1) && first.tuple_element() == Some(0))
+            );
             let borrowed = lower("liveReceiver");
             assert_eq!(borrowed.completion(), Completion::SourceRejected);
             assert!(borrowed.mir().is_none());
@@ -678,6 +748,32 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
             assert_eq!(repeatable.completion(), Completion::Incomplete);
             assert!(repeatable.mir().is_none());
             assert_eq!(repeatable.blocked_at().unwrap().span.bytes(), b"job()");
+
+            let type_limits = AnalysisLimits {
+                max_work: typed.statistics().work,
+                max_entries: typed.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            let graph = loader::load_installed(request.clone()).unwrap();
+            let type_check = |limits| analyze_typed(&graph, limits);
+            assert!(type_check(type_limits).receipt().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: type_limits.max_work - 1,
+                    ..type_limits
+                },
+                AnalysisLimits {
+                    max_entries: type_limits.max_entries - 1,
+                    ..type_limits
+                },
+            ] {
+                let report = type_check(short);
+                assert_eq!(
+                    report.completion(),
+                    compiler::analysis::typed::TypedCompletion::ResourceLimit
+                );
+                assert!(report.receipt().is_none());
+            }
         },
     );
 }
@@ -949,15 +1045,49 @@ fn borrowed_pair_handoff_does_not_acknowledge_an_unrelated_result() {
 }
 
 #[test]
+fn consumed_pair_handoff_does_not_skip_an_unrelated_result() {
+    use compiler::analysis::typed::{ResultDiscardKind, TypedCompletion};
+
+    probe_report(
+        "captures::consumed_pair_handoff_does_not_skip_an_unrelated_result",
+        r#"
+            function unacknowledged(untouched: Result<bool, i32>.Ok, left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let _ = job();
+                return job();
+            }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::SourceRejected);
+            assert!(typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty());
+            let [discard] = uses.discards() else {
+                panic!("expected the unrelated Result at exit")
+            };
+            assert_eq!(discard.code(), "R0103");
+            assert_eq!(discard.kind, ResultDiscardKind::ScopeExit);
+            assert_eq!(discard.origin.module, &module.key);
+            assert_eq!(
+                discard.origin.span.bytes(),
+                b"untouched: Result<bool, i32>.Ok"
+            );
+            assert_eq!(discard.discard.span.bytes(), b"return job();");
+        },
+    );
+}
+
+#[test]
 fn broader_invocations_still_need_typed_evidence() {
     use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 
     probe_report(
         "captures::broader_invocations_still_need_typed_evidence",
         r#"
-            function again(left: string, right: string): [string, string] {
-                let job: once () => [string, string] = () => [left, right];
+            function overwritten(flag: bool, left: string, right: string, erased: once () => [string, string]): [string, string] {
+                let mut job: once () => [string, string] = () => [left, right];
                 let _ = job();
+                if (flag) { job = erased; }
                 return job();
             }
             type Box = { item: Result<bool, i32>; }

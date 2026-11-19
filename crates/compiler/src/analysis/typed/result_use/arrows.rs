@@ -98,7 +98,11 @@ impl<'a, 'g> Check<'a, 'g> {
         self.singleton(state)
     }
 
-    fn primitive_capture_pair(&mut self, node: NodeId, arrow: &ArrowFacts<'g>) -> Work<bool> {
+    pub(super) fn primitive_capture_pair(
+        &mut self,
+        node: NodeId,
+        arrow: &ArrowFacts<'g>,
+    ) -> Work<bool> {
         let [first, second] = arrow.captures.as_slice() else {
             return Ok(false);
         };

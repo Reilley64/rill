@@ -39,6 +39,8 @@ pub(super) enum Content<'g> {
     CallerBoolOrigin(&'g DeclarationId),
     /// Typed source origin of the callable stored at this exact residence.
     Callable(NodeId),
+    /// An exact, Result-free local pair was consumed by a checked once call.
+    ConsumedPair,
     /// Containment is unresolved at this origin, not known empty.
     Unclassified(NodeId),
 }
@@ -56,7 +58,10 @@ impl Located<'_> {
                 Content::Result(value) => value.component.len(),
                 Content::Test(tag, _) => tag_size(tag),
                 Content::Alias((_, path)) | Content::PossibleAlias((_, path)) => path.len(),
-                Content::CallerBoolOrigin(_) | Content::Callable(_) | Content::Unclassified(_) => 0,
+                Content::CallerBoolOrigin(_)
+                | Content::Callable(_)
+                | Content::ConsumedPair
+                | Content::Unclassified(_) => 0,
             }
     }
 }

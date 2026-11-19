@@ -245,10 +245,12 @@ impl<'a, 'g> Check<'a, 'g> {
         // Invalidating a location can discard a hint without losing a
         // tracked residence or handing a later store an incoming origin.
         self.budget.step(affected.len())?;
-        if affected
-            .iter()
-            .any(|entry| !matches!(entry.content, Content::CallerBoolOrigin(_)))
-        {
+        if affected.iter().any(|entry| {
+            !matches!(
+                entry.content,
+                Content::CallerBoolOrigin(_) | Content::ConsumedPair
+            )
+        }) {
             self.pending(site, ResultUseBlocker::Storage)?;
         }
         Ok(())

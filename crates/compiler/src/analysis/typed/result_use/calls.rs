@@ -233,6 +233,32 @@ impl<'a, 'g> Check<'a, 'g> {
         // The typed invocation identifies the receiver. Its contract alone does
         // not prove Result use for an erased callable or for owned captures.
         let syntax = &self.module.syntax.nodes[node];
+        let pair_receiver = if syntax.kind == NodeKind::Call
+            && syntax.children.as_slice() == [receiver]
+            && invocation.mode == crate::analysis::InvocationMode::Once
+            && invocation.access == Access::Owned
+            && invocation.assumption.is_none()
+            && let Some(path) = &invocation.path
+            && path.root.kind == DeclarationKind::Binding
+            && path.projections.is_empty()
+            && let TypeTerm::Tuple(elements) = value.ty.as_ref()
+            && elements.len() == 2
+        {
+            self.budget.step(2)?;
+            elements
+                .iter()
+                .all(|element| match element.as_ref() {
+                    TypeTerm::Primitive(_) => true,
+                    TypeTerm::Reference {
+                        mutable: false,
+                        referent,
+                    } => matches!(referent.as_ref(), TypeTerm::Primitive(_)),
+                    _ => false,
+                })
+                .then_some(Root::Local(path.root))
+        } else {
+            None
+        };
         let arguments = if syntax.kind == NodeKind::Call {
             &syntax.children[1..]
         } else {
@@ -279,11 +305,45 @@ impl<'a, 'g> Check<'a, 'g> {
             let address = state
                 .alias(root, &[], self.budget)?
                 .unwrap_or((root, Vec::new()));
+            let values = state.contents(address.0, &address.1, self.budget)?;
+            let mut consumed = None;
+            if let Some(local) = pair_receiver
+                && address.0 == root
+                && address.1.is_empty()
+                && let [value] = values.as_slice()
+                && value.component.is_empty()
+                && self
+                    .address(state, invocation.path.as_ref())?
+                    .is_some_and(|(exact, parts)| exact == local && parts.is_empty())
+                && state.contents(local, &[], self.budget)?.is_empty()
+            {
+                match value.content {
+                    Content::ConsumedPair => {
+                        // No environment remains to prove and no Result
+                        // residence can arrive through this scalar pair.
+                        // Keep checking unrelated residences on the path;
+                        // ownership diagnoses consumption at this call.
+                        state.take(root, &[], self.budget)?;
+                        state.store(local, &[], Content::ConsumedPair, self.budget)?;
+                        continue;
+                    }
+                    Content::Callable(origin) => {
+                        if let Some(arrow) = self
+                            .facts(origin)?
+                            .and_then(|f| f.callable.as_ref()?.arrow.as_deref())
+                            .filter(|arrow| arrow.site.node == origin && arrow.premise.is_none())
+                            && self.primitive_capture_pair(origin, arrow)?
+                        {
+                            consumed = Some(local);
+                        }
+                    }
+                    _ => {}
+                }
+            }
             let checked = if invocation.assumption.is_some() {
-                let receiver = state.contents(address.0, &address.1, self.budget)?;
-                self.symbolic_callback(invocation, &receiver)?
+                self.symbolic_callback(invocation, &values)?
             } else {
-                self.prove_at(state, &address, invocation.mode, depth + 1)?
+                self.prove_actual(values, invocation.mode, depth + 1)?
             };
             for referent in state.aliases_under(address.0, &address.1, self.budget)? {
                 self.forget_address(state, &referent, node)?;
@@ -292,6 +352,8 @@ impl<'a, 'g> Check<'a, 'g> {
             self.finish_call(node, value, state, args(), (checked, false, false))?;
             if !checked {
                 self.pending(node, ResultUseBlocker::CallBoundary)?;
+            } else if let Some(local) = consumed {
+                state.store(local, &[], Content::ConsumedPair, self.budget)?;
             }
         }
         self.call_output(node, value, states)
