@@ -289,6 +289,14 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 let _ = *first;
                 return *second;
             }
+            function distinct(left: [bool, bool], right: [bool, bool]): bool {
+                let mut a = left;
+                let mut b = right;
+                let first = &mut a[0];
+                let second = &mut b[0];
+                let _ = *first;
+                return *second;
+            }
             function writeWhileShared(seed: [bool, bool]): bool {
                 let mut value = seed;
                 let first = &value[0];
@@ -321,8 +329,24 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 if (flag) { let pair: [bool, bool] = [false, true]; held = &pair[0]; }
                 return *held;
             }
+            function ends(flag: bool, seed: &bool): void {
+                let mut held = seed;
+                if (flag) {
+                    let pair: [bool, bool] = [false, true];
+                    held = &pair[0];
+                    let _ = *held;
+                }
+            }
             function escape(value: [bool, bool]): &bool { return &value[0]; }
             function descriptorSlot(value: [&bool, bool]): &&bool { return &value[0]; }
+            function borrowedTuple(value: &[bool, bool]): &bool { return &value[0]; }
+            function nested(value: [[bool, bool], bool]): &bool { return &value[0][1]; }
+            function groupedCycle(seed: &bool): void {
+                let mut a: [bool, &bool] = [false, seed];
+                let mut b: [bool, &bool] = [true, seed];
+                a[1] = &b[0];
+                b[1] = &a[0];
+            }
         "#,
         |_, module, receipt| {
             let lower = |name, limits| {
@@ -403,10 +427,37 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
-            let unsupported = check("descriptorSlot");
-            assert_eq!(unsupported.completion(), Completion::Incomplete);
-            assert!(unsupported.mir().is_none());
-            assert_eq!(unsupported.blocked_at().unwrap().span.bytes(), b"&value[0]");
+            let distinct = check("distinct");
+            let mir = distinct
+                .mir()
+                .expect("exclusive loans of different owners coexist");
+            let borrows: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Borrow { .. }))
+                .collect();
+            assert!(matches!(borrows.as_slice(), [
+                Operation::Borrow { source: first, exclusive: true, .. },
+                Operation::Borrow { source: second, exclusive: true, .. },
+            ] if first.root.node != second.root.node && first.tuple_element() == Some(0) && second.tuple_element() == Some(0)));
+            assert!(check("ends").mir().is_some());
+            for name in ["descriptorSlot", "borrowedTuple", "nested", "groupedCycle"] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+            }
+            assert_eq!(
+                check("descriptorSlot").blocked_at().unwrap().span.bytes(),
+                b"&value[0]"
+            );
+            let cycle = check("groupedCycle");
+            assert!(
+                cycle
+                    .blocked_at()
+                    .unwrap()
+                    .span
+                    .bytes()
+                    .starts_with(b"{\n                let mut a:")
+            );
 
             let limits = AnalysisLimits {
                 max_work: shared.statistics().work,
