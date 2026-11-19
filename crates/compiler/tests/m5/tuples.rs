@@ -347,6 +347,29 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 a[1] = &b[0];
                 b[1] = &a[0];
             }
+            function liveCycle(seed: &bool, flag: bool): bool {
+                let mut held = seed;
+                if (flag) {
+                    let mut a: [bool, &bool] = [false, seed];
+                    let mut b: [bool, &bool] = [true, seed];
+                    a[1] = &b[0];
+                    b[1] = &a[0];
+                    held = &a[0x0];
+                }
+                return *held;
+            }
+            function incompatibleOrder(seed: &bool): void {
+                let mut a: [&bool, bool] = [seed, false];
+                let mut b: [&bool, bool] = [seed, true];
+                a[0] = &b[1];
+                b[0] = &a[1];
+            }
+            function observableCycle(seed: &bool, first: string, second: string): void {
+                let mut a: [bool, &bool, string] = [false, seed, first];
+                let mut b: [bool, &bool, string] = [true, seed, second];
+                a[1] = &b[0];
+                b[1] = &a[0];
+            }
         "#,
         |_, module, receipt| {
             let lower = |name, limits| {
@@ -440,7 +463,28 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 Operation::Borrow { source: second, exclusive: true, .. },
             ] if first.root.node != second.root.node && first.tuple_element() == Some(0) && second.tuple_element() == Some(0)));
             assert!(check("ends").mir().is_some());
-            for name in ["descriptorSlot", "borrowedTuple", "nested", "groupedCycle"] {
+            let live = check("liveCycle");
+            assert_eq!(live.completion(), Completion::SourceRejected);
+            assert!(live.mir().is_none());
+            let [finding] = live.findings() else {
+                panic!("expected the external holder to block scope exit")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert!(
+                finding
+                    .site
+                    .span
+                    .bytes()
+                    .starts_with(b"{\n                    let mut a:")
+            );
+            assert_eq!(finding.related.span.bytes(), b"&a[0x0]");
+            for name in [
+                "descriptorSlot",
+                "borrowedTuple",
+                "nested",
+                "incompatibleOrder",
+                "observableCycle",
+            ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
@@ -450,21 +494,47 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 b"&value[0]"
             );
             let cycle = check("groupedCycle");
-            assert!(
-                cycle
-                    .blocked_at()
-                    .unwrap()
-                    .span
-                    .bytes()
-                    .starts_with(b"{\n                let mut a:")
+            let mir = cycle
+                .mir()
+                .unwrap_or_else(|| panic!("groupedCycle: {:?}", cycle.completion()));
+            let scopes: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
+                        Obligation::EndStorage(place) if matches!(place.root.span.bytes(), b"a" | b"b"))) => Some(actions),
+                    _ => None,
+                })
+                .collect();
+            let [scope] = scopes.as_slice() else {
+                panic!("both tuples must end on the same boundary")
+            };
+            let order: Vec<_> = scope
+                .iter()
+                .map(|action| match action {
+                    Obligation::EndStorage(place) => {
+                        (place.root.span.bytes(), place.tuple_element())
+                    }
+                    other => panic!("unexpected cleanup: {other:?}"),
+                })
+                .collect();
+            assert_eq!(
+                order,
+                [
+                    (b"b".as_slice(), Some(1)),
+                    (b"a".as_slice(), Some(1)),
+                    (b"b".as_slice(), Some(0)),
+                    (b"b".as_slice(), None),
+                    (b"a".as_slice(), Some(0)),
+                    (b"a".as_slice(), None),
+                ]
             );
 
             let limits = AnalysisLimits {
-                max_work: shared.statistics().work,
-                max_entries: shared.statistics().entries,
+                max_work: cycle.statistics().work,
+                max_entries: cycle.statistics().entries,
                 ..AnalysisLimits::default()
             };
-            assert!(lower("shared", limits).mir().is_some());
+            assert!(lower("groupedCycle", limits).mir().is_some());
             for short in [
                 AnalysisLimits {
                     max_work: limits.max_work - 1,
@@ -475,7 +545,7 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                     ..limits
                 },
             ] {
-                let limited = lower("shared", short);
+                let limited = lower("groupedCycle", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }

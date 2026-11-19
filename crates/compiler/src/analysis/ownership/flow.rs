@@ -471,6 +471,111 @@ fn cleanup_operation<'g>(
     })
 }
 
+// Refine a stuck owner schedule only for flat tuples whose remaining
+// storage has no observable cleanup. Keep the reverse-position edges and
+// add dependencies on exact backing members, not their entire owners.
+fn finish_tuple_cleanup<'g>(
+    module: &'g Module,
+    slots: &[Local<'g>],
+    state: &mut [State],
+    scope: &[Slot],
+    node: NodeId,
+    actions: &mut Vec<Cleanup<'g>>,
+    budget: &mut Budget,
+) -> ResultOf<()> {
+    let mut nodes = Vec::new();
+    for &owner in scope {
+        budget.step(1)?;
+        let State::Initialized(root) = &state[owner] else {
+            continue;
+        };
+        if slots[owner].members == 0
+            || !matches!(
+                slots[owner + 1].projection,
+                Some(Projection::TupleElement(_))
+            )
+            || !root.loans.is_empty()
+        {
+            return Err(Stop::Pending(node));
+        }
+        let mut lower = None;
+        for slot in slots[owner].storage(owner) {
+            budget.step(1)?;
+            if !matches!(state[slot], State::Initialized(_)) {
+                continue;
+            }
+            if slots[slot].cleanup != StorageCleanup::End {
+                return Err(Stop::Pending(node));
+            }
+            budget.reserve(1)?;
+            let index = nodes.len();
+            nodes.push((slot, lower));
+            lower = Some(index);
+        }
+    }
+    // The slot order is declaration order, then ascending position. Pop the
+    // largest ready slot so an independent tie keeps the normal cleanup order.
+    budget.reserve(3 * nodes.len())?;
+    let mut indegrees = vec![0usize; nodes.len()];
+    let mut edges = vec![Vec::new(); nodes.len()];
+    let index_of = |slot| nodes.binary_search_by_key(&slot, |&(member, _)| member);
+    for (index, &(slot, lower)) in nodes.iter().enumerate() {
+        budget.step(1)?;
+        let mut add = |target: usize, budget: &mut Budget| -> ResultOf<()> {
+            budget.reserve(1)?;
+            edges[index].push(target);
+            indegrees[target] += 1;
+            Ok(())
+        };
+        if let Some(lower) = lower {
+            add(lower, budget)?;
+        }
+        visit_loans(state, slot..slot + 1, budget, |loan, budget| {
+            if loan.kind.borrows_local_storage() {
+                let owner = slots[loan.source].owner;
+                budget.step(1)?;
+                if index_of(owner).is_ok() {
+                    if owner == loan.source {
+                        return Err(Stop::Pending(node));
+                    }
+                    budget.step(1)?;
+                    add(
+                        index_of(loan.source).map_err(|_| Stop::Pending(node))?,
+                        budget,
+                    )?;
+                }
+            }
+            Ok(())
+        })?;
+    }
+    let mut ready = BTreeSet::new();
+    for (index, &indegree) in indegrees.iter().enumerate() {
+        budget.step(1)?;
+        if indegree == 0 {
+            ready.insert(index);
+        }
+    }
+    let mut ended = 0;
+    while let Some(index) = ready.pop_last() {
+        let slot = nodes[index].0;
+        budget.step(1 + edges[index].len())?;
+        budget.reserve(1)?;
+        actions.push(Cleanup::EndStorage(slots[slot].place(module)));
+        state[slot] = State::Vacant;
+        ended += 1;
+        for &target in &edges[index] {
+            indegrees[target] -= 1;
+            if indegrees[target] == 0 {
+                ready.insert(target);
+            }
+        }
+    }
+    if ended != nodes.len() {
+        return Err(Stop::Pending(node));
+    }
+    Ok(())
+}
+
 fn cleanup_boundary<'g>(
     module: &'g Module,
     slots: &[Local<'g>],
@@ -596,21 +701,20 @@ fn cleanup_boundary<'g>(
         }
     }
     if scheduled != remaining {
-        // Grouping by record can make a cycle out of independently
-        // orderable fields. Do not reject without the field cleanup judgment.
         if grouped_dependencies {
-            return Err(Stop::Pending(node));
+            finish_tuple_cleanup(module, slots, state, scope, node, &mut actions, budget)?;
+        } else {
+            let slot = scope
+                .iter()
+                .copied()
+                .find(|&slot| matches!(state[slot], State::Initialized(_)))
+                .ok_or(Stop::Pending(node))?;
+            return Err(Stop::Rejected {
+                site: node,
+                related: slots[slot].node,
+                kind: Conflict::Release,
+            });
         }
-        let slot = scope
-            .iter()
-            .copied()
-            .find(|&slot| matches!(state[slot], State::Initialized(_)))
-            .ok_or(Stop::Pending(node))?;
-        return Err(Stop::Rejected {
-            site: node,
-            related: slots[slot].node,
-            kind: Conflict::Release,
-        });
     }
     for &slot in scope {
         let region = slots[slot].storage(slot);
