@@ -73,6 +73,13 @@ enum OptionPayload<'t, 'g> {
     Text(&'t Type<'g>),
 }
 
+#[derive(Clone, Copy)]
+enum OptionTextSource<'a, 'g> {
+    Move(Slot),
+    Constructor,
+    Factory(NodeId, &'a ExpressionFacts<'g>),
+}
+
 struct CheckedPropagation<'a, 'g> {
     exit: &'a Propagation<'g>,
     wrap: Option<&'a ErrorConstruction<'g>>,
@@ -81,8 +88,7 @@ struct CheckedPropagation<'a, 'g> {
     source: NodeId,
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
-    option_text: Option<&'a Type<'g>>,
-    option_move_from: Option<Slot>,
+    option_text: Option<(&'a Type<'g>, OptionTextSource<'a, 'g>)>,
 }
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
@@ -1509,7 +1515,6 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             (source, &operand.ty, Some(operand))
         };
-        let mut option_move_from = None;
         let (wrapper, option_text) = if let Some(error) = &exit.error {
             let (role, _) = self
                 .scalar_result_role(operand)
@@ -1542,13 +1547,13 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                     self.budget.step(1)?;
                     let source_facts = source_facts.ok_or(Stop::Pending(node))?;
-                    if let Some(path) = source_facts
+                    let source = if let Some(path) = source_facts
                         .path
                         .as_ref()
                         .filter(|path| path.projections.is_empty())
                     {
                         self.budget.step(1)?;
-                        option_move_from = Some(self.resolve_place(source, path)?);
+                        OptionTextSource::Move(self.resolve_place(source, path)?)
                     } else {
                         let root = self.ungroup(source)?;
                         let origin = if root == source {
@@ -1557,11 +1562,33 @@ impl<'a, 'g> Build<'a, 'g> {
                             self.budget.step(1)?;
                             self.value(root)?
                         };
-                        if !matches!(origin.data, Some(DataExpression::Construction(_))) {
-                            return Err(Stop::Pending(node));
+                        if matches!(origin.data, Some(DataExpression::Construction(_))) {
+                            OptionTextSource::Constructor
+                        } else {
+                            self.budget.step(1)?;
+                            let call = origin.call.as_deref().ok_or(Stop::Pending(node))?;
+                            if self.module.syntax.nodes[root].kind != NodeKind::Call
+                                || call.pipe_input.is_some()
+                            {
+                                return Err(Stop::Pending(node));
+                            }
+                            let (parameters, result) =
+                                self.direct_application_signature(node, call)?;
+                            if result != operand {
+                                return Err(Stop::Pending(node));
+                            }
+                            for (formal, &arg) in parameters.iter().zip(&call.arguments) {
+                                self.budget.step(2)?;
+                                if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
+                                    || self.value(arg)?.ty != formal.ty
+                                {
+                                    return Err(Stop::Pending(node));
+                                }
+                            }
+                            OptionTextSource::Factory(root, origin)
                         }
-                    }
-                    Some(ty)
+                    };
+                    Some((ty, source))
                 }
             };
             (None, text)
@@ -1575,7 +1602,6 @@ impl<'a, 'g> Build<'a, 'g> {
             operand,
             wrapper,
             option_text,
-            option_move_from,
         })
     }
 
@@ -1598,7 +1624,6 @@ impl<'a, 'g> Build<'a, 'g> {
             operand,
             wrapper,
             option_text,
-            option_move_from,
         } = self.checked_propagation(node, facts, site)?;
         let pipe_arguments = if matches!(site, PropagationSite::StatementRoot)
             && piped
@@ -1675,7 +1700,7 @@ impl<'a, 'g> Build<'a, 'g> {
         } else {
             let success = if !exit.can_continue {
                 None
-            } else if let Some(ty) = option_text {
+            } else if let Some((ty, _)) = option_text {
                 let (into, next) = if let Some(into) = into {
                     (into, next)
                 } else {
@@ -1744,7 +1769,10 @@ impl<'a, 'g> Build<'a, 'g> {
             self.call_with_propagating_arguments(node, call, Some(scratch), split, depth, arguments)
         } else if piped {
             self.call(node, facts, Some(scratch), split, depth, Some(operand))
-        } else if let Some(from) = option_move_from {
+        } else if let Some((_, OptionTextSource::Factory(factory, facts))) = option_text {
+            self.depth(depth)?;
+            self.call(factory, facts, Some(scratch), split, depth, Some(operand))
+        } else if let Some((_, OptionTextSource::Move(from))) = option_text {
             self.depth(depth)?;
             self.emit(
                 source,
@@ -2836,7 +2864,7 @@ impl<'a, 'g> Build<'a, 'g> {
         into: Option<Slot>,
         next: Pc,
         depth: usize,
-        pipe_carrier: Option<&Type<'g>>,
+        checked_carrier: Option<&Type<'g>>,
     ) -> ResultOf<Pc> {
         let Some(call) = facts.call.as_deref() else {
             return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next);
@@ -2875,16 +2903,17 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             return self.emit(node, Action::Dispose(operand), Edges::Next(next));
         }
-        let result = pipe_carrier.unwrap_or(&facts.ty);
+        let result = checked_carrier.unwrap_or(&facts.ty);
         if !Self::direct_application_call(call)
-            || !self.direct_call_type(result)
+            || !(self.direct_call_type(result)
+                || checked_carrier.is_some() && self.admitted_option(result).is_some())
             || into.is_some_and(|slot| self.slots[slot].contains_guard())
         {
             return Err(Stop::Pending(node));
         }
         let piped = call.pipe_input.is_some();
         // A propagating pipe already passed its exact carrier signature check.
-        let ordinary_pipe = piped && pipe_carrier.is_none();
+        let ordinary_pipe = piped && checked_carrier.is_none();
         let mut tuple_or_leaf_admitted =
             ordinary_pipe && self.admits_direct_tuple_or_leaf_call(call, result)?;
         let mut pipe_retention = None;

@@ -4473,11 +4473,6 @@ fn fresh_option_text_propagation_stages_the_constructor_once() {
                 let held = Option<string>.Some(owner);
                 return true;
             }
-            function make(owner: string): Option<string> { return Option<string>.Some(owner); }
-            function returned(owner: string): Option<bool> {
-                let _ = make(owner)?;
-                return Option.Some(true);
-            }
             function reused(owner: string): Option<bool> {
                 let _ = Option<string>.Some(relay(owner))?;
                 dispose(owner);
@@ -4579,10 +4574,6 @@ fn fresh_option_text_propagation_stages_the_constructor_once() {
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
                 if operand.root.span.bytes() == b"held" && *some == &option.some.id)
             );
-            let returned = lower("returned", default);
-            assert_eq!(returned.completion(), Completion::Incomplete);
-            assert!(returned.mir().is_none());
-            assert_eq!(returned.blocked_at().unwrap().span.bytes(), b"make(owner)?");
             let reused = lower("reused", default);
             assert_eq!(reused.completion(), Completion::SourceRejected);
             assert!(reused.mir().is_none());
@@ -4592,6 +4583,178 @@ fn fresh_option_text_propagation_stages_the_constructor_once() {
             assert_eq!(finding.code(), "R0200");
             assert_eq!(finding.site.span.bytes(), b"dispose(owner)");
             assert_eq!(finding.related.span.bytes(), b"owner");
+            let exact = AnalysisLimits {
+                max_work: named.statistics().work,
+                max_entries: named.statistics().entries,
+                ..default
+            };
+            assert!(lower("named", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("named", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn option_text_factory_propagation_checks_the_reached_call_once() {
+    probe_with_typed(
+        "propagation::option_text_factory_propagation_checks_the_reached_call_once",
+        r#"
+            function stage(owner: string): string { return owner; }
+            function after(bit: bool): bool { return bit; }
+            function make(flag: bool, owner: string): Option<string> {
+                if (flag) { return Option<string>.Some(owner); }
+                return Option<string>.None;
+            }
+            function makeSome(owner: string): Option<string>.Some { return Option<string>.Some(owner); }
+            function makeNone(owner: string): Option<string>.None { dispose(owner); return Option<string>.None; }
+            function named(flag: bool, owner: string, later: string): Option<bool> {
+                let output = (make(flag, stage(owner)))?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function discarded(owner: string): Option<bool> {
+                makeSome(owner)?;
+                return Option.Some(after(true));
+            }
+            function empty(owner: string, later: string): Option<bool> {
+                let _ = makeNone(owner)?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function invalid(owner: string): Option<string>.None {
+                dispose(owner); dispose(owner); return Option<string>.None;
+            }
+            function reached(owner: string): Option<bool> {
+                let _ = invalid(owner)?;
+                return Option.Some(true);
+            }
+            function borrowedFactory(owner: &string): Option<string> { return Option<string>.None; }
+            function excluded(owner: string): Option<bool> {
+                let _ = borrowedFactory(&owner)?;
+                return Option.Some(true);
+            }
+            function embedded(flag: Option<bool>, owner: string): Option<bool> {
+                let _ = make(flag?, owner)?;
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let named = lower("named", default);
+            let mir = named
+                .mir()
+                .unwrap_or_else(|| panic!("named factory: {:?}", named.completion()));
+            let (yes, no) = variant_edges(
+                mir,
+                mir.entry,
+                &option.some.id,
+                b"(make(flag, stage(owner)))",
+            );
+            let prefix: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| matches!(op, Operation::Call(_) | Operation::TestVariant { .. }))
+                .collect();
+            assert!(
+                matches!(prefix.as_slice(), [Operation::Call(stage), Operation::Call(make), Operation::TestVariant { .. }]
+                if *stage == id("stage") && *make == id("make")),
+                "{prefix:?}"
+            );
+            assert_eq!(calls_on_path(mir, [false]), [id("stage"), id("make")]);
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("make"), id("after")]
+            );
+            assert_return(
+                &linear(mir, yes),
+                &option.some.id,
+                true,
+                &[b"output", b"later: string"],
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"later: string"],
+            );
+            let discarded = lower("discarded", default);
+            let mir = discarded
+                .mir()
+                .expect("known Some factory runs, then drops its payload before the successor");
+            assert_eq!(calls_on_path(mir, []), [id("makeSome"), id("after")]);
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(payload)]
+                if payload.root.span.bytes() == b"makeSome(owner)?")
+            );
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Call(_) | Operation::TakeOptionPayload { .. } => true,
+                    Operation::Cleanup(actions) => actions
+                        .iter()
+                        .any(|action| matches!(action, Obligation::Drop(_))),
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(ops.as_slice(), [Operation::Call(factory), Operation::TakeOptionPayload { into, .. }, Operation::Cleanup(actions), Operation::Call(after)]
+                if *factory == id("makeSome") && *after == id("after") && matches!(actions.as_slice(), [Obligation::Drop(payload)] if payload.root.node == into.root.node)),
+                "{ops:?}"
+            );
+            let empty = lower("empty", default);
+            let mir = empty
+                .mir()
+                .expect("known None still calls the factory before returning");
+            assert_eq!(calls_on_path(mir, []), [id("makeNone")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"later: string"],
+            );
+            let reached = lower("reached", default);
+            assert_eq!(reached.completion(), Completion::SourceRejected);
+            assert!(reached.mir().is_none());
+            let [finding] = reached.findings() else {
+                panic!("expected one reached factory finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(owner)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(owner)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let excluded = lower("excluded", default);
+            assert_eq!(excluded.completion(), Completion::Incomplete);
+            assert!(excluded.mir().is_none());
+            assert_eq!(
+                excluded.blocked_at().unwrap().span.bytes(),
+                b"borrowedFactory(&owner)?"
+            );
+            let embedded = lower("embedded", default);
+            assert_eq!(embedded.completion(), Completion::Incomplete);
+            assert!(embedded.mir().is_none());
             let exact = AnalysisLimits {
                 max_work: named.statistics().work,
                 max_entries: named.statistics().entries,
