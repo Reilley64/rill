@@ -5851,6 +5851,10 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
             let mir = deep_skip
                 .mir()
                 .expect("skip the deeper pipe without staging its input");
+            assert_eq!(mir.blocks.len(), skipped.mir().unwrap().blocks.len());
+            assert_eq!(deep_skip.statistics().entries, skipped.statistics().entries);
+            assert!(deep_skip.statistics().work > skipped.statistics().work);
+            assert!(deep_skip.statistics().max_depth > skipped.statistics().max_depth);
             assert_eq!(calls_on_path(mir, []), [id("stage")]);
             assert_option_cleanup_return(
                 &linear(mir, mir.entry),
@@ -6743,7 +6747,7 @@ fn recursive_pipe_operands_have_separate_failure_prefixes() {
                 let output = stage(prefix) |> step((stage(middle) |> step(((input?) |> step(stage(inside), first?, _)?), second?, _)?), third?, _)?;
                 return Option.Some(true);
             }
-            function terminal(prefix: string, middle: string, input: Option<string>.Some, inside: string, first: Option<bool>.None, second: Option<bool>, third: Option<bool>, keep: string): Option<bool> {
+            function terminal(prefix: string, middle: string, input: Option<string>, inside: string, first: Option<bool>.None, second: Option<bool>, third: Option<bool>, keep: string): Option<bool> {
                 let _ = stage(prefix) |> step((stage(middle) |> step(((input?) |> step(stage(inside), first?, _)?), second?, _)?), third?, _)?;
                 return Option.Some(true);
             }
@@ -6823,12 +6827,25 @@ fn recursive_pipe_operands_have_separate_failure_prefixes() {
             let mir = terminal
                 .mir()
                 .expect("a terminal deepest argument skips all three steps");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert_eq!(calls_on_path(mir, [false]), [id("stage"), id("stage")]);
             assert_eq!(
-                calls_on_path(mir, []),
+                calls_on_path(mir, [true]),
                 [id("stage"), id("stage"), id("stage")]
             );
             assert_return(
-                &linear(mir, mir.entry),
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[
+                    b"stage(middle)",
+                    b"stage(prefix)",
+                    b"keep: string",
+                    b"inside: string",
+                ],
+            );
+            assert_return(
+                &linear(mir, yes),
                 &option.none.id,
                 false,
                 &[
@@ -6934,6 +6951,14 @@ fn skipped_compositions_still_check_result_carrier_producers() {
                 let _ = both(gate?, ((fail<bool, i32, i32>(7i32, cause())?) |> relay?));
                 return Result.Ok(true);
             }
+            function reachedConditional(gate: Result<bool, i32>.Ok, bit: bool): Result<bool, i32> {
+                let _ = both(gate?, (((if (bit) successValue<bool, i32>(true) else successValue<bool, i32>(false))?) |> relay?) |> known?);
+                return Result.Ok(true);
+            }
+            function skippedConditional(gate: Result<bool, i32>.Err, bit: bool): Result<bool, i32> {
+                let _ = both(gate?, (((if (bit) successValue<bool, i32>(true) else successValue<bool, i32>(false))?) |> relay?) |> known?);
+                return Result.Ok(true);
+            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -6991,6 +7016,14 @@ fn skipped_compositions_still_check_result_carrier_producers() {
                 ("skippedGeneric", b"successValue<bool, i32>(true)"),
                 ("reachedRetained", b"fail<bool, i32, i32>(7i32, cause())"),
                 ("skippedRetained", b"fail<bool, i32, i32>(7i32, cause())"),
+                (
+                    "reachedConditional",
+                    b"if (bit) successValue<bool, i32>(true) else successValue<bool, i32>(false)",
+                ),
+                (
+                    "skippedConditional",
+                    b"if (bit) successValue<bool, i32>(true) else successValue<bool, i32>(false)",
+                ),
             ] {
                 let report = lower(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");

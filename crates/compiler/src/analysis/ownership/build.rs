@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
-    CheckedPipeCarrier { primitive_arguments: bool },
+    CheckedPipeCarrier { primitive_arguments_checked: bool },
 }
 
 struct PropagatingValueCall<'a, 'g> {
@@ -1644,7 +1644,7 @@ impl<'a, 'g> Build<'a, 'g> {
             && let Some(arguments) = self.propagating_arguments(
                 node,
                 PropagatingCallOutput::CheckedPipeCarrier {
-                    primitive_arguments: matches!(
+                    primitive_arguments_checked: matches!(
                         option_text,
                         Some((_, OptionTextSource::PipeStep))
                     ),
@@ -1877,19 +1877,19 @@ impl<'a, 'g> Build<'a, 'g> {
             self.checked_scalar_error(node, facts, data)?;
         } else if let Some(DataExpression::Construction(data)) = &facts.data {
             self.checked_variant_payload(node, data)?;
-        } else if self.module.syntax.nodes[node].kind == NodeKind::Call {
-            // A typed scalar carrier alone does not admit a generic or
-            // computed producer. Use the same call-target gate as lowering.
-            if !facts
-                .call
-                .as_deref()
-                .is_some_and(Self::direct_application_call)
-            {
-                return Err(Stop::Pending(node));
+        } else {
+            // An admitted carrier type does not prove an arbitrary producer.
+            // Preserve the reached place and direct-call shapes without reading flow.
+            match self.module.syntax.nodes[node].kind {
+                _ if projection(facts).is_some() => {}
+                NodeKind::ValueReference => {}
+                NodeKind::Call
+                    if facts
+                        .call
+                        .as_deref()
+                        .is_some_and(Self::direct_application_call) => {}
+                _ => return Err(Stop::Pending(node)),
             }
-        } else if self.module.syntax.nodes[node].kind == NodeKind::Pipe {
-            // An ordinary pipe returning a carrier has no admitted call route.
-            return Err(Stop::Pending(node));
         }
         Ok(())
     }
@@ -2096,10 +2096,10 @@ impl<'a, 'g> Build<'a, 'g> {
                 self.check_exact_primitive_call(node, call, expected)?;
             }
             PropagatingCallOutput::CheckedPipeCarrier {
-                primitive_arguments: true,
+                primitive_arguments_checked: true,
             } => {}
             PropagatingCallOutput::CheckedPipeCarrier {
-                primitive_arguments: false,
+                primitive_arguments_checked: false,
             } => {
                 self.check_primitive_pipe_arguments(node, call)?;
             }
