@@ -940,16 +940,23 @@ impl<'a, 'g> Build<'a, 'g> {
                         },
                     ) if let TypeTerm::Tuple(elements) = referent.as_ref() => {
                         self.budget.step(elements.len())?;
+                        let mut nested = false;
+                        let mut reference = false;
                         for element in elements {
-                            if shared_pattern_member_type(element.as_ref()) {
-                                continue;
+                            match element.as_ref() {
+                                TypeTerm::Primitive(_) => {}
+                                TypeTerm::Tuple(inner)
+                                    if self.primitive_tuple_elements(inner)? =>
+                                {
+                                    nested = true
+                                }
+                                ty if shared_primitive_reference(ty) => reference = true,
+                                _ => return Err(Stop::Pending(pattern)),
                             }
-                            let TypeTerm::Tuple(inner) = element.as_ref() else {
-                                return Err(Stop::Pending(pattern));
-                            };
-                            if !self.primitive_tuple_elements(inner)? {
-                                return Err(Stop::Pending(pattern));
-                            }
+                        }
+                        // The carried-reference rule is still flat-only.
+                        if nested && reference {
+                            return Err(Stop::Pending(pattern));
                         }
                         Access::ReadOnly
                     }

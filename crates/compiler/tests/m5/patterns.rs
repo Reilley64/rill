@@ -1549,6 +1549,11 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
                 let [[[bit, _], _], _] = value;
                 return bit;
             }
+            function mixedReference(value: &[&bool, [bool, bool]]): &bool {
+                let [saved, [bit, _]] = value;
+                let _ = bit;
+                return saved;
+            }
             function nestedReference(value: &[[&bool, bool], bool]): &bool {
                 let [[saved, _], _] = value;
                 return saved;
@@ -1654,14 +1659,28 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
                     "aliasEnds" => {
                         let ended = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action|
                             matches!(action, Obligation::EndStorage(place) if place.root.span.bytes() == b"alias")))).unwrap();
-                        assert!(ops[..ended].iter().any(|op| matches!(
-                            op,
+                        let transfer: Vec<_> = ops[..ended]
+                            .iter()
+                            .copied()
+                            .filter(|op| match op {
+                                Operation::BindBorrowedMember { .. }
+                                | Operation::Install { .. } => true,
+                                Operation::Copy { from, .. } => from.root.span.bytes() == b"text",
+                                _ => false,
+                            })
+                            .collect();
+                        assert!(
+                            matches!(transfer.as_slice(), [
                             Operation::BindBorrowedMember {
                                 projection: Projection::NestedTupleElement { outer: 0, inner: 1 },
-                                binding: SharedView,
-                                ..
-                            }
-                        )));
+                                into: text, binding: SharedView, ..
+                            },
+                            Operation::Copy { from, into: Some(staged) },
+                            Operation::Install { target, incoming },
+                        ] if text.root.node == from.root.node && staged.root.node == incoming.root.node
+                            && target.root.span.bytes() == b"out"),
+                            "{transfer:?}"
+                        );
                         assert!(
                             matches!(ops[ended + 1..].iter().copied().filter(|op| matches!(op, Operation::Copy { .. } | Operation::Export(_))).collect::<Vec<_>>().as_slice(), [
                             Operation::Copy { from, into: Some(result) }, Operation::Export(output)
@@ -1698,6 +1717,7 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
                 ("ownedNested", "value: [[bool, string], bool]"),
                 ("deeper", "[[[bit, _], _], _]"),
                 ("nestedReference", "[[saved, _], _]"),
+                ("mixedReference", "[saved, [bit, _]]"),
                 ("exclusive", "[[_, text], _]"),
             ] {
                 let report = check(name);
