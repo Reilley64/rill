@@ -140,6 +140,12 @@ fn liveness(
             Action::ForwardResultFailure { operand, into, .. } => {
                 use_one(Some(operand), Some(into))
             }
+            Action::WrapResultFailure {
+                operand,
+                payload,
+                into,
+                ..
+            } => ([Some(operand), Some(payload)], Some(into)),
         };
         let cleaned = match instruction.action {
             Action::Cleanup(index) => cleanups[index].as_slice(),
@@ -841,6 +847,29 @@ pub(super) fn run<'g>(
                         into: local(into),
                         variant,
                         wrapper,
+                    }
+                }
+                Action::WrapResultFailure {
+                    operand,
+                    payload,
+                    into,
+                    variant,
+                    wrapper,
+                    origin,
+                    cause_display,
+                } => {
+                    initialized(&state[operand], node)?;
+                    initialized(&state[payload], node)?;
+                    state[into] = std::mem::replace(&mut state[operand], State::Vacant);
+                    state[payload] = State::Vacant;
+                    Operation::WrapResultFailure {
+                        operand: local(operand),
+                        payload: local(payload),
+                        into: local(into),
+                        variant,
+                        wrapper,
+                        origin,
+                        cause_display,
                     }
                 }
                 Action::ForbiddenBorrowedMove(slot) => {

@@ -8,6 +8,7 @@ use super::{
     TypeTerm, retained_bool_contents_type,
 };
 use crate::loader::{Declaration, DeclarationId, DeclarationKind};
+use crate::source::Span;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
 
@@ -197,6 +198,18 @@ pub enum Operation<'g> {
         into: Place<'g>,
         variant: &'g DeclarationId,
         wrapper: &'g DeclarationId,
+    },
+    /// Consume the failed Result as the complete cause of a new Result.Err.
+    /// The staged outer payload is consumed; only the new wrapper gets the
+    /// original question-mark token's origin. The inner i32 uses scalar cleanup.
+    WrapResultFailure {
+        operand: Place<'g>,
+        payload: Place<'g>,
+        into: Place<'g>,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        origin: &'g Span,
+        cause_display: &'g DeclarationId,
     },
     Dispose {
         callee: &'g DeclarationId,
@@ -695,6 +708,15 @@ enum Action<'g> {
         into: Slot,
         variant: &'g DeclarationId,
         wrapper: &'g DeclarationId,
+    },
+    WrapResultFailure {
+        operand: Slot,
+        payload: Slot,
+        into: Slot,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        origin: &'g Span,
+        cause_display: &'g DeclarationId,
     },
     FormClosure {
         capture: Slot,

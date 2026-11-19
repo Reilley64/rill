@@ -6,7 +6,7 @@ use crate::analysis::scalars::data::{
     Access, Construction, DataExpression, PathProjection, PatternFacts, PatternProjection,
     PlacePath,
 };
-use crate::analysis::scalars::generics::callables::CaptureForm;
+use crate::analysis::scalars::generics::{GoalState, callables::CaptureForm};
 use crate::analysis::scalars::{ErrorConstruction, ExpressionFacts, PropagationTarget};
 use crate::analysis::typed::{ErrorOperation, OptionRole, ResultRole};
 use crate::loader::Origin;
@@ -514,7 +514,10 @@ impl<'a, 'g> Build<'a, 'g> {
                 let value = *children.last().unwrap();
                 let binding = self.binding(node)?;
                 let initializer = self.ungroup(value)?;
-                if self.module.syntax.nodes[initializer].kind == NodeKind::Propagate {
+                if matches!(
+                    self.module.syntax.nodes[initializer].kind,
+                    NodeKind::Propagate | NodeKind::Wrap
+                ) {
                     let into = match binding {
                         Binding::Discard => None,
                         Binding::Name { declaration, .. } => Some(self.locals[declaration]),
@@ -833,8 +836,10 @@ impl<'a, 'g> Build<'a, 'g> {
         let source = self.module.syntax.nodes[node].children[0];
         let operand = self.value(source)?;
         let (id, result) = self.return_contract;
-        let Some(DataExpression::Propagation(exit)) = &self.value(node)?.data else {
-            return Err(Stop::Pending(node));
+        let (exit, wrap) = match &self.value(node)?.data {
+            Some(DataExpression::Propagation(exit)) => (exit.as_ref(), None),
+            Some(DataExpression::Wrapping(wrap)) => (&wrap.branch, Some(&wrap.construction)),
+            _ => return Err(Stop::Pending(node)),
         };
         if operand.access != Access::Owned
             || !matches!(exit.target, PropagationTarget::Callable(target) if target == id)
@@ -858,7 +863,8 @@ impl<'a, 'g> Build<'a, 'g> {
             let role = self
                 .bool_option_role(&operand.ty)
                 .ok_or(Stop::Pending(node))?;
-            if self.bool_option_role(result).is_none()
+            if wrap.is_some()
+                || self.bool_option_role(result).is_none()
                 || exit.success != &role.some.id
                 || exit.failure != &role.none.id
             {
@@ -891,16 +897,20 @@ impl<'a, 'g> Build<'a, 'g> {
                 .transpose()?;
             let failure = return_slot
                 .map(|(output, export)| {
-                    self.emit(
-                        node,
-                        Action::ForwardResultFailure {
-                            operand: scratch,
-                            into: output,
-                            variant: exit.failure,
-                            wrapper,
-                        },
-                        Edges::Next(export),
-                    )
+                    if let Some(data) = wrap {
+                        self.wrap_result_failure(node, scratch, data, output, export, depth)
+                    } else {
+                        self.emit(
+                            node,
+                            Action::ForwardResultFailure {
+                                operand: scratch,
+                                into: output,
+                                variant: exit.failure,
+                                wrapper,
+                            },
+                            Edges::Next(export),
+                        )
+                    }
                 })
                 .transpose()?;
             (success, failure)
@@ -951,6 +961,80 @@ impl<'a, 'g> Build<'a, 'g> {
             (None, None) => return Err(Stop::Pending(node)),
         };
         self.expression(source, Some(scratch), split, depth)
+    }
+
+    fn wrap_result_failure(
+        &mut self,
+        node: NodeId,
+        operand: Slot,
+        data: &ErrorConstruction<'g>,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let role = self.typed.result_role().ok_or(Stop::Pending(node))?;
+        let [left, right] = self.module.syntax.nodes[node].children[..] else {
+            return Err(Stop::Pending(node));
+        };
+        let retained = data.retained.as_ref().ok_or(Stop::Pending(node))?;
+        self.budget.step(1)?;
+        if data.operation != ErrorOperation::Wrap
+            || data.result != *self.return_contract.1
+            || data.failure != &role.err.id
+            || data.wrapper != &role.wrapper.id
+            || data.value != right
+            || retained.operand != left
+            || !matches!(&*retained.wrapper, TypeTerm::Nominal { declaration, arguments }
+                if *declaration == data.wrapper && matches!(arguments.as_slice(), [payload] if *payload == retained.payload))
+            || !matches!(retained.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+            || !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+            || self.value(right)?.ty != data.payload
+        {
+            return Err(Stop::Pending(node));
+        }
+        self.budget.step(4)?;
+        let bodies = self.typed.bodies();
+        for goal in [&retained.no_borrow, &retained.sendable, &retained.shareable] {
+            if !bodies
+                .goal(goal)
+                .is_ok_and(|fact| fact.state == GoalState::Proved)
+            {
+                return Err(Stop::Pending(node));
+            }
+        }
+        let display = bodies
+            .goal(&retained.display)
+            .map_err(|_| Stop::Pending(node))?;
+        let selected = display
+            .selection
+            .as_ref()
+            .filter(|selected| {
+                display.state == GoalState::Proved && selected.substitution.is_empty()
+            })
+            .ok_or(Stop::Pending(node))?;
+        let tokens = &self.module.syntax.lexed.tokens;
+        self.budget
+            .step(1 + tokens.len().checked_ilog2().unwrap_or(0) as usize)?;
+        let origin = &tokens
+            .get(tokens.partition_point(|token| token.span.start() < data.origin.start()))
+            .filter(|token| token.span == data.origin && token.span.bytes() == b"?")
+            .ok_or(Stop::Pending(node))?
+            .span;
+        let payload = self.slot(right, &data.payload)?;
+        let wrap = self.emit(
+            node,
+            Action::WrapResultFailure {
+                operand,
+                payload,
+                into,
+                variant: data.failure,
+                wrapper: data.wrapper,
+                origin,
+                cause_display: selected.implementation,
+            },
+            Edges::Next(next),
+        )?;
+        self.expression(right, Some(payload), wrap, depth)
     }
 
     fn construct_variant(

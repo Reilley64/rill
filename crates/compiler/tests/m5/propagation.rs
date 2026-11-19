@@ -188,6 +188,259 @@ fn option_postfix_returns_through_initialized_cleanup() {
 }
 
 #[test]
+fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
+    probe_with_typed(
+        "propagation::scalar_infix_wraps_only_failure_and_preserves_the_cause",
+        r#"
+            function left(input: Result<bool, i32>): Result<bool, i32> { return input; }
+            function outer(message: string): i32 { dispose(message); return 42i32; }
+            function paths(input: Result<bool, i32>, message: string, owner: string): Result<i32, i32> {
+                let bit = left(input) ? outer(message);
+                return Result.Ok(7i32);
+            }
+            function knownOk(input: Result<bool, i32>.Ok, message: string): Result<i32, i32> {
+                dispose(message);
+                let _ = (input ? outer(message));
+                return Result.Ok(7i32);
+            }
+            function knownError(input: Result<bool, i32>.Err, message: string, owner: string): Result<i32, i32> {
+                let _ = input ? outer(message);
+                return Result.Ok(7i32);
+            }
+            function movedRhs(input: Result<bool, i32>, message: string): Result<i32, i32> {
+                dispose(message);
+                let _ = input ? outer(message);
+                return Result.Ok(7i32);
+            }
+            function movedLeft(input: Result<bool, i32>): Result<bool, i32> {
+                let _ = input ? 42i32;
+                return input;
+            }
+            function otherType(input: Result<bool, i32>, message: string): Result<bool, string> {
+                let bit = input ? message;
+                return Result.Ok(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            use compiler::analysis::scalars::{NodeFactKind, data::DataExpression};
+
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let role = typed.result_role().unwrap();
+            let report = lower("paths");
+            let mir = report.mir().expect("both infix routes lower");
+            let prefix = straight_blocks(mir, mir.entry);
+            let test = prefix.last().unwrap();
+            let (
+                Operation::TestVariant {
+                    operand: staged_left,
+                    success,
+                },
+                Terminator::Branch { yes, no },
+            ) = (&test.operation, test.terminator)
+            else {
+                panic!("expected to test the staged left Result");
+            };
+            assert_eq!(*success, &role.ok.id);
+            let left = prefix
+                .iter()
+                .find(|b| matches!(b.operation, Operation::Call(_)))
+                .unwrap();
+            assert_eq!(left.site.span.bytes(), b"left(input)");
+            assert_eq!(staged_left.root.node, left.site.node);
+            assert_eq!(calls_on_path(mir, [true]), [&declaration("left").id]);
+            assert_eq!(
+                calls_on_path(mir, [false]),
+                [&declaration("left").id, &declaration("outer").id]
+            );
+            let success = linear(mir, yes);
+            assert!(!success.iter().any(|op| matches!(
+                op,
+                Operation::WrapResultFailure { .. } | Operation::ForwardResultFailure { .. }
+            )));
+            let copies: Vec<_> = success
+                .iter()
+                .copied()
+                .filter(|op| matches!(op, Operation::TakeResultSuccess { .. }))
+                .collect();
+            assert!(matches!(copies.as_slice(), [
+                Operation::TakeResultSuccess { operand, into: Some(bit) }
+            ] if operand.root.node == staged_left.root.node && bit.root.span.bytes() == b"bit"));
+            assert_return(
+                &success,
+                &role.ok.id,
+                true,
+                &[b"owner: string", b"message: string"],
+            );
+
+            let failure = straight_blocks(mir, no);
+            assert!(matches!(
+                failure.last().unwrap().terminator,
+                Terminator::Return
+            ));
+            let route: Vec<_> = failure
+                .iter()
+                .copied()
+                .filter(|b| {
+                    matches!(
+                        b.operation,
+                        Operation::Call(_)
+                            | Operation::WrapResultFailure { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            let [rhs, wrap, export] = route.as_slice() else {
+                panic!("expected one RHS call, then wrap and export");
+            };
+            let Operation::WrapResultFailure {
+                operand,
+                payload,
+                into,
+                variant,
+                wrapper,
+                origin,
+                cause_display,
+            } = &wrap.operation
+            else {
+                panic!("expected to wrap the staged failure")
+            };
+            assert!(
+                matches!(&export.operation, Operation::Export(result) if result.root.node == into.root.node)
+            );
+            assert_eq!(rhs.site.span.bytes(), b"outer(message)");
+            assert_eq!(rhs.site.node, payload.root.node);
+            assert_eq!(staged_left.root.node, operand.root.node);
+            assert_eq!(*variant, &role.err.id);
+            assert_eq!(*wrapper, &role.wrapper.id);
+            let source = typed
+                .bodies()
+                .node(module, wrap.site.node)
+                .unwrap()
+                .unwrap();
+            let NodeFactKind::Expression(facts) = &source.kind else {
+                panic!("expected infix facts")
+            };
+            let Some(DataExpression::Wrapping(data)) = &facts.data else {
+                panic!("expected typed wrapping")
+            };
+            assert_eq!(*origin, &data.construction.origin);
+            assert_eq!(origin.snapshot(), &module.snapshot);
+            assert_eq!(
+                origin.start(),
+                wrap.site.span.start() + b"left(input) ".len()
+            );
+            assert_eq!(origin.bytes(), b"?");
+            let retained = data.construction.retained.as_ref().unwrap();
+            assert_eq!(
+                *cause_display,
+                typed
+                    .bodies()
+                    .goal(&retained.display)
+                    .unwrap()
+                    .selection
+                    .as_ref()
+                    .unwrap()
+                    .implementation
+            );
+            let failure_ops: Vec<_> = failure.iter().map(|b| &b.operation).collect();
+            assert!(!failure_ops.iter().any(|op| matches!(
+                op,
+                Operation::ConstructResultError { .. }
+                    | Operation::ForwardResultFailure { .. }
+                    | Operation::TakeResultSuccess { .. }
+            )));
+            assert_export(&failure_ops, &[b"owner: string"], |op, output| {
+                matches!(op,
+                    Operation::WrapResultFailure { into, .. } if into.root.node == output.root.node
+                )
+            });
+
+            let known = lower("knownOk");
+            let mir = known.mir().expect("known success skips the moved RHS");
+            let ops = linear(mir, mir.entry);
+            assert!(
+                ops.iter()
+                    .any(|op| matches!(op, Operation::TakeResultSuccess { into: None, .. }))
+            );
+            assert!(
+                !ops.iter().any(|op| matches!(
+                    op,
+                    Operation::Call(_) | Operation::WrapResultFailure { .. }
+                ))
+            );
+            assert_return(&ops, &role.ok.id, true, &[]);
+
+            let known = lower("knownError");
+            let mir = known.mir().expect("known failure wraps and returns");
+            let ops = linear(mir, mir.entry);
+            assert_eq!(calls_on_path(mir, []), [&declaration("outer").id]);
+            assert_export(&ops, &[b"owner: string"], |op, output| {
+                matches!(op,
+                    Operation::WrapResultFailure { operand, into, .. }
+                        if operand.root.span.bytes() == b"input" && into.root.node == output.root.node
+                )
+            });
+
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(check("paths", limits).completion(), Completion::Checked);
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let short = check("paths", short);
+                assert_eq!(short.completion(), Completion::ResourceLimit);
+                assert!(short.mir().is_none());
+            }
+            for (name, site, related) in [
+                ("movedRhs", "message", "dispose(message)"),
+                ("movedLeft", "input", "input"),
+            ] {
+                let moved = lower(name);
+                assert_eq!(moved.completion(), Completion::SourceRejected, "{name}");
+                assert!(moved.mir().is_none());
+                let [finding] = moved.findings() else {
+                    panic!("expected one moved operand")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(
+                    std::str::from_utf8(finding.site.span.bytes()),
+                    Ok(site),
+                    "{name} primary"
+                );
+                assert_eq!(
+                    std::str::from_utf8(finding.related.span.bytes()),
+                    Ok(related),
+                    "{name} related"
+                );
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+            let unsupported = lower("otherType");
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert!(unsupported.mir().is_none());
+        },
+    );
+}
+
+#[test]
 fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
     probe_with_typed(
         "propagation::fresh_scalar_error_keeps_constructor_origin_through_postfix",
@@ -234,19 +487,7 @@ fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
                 let mir = report
                     .mir()
                     .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
-                let walk = |mut pc: usize| {
-                    let mut path = Vec::new();
-                    for _ in 0..mir.blocks.len() {
-                        let block = &mir.blocks[pc];
-                        path.push(block);
-                        match block.terminator {
-                            Terminator::Goto(next) => pc = next,
-                            _ => return path,
-                        }
-                    }
-                    panic!("expected a finite path to a branch or return");
-                };
-                let mut path = walk(mir.entry);
+                let mut path = straight_blocks(mir, mir.entry);
                 if name == "early" {
                     let branch = path.last().unwrap();
                     let (
@@ -279,7 +520,7 @@ fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
                         Operation::Dispose { operand: owner, .. },
                     ] if source.root.node == operand.root.node && owner.root.span.bytes() == b"owner: string"));
                     assert_return(&success, &role.ok.id, true, &[]);
-                    path.extend(walk(no));
+                    path.extend(straight_blocks(mir, no));
                 }
                 assert!(matches!(
                     path.last().unwrap().terminator,
@@ -591,7 +832,26 @@ fn variant_edges(mir: &Mir<'_>, mut pc: usize, expected: &loader::DeclarationId)
     panic!("path did not reach the variant test");
 }
 
-fn calls_on_path<'g>(mir: &Mir<'g>, branches: [bool; 2]) -> Vec<&'g loader::DeclarationId> {
+fn straight_blocks<'a, 'g>(
+    mir: &'a Mir<'g>,
+    mut pc: usize,
+) -> Vec<&'a compiler::analysis::ownership::Block<'g>> {
+    let mut path = Vec::new();
+    for _ in 0..mir.blocks.len() {
+        let block = &mir.blocks[pc];
+        path.push(block);
+        match block.terminator {
+            Terminator::Goto(next) => pc = next,
+            _ => return path,
+        }
+    }
+    panic!("expected a finite path to a branch or return");
+}
+
+fn calls_on_path<'g, const N: usize>(
+    mir: &Mir<'g>,
+    branches: [bool; N],
+) -> Vec<&'g loader::DeclarationId> {
     let mut pc = mir.entry;
     let mut choices = branches.into_iter();
     let mut calls = Vec::new();
