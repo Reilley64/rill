@@ -4238,6 +4238,11 @@ fn live_option_text_cleanup_drops_only_the_initialized_carrier_payload() {
                 held = incoming;
                 return held;
             }
+            function selfReplace(carrier: Option<string>): Option<string> {
+                let mut held = carrier;
+                held = held;
+                return held;
+            }
             function afterDrop(bit: bool): bool { return bit; }
             function discarded(carrier: Option<string>): bool {
                 let _ = carrier;
@@ -4259,16 +4264,6 @@ fn live_option_text_cleanup_drops_only_the_initialized_carrier_payload() {
             let mir = normal
                 .mir()
                 .unwrap_or_else(|| panic!("normal: {:?}", normal.completion()));
-            let tail = linear(mir, mir.entry);
-            let export = tail
-                .iter()
-                .position(|op| matches!(op, Operation::Export(_)))
-                .unwrap();
-            assert!(
-                !tail[..export]
-                    .iter()
-                    .any(|op| matches!(op, Operation::Cleanup(_)))
-            );
             let option = typed.option_role().unwrap();
             let assert_carrier_cleanup = |actions: &[Obligation<'_>]| {
                 assert!(
@@ -4278,24 +4273,26 @@ fn live_option_text_cleanup_drops_only_the_initialized_carrier_payload() {
                     "{actions:?}"
                 );
             };
-            assert_carrier_cleanup(&path_drops(mir, mir.entry));
+            let assert_export_first = |mir: &Mir<'_>, entry| {
+                let ops = linear(mir, entry);
+                let export = ops
+                    .iter()
+                    .position(|op| matches!(op, Operation::Export(_)))
+                    .unwrap();
+                assert!(ops[..export].iter().all(|op| !matches!(
+                    op,
+                    Operation::Cleanup(_) | Operation::Drop(_) | Operation::DropCapture { .. }
+                )));
+                assert_carrier_cleanup(&path_drops(mir, entry));
+            };
+            assert_export_first(mir, mir.entry);
             let early = lower("early", default);
             let mir = early
                 .mir()
                 .expect("live carrier survives until either lexical exit");
             let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
             for entry in [yes, no] {
-                let ops = linear(mir, entry);
-                let export = ops
-                    .iter()
-                    .position(|op| matches!(op, Operation::Export(_)))
-                    .unwrap();
-                assert!(
-                    ops[..export]
-                        .iter()
-                        .all(|op| !matches!(op, Operation::Cleanup(_)))
-                );
-                assert_carrier_cleanup(&path_drops(mir, entry));
+                assert_export_first(mir, entry);
             }
             let conditional = lower("conditional", default);
             let mir = conditional
@@ -4323,7 +4320,12 @@ fn live_option_text_cleanup_drops_only_the_initialized_carrier_payload() {
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
                 if operand.root.span.bytes() == b"carrier: Option<string>.Some" && *some == &option.some.id)
             );
-            for name in ["none", "exported"] {
+            let none = lower("none", default);
+            let mir = none.mir().expect("known None only ends carrier storage");
+            assert!(path_drops(mir, mir.entry).is_empty());
+            assert!(linear(mir, mir.entry).iter().any(|op| matches!(op, Operation::Cleanup(actions)
+                if matches!(actions.as_slice(), [Obligation::EndStorage(carrier)] if carrier.root.span.bytes() == b"carrier: Option<string>.None"))));
+            for name in ["exported", "selfReplace"] {
                 let report = lower(name, default);
                 let mir = report
                     .mir()
@@ -4366,32 +4368,45 @@ fn live_option_text_cleanup_drops_only_the_initialized_carrier_payload() {
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
                 if operand.root.span.bytes() == b"carrier" && *some == &option.some.id)
             );
-            let ops = linear(mir, mir.entry);
-            let drop = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::DropOptionPayload { .. })))).unwrap();
-            let after = ops
-                .iter()
-                .position(|op| matches!(op, Operation::Call(callee) if *callee == id("afterDrop")))
-                .unwrap();
-            assert!(drop < after);
-            let exact = AnalysisLimits {
-                max_work: conditional.statistics().work,
-                max_entries: conditional.statistics().entries,
-                ..default
-            };
-            assert!(lower("conditional", exact).mir().is_some());
-            for short in [
-                AnalysisLimits {
-                    max_work: exact.max_work - 1,
-                    ..exact
-                },
-                AnalysisLimits {
-                    max_entries: exact.max_entries - 1,
-                    ..exact
-                },
-            ] {
-                let limited = lower("conditional", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+            let actions: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Move { from, .. } => {
+                        from.root.span.bytes() == b"carrier: Option<string>"
+                    }
+                    Operation::Cleanup(actions) => actions
+                        .iter()
+                        .any(|action| matches!(action, Obligation::DropOptionPayload { .. })),
+                    Operation::Call(_) => true,
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(actions.as_slice(), [Operation::Move { into: Some(staged), .. }, Operation::Cleanup(cleanup), Operation::Call(callee)]
+                if *callee == id("afterDrop") && matches!(cleanup.as_slice(), [Obligation::DropOptionPayload { operand, .. }] if operand.root.node == staged.root.node)),
+                "{actions:?}"
+            );
+            for (name, report) in [("conditional", conditional), ("discarded", discarded)] {
+                let exact = AnalysisLimits {
+                    max_work: report.statistics().work,
+                    max_entries: report.statistics().entries,
+                    ..default
+                };
+                assert!(lower(name, exact).mir().is_some());
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = lower(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none());
+                }
             }
         },
     );

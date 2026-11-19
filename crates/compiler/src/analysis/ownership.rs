@@ -314,7 +314,7 @@ pub enum RetainedPlace<'g> {
 pub enum Cleanup<'g> {
     EndStorage(Place<'g>),
     Drop(Place<'g>),
-    /// Consume an owned Option<string>, dropping its string only in `some`.
+    /// Consume an owned `Option<string>`, dropping its string only in `some`.
     DropOptionPayload {
         operand: Place<'g>,
         some: &'g DeclarationId,
