@@ -1301,6 +1301,14 @@ fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
                 let mut owner = seed;
                 let _ = reversed(&owner[1], &mut owner);
             }
+            function bad(value: &[bool, string], fallback: &string): &string {
+                let local = "local";
+                return &local;
+            }
+            function reachedBad(value: &[bool, string], fallback: &string): &string { return bad(value, fallback); }
+            function unsupportedPipe(value: &[bool, string], fallback: &string, flag: bool): &string {
+                return flag |> choose(value, fallback);
+            }
             function mutableExtra(value: &[bool, string], extra: &mut bool): bool { return false; }
             function unsupportedMutable(value: &[bool, string], extra: &mut bool): bool { return mutableExtra(value, extra); }
             function secondTuple(value: &[bool, string], other: &[bool, bool]): bool { return false; }
@@ -1413,6 +1421,7 @@ fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
                 ("keepsExclusive", "R0201", "owner[0]", "&mut owner"),
                 ("laterShared", "R0201", "&owner[1]", "&mut owner"),
                 ("laterExclusive", "R0201", "&mut owner", "&owner[1]"),
+                ("reachedBad", "R0202", "return &local;", "local"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
@@ -1424,13 +1433,17 @@ fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
                 assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
-            for name in ["unsupportedMutable", "unsupportedSecond"] {
+            for (name, site) in [
+                ("unsupportedMutable", "value"),
+                ("unsupportedSecond", "value"),
+                ("unsupportedPipe", "flag |> choose(value, fallback)"),
+            ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
                 assert_eq!(
                     report.blocked_at().unwrap().span.bytes(),
-                    b"value",
+                    site.as_bytes(),
                     "{name}"
                 );
             }

@@ -273,7 +273,7 @@ impl<'a, 'g> Build<'a, 'g> {
             .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_))))
     }
 
-    fn direct_tuple_borrow_argument(
+    fn admits_direct_tuple_borrow_call(
         &mut self,
         call: &crate::analysis::scalars::CallFacts<'g>,
         position: usize,
@@ -283,7 +283,6 @@ impl<'a, 'g> Build<'a, 'g> {
         // This tuple and the other leaf inputs have no retained destination.
         // The existing leaf-result contract keeps all possible input backing.
         if call.pipe_input.is_some()
-            || !call.defaults.is_empty()
             || !(matches!(result.as_ref(), TypeTerm::Primitive(_)) || primitive_reference(result))
         {
             return Ok(false);
@@ -2142,7 +2141,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     return Err(Stop::Pending(arg));
                 }
             } else if !self.direct_call_type(&ty)
-                && !self.direct_tuple_borrow_argument(call, position, &ty, &facts.ty)?
+                && !self.admits_direct_tuple_borrow_call(call, position, &ty, &facts.ty)?
             {
                 return Err(Stop::Pending(arg));
             }
