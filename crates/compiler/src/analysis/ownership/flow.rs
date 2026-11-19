@@ -15,7 +15,7 @@ enum State {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
 struct Held {
     loans: Arc<[Loan]>,
-    capture_drop: Option<NodeId>,
+    capture_drops: [Option<NodeId>; 2],
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
     stored_at: Option<NodeId>,
@@ -120,7 +120,12 @@ fn liveness(
             Action::Displace { target, incoming } | Action::Install { target, incoming } => {
                 use_one(Some(incoming), Some(target))
             }
-            Action::FormClosure { capture, into, .. } => use_one(Some(capture), Some(into)),
+            Action::FormClosure {
+                capture,
+                second,
+                into,
+                ..
+            } => ([Some(capture), second], Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
             // External contents are already live at every instruction.
             Action::CopyThrough {
@@ -398,22 +403,13 @@ fn forbid_custom_partial(
     Ok(())
 }
 
-fn cleanup_of<'g>(
-    module: &'g Module,
-    local: Local<'g>,
-    held: &Held,
-    node: NodeId,
-) -> ResultOf<Cleanup<'g>> {
+fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultOf<Cleanup<'g>> {
     let place = local.place(module);
     match local.cleanup {
         StorageCleanup::Unlowered => Err(Stop::Pending(node)),
         StorageCleanup::Drop => Ok(Cleanup::Drop(place)),
         StorageCleanup::ReleaseGuard(release) => Ok(release.cleanup(place)),
-        StorageCleanup::End if let Some(field) = held.capture_drop => Ok(Cleanup::DropCapture {
-            closure: place.root,
-            field: site_at(module, field),
-        }),
-        StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
+        StorageCleanup::End | StorageCleanup::ClosureEnvironment => Ok(Cleanup::EndStorage(place)),
     }
 }
 
@@ -423,10 +419,10 @@ fn cleanup_operation<'g>(
     state: State,
     node: NodeId,
 ) -> ResultOf<Operation<'g>> {
-    let State::Initialized(held) = state else {
+    if !matches!(state, State::Initialized(_)) {
         return Ok(Operation::None);
-    };
-    Ok(match cleanup_of(module, local, &held, node)? {
+    }
+    Ok(match cleanup_of(module, local, node)? {
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
         Cleanup::EndStorage(_) => Operation::None,
@@ -547,7 +543,18 @@ fn cleanup_boundary<'g>(
                 if member != slot {
                     budget.reserve(1)?;
                 }
-                actions.push(cleanup_of(module, slots[member], &held, node)?);
+                let drops = held.capture_drops.into_iter().flatten();
+                let count = drops.clone().count();
+                if count == 0 {
+                    actions.push(cleanup_of(module, slots[member], node)?);
+                } else {
+                    budget.reserve(count - 1)?;
+                    let closure = slots[member].place(module).root;
+                    actions.extend(drops.rev().map(|field| Cleanup::DropCapture {
+                        closure,
+                        field: site_at(module, field),
+                    }));
+                }
             }
         }
     }
@@ -1113,18 +1120,44 @@ pub(super) fn run<'g>(
                 }
                 Action::FormClosure {
                     capture,
+                    second,
                     into,
                     mode,
                 } => {
-                    let mut held = initialized(&state[capture], node)?.clone();
-                    held.capture_drop = (slots[capture].cleanup == StorageCleanup::Drop)
-                        .then_some(slots[capture].node);
+                    let first = initialized(&state[capture], node)?;
+                    let loans = if let Some(second) = second {
+                        initialized(&state[second], node)?;
+                        let mut loans = BTreeSet::new();
+                        for slot in [capture, second] {
+                            include_loans(&mut loans, &state, slots[slot].storage(slot), budget)?;
+                        }
+                        loan_set(loans, budget)?
+                    } else {
+                        first.loans.clone()
+                    };
+                    let drop_of = |slot: Slot| {
+                        (slots[slot].cleanup == StorageCleanup::Drop).then_some(slots[slot].node)
+                    };
+                    state[into] = State::Initialized(Held {
+                        loans,
+                        capture_drops: [drop_of(capture), second.and_then(drop_of)],
+                        ..Held::default()
+                    });
                     state[capture] = State::Vacant;
-                    state[into] = State::Initialized(held);
-                    Operation::FormClosure {
-                        closure: local(into).root,
-                        capture: local(capture).root,
-                        mode,
+                    let closure = local(into).root;
+                    if let Some(second) = second {
+                        state[second] = State::Vacant;
+                        Operation::FormClosurePair {
+                            closure,
+                            captures: [local(capture).root, local(second).root],
+                            mode,
+                        }
+                    } else {
+                        Operation::FormClosure {
+                            closure,
+                            capture: local(capture).root,
+                            mode,
+                        }
                     }
                 }
                 Action::Dispose(slot) => {

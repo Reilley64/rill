@@ -6,7 +6,10 @@ use crate::analysis::scalars::data::{
     Access, Construction, DataExpression, PathProjection, PatternFacts, PatternProjection,
     PlacePath,
 };
-use crate::analysis::scalars::generics::{GoalState, callables::CaptureForm};
+use crate::analysis::scalars::generics::{
+    GoalState,
+    callables::{CaptureFact, CaptureForm},
+};
 use crate::analysis::scalars::{ErrorConstruction, ExpressionFacts, PropagationTarget};
 use crate::analysis::typed::{
     ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
@@ -84,7 +87,7 @@ impl<'a, 'g> Build<'a, 'g> {
             TypeTerm::Primitive(_) if owns_text(ty) => (true, StorageCleanup::Drop),
             TypeTerm::Primitive(_) => (false, StorageCleanup::End),
             TypeTerm::Reference { mutable, .. } => (*mutable, StorageCleanup::End),
-            TypeTerm::Callable { .. } => (true, StorageCleanup::End),
+            TypeTerm::Callable { .. } => (true, StorageCleanup::ClosureEnvironment),
             TypeTerm::Nominal { .. } if let Some(release) = self.guard_release(ty)? => {
                 (true, StorageCleanup::ReleaseGuard(release))
             }
@@ -1475,26 +1478,67 @@ impl<'a, 'g> Build<'a, 'g> {
     }
 
     fn closure(&mut self, node: NodeId, into: Slot, next: Pc, depth: usize) -> ResultOf<Pc> {
+        self.budget.step(1)?;
         let arrow = self
             .facts
             .get(&node)
             .and_then(|f| f.callable.as_ref()?.arrow.as_deref())
             .ok_or(Stop::Pending(node))?;
         let body = self.module.syntax.nodes[node].children[1];
-        let [capture] = arrow.captures.as_slice() else {
-            return Err(Stop::Pending(node));
-        };
         let mode = arrow.mode.ok_or(Stop::Pending(node))?;
-        // Only an arrow whose entire body returns its single captured value is
-        // lowered here. It has no additional dynamic access or cleanup to check.
-        if arrow.premise.is_some()
-            || !arrow.parameters.is_empty()
-            || capture.site.node != body
-            || !capture.reachable
+        if arrow.premise.is_some() || !arrow.parameters.is_empty() {
+            return Err(Stop::Pending(node));
+        }
+        // Admit only direct stable sources, either the entire body or a
+        // written pair. A tuple of these sources adds no body computation
+        // to run at formation.
+        let (first, second) = match arrow.captures.as_slice() {
+            [capture] if capture.site.node == body => (capture, None),
+            [first, second] if first.path.root != second.path.root => {
+                self.budget.step(1)?;
+                let Some(DataExpression::Tuple { elements }) = &self.value(body)?.data else {
+                    return Err(Stop::Pending(node));
+                };
+                if elements.as_slice() == [first.site.node, second.site.node] {
+                    (first, Some(second))
+                } else if elements.as_slice() == [second.site.node, first.site.node] {
+                    (second, Some(first))
+                } else {
+                    return Err(Stop::Pending(node));
+                }
+            }
+            _ => return Err(Stop::Pending(node)),
+        };
+        let capture = self.capture_slot(first)?;
+        let second = second
+            .map(|fact| self.capture_slot(fact).map(|slot| (fact.site.node, slot)))
+            .transpose()?;
+        let form = self.emit(
+            node,
+            Action::FormClosure {
+                capture,
+                second: second.map(|(_, slot)| slot),
+                into,
+                mode,
+            },
+            Edges::Next(next),
+        )?;
+        let tail = if let Some((site, slot)) = second {
+            self.expression(site, Some(slot), form, depth + 1)?
+        } else {
+            form
+        };
+        self.expression(first.site.node, Some(capture), tail, depth + 1)
+    }
+
+    fn capture_slot(&mut self, capture: &CaptureFact<'g>) -> ResultOf<Slot> {
+        let node = capture.site.node;
+        let syntax = &self.module.syntax.nodes[node];
+        if !capture.reachable
             || capture.through.is_some()
             || !capture.path.projections.is_empty()
             || !matches!(
-                (capture.form, self.module.syntax.nodes[body].kind),
+                (capture.form, syntax.kind),
                 (
                     CaptureForm::ExplicitBorrow { mutable: false },
                     NodeKind::Prefix("&")
@@ -1503,24 +1547,12 @@ impl<'a, 'g> Build<'a, 'g> {
                     NodeKind::ValueReference
                 )
             )
+            || !(matches!(capture.ty.as_ref(), TypeTerm::Primitive(_))
+                || primitive_reference(&capture.ty))
         {
             return Err(Stop::Pending(node));
         }
-        let ty = self.value(body)?.ty.clone();
-        if !matches!(ty.as_ref(), TypeTerm::Primitive(_)) && !primitive_reference(&ty) {
-            return Err(Stop::Pending(node));
-        }
-        let capture = self.slot(body, &ty)?;
-        let form = self.emit(
-            node,
-            Action::FormClosure {
-                capture,
-                into,
-                mode,
-            },
-            Edges::Next(next),
-        )?;
-        self.expression(body, Some(capture), form, depth + 1)
+        self.slot(node, &capture.ty)
     }
 
     fn call_destination(

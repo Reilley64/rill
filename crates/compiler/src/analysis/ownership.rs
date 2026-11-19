@@ -156,6 +156,12 @@ pub enum Operation<'g> {
         capture: Site<'g>,
         mode: InvocationMode,
     },
+    /// Form a pair environment from the two already-staged captures, in order.
+    FormClosurePair {
+        closure: Site<'g>,
+        captures: [Site<'g>; 2],
+        mode: InvocationMode,
+    },
     Call(&'g DeclarationId),
     /// A direct call may retain an input's backing in the destination's
     /// contents, including the exclusive restriction on a shared view.
@@ -665,6 +671,7 @@ enum StorageCleanup<'g> {
     End,
     Drop,
     Unlowered,
+    ClosureEnvironment,
     ReleaseGuard(GuardRelease<'g>),
 }
 
@@ -674,7 +681,10 @@ impl<'g> Local<'g> {
     }
 
     fn needs_boundary_cleanup(self) -> bool {
-        self.members > 0 || self.custom_disposer.is_some() || self.guard_release().is_some()
+        self.members > 0
+            || self.custom_disposer.is_some()
+            || self.guard_release().is_some()
+            || self.cleanup == StorageCleanup::ClosureEnvironment
     }
 
     fn guard_release(self) -> Option<GuardRelease<'g>> {
@@ -771,6 +781,7 @@ enum Action<'g> {
     },
     FormClosure {
         capture: Slot,
+        second: Option<Slot>,
         into: Slot,
         mode: InvocationMode,
     },
