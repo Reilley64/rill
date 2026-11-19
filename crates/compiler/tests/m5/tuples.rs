@@ -347,6 +347,11 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 a[1] = &b[0];
                 b[1] = &a[0];
             }
+            function oneWay(seed: &bool): void {
+                let mut a: [bool, &bool] = [false, seed];
+                let b: [bool, &bool] = [true, seed];
+                a[1] = &b[0];
+            }
             function liveCycle(seed: &bool, flag: bool): bool {
                 let mut held = seed;
                 if (flag) {
@@ -488,37 +493,48 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
+                if matches!(name, "incompatibleOrder" | "observableCycle") {
+                    let site = report.blocked_at().unwrap();
+                    assert!(
+                        site.span
+                            .bytes()
+                            .starts_with(b"{\n                let mut a:"),
+                        "{name}"
+                    );
+                }
             }
             assert_eq!(
                 check("descriptorSlot").blocked_at().unwrap().span.bytes(),
                 b"&value[0]"
             );
-            let cycle = check("groupedCycle");
-            let mir = cycle
-                .mir()
-                .unwrap_or_else(|| panic!("groupedCycle: {:?}", cycle.completion()));
-            let scopes: Vec<_> = linear(mir, mir.entry)
-                .into_iter()
-                .filter_map(|op| match op {
-                    Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
-                        Obligation::EndStorage(place) if matches!(place.root.span.bytes(), b"a" | b"b"))) => Some(actions),
-                    _ => None,
-                })
-                .collect();
-            let [scope] = scopes.as_slice() else {
-                panic!("both tuples must end on the same boundary")
+            let order = |name| {
+                let report = check(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let scopes: Vec<_> = linear(mir, mir.entry)
+                    .into_iter()
+                    .filter_map(|op| match op {
+                        Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
+                            Obligation::EndStorage(place) if matches!(place.root.span.bytes(), b"a" | b"b"))) => Some(actions),
+                        _ => None,
+                    })
+                     .collect();
+                let [scope] = scopes.as_slice() else {
+                    panic!("both tuples must end on the same boundary")
+                };
+                scope
+                    .iter()
+                    .map(|action| match action {
+                        Obligation::EndStorage(place) => {
+                            (place.root.span.bytes(), place.tuple_element())
+                        }
+                        other => panic!("unexpected cleanup: {other:?}"),
+                    })
+                    .collect::<Vec<_>>()
             };
-            let order: Vec<_> = scope
-                .iter()
-                .map(|action| match action {
-                    Obligation::EndStorage(place) => {
-                        (place.root.span.bytes(), place.tuple_element())
-                    }
-                    other => panic!("unexpected cleanup: {other:?}"),
-                })
-                .collect();
             assert_eq!(
-                order,
+                order("groupedCycle"),
                 [
                     (b"b".as_slice(), Some(1)),
                     (b"a".as_slice(), Some(1)),
@@ -528,7 +544,19 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                     (b"a".as_slice(), None),
                 ]
             );
+            assert_eq!(
+                order("oneWay"),
+                [
+                    (b"a".as_slice(), Some(1)),
+                    (b"a".as_slice(), Some(0)),
+                    (b"a".as_slice(), None),
+                    (b"b".as_slice(), Some(1)),
+                    (b"b".as_slice(), Some(0)),
+                    (b"b".as_slice(), None),
+                ]
+            );
 
+            let cycle = check("groupedCycle");
             let limits = AnalysisLimits {
                 max_work: cycle.statistics().work,
                 max_entries: cycle.statistics().entries,
