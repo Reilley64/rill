@@ -253,6 +253,13 @@ impl<'a, 'g> Build<'a, 'g> {
         }))
     }
 
+    fn primitive_tuple_elements(&mut self, elements: &[Type<'g>]) -> ResultOf<bool> {
+        self.budget.step(elements.len())?;
+        Ok(elements
+            .iter()
+            .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_))))
+    }
+
     fn direct_tuple_borrow_argument(
         &mut self,
         call: &crate::analysis::scalars::CallFacts<'g>,
@@ -277,11 +284,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let TypeTerm::Tuple(elements) = referent.as_ref() else {
             return Ok(false);
         };
-        self.budget.step(elements.len())?;
-        if !elements
-            .iter()
-            .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
-        {
+        if !self.primitive_tuple_elements(elements)? {
             return Ok(false);
         }
         self.budget.step(2 + elements.len())?;
@@ -991,17 +994,15 @@ impl<'a, 'g> Build<'a, 'g> {
             return Ok(None);
         };
         let name = self.ungroup(syntax.children[0])?;
-        if self.module.syntax.nodes[name].kind != NodeKind::ValueReference {
+        if self.module.syntax.nodes[name].kind != NodeKind::ValueReference
+            || !self.primitive_tuple_elements(elements)?
+        {
             return Ok(None);
         }
-        self.budget.step(1 + 2 * elements.len())?;
+        // Compare only after proving the result has no nested members.
+        self.budget.step(1 + elements.len())?;
         let input = self.value(name)?;
-        if input.access != Access::Owned
-            || *result != input.ty
-            || !elements
-                .iter()
-                .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
-        {
+        if input.access != Access::Owned || *result != input.ty {
             return Ok(None);
         }
         Ok(input.path.as_ref().filter(|path| {
@@ -1033,15 +1034,13 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(pattern));
             }
         } else {
-            self.budget.step(1 + elements.len())?;
+            self.budget.step(1)?;
             let input = self.value(operand)?;
             if self.module.syntax.nodes[operand].kind != NodeKind::ValueReference
                 || input.access != Access::Owned
                 || !matches!(&input.path, Some(path) if path.root.kind == DeclarationKind::Binding
                     && path.projections.is_empty())
-                || !elements
-                    .iter()
-                    .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
+                || !self.primitive_tuple_elements(elements)?
             {
                 return Err(Stop::Pending(pattern));
             }

@@ -729,6 +729,22 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 touch(view);
                 return bit;
             }
+            function parentSlotEnds(seed: [bool, string], fallback: &mut string): bool {
+                let mut owner = seed;
+                let mut view = fallback;
+                { let parent = &mut owner; view = project(&mut *parent); }
+                let bit = owner[0];
+                touch(view);
+                return bit;
+            }
+            function explicitSharedResult(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let view = projectShared(&mut *parent);
+                let bit = snapshot(parent);
+                let _ = view;
+                return bit;
+            }
             function movedDescriptor(seed: [bool, string]): bool {
                 let mut owner = seed;
                 let parent = &mut owner;
@@ -746,6 +762,11 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
             function unsupportedReborrowContents(parent: &mut [&bool, string]): void {
                 let child = &mut *parent;
                 let _ = child;
+            }
+            function unsupportedAnnotatedPattern(parent: &mut [[bool, string], bool]): bool {
+                let [[first, _], bit]: &mut [[bool, string], bool] = &mut *parent;
+                let _ = first;
+                return bit;
             }
             function unsupportedSharedReborrow(parent: &mut [bool, string]): void {
                 let child = &*parent;
@@ -875,6 +896,11 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                         "{name}: {route:?}"
                     );
                 }
+                assert!(linear(mir, mir.entry).windows(2).any(|step| matches!(step,
+                    [Operation::Drop(old), Operation::Install { target, .. }]
+                        if old.root.node == target.root.node && old.root.span.bytes() == b"owner"
+                            && old.tuple_element() == Some(1) && target.tuple_element() == Some(1))),
+                    "{name}: the displaced member must drop before installation");
                 assert!(
                     matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(new)]
                     if old.root.node == new.root.node && old.root.span.bytes() == b"owner"
@@ -909,6 +935,8 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 ),
                 ("explicitOwner", "R0201", "owner[0]", "&mut owner"),
                 ("parentStillSuspended", "R0201", "parent", "&mut *parent"),
+                ("parentSlotEnds", "R0201", "owner[0]", "&mut owner"),
+                ("explicitSharedResult", "R0201", "parent", "&mut *parent"),
                 ("movedDescriptor", "R0200", "&mut *parent", "parent"),
                 (
                     "escapedDescriptor",
@@ -942,6 +970,7 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 ("unsupportedIndirect", "**parent"),
                 ("unsupportedReborrowContents", "*parent"),
                 ("unsupportedSharedReborrow", "*parent"),
+                ("unsupportedAnnotatedPattern", "[[first, _], bit]"),
                 ("unsupportedSecondArg", "&mut owner"),
             ] {
                 let report = check(name);
