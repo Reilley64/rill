@@ -1,8 +1,34 @@
 use super::*;
 
+fn canonical_record_field<'g>(
+    typed: &TypedReport<'g>,
+    module: &loader::ModuleKey,
+    record: &str,
+    name: &str,
+) -> &'g loader::DeclarationId {
+    use compiler::analysis::DeclarationShape;
+    let facts = typed
+        .inventory()
+        .type_facts()
+        .declarations()
+        .find(|facts| {
+            facts.declaration.id.module == *module
+                && facts.declaration.name.as_deref() == Some(record)
+        })
+        .unwrap();
+    let DeclarationShape::Record { fields } = &facts.shape else {
+        panic!("expected checked record fields")
+    };
+    &fields
+        .iter()
+        .find(|member| member.declaration.name.as_deref() == Some(name))
+        .unwrap()
+        .declaration
+        .id
+}
+
 #[test]
 fn nested_owned_records_clean_initialized_leaves_on_exit() {
-    use compiler::analysis::DeclarationShape;
     use compiler::analysis::ownership::Projection;
 
     probe_with_typed(
@@ -44,23 +70,7 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                     .find(|decl| decl.name.as_deref() == Some(name))
                     .unwrap()
             };
-            let field = |record, name| {
-                let facts = typed
-                    .inventory()
-                    .type_facts()
-                    .declarations()
-                    .find(|facts| facts.declaration.id == declaration(record).id)
-                    .unwrap();
-                let DeclarationShape::Record { fields } = &facts.shape else {
-                    panic!("expected checked record fields")
-                };
-                &fields
-                    .iter()
-                    .find(|member| member.declaration.name.as_deref() == Some(name))
-                    .unwrap()
-                    .declaration
-                    .id
-            };
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
             let lower =
                 |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
             let default = AnalysisLimits::default();
@@ -172,7 +182,6 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
 
 #[test]
 fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
-    use compiler::analysis::DeclarationShape;
     use compiler::analysis::ownership::Projection;
 
     probe_with_typed(
@@ -201,6 +210,13 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
                 let again = value.child;
                 return again.flag;
             }
+            type BitOuter = { child: Inner; bit: bool; }
+            function copyBit(value: BitOuter): bool {
+                let taken = value.child;
+                let first = value.bit;
+                let again = value.bit;
+                return again;
+            }
             function borrowField(value: Outer): void { let held = &value.child; }
             function nestedLeaf(value: Outer): string { return value.child.text; }
         "#,
@@ -212,23 +228,7 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
                     .find(|decl| decl.name.as_deref() == Some(name))
                     .unwrap()
             };
-            let field = |record, name| {
-                let facts = typed
-                    .inventory()
-                    .type_facts()
-                    .declarations()
-                    .find(|facts| facts.declaration.id == declaration(record).id)
-                    .unwrap();
-                let DeclarationShape::Record { fields } = &facts.shape else {
-                    panic!("expected checked record fields")
-                };
-                &fields
-                    .iter()
-                    .find(|member| member.declaration.name.as_deref() == Some(name))
-                    .unwrap()
-                    .declaration
-                    .id
-            };
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
             let lower =
                 |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
             let default = AnalysisLimits::default();
@@ -289,6 +289,36 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
             let mir = grouped
                 .mir()
                 .expect("moving a grouped subtree transfers all its initialized fields");
+            let transfer: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Cleanup(_)))
+                .collect();
+            let [
+                Operation::Move {
+                    from: source,
+                    into: Some(taken),
+                },
+                Operation::Cleanup(taken_cleanup),
+                Operation::Cleanup(source_cleanup),
+            ] = transfer.as_slice()
+            else {
+                panic!("expected one child transfer and the two cleanup boundaries")
+            };
+            assert_eq!(source.root.span.bytes(), b"value: Stacked");
+            assert_eq!(&source.field().unwrap().id, field("Stacked", "last"));
+            assert_eq!(taken.root.span.bytes(), b"taken");
+            assert!(taken.projection.is_none());
+            assert!(
+                matches!(taken_cleanup.as_slice(), [Obligation::Drop(_), Obligation::EndStorage(marker), Obligation::Drop(_), Obligation::EndStorage(header)]
+                if marker.root.node == taken.root.node && marker.field().is_some_and(|member| &member.id == field("Pair", "marker"))
+                    && header.root.node == taken.root.node && header.projection.is_none())
+            );
+            assert!(
+                matches!(source_cleanup.as_slice(), [Obligation::Drop(_), Obligation::Drop(_), Obligation::EndStorage(marker), Obligation::Drop(_), Obligation::EndStorage(child), Obligation::EndStorage(root)]
+                if [marker, child, root].iter().all(|place| place.root.node == source.root.node)
+                    && matches!(marker.projection, Some(Projection::NestedField { outer, inner }) if &outer.id == field("Stacked", "first") && &inner.id == field("Pair", "marker"))
+                    && child.field().is_some_and(|member| &member.id == field("Stacked", "first")) && root.projection.is_none())
+            );
             let drops = path_drops(mir, mir.entry);
             let expected = [
                 (b"taken".as_slice(), "Pair", "back", None),
@@ -351,6 +381,27 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(remaining)]
                 if remaining.root.span.bytes() == b"value: CopyChild" && remaining.field().is_some_and(|member| &member.id == field("CopyChild", "sibling")))
             );
+            let direct_bit = lower("copyBit", default);
+            let mir = direct_bit
+                .mir()
+                .expect("a moved child does not affect copies of the scalar sibling");
+            let copies: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::Copy {
+                        from,
+                        into: Some(dest),
+                    } if from.root.span.bytes() == b"value: BitOuter" => Some((from, dest)),
+                    _ => None,
+                })
+                .collect();
+            assert!(matches!(copies.as_slice(), [(from, first), (again, second)]
+                if from.root.node == again.root.node && first.root.span.bytes() == b"first" && second.root.span.bytes() == b"again"
+                    && [from, again].iter().all(|place| place.field().is_some_and(|member| &member.id == field("BitOuter", "bit")))));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
+                if text.root.span.bytes() == b"taken" && text.field().is_some_and(|member| &member.id == field("Inner", "text")))
+            );
             for name in ["reread", "backedge"] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
@@ -361,10 +412,16 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
                 assert_eq!(finding.code(), "R0200");
                 assert_eq!(finding.site.span.bytes(), b"value.child");
                 assert_eq!(finding.related.span.bytes(), b"value.child");
-                assert_eq!(
-                    finding.site.node == finding.related.node,
-                    name == "backedge"
-                );
+                let body = &module.syntax.nodes[declaration(name).node].span;
+                for site in [&finding.site, &finding.related] {
+                    assert_eq!(site.module, &module.key);
+                    assert!(body.start() <= site.span.start() && site.span.end() <= body.end());
+                }
+                if name == "backedge" {
+                    assert_eq!(finding.site.node, finding.related.node);
+                } else {
+                    assert!(finding.related.span.start() < finding.site.span.start());
+                }
             }
             for (name, site) in [
                 ("borrowField", b"value.child".as_slice()),

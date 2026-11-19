@@ -704,8 +704,10 @@ struct DisposerFrame {
 #[derive(Clone, Copy)]
 struct Local<'g> {
     node: NodeId,
+    /// Lexical cleanup root, including for leaves inside a nested child.
     owner: Slot,
     projection: Option<Projection<'g>>,
+    /// Number of trailing slots in this region, not just direct fields.
     members: usize,
     reference_member: bool,
     has_guard_field: bool,

@@ -270,9 +270,12 @@ impl<'a, 'g> Build<'a, 'g> {
                     }),
                 )?
             };
-            self.slots[child].owner = root;
             self.slots[child].projection = Some(Projection::Field(outer.declaration));
             self.slots[root].moves |= self.slots[child].moves;
+            for slot in self.slots[child].storage(child) {
+                self.budget.step(1)?;
+                self.slots[slot].owner = root;
+            }
         }
         self.slots[root].members = self.slots.len() - root - 1;
         Ok(Some(root))
