@@ -234,69 +234,76 @@ fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
                 let mir = report
                     .mir()
                     .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
-                let mut tested = None;
-                let ops = if name == "early" {
-                    let mut prefix = Vec::new();
-                    let mut pc = mir.entry;
+                let walk = |mut pc: usize| {
+                    let mut path = Vec::new();
                     for _ in 0..mir.blocks.len() {
                         let block = &mir.blocks[pc];
-                        prefix.push(&block.operation);
-                        match (&block.operation, block.terminator) {
-                            (
-                                Operation::TestVariant { operand, success },
-                                Terminator::Branch { yes, no },
-                            ) => {
-                                assert_eq!(*success, &role.ok.id);
-                                tested = Some(operand);
-                                let success = linear(mir, yes);
-                                assert!(!success.iter().any(|op| matches!(
-                                    op,
-                                    Operation::Call(_)
-                                        | Operation::ConstructResultError { .. }
-                                        | Operation::ForwardResultFailure { .. }
-                                )));
-                                let transfer: Vec<_> = success
-                                    .iter()
-                                    .copied()
-                                    .filter(|op| {
-                                        matches!(
-                                            op,
-                                            Operation::TakeResultSuccess { .. }
-                                                | Operation::Dispose { .. }
-                                        )
-                                    })
-                                    .collect();
-                                assert!(matches!(transfer.as_slice(), [
-                                    Operation::TakeResultSuccess { operand: source, into: None },
-                                    Operation::Dispose { operand: owner, .. },
-                                ] if source.root.node == operand.root.node && owner.root.span.bytes() == b"owner: string"));
-                                assert_return(&success, &role.ok.id, true, &[]);
-                                prefix.extend(linear(mir, no));
-                                break;
-                            }
-                            (_, Terminator::Goto(next)) => pc = next,
-                            _ => panic!("expected a Result variant test"),
+                        path.push(block);
+                        match block.terminator {
+                            Terminator::Goto(next) => pc = next,
+                            _ => return path,
                         }
                     }
-                    assert!(tested.is_some());
-                    prefix
-                } else {
-                    linear(mir, mir.entry)
+                    panic!("expected a finite path to a branch or return");
                 };
-                let route: Vec<_> = ops
+                let mut path = walk(mir.entry);
+                if name == "early" {
+                    let branch = path.last().unwrap();
+                    let (
+                        Operation::TestVariant { operand, success },
+                        Terminator::Branch { yes, no },
+                    ) = (&branch.operation, branch.terminator)
+                    else {
+                        panic!("expected a Result variant test");
+                    };
+                    assert_eq!(*success, &role.ok.id);
+                    let success = linear(mir, yes);
+                    assert!(!success.iter().any(|op| matches!(
+                        op,
+                        Operation::Call(_)
+                            | Operation::ConstructResultError { .. }
+                            | Operation::ForwardResultFailure { .. }
+                    )));
+                    let transfer: Vec<_> = success
+                        .iter()
+                        .copied()
+                        .filter(|op| {
+                            matches!(
+                                op,
+                                Operation::TakeResultSuccess { .. } | Operation::Dispose { .. }
+                            )
+                        })
+                        .collect();
+                    assert!(matches!(transfer.as_slice(), [
+                        Operation::TakeResultSuccess { operand: source, into: None },
+                        Operation::Dispose { operand: owner, .. },
+                    ] if source.root.node == operand.root.node && owner.root.span.bytes() == b"owner: string"));
+                    assert_return(&success, &role.ok.id, true, &[]);
+                    path.extend(walk(no));
+                }
+                assert!(matches!(
+                    path.last().unwrap().terminator,
+                    Terminator::Return
+                ));
+                let ops: Vec<_> = path.iter().map(|b| &b.operation).collect();
+                let route: Vec<_> = path
                     .iter()
                     .copied()
-                    .filter(|op| {
+                    .filter(|b| {
                         matches!(
-                            op,
+                            b.operation,
                             Operation::Call(_)
                                 | Operation::ConstructResultError { .. }
+                                | Operation::TestVariant { .. }
                                 | Operation::ForwardResultFailure { .. }
                                 | Operation::Export(_)
                         )
                     })
                     .collect();
-                let [
+                let [call, construct, exit @ ..] = route.as_slice() else {
+                    panic!("{name}: expected a payload call and construction");
+                };
+                let (
                     Operation::Call(callee),
                     Operation::ConstructResultError {
                         constructor,
@@ -305,27 +312,16 @@ fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
                         payload,
                         into,
                     },
-                    exit @ ..,
-                ] = route.as_slice()
+                ) = (&call.operation, &construct.operation)
                 else {
-                    panic!("{name}: expected a single payload call before constructing the error");
+                    panic!("{name}: expected to call the payload function before construction");
                 };
                 assert_eq!(*callee, &declaration("payload").id);
                 assert_eq!(*constructor, &role.constructor.unwrap().id);
                 assert_eq!(*variant, &role.err.id);
                 assert_eq!(*wrapper, &role.wrapper.id);
-                let call = mir
-                    .blocks
-                    .iter()
-                    .find(|b| matches!(b.operation, Operation::Call(_)))
-                    .unwrap();
                 assert_eq!(payload.root.node, call.site.node);
                 assert_eq!(call.site.span.bytes(), b"payload(message)");
-                let construct = mir
-                    .blocks
-                    .iter()
-                    .find(|b| matches!(b.operation, Operation::ConstructResultError { .. }))
-                    .unwrap();
                 assert_eq!(construct.site.span.bytes(), written_call);
                 let typed_site = typed
                     .bodies()
@@ -342,20 +338,25 @@ fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
                 assert_eq!(error.origin.start(), construct.site.span.start());
                 assert_eq!(error.value, payload.root.node);
                 assert!(error.retained.is_none());
-                if let Some(tested) = tested {
-                    assert_eq!(tested.root.node, into.root.node);
-                    assert!(matches!(exit, [
-                        Operation::ForwardResultFailure { operand, .. }, Operation::Export(_)
-                    ] if operand.root.node == into.root.node));
-                    assert_forward(&ops, role, written_call, &[b"owner: string"]);
-                } else {
-                    assert!(
-                        matches!(exit, [Operation::Export(output)] if output.root.node == into.root.node)
-                    );
-                    assert_export(&ops, &[b"owner: string"], |op, output| {
-                        matches!(op,
-                        Operation::ConstructResultError { into, .. } if into.root.node == output.root.node)
-                    });
+                match (name, exit) {
+                    ("early", [tested, forward, export]) => {
+                        assert!(matches!(
+                            (&tested.operation, &forward.operation, &export.operation),
+                            (Operation::TestVariant { operand: tested, .. },
+                                Operation::ForwardResultFailure { operand, .. }, Operation::Export(_))
+                            if tested.root.node == into.root.node && operand.root.node == into.root.node
+                        ));
+                        assert_forward(&ops, role, written_call, &[b"owner: string"]);
+                    }
+                    ("direct", [export]) => {
+                        assert!(matches!(&export.operation, Operation::Export(output)
+                            if output.root.node == into.root.node));
+                        assert_export(&ops, &[b"owner: string"], |op, output| {
+                            matches!(op,
+                            Operation::ConstructResultError { into, .. } if into.root.node == output.root.node)
+                        });
+                    }
+                    _ => panic!("{name}: unexpected error construction/exit route"),
                 }
                 assert!(!ops.iter().any(|op| matches!(
                     op,
@@ -423,7 +424,7 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
             }
             function nestedError(input: Result<bool, i32>.Err, owner: string): Result<i32, i32> {
                 if (true) { let inner = owner; let _ = input?; }
-                return Err(1i32);
+                return successValue<i32, i32>(1i32);
             }
             function knownOk(input: Result<bool, i32>.Ok, owner: string): Result<i32, i32> {
                 let _ = input?;

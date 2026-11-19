@@ -177,8 +177,8 @@ pub enum Operation<'g> {
         payload: Option<Place<'g>>,
         into: Place<'g>,
     },
-    /// Consume the payload into a fresh, cause-free error wrapper. Its
-    /// origin is the start of this block's original constructor call site.
+    /// Consume the payload into a fresh, cause-free `Result.Err` in `into`.
+    /// Its origin is this block's source snapshot and `site.span.start()`.
     ConstructResultError {
         constructor: &'g DeclarationId,
         variant: &'g DeclarationId,
