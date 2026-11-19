@@ -746,6 +746,21 @@ fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
                 let _ = moved;
                 return bit;
             }
+            function heldReborrow(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let [_, view] = &mut owner;
+                let child = &mut *view;
+                let bit = owner[0];
+                let _ = child;
+                return bit;
+            }
+            function suspendedView(seed: [bool, string]): void {
+                let mut owner = seed;
+                let [_, view] = &mut owner;
+                let child = &mut *view;
+                touch(view);
+                touch(child);
+            }
             function acquisition(seed: [bool, string]): bool {
                 let mut owner = seed;
                 let shared = &owner;
@@ -895,6 +910,8 @@ fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
             );
             for (name, code, at, cause) in [
                 ("conflicts", "R0201", "owner[0]", "&mut owner"),
+                ("heldReborrow", "R0201", "owner[0]", "&mut owner"),
+                ("suspendedView", "R0201", "view", "&mut *view"),
                 ("acquisition", "R0201", "&mut owner", "&owner"),
                 ("replaceEarly", "R0203", "owner[0] = true;", "&mut owner"),
                 ("escapes", "R0202", "return view;", "owner"),
