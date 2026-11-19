@@ -11,7 +11,7 @@ use crate::analysis::scalars::generics::{
     callables::{CaptureFact, CaptureForm},
 };
 use crate::analysis::scalars::{
-    ErrorConstruction, ExpressionFacts, Propagation, PropagationTarget,
+    CallFacts, ErrorConstruction, ExpressionFacts, Propagation, PropagationTarget,
 };
 use crate::analysis::typed::{
     ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
@@ -30,6 +30,13 @@ enum PropagatingCallOutput<'a, 'g> {
 enum PropagationSite {
     StatementRoot,
     NestedArgument,
+}
+
+struct PropagatingValueCall<'a, 'g> {
+    node: NodeId,
+    call: &'a CallFacts<'g>,
+    result: &'a Type<'g>,
+    arguments: PropagatingArguments,
 }
 
 struct PropagatingArguments {
@@ -827,22 +834,15 @@ impl<'a, 'g> Build<'a, 'g> {
                         PropagationSite::StatementRoot,
                     );
                 }
-                if let Some((call, arguments)) =
-                    self.check_scalar_call_propagation(initializer, exits.returning, depth + 1)?
+                if let Some(call) =
+                    self.check_value_call_propagation(initializer, exits.returning, depth + 1)?
                 {
                     let into = match binding {
                         Binding::Discard => None,
                         Binding::Name { declaration, .. } => Some(self.locals[declaration]),
                         _ => return Err(Stop::Pending(node)),
                     };
-                    return self.call_with_propagating_arguments(
-                        initializer,
-                        call,
-                        into,
-                        next,
-                        depth + 1,
-                        arguments,
-                    );
+                    return self.lower_propagating_value_call(node, call, into, next, depth + 1);
                 }
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
@@ -873,17 +873,10 @@ impl<'a, 'g> Build<'a, 'g> {
                         depth + 1,
                         PropagationSite::StatementRoot,
                     )
-                } else if let Some((call, arguments)) =
-                    self.check_scalar_call_propagation(expression, exits.returning, depth + 1)?
+                } else if let Some(call) =
+                    self.check_value_call_propagation(expression, exits.returning, depth + 1)?
                 {
-                    self.call_with_propagating_arguments(
-                        expression,
-                        call,
-                        None,
-                        next,
-                        depth + 1,
-                        arguments,
-                    )
+                    self.lower_propagating_value_call(node, call, None, next, depth + 1)
                 } else {
                     self.discard(node, value, next, depth + 1)
                 }
@@ -1685,17 +1678,12 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(false)
     }
 
-    fn check_scalar_call_propagation(
+    fn check_value_call_propagation(
         &mut self,
         node: NodeId,
         returning: Pc,
         depth: usize,
-    ) -> ResultOf<
-        Option<(
-            &'a crate::analysis::scalars::CallFacts<'g>,
-            PropagatingArguments,
-        )>,
-    > {
+    ) -> ResultOf<Option<PropagatingValueCall<'a, 'g>>> {
         self.budget.step(1)?;
         if !matches!(
             self.module.syntax.nodes[node].kind,
@@ -1721,7 +1709,12 @@ impl<'a, 'g> Build<'a, 'g> {
             {
                 return Err(Stop::Pending(node));
             }
-            Ok(Some((call, arguments)))
+            Ok(Some(PropagatingValueCall {
+                node,
+                call,
+                result: &facts.ty,
+                arguments,
+            }))
         } else {
             Ok(None)
         }
@@ -1785,7 +1778,8 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         match output {
             PropagatingCallOutput::Value(expected) => {
-                if !matches!(expected.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
+                if !(owns_text(expected)
+                    || matches!(expected.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32")))
                 {
                     return Err(Stop::Pending(node));
                 }
@@ -2610,6 +2604,32 @@ impl<'a, 'g> Build<'a, 'g> {
         };
         self.lower_propagating_argument(argument, Some(slot), next, failure_cleanup, depth)
             .map(Some)
+    }
+
+    fn lower_propagating_value_call(
+        &mut self,
+        statement: NodeId,
+        checked: PropagatingValueCall<'a, 'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let PropagatingValueCall {
+            node,
+            call,
+            result,
+            arguments,
+        } = checked;
+        // Only a reached call can produce a discarded owner. Its cleanup
+        // belongs to the call's normal continuation, not any argument exit.
+        let (into, next) =
+            if into.is_none() && arguments.terminal_failure.is_none() && owns_text(result) {
+                let slot = self.slot(node, result)?;
+                (Some(slot), self.cleanup(statement, &[slot], next)?)
+            } else {
+                (into, next)
+            };
+        self.call_with_propagating_arguments(node, call, into, next, depth, arguments)
     }
 
     fn call_with_propagating_arguments(

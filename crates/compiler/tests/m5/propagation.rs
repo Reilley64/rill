@@ -3620,11 +3620,7 @@ fn scalar_call_statements_preserve_propagating_argument_exits() {
                 invalid(input?, stage(owner));
                 return Option.Some(true);
             }
-            function text(bit: bool): string { return "owned"; }
-            function owning(input: Option<bool>): Option<bool> {
-                text(input?);
-                return Option.Some(true);
-            }
+
             function identity(bit: bool): bool { return bit; }
             function inputPipe(input: Option<bool>): Option<bool> {
                 (input?) |> identity;
@@ -3752,11 +3748,182 @@ fn scalar_call_statements_preserve_propagating_argument_exits() {
                 calls_on_path(mir, [true, true]),
                 [id("stage"), id("consumePair"), id("after")]
             );
-            for name in ["owning", "deeper"] {
-                let blocked = lower(name, default);
-                assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");
-                assert!(blocked.mir().is_none());
+            let deeper = lower("deeper", default);
+            assert_eq!(deeper.completion(), Completion::Incomplete);
+            assert!(deeper.mir().is_none());
+            let exact = AnalysisLimits {
+                max_work: pipe.statistics().work,
+                max_entries: pipe.statistics().entries,
+                ..default
+            };
+            assert!(lower("pipe", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("pipe", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
             }
+        },
+    );
+}
+
+#[test]
+fn propagating_calls_create_owning_results_only_on_success() {
+    probe_with_typed(
+        "propagation::propagating_calls_create_owning_results_only_on_success",
+        r#"
+            function stage(owner: string): string { return owner; }
+            function text(bit: bool, owner: string): string { return owner; }
+            function scalar(bit: bool, owner: string): bool { dispose(owner); return bit; }
+            function after(bit: bool): bool { return bit; }
+            function named(owner: string, input: Option<bool>): Option<bool> {
+                let output = text(input?, stage(owner));
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function discarded(owner: string, input: Option<bool>): Option<bool> {
+                let _ = text(input?, stage(owner));
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function pipe(owner: string, input: Result<bool, i32>): Result<bool, i32> {
+                stage(owner) |> text(input?, _);
+                let bit = after(true);
+                return Result.Ok(bit);
+            }
+            function stopped(owner: string, input: Option<bool>.None): Option<bool> {
+                stage(owner) |> text(input?, _);
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function stoppedScalar(owner: string, input: Option<bool>.None): Option<bool> {
+                stage(owner) |> scalar(input?, _);
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function reused(owner: string, input: Option<bool>): Option<bool> {
+                let output = text(input?, stage(owner));
+                dispose(output); dispose(output);
+                return Option.Some(true);
+            }
+            function compound(bit: bool): [string, string] { return ["left", "right"]; }
+            function unsupported(input: Option<bool>): Option<bool> {
+                compound(input?);
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let default = AnalysisLimits::default();
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let option = typed.option_role().unwrap();
+            let named = lower("named", default);
+            let mir = named
+                .mir()
+                .unwrap_or_else(|| panic!("named: {:?}", named.completion()));
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"owner: string"],
+            );
+            assert_return(&linear(mir, yes), &option.some.id, true, &[b"output"]);
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("text"), id("after")]
+            );
+            let discarded = lower("discarded", default);
+            let mir = discarded
+                .mir()
+                .expect("explicit discard must drop the returned owner on success");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"owner: string"],
+            );
+            let result = typed.result_role().unwrap();
+            let pipe = lower("pipe", default);
+            let piped = pipe
+                .mir()
+                .expect("ordinary pipe drops its owning result at the statement boundary");
+            let (pipe_yes, pipe_no) = variant_edges(piped, piped.entry, &result.ok.id, b"input");
+            assert_forward(
+                &linear(piped, pipe_no),
+                result,
+                b"input",
+                &[b"stage(owner)"],
+            );
+            assert_eq!(calls_on_path(piped, [false]), [id("stage")]);
+            for (mir, entry, output) in [
+                (mir, yes, b"text(input?, stage(owner))".as_slice()),
+                (
+                    piped,
+                    pipe_yes,
+                    b"stage(owner) |> text(input?, _)".as_slice(),
+                ),
+            ] {
+                let tail = linear(mir, entry);
+                let relevant: Vec<_> = tail
+                    .iter()
+                    .copied()
+                    .filter(|op| match op {
+                        Operation::Cleanup(actions) => actions
+                            .iter()
+                            .any(|action| matches!(action, Obligation::Drop(_))),
+                        Operation::Call(callee) => *callee != id("stage"),
+                        _ => false,
+                    })
+                    .collect();
+                assert!(
+                    matches!(relevant.as_slice(), [Operation::Call(text), Operation::Cleanup(actions), Operation::Call(after)]
+                    if *text == id("text") && *after == id("after") && matches!(actions.as_slice(), [Obligation::Drop(place)] if place.root.span.bytes() == output)),
+                    "{relevant:?}"
+                );
+            }
+            let stopped = lower("stopped", default);
+            let mir = stopped
+                .mir()
+                .expect("known failure never allocates the discarded result");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(owner)"],
+            );
+            let scalar = lower("stoppedScalar", default);
+            assert!(scalar.mir().is_some());
+            assert_eq!(stopped.statistics().entries, scalar.statistics().entries);
+            let reused = lower("reused", default);
+            assert_eq!(reused.completion(), Completion::SourceRejected);
+            assert!(reused.mir().is_none());
+            let [finding] = reused.findings() else {
+                panic!("expected one moved-result finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(output)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let unsupported = lower("unsupported", default);
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert!(unsupported.mir().is_none());
             let exact = AnalysisLimits {
                 max_work: pipe.statistics().work,
                 max_entries: pipe.statistics().entries,
