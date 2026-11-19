@@ -616,6 +616,14 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 owner[1] = "new";
                 return owner[0];
             }
+            function inspect(parent: &mut [bool, string]): void {}
+            function literalOwner(): bool {
+                let mut owner: [bool, string] = [false, "initial"];
+                let bit = snapshot(&mut owner);
+                inspect(&mut owner);
+                owner[1] = "new";
+                return bit;
+            }
             function sharedStillExclusive(seed: [bool, string]): bool {
                 let mut owner = seed;
                 let view = projectShared(&mut owner);
@@ -668,21 +676,18 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 let mut owner = seed;
                 return compoundResult(&mut owner);
             }
+            function unsupportedExplicit(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                return snapshot(&mut *parent);
+            }
+            function twoArgs(parent: &mut [bool, string], bit: bool): bool { return bit; }
+            function unsupportedSecondArg(seed: [bool, string]): bool {
+                let mut owner = seed;
+                return twoArgs(&mut owner, true);
+            }
         "#,
         |_, module, receipt| {
-            let lower = |name, limits| {
-                let decl = module
-                    .declarations
-                    .iter()
-                    .find(|d| d.name.as_deref() == Some(name))
-                    .unwrap();
-                lower_body(receipt, module, &decl.id, limits).unwrap()
-            };
-            let check = |name| lower(name, AnalysisLimits::default());
-            let resumes = check("resumes");
-            let mir = resumes
-                .mir()
-                .unwrap_or_else(|| panic!("resumes: {:?}", resumes.completion()));
             let declaration = |name| {
                 module
                     .declarations
@@ -690,6 +695,13 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap()
             };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let resumes = check("resumes");
+            let mir = resumes
+                .mir()
+                .unwrap_or_else(|| panic!("resumes: {:?}", resumes.completion()));
             fn accesses<'a, 'g>(mir: &'a Mir<'g>) -> Vec<&'a Operation<'g>> {
                 linear(mir, mir.entry)
                     .into_iter()
@@ -704,7 +716,9 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                     })
                     .collect()
             }
-            assert!(matches!(accesses(mir).as_slice(), [
+            let route = accesses(mir);
+            assert!(
+                matches!(route.as_slice(), [
                 Operation::Borrow { source, holder: parent, exclusive: true },
                 Operation::Reborrow { parent: scalar, exclusive: true, .. },
                 Operation::Call(snapshot),
@@ -716,7 +730,9 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
             ] if source.projection.is_none() && target.tuple_element() == Some(1)
                 && source.root.node == target.root.node && parent.root.node == scalar.root.node && parent.root.node == reference.root.node
                 && parent.root.span.bytes() == b"parent" && view.root.span.bytes() == b"view"
-                && **snapshot == declaration("snapshot").id && **project == declaration("project").id && **touch == declaration("touch").id));
+                && **snapshot == declaration("snapshot").id && **project == declaration("project").id && **touch == declaration("touch").id),
+                "named tuple call path: {route:?}"
+            );
             let limits = AnalysisLimits {
                 max_work: resumes.statistics().work,
                 max_entries: resumes.statistics().entries,
@@ -742,18 +758,28 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 if old.root.node == replacement.root.node && old.root.span.bytes() == b"owner"
                     && old.tuple_element() == Some(1) && replacement.tuple_element() == Some(1))
             );
+            let literal = check("literalOwner");
+            assert!(
+                literal.mir().is_some(),
+                "literal owner: {:?}",
+                literal.completion()
+            );
             let fresh = check("freshResumes");
             let mir = fresh
                 .mir()
                 .expect("the fresh call's loan ends after the returned view is dead");
-            assert!(matches!(accesses(mir).as_slice(), [
+            let route = accesses(mir);
+            assert!(
+                matches!(route.as_slice(), [
                 Operation::Borrow { source, exclusive: true, .. },
                 Operation::Call(project),
                 Operation::Reborrow { parent: view, exclusive: true, .. },
                 Operation::Call(touch),
                 Operation::Install { target, .. },
             ] if source.projection.is_none() && source.root.node == target.root.node && target.tuple_element() == Some(1)
-                && view.root.span.bytes() == b"view" && **project == declaration("project").id && **touch == declaration("touch").id));
+                && view.root.span.bytes() == b"view" && **project == declaration("project").id && **touch == declaration("touch").id),
+                "fresh tuple call path: {route:?}"
+            );
             for (name, code, at, cause) in [
                 ("liveFresh", "R0201", "owner[0]", "&mut owner"),
                 ("sharedStillExclusive", "R0201", "owner[0]", "&mut owner"),
@@ -781,6 +807,8 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 ("unsupportedContents", "&mut owner"),
                 ("unsupportedShared", "&seed"),
                 ("unsupportedResult", "&mut owner"),
+                ("unsupportedExplicit", "*parent"),
+                ("unsupportedSecondArg", "&mut owner"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
@@ -791,6 +819,68 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                     "{name}"
                 );
             }
+        },
+    );
+}
+
+#[test]
+fn tuple_call_invalidation_does_not_reuse_a_stale_boolean_for_result_use() {
+    use compiler::analysis::typed::{ResultDiscardKind, TypedCompletion};
+
+    probe_report(
+        "tuples::tuple_call_invalidation_does_not_reuse_a_stale_boolean_for_result_use",
+        r#"
+            function inspect(owner: &mut [bool, string]): void {}
+            function conditional(unhandled: Result<bool, i32>.Ok): void {
+                let mut owner: [bool, string] = [true, "initial"];
+                inspect(&mut owner);
+                if (owner[0]) { let _ = unhandled; }
+            }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::SourceRejected);
+            assert!(typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty());
+            let [discard] = uses.discards() else {
+                panic!("the post-call condition must not prove acknowledgement")
+            };
+            assert_eq!(discard.code(), "R0103");
+            assert_eq!(discard.kind, ResultDiscardKind::ScopeExit);
+            assert_eq!(discard.origin.module, &module.key);
+            assert_eq!(
+                discard.origin.span.bytes(),
+                b"unhandled: Result<bool, i32>.Ok"
+            );
+        },
+    );
+}
+
+#[test]
+fn mutable_tuple_calls_with_result_residences_keep_the_typed_blocker() {
+    use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
+
+    probe_report(
+        "tuples::mutable_tuple_calls_with_result_residences_keep_the_typed_blocker",
+        r#"
+            function inspect(owner: &mut [bool, Result<bool, i32>.Ok]): void {}
+            function blocked(input: Result<bool, i32>.Ok): void {
+                let mut owner: [bool, Result<bool, i32>.Ok] = [true, input];
+                inspect(&mut owner);
+                let _ = owner;
+            }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            assert!(
+                uses.pending()
+                    .iter()
+                    .any(|pending| pending.blocker == ResultUseBlocker::Storage
+                        && pending.site.module == &module.key
+                        && pending.site.span.bytes() == b"&mut owner")
+            );
         },
     );
 }

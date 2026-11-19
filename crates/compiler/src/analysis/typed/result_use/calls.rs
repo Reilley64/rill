@@ -121,25 +121,40 @@ impl<'a, 'g> Check<'a, 'g> {
                 } => Some(referent.as_ref()),
                 _ => None,
             });
+            let primitive_tuple = if !referents.is_empty()
+                && !observer
+                && let Some(TypeTerm::Tuple(elements)) = mutable_referent
+            {
+                self.budget.step(elements.len())?;
+                elements
+                    .iter()
+                    .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
+            } else {
+                false
+            };
             for address @ (owner, _) in referents {
                 if observer && exact.is_none() || mutable_referent.is_some() && !observer {
-                    let scalar = matches!(mutable_referent, Some(TypeTerm::Primitive(_)));
+                    let boolean_storage =
+                        primitive_tuple || matches!(mutable_referent, Some(TypeTerm::Primitive(_)));
                     let exact_descriptor = if bool_descriptor && let Some(exact) = &exact {
                         self.budget.step(1 + exact.1.len().min(address.1.len()))?;
                         exact == &address
                     } else {
                         false
                     };
-                    if scalar || exact_descriptor {
-                        // Mutation invalidates Boolean refinements or the alias
-                        // in an exact descriptor, never a Result residence.
+                    if boolean_storage || exact_descriptor {
+                        // Mutation can invalidate Boolean refinements in
+                        // primitive storage or an exact descriptor alias.
+                        // Neither exception acknowledges a Result residence.
                         let affected = state.take(address.0, &address.1, self.budget)?;
                         self.budget.step(affected.len())?;
                         let stale = |entry: &Located<'g>| match &entry.content {
-                            Content::Test(tag, _) if scalar => {
+                            Content::Test(tag, _) if boolean_storage => {
                                 matches!(tag.as_ref(), Constructor::Boolean(_))
                             }
                             Content::Alias(_) | Content::PossibleAlias(_) => exact_descriptor,
+                            // Preserve ordinary hint invalidation on tuple storage.
+                            Content::CallerBoolOrigin(_) | Content::ConsumedPair => primitive_tuple,
                             _ => false,
                         };
                         if affected.iter().any(|entry| !stale(entry)) {
