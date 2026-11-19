@@ -824,7 +824,8 @@ fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
                 Operation::Move { from: owner, .. },
                 Operation::Copy { from: read, into: Some(result) },
                 Operation::Export(output),
-            ] if source.root.node == owner.root.node && holder.root.node == a.root.node && holder.root.node == b.root.node
+            ] if source.projection.is_none() && source.root.node == owner.root.node
+                && holder.root.node == a.root.node && holder.root.node == b.root.node
                 && first.root.span.bytes() == b"first" && second.root.span.bytes() == b"second"
                 && read.root.node == second.root.node && output.root.node == result.root.node));
             let resumes = check("resumes");
@@ -855,7 +856,7 @@ fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
                 Operation::Reborrow { parent, exclusive: true, .. },
                 Operation::Call(callee),
                 Operation::Install { target, .. },
-            ] if source.root.node == target.root.node && target.tuple_element() == Some(1)
+            ] if source.projection.is_none() && source.root.node == target.root.node && target.tuple_element() == Some(1)
                 && holder.root.node == descriptor.root.node && parent.root.node == view.root.node && **callee == touch.id));
             let limits = AnalysisLimits {
                 max_work: resumes.statistics().work,

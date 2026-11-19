@@ -3,8 +3,8 @@ use super::*;
 use crate::analysis::MemberType;
 use crate::analysis::ordinary::{self, HypotheticalOutcome};
 use crate::analysis::scalars::data::{
-    Access, Construction, DataExpression, PathProjection, PatternFacts, PatternProjection,
-    PlacePath,
+    Access, Construction, DataExpression, PathProjection, PatternBinder, PatternFacts,
+    PatternProjection, PlacePath,
 };
 use crate::analysis::scalars::generics::{
     GoalState,
@@ -33,6 +33,29 @@ fn shared_primitive_reference(ty: &TypeTerm<'_>) -> bool {
 
 fn shared_pattern_member_type(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(_)) || shared_primitive_reference(ty)
+}
+
+fn borrowed_binding_mode(
+    access: Access,
+    binder: &PatternBinder<'_>,
+) -> Option<BorrowedMemberBinding> {
+    if binder.ty == binder.source_type {
+        Some(if shared_primitive_reference(binder.ty.as_ref()) {
+            BorrowedMemberBinding::CopyReference
+        } else {
+            BorrowedMemberBinding::CopyScalar
+        })
+    } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable, referent }
+        if *mutable == (access == Access::Writable) && *referent == binder.source_type)
+    {
+        Some(if access == Access::Writable {
+            BorrowedMemberBinding::ExclusiveView
+        } else {
+            BorrowedMemberBinding::SharedView
+        })
+    } else {
+        None
+    }
 }
 
 fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>)> {
@@ -917,20 +940,27 @@ impl<'a, 'g> Build<'a, 'g> {
         let input = self.value(operand)?;
         // Restrict the whole named tuple. Do not introduce either a
         // reborrow of a named descriptor or a split into sibling views.
-        if input.access != Access::Owned
+        if self.module.syntax.nodes[operand].kind != NodeKind::ValueReference
+            || input.access != Access::Owned
             || !matches!(&input.path, Some(path) if path.root.kind == DeclarationKind::Binding
                 && path.projections.is_empty())
             || !elements
                 .iter()
                 .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
-            || !(facts
-                .binders
-                .iter()
-                .all(|binder| binder.ty == binder.source_type)
-                || matches!(facts.binders.as_slice(), [binder]
-                    if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable: true, referent }
-                        if *referent == binder.source_type)))
         {
+            return Err(Stop::Pending(pattern));
+        }
+        let supported = match facts.binders.as_slice() {
+            [binder] => matches!(
+                borrowed_binding_mode(Access::Writable, binder),
+                Some(BorrowedMemberBinding::CopyScalar | BorrowedMemberBinding::ExclusiveView)
+            ),
+            binders => binders.iter().all(|binder| {
+                borrowed_binding_mode(Access::Writable, binder)
+                    == Some(BorrowedMemberBinding::CopyScalar)
+            }),
+        };
+        if !supported {
             return Err(Stop::Pending(pattern));
         }
         Ok(())
@@ -1067,23 +1097,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                     _ => return Err(Stop::Pending(site)),
                 };
-                let binding = if binder.ty == binder.source_type {
-                    if shared_primitive_reference(binder.ty.as_ref()) {
-                        BorrowedMemberBinding::CopyReference
-                    } else {
-                        BorrowedMemberBinding::CopyScalar
-                    }
-                } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable, referent }
-                    if *mutable == (access == Access::Writable) && *referent == binder.source_type)
-                {
-                    if access == Access::Writable {
-                        BorrowedMemberBinding::ExclusiveView
-                    } else {
-                        BorrowedMemberBinding::SharedView
-                    }
-                } else {
-                    return Err(Stop::Pending(site));
-                };
+                let binding = borrowed_binding_mode(access, binder).ok_or(Stop::Pending(site))?;
                 Action::BindBorrowedMember {
                     descriptor: scratch,
                     projection,
