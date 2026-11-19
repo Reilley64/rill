@@ -1045,6 +1045,13 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             function unsupportedExclusive(value: &mut [[bool, string], bool]): bool { return exclusive(value); }
             function compoundResult(value: &[[bool, string], bool]): [bool, bool] { return [false, true]; }
             function unsupportedResult(value: &[[bool, string], bool]): [bool, bool] { return compoundResult(value); }
+            function outerReference(value: &[&bool, [bool, bool]]): bool { return false; }
+            function unsupportedOuterReference(value: &[&bool, [bool, bool]]): bool { return outerReference(value); }
+            function innerReference(value: &[[&bool, string], bool]): bool { return false; }
+            function unsupportedInnerReference(value: &[[&bool, string], bool]): bool { return innerReference(value); }
+            function extra(value: &[[bool, string], bool], bit: bool): bool { return bit; }
+            function unsupportedExtra(value: &[[bool, string], bool]): bool { return extra(value, true); }
+            function unsupportedPipe(value: &[[bool, string], bool]): &string { return value |> nestedView; }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -1178,13 +1185,22 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
                 "unsupportedCarried",
                 "unsupportedExclusive",
                 "unsupportedResult",
+                "unsupportedOuterReference",
+                "unsupportedInnerReference",
+                "unsupportedExtra",
+                "unsupportedPipe",
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
+                let site = if name == "unsupportedPipe" {
+                    "value |> nestedView"
+                } else {
+                    "value"
+                };
                 assert_eq!(
                     report.blocked_at().unwrap().span.bytes(),
-                    b"value",
+                    site.as_bytes(),
                     "{name}"
                 );
             }
