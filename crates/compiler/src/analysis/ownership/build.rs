@@ -23,17 +23,7 @@ use std::sync::Arc;
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
-    CheckedPipeCarrier {
-        primitive_arguments: bool,
-        site: PropagationSite,
-    },
-}
-
-#[derive(Clone, Copy)]
-enum PropagationSite {
-    StatementRoot,
-    ComposedArgument,
-    NestedArgument,
+    CheckedPipeCarrier { primitive_arguments: bool },
 }
 
 struct PropagatingValueCall<'a, 'g> {
@@ -70,7 +60,6 @@ struct PropagatingArgument {
     evaluation_position: usize,
     root: NodeId,
     can_return: bool,
-    composed_pipe: bool,
 }
 
 enum OptionPayload<'t, 'g> {
@@ -903,14 +892,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         Binding::Name { declaration, .. } => Some(self.locals[declaration]),
                         _ => return Err(Stop::Pending(node)),
                     };
-                    return self.propagate(
-                        initializer,
-                        into,
-                        next,
-                        exits.returning,
-                        depth + 1,
-                        PropagationSite::StatementRoot,
-                    );
+                    return self.propagate(initializer, into, next, exits.returning, depth + 1);
                 }
                 if let Some(call) =
                     self.check_value_call_propagation(initializer, exits.returning, depth + 1)?
@@ -943,14 +925,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 let value = children[0];
                 let expression = self.ungroup(value)?;
                 if self.propagates_directly(expression)? {
-                    self.propagate(
-                        expression,
-                        None,
-                        next,
-                        exits.returning,
-                        depth + 1,
-                        PropagationSite::StatementRoot,
-                    )
+                    self.propagate(expression, None, next, exits.returning, depth + 1)
                 } else if let Some(call) =
                     self.check_value_call_propagation(expression, exits.returning, depth + 1)?
                 {
@@ -1650,11 +1625,8 @@ impl<'a, 'g> Build<'a, 'g> {
         next: Pc,
         return_cleanup: Pc,
         depth: usize,
-        site: PropagationSite,
     ) -> ResultOf<Pc> {
-        if matches!(site, PropagationSite::ComposedArgument) {
-            self.depth(depth)?;
-        }
+        self.depth(depth)?;
         let facts = self.value(node)?;
         let CheckedPropagation {
             exit,
@@ -1666,10 +1638,7 @@ impl<'a, 'g> Build<'a, 'g> {
             wrapper,
             option_text,
         } = self.checked_propagation(node, facts)?;
-        let pipe_arguments = if matches!(
-            site,
-            PropagationSite::StatementRoot | PropagationSite::ComposedArgument
-        ) && piped
+        let pipe_arguments = if piped
             && fresh.is_none()
             && let Some(call) = facts.call.as_deref()
             && let Some(arguments) = self.propagating_arguments(
@@ -1679,7 +1648,6 @@ impl<'a, 'g> Build<'a, 'g> {
                         option_text,
                         Some((_, OptionTextSource::PipeStep))
                     ),
-                    site,
                 },
                 call,
                 return_cleanup,
@@ -1859,7 +1827,6 @@ impl<'a, 'g> Build<'a, 'g> {
         enclosing: NodeId,
         mut arg: NodeId,
         root: Option<NodeId>,
-        allows_composed_pipe: bool,
         mut depth: usize,
     ) -> ResultOf<()> {
         if let Some(root) = root {
@@ -1885,7 +1852,7 @@ impl<'a, 'g> Build<'a, 'g> {
             } else if !checked.piped {
                 self.check_skipped_carrier_producer(checked.source)?;
             }
-            if allows_composed_pipe && checked.piped && checked.fresh.is_none() {
+            if checked.piped && checked.fresh.is_none() {
                 let call = facts.call.as_deref().ok_or(Stop::Pending(root))?;
                 return self.check_skipped_pipe(
                     enclosing,
@@ -1947,11 +1914,13 @@ impl<'a, 'g> Build<'a, 'g> {
             [callable, arguments] => (callable, Some(arguments)),
             _ => return Err(Stop::Pending(root)),
         };
-        self.check_skipped_argument(enclosing, callable, None, false, depth + 2)?;
+        // Recurse only through complete roots, with the same depth meter as
+        // the skipped syntax walk.
+        self.check_skipped_argument(enclosing, callable, None, depth + 2)?;
         let check_operand = |this: &mut Self, arg, depth| -> ResultOf<bool> {
             let root = this.ungroup(arg)?;
             let direct = this.propagates_directly(root)?;
-            this.check_skipped_argument(enclosing, arg, direct.then_some(root), false, depth)?;
+            this.check_skipped_argument(enclosing, arg, direct.then_some(root), depth)?;
             Ok(direct)
         };
         let mut has_propagating_argument = check_operand(self, input, depth + 1)?;
@@ -2048,16 +2017,6 @@ impl<'a, 'g> Build<'a, 'g> {
             None
         };
         let order = || argument_staging_order(&call.arguments, pipe_formal).enumerate();
-        // A top-level call or pipe can admit one composed argument layer.
-        // A pipe lowered as that argument cannot admit another layer.
-        let allows_composed_pipe = matches!(
-            output,
-            PropagatingCallOutput::Value(_)
-                | PropagatingCallOutput::CheckedPipeCarrier {
-                    site: PropagationSite::StatementRoot,
-                    ..
-                }
-        );
         let mut roots = Vec::new();
         let mut terminal_root_index = None;
         let mut can_return = false;
@@ -2077,7 +2036,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     _ => return Err(Stop::Pending(root)),
                 };
                 let mut composed_pipe = false;
-                if allows_composed_pipe && terminal_root_index.is_none() {
+                if terminal_root_index.is_none() {
                     self.budget.step(1)?;
                     if self.module.syntax.nodes[root].kind == NodeKind::Pipe
                         && let Some(pipe) = value.call.as_deref()
@@ -2121,7 +2080,6 @@ impl<'a, 'g> Build<'a, 'g> {
                     evaluation_position: position,
                     root,
                     can_return: returns,
-                    composed_pipe,
                 });
             }
         }
@@ -2139,11 +2097,9 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             PropagatingCallOutput::CheckedPipeCarrier {
                 primitive_arguments: true,
-                ..
             } => {}
             PropagatingCallOutput::CheckedPipeCarrier {
                 primitive_arguments: false,
-                ..
             } => {
                 self.check_primitive_pipe_arguments(node, call)?;
             }
@@ -2159,13 +2115,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 let admitted_root = skipped
                     .next_if(|argument| argument.evaluation_position == position)
                     .map(|argument| argument.root);
-                self.check_skipped_argument(
-                    node,
-                    arg,
-                    admitted_root,
-                    allows_composed_pipe,
-                    depth + 1,
-                )?;
+                self.check_skipped_argument(node, arg, admitted_root, depth + 1)?;
             }
             roots.truncate(index);
             Some(terminal)
@@ -2944,18 +2894,7 @@ impl<'a, 'g> Build<'a, 'g> {
     ) -> ResultOf<Pc> {
         // The proof already read this root; lowering reads its syntax and facts again.
         self.budget.step(2)?;
-        self.propagate(
-            argument.root,
-            into,
-            next,
-            failure_cleanup,
-            depth + 1,
-            if argument.composed_pipe {
-                PropagationSite::ComposedArgument
-            } else {
-                PropagationSite::NestedArgument
-            },
-        )
+        self.propagate(argument.root, into, next, failure_cleanup, depth + 1)
     }
 
     fn stage_propagating_argument(

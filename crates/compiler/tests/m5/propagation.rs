@@ -5579,7 +5579,7 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
                 return Option.Some(bit);
             }
             function bounce(value: string): Option<string> { return Option<string>.Some(value); }
-            function tooDeep(before: string, input: Option<string>): Option<bool> {
+            function deepDirect(before: string, input: Option<string>): Option<bool> {
                 let bit = useAll(stage(before), ((((input?) |> bounce?) |> bounce?)), true);
                 return Option.Some(bit);
             }
@@ -5830,13 +5830,34 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
             let grouped = lower("skipGrouped", cap);
             assert_eq!(grouped.completion(), Completion::ResourceLimit);
             assert!(grouped.mir().is_none());
-            for name in [
-                "tooDeep",
-                "skipDeep",
-                "skipBadCarrier",
-                "skipNonPrimitive",
-                "skipNestedOperand",
-            ] {
+            let direct = lower("deepDirect", default);
+            let mir = direct
+                .mir()
+                .expect("a direct call can stage a deeper composition");
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("stage"), id("bounce")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, false]),
+                [id("stage"), id("bounce"), id("bounce")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true]),
+                [id("stage"), id("bounce"), id("bounce"), id("useAll")]
+            );
+            let deep_skip = lower("skipDeep", default);
+            let mir = deep_skip
+                .mir()
+                .expect("skip the deeper pipe without staging its input");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_option_cleanup_return(
+                &linear(mir, mir.entry),
+                option,
+                &[b"stage(before)", b"input: Option<string>"],
+            );
+            for name in ["skipBadCarrier", "skipNonPrimitive", "skipNestedOperand"] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none(), "{name}");
@@ -6437,7 +6458,7 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                 let _ = ((input?) |> present?) |> outer(((written?) |> present?), true, _)?;
                 return Option.Some(true);
             }
-            function tooDeep(prefix: string, input: Option<string>): Option<bool> {
+            function deepOuter(prefix: string, input: Option<string>): Option<bool> {
                 let _ = stage(prefix) |> outer((((input?) |> present?) |> present?), true, _)?;
                 return Option.Some(true);
             }
@@ -6659,12 +6680,18 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                 option,
                 &[b"written: Option<string>"],
             );
-            let deeper = lower("tooDeep", default);
-            assert_eq!(deeper.completion(), Completion::Incomplete);
-            assert!(deeper.mir().is_none());
+            let deeper = lower("deepOuter", default);
+            let mir = deeper
+                .mir()
+                .expect("both known-Some steps stage once before the outer step");
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
             assert_eq!(
-                deeper.blocked_at().unwrap().span.bytes(),
-                b"((input?) |> present?) |> present?"
+                calls_on_path(mir, [true, false]),
+                [id("stage"), id("present"), id("present"), id("outer")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("stage"), id("present"), id("present"), id("outer")]
             );
             let exact = AnalysisLimits {
                 max_work: written.statistics().work,
@@ -6700,6 +6727,176 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
 }
 
 #[test]
+fn recursive_pipe_operands_have_separate_failure_prefixes() {
+    probe_with_typed(
+        "propagation::recursive_pipe_operands_have_separate_failure_prefixes",
+        r#"
+            function stage(value: string): string { return value; }
+            function step(value: string, bit: bool, owner: string): Option<string> {
+                dispose(owner);
+                if (bit) { return Option<string>.Some(value); }
+                return Option<string>.None;
+            }
+            function present(value: string): Option<string>.Some { return Option<string>.Some(value); }
+            function useText(bit: bool, value: string): bool { dispose(value); return bit; }
+            function deep(prefix: string, middle: string, input: Option<string>, inside: string, first: Option<bool>, second: Option<bool>, third: Option<bool>, keep: string): Option<bool> {
+                let output = stage(prefix) |> step((stage(middle) |> step(((input?) |> step(stage(inside), first?, _)?), second?, _)?), third?, _)?;
+                return Option.Some(true);
+            }
+            function terminal(prefix: string, middle: string, input: Option<string>.Some, inside: string, first: Option<bool>.None, second: Option<bool>, third: Option<bool>, keep: string): Option<bool> {
+                let _ = stage(prefix) |> step((stage(middle) |> step(((input?) |> step(stage(inside), first?, _)?), second?, _)?), third?, _)?;
+                return Option.Some(true);
+            }
+            function skipped(flag: Option<bool>.None, input: Option<string>): Option<bool> {
+                let _ = useText(flag?, ((((input?) |> present?) |> present?) |> present?));
+                return Option.Some(true);
+            }
+            function fromNumber(number: i32): Option<string> { return Option<string>.Some("value"); }
+            function skippedBadCarrier(flag: Option<bool>.None): Option<bool> {
+                let _ = useText(flag?, ((((Option<i32>.Some(7i32)?) |> fromNumber?) |> present?) |> present?));
+                return Option.Some(true);
+            }
+            function bad(message: string): Option<string>.Some {
+                dispose(message); dispose(message); return Option<string>.Some("value");
+            }
+            function reachedBad(seed: Option<string>.Some): Option<bool> {
+                let _ = useText(true, ((((seed?) |> bad?) |> present?) |> present?));
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let deep = lower("deep", default);
+            let mir = deep
+                .mir()
+                .unwrap_or_else(|| panic!("deep composition: {:?}", deep.completion()));
+            let inner = b"(input?) |> step(stage(inside), first?, _)?";
+            let middle = b"stage(middle) |> step(((input?) |> step(stage(inside), first?, _)?), second?, _)?";
+            let outer = b"stage(prefix) |> step((stage(middle) |> step(((input?) |> step(stage(inside), first?, _)?), second?, _)?), third?, _)?";
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (first_yes, first_no) = variant_edges(mir, yes, &option.some.id, b"first");
+            let (inner_yes, inner_no) = variant_edges(mir, first_yes, &option.some.id, inner);
+            let (second_yes, second_no) = variant_edges(mir, inner_yes, &option.some.id, b"second");
+            let (middle_yes, middle_no) = variant_edges(mir, second_yes, &option.some.id, middle);
+            let (third_yes, third_no) = variant_edges(mir, middle_yes, &option.some.id, b"third");
+            let (outer_yes, outer_no) = variant_edges(mir, third_yes, &option.some.id, outer);
+            for (failure, drops) in [
+                (no, &[b"stage(middle)".as_slice(), b"stage(prefix)", b"keep: string", b"inside: string"][..]),
+                (first_no, &[b"stage(inside)".as_slice(), b"(input?)", b"stage(middle)", b"stage(prefix)", b"keep: string"][..]),
+                (inner_no, &[b"stage(middle)".as_slice(), b"stage(prefix)", b"keep: string"][..]),
+                (second_no, &[b"((input?) |> step(stage(inside), first?, _)?)".as_slice(), b"stage(middle)", b"stage(prefix)", b"keep: string"][..]),
+                (middle_no, &[b"stage(prefix)".as_slice(), b"keep: string"][..]),
+                (third_no, &[b"(stage(middle) |> step(((input?) |> step(stage(inside), first?, _)?), second?, _)?)".as_slice(), b"stage(prefix)", b"keep: string"][..]),
+                (outer_no, &[b"keep: string".as_slice()][..]),
+            ] {
+                assert_return(&linear(mir, failure), &option.none.id, false, drops);
+            }
+            assert_return(
+                &linear(mir, outer_yes),
+                &option.some.id,
+                true,
+                &[b"output", b"keep: string"],
+            );
+            assert_eq!(calls_on_path(mir, [false]), [id("stage"), id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, true, true, true, true, true, true]),
+                [
+                    id("stage"),
+                    id("stage"),
+                    id("stage"),
+                    id("step"),
+                    id("step"),
+                    id("step")
+                ]
+            );
+            let terminal = lower("terminal", default);
+            let mir = terminal
+                .mir()
+                .expect("a terminal deepest argument skips all three steps");
+            assert_eq!(
+                calls_on_path(mir, []),
+                [id("stage"), id("stage"), id("stage")]
+            );
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[
+                    b"stage(inside)",
+                    b"(input?)",
+                    b"stage(middle)",
+                    b"stage(prefix)",
+                    b"keep: string",
+                ],
+            );
+            let skipped = lower("skipped", default);
+            let mir = skipped
+                .mir()
+                .expect("wholly skipped recursive composition is proof-only");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_option_cleanup_return(
+                &linear(mir, mir.entry),
+                option,
+                &[b"input: Option<string>"],
+            );
+            let bad_carrier = lower("skippedBadCarrier", default);
+            assert_eq!(bad_carrier.completion(), Completion::Incomplete);
+            assert!(bad_carrier.mir().is_none());
+            assert_eq!(
+                bad_carrier.blocked_at().unwrap().span.bytes(),
+                b"Option<i32>.Some(7i32)?"
+            );
+            let bad_call = lower("reachedBad", default);
+            assert_eq!(bad_call.completion(), Completion::SourceRejected);
+            assert!(bad_call.mir().is_none());
+            let [finding] = bad_call.findings() else {
+                panic!("expected the deepest reached callee finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(message)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(message)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            for (name, report) in [("deep", deep), ("skipped", skipped)] {
+                let limits = AnalysisLimits {
+                    max_work: report.statistics().work,
+                    max_entries: report.statistics().entries,
+                    max_depth: report.statistics().max_depth,
+                };
+                assert!(lower(name, limits).mir().is_some());
+                for short in [
+                    AnalysisLimits {
+                        max_work: limits.max_work - 1,
+                        ..limits
+                    },
+                    AnalysisLimits {
+                        max_entries: limits.max_entries - 1,
+                        ..limits
+                    },
+                    AnalysisLimits {
+                        max_depth: limits.max_depth - 1,
+                        ..limits
+                    },
+                ] {
+                    let limited = lower(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none());
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn skipped_compositions_still_check_result_carrier_producers() {
     probe_with_typed(
         "propagation::skipped_compositions_still_check_result_carrier_producers",
@@ -6708,12 +6905,17 @@ fn skipped_compositions_still_check_result_carrier_producers() {
             function both(left: bool, right: bool): bool { return right; }
             function relay(value: bool): Result<bool, i32> { return Result.Ok(value); }
             function cause(): fail<i32> { return cause(); }
+            function known(value: bool): Result<bool, i32>.Ok { return Result<bool, i32>.Ok(value); }
+            function deep(input: Result<bool, i32>, keep: string): Result<bool, i32> {
+                let bit = ((((input?) |> known?) |> relay?) |> known?);
+                return Result.Ok(bit);
+            }
             function canonical(gate: Result<bool, i32>.Err): Result<bool, i32> {
-                let _ = both(gate?, ((Result<bool, i32>.Ok(true)?) |> relay?));
+                let _ = both(gate?, (((Result<bool, i32>.Ok(true)?) |> relay?) |> known?));
                 return Result.Ok(true);
             }
             function fresh(gate: Result<bool, i32>.Err): Result<bool, i32> {
-                let _ = both(gate?, ((fail<bool, i32>(7i32)?) |> relay?));
+                let _ = both(gate?, (((fail<bool, i32>(7i32)?) |> relay?) |> known?));
                 return Result.Ok(true);
             }
             function reachedGeneric(gate: Result<bool, i32>.Ok): Result<bool, i32> {
@@ -6734,16 +6936,41 @@ fn skipped_compositions_still_check_result_carrier_producers() {
             }
         "#,
         |_, module, receipt, typed| {
-            let lower = |name| {
-                let id = &module
+            let id = |name| {
+                &module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap()
-                    .id;
-                lower_body(receipt, module, id, AnalysisLimits::default()).unwrap()
+                    .id
             };
+            let lower =
+                |name| lower_body(receipt, module, id(name), AnalysisLimits::default()).unwrap();
             let role = typed.result_role().unwrap();
+            let deep = lower("deep");
+            let mir = deep
+                .mir()
+                .expect("whole-pipe flow preserves failures of known-Ok steps' inputs");
+            let (yes, no) = variant_edges(mir, mir.entry, &role.ok.id, b"input");
+            let relay = b"((input?) |> known?) |> relay?";
+            let (relay_yes, relay_no) = variant_edges(mir, yes, &role.ok.id, relay);
+            assert_forward(&linear(mir, no), role, b"input", &[b"keep: string"]);
+            assert_forward(&linear(mir, relay_no), role, relay, &[b"keep: string"]);
+            assert_return(
+                &linear(mir, relay_yes),
+                &role.ok.id,
+                true,
+                &[b"keep: string"],
+            );
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("known"), id("relay")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("known"), id("relay"), id("known")]
+            );
             for name in ["canonical", "fresh"] {
                 let report = lower(name);
                 let mir = report
