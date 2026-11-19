@@ -1390,13 +1390,16 @@ impl<'a, 'g> Build<'a, 'g> {
                     if self.slots[from].contains_guard() {
                         return Err(Stop::Pending(node));
                     }
-                    // Initialization is per position. It does not establish a
-                    // loan-overlap rule for separately borrowed tuple elements.
                     if matches!(
                         self.slots[from].projection,
                         Some(Projection::TupleElement(_))
                     ) {
-                        return Err(Stop::Pending(node));
+                        let element = self.value(operand)?;
+                        if element.access != Access::Owned
+                            || !matches!(element.ty.as_ref(), TypeTerm::Primitive(_))
+                        {
+                            return Err(Stop::Pending(node));
+                        }
                     }
                     Action::Borrow {
                         from,

@@ -37,10 +37,6 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
                 let value: [&bool, string] = [&p, "tag"];
                 return forward(value);
             }
-            function borrowElement(value: [bool, bool]): bool {
-                let r = &value[0];
-                return *r;
-            }
             function pass(value: [string, string, string]): [string, string, string] { return value; }
             function temporary(value: [string, string, string]): string { return pass(value)[1]; }
             function bindTemporary(value: [string, string, string]): string {
@@ -200,10 +196,6 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
             assert_eq!(finding.code(), "R0202");
             assert_eq!(finding.related.span.bytes(), b"p: bool");
 
-            let borrowed = lower("borrowElement");
-            assert_eq!(borrowed.completion(), Completion::Incomplete);
-            assert!(borrowed.mir().is_none());
-
             let temporary = lower("temporary");
             let mir = temporary.mir().expect("tuple result projection MIR");
             assert!(
@@ -264,6 +256,161 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
                 };
                 assert_eq!(finding.code(), code);
                 assert_eq!(finding.related.span.bytes(), related);
+            }
+        },
+    );
+}
+
+#[test]
+fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
+    probe(
+        "tuples::fixed_tuple_loans_track_exact_members_without_proving_disjointness",
+        r#"
+            function shared(value: [bool, bool, string]): bool {
+                let first = &value[0];
+                let second = &value[0x1];
+                let _ = *first;
+                return *second;
+            }
+            function afterMove(value: [string, bool, string]): bool {
+                let taken = value[0];
+                let selected = &value[1];
+                return *selected;
+            }
+            function moved(value: [string, bool]): void {
+                let taken = value[0];
+                let view = &value[0];
+                let _ = view;
+            }
+            function exclusive(seed: [bool, bool]): bool {
+                let mut value = seed;
+                let first = &mut value[0];
+                let second = &value[1];
+                let _ = *first;
+                return *second;
+            }
+            function writeWhileShared(seed: [bool, bool]): bool {
+                let mut value = seed;
+                let first = &value[0];
+                value[1] = true;
+                return *first;
+            }
+            function readWhileExclusive(seed: [bool, bool]): bool {
+                let mut value = seed;
+                let first = &mut value[0];
+                let second = value[1];
+                let _ = *first;
+                return second;
+            }
+            function moveWhileShared(value: [bool, string]): string {
+                let first = &value[0];
+                let carried = first;
+                let second = value[1];
+                let _ = *carried;
+                return second;
+            }
+            function lastUse(seed: [bool, bool]): bool {
+                let mut value = seed;
+                let first = &mut value[0];
+                let _ = *first;
+                value[1] = true;
+                return value[1];
+            }
+            function escape(value: [bool, bool]): &bool { return &value[0]; }
+            function descriptorSlot(value: [&bool, bool]): &&bool { return &value[0]; }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, limits).unwrap()
+            };
+            let check = |name| lower(name, AnalysisLimits::default());
+            let shared = check("shared");
+            let mir = shared
+                .mir()
+                .unwrap_or_else(|| panic!("shared: {:?}", shared.completion()));
+            let borrows: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Borrow { .. }))
+                .collect();
+            assert!(matches!(borrows.as_slice(), [
+                Operation::Borrow { source: first, holder: a, exclusive: false },
+                Operation::Borrow { source: second, holder: b, exclusive: false },
+            ] if first.root.node == second.root.node && first.root.span.bytes() == b"value: [bool, bool, string]"
+                && first.tuple_element() == Some(0) && second.tuple_element() == Some(1)
+                && a.root.span.bytes() == b"first" && b.root.span.bytes() == b"second"));
+            assert_eq!(dropped_elements(mir, mir.entry), [2]);
+            let after_move = check("afterMove");
+            let mir = after_move
+                .mir()
+                .expect("an initialized member remains borrowable after a sibling move");
+            assert!(matches!(path_drops(mir, mir.entry).as_slice(),
+                [Obligation::Drop(taken), Obligation::Drop(last)] if taken.root.span.bytes() == b"taken" && last.tuple_element() == Some(2)));
+            let last_use = check("lastUse");
+            let mir = last_use
+                .mir()
+                .expect("the exclusive restriction ends after the last use");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. } | Operation::Install { .. } | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Borrow { source, exclusive: true, .. },
+                Operation::Install { target, .. },
+                Operation::Export(_),
+            ] if source.root.node == target.root.node && source.tuple_element() == Some(0) && target.tuple_element() == Some(1)));
+
+            for (name, code, site, related) in [
+                ("moved", "R0200", "&value[0]", "value[0]"),
+                ("exclusive", "R0201", "&value[1]", "&mut value[0]"),
+                ("writeWhileShared", "R0203", "value[1] = true;", "&value[0]"),
+                ("readWhileExclusive", "R0201", "value[1]", "&mut value[0]"),
+                ("moveWhileShared", "R0203", "value[1]", "&value[0]"),
+                ("escape", "R0202", "return &value[0];", "&value[0]"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one diagnostic")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            let unsupported = check("descriptorSlot");
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert!(unsupported.mir().is_none());
+            assert_eq!(unsupported.blocked_at().unwrap().span.bytes(), b"&value[0]");
+
+            let limits = AnalysisLimits {
+                max_work: shared.statistics().work,
+                max_entries: shared.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("shared", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("shared", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
             }
         },
     );

@@ -237,7 +237,18 @@ fn conflict(
             Access::Exclusive => true,
             Access::EndScope => loan.kind.borrows_local_storage(),
         };
-        if blocks && overlap(slots, loan.source, source) {
+        // Keep the exact member for initialization, backing and MIR, but
+        // do not use distinct tuple positions as proof of disjoint access.
+        let restriction = if loan.kind.borrows_local_storage()
+            && matches!(
+                slots[loan.source].projection,
+                Some(Projection::TupleElement(_))
+            ) {
+            slots[loan.source].owner
+        } else {
+            loan.source
+        };
+        if blocks && overlap(slots, restriction, source) {
             return Err(Stop::Rejected {
                 site,
                 related: loan.site,
