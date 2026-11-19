@@ -1667,9 +1667,6 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(1)?;
             let root = self.ungroup(arg)?;
             if self.propagates_directly(root)? {
-                if position == 0 && pipe_formal.is_some() {
-                    return Err(Stop::Pending(node));
-                }
                 self.budget.step(1)?;
                 let exit = match &self.value(root)?.data {
                     Some(DataExpression::Propagation(exit)) => exit.as_ref(),

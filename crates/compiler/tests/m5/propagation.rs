@@ -2943,11 +2943,6 @@ fn outer_pipes_stage_the_input_before_propagating_written_arguments() {
                 return Option.Some(bit);
             }
             function head(owner: string, bit: bool): bool { dispose(owner); return bit; }
-            function identity(bit: bool): bool { return bit; }
-            function unsupportedInput(input: Option<bool>): Option<bool> {
-                let bit = (input?) |> identity;
-                return Option.Some(bit);
-            }
             function pass(owner: string, bit: bool): Option<bool> { dispose(owner); return Option.Some(bit); }
             function unsupportedStep(owner: string, input: Option<bool>): Option<bool> {
                 let bit = owner |> pass(input?)?;
@@ -3050,10 +3045,155 @@ fn outer_pipes_stage_the_input_before_propagating_written_arguments() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
-            for name in ["unsupportedInput", "unsupportedStep"] {
-                let blocked = check(name);
-                assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");
-                assert!(blocked.mir().is_none());
+            let blocked = check("unsupportedStep");
+            assert_eq!(blocked.completion(), Completion::Incomplete);
+            assert!(blocked.mir().is_none());
+        },
+    );
+}
+
+#[test]
+fn propagating_pipe_input_runs_before_written_arguments() {
+    probe_with_typed(
+        "propagation::propagating_pipe_input_runs_before_written_arguments",
+        r#"
+            function relay(value: Option<bool>): Option<bool> { return value; }
+            function stage(owner: string): string { return owner; }
+            function consume(owner: string, written: bool, incoming: bool): bool {
+                dispose(owner); return incoming;
+            }
+            function invalid(owner: string, written: bool, incoming: bool): bool {
+                dispose(owner); dispose(owner); return incoming;
+            }
+            function pipe(input: Option<bool>, owner: string, second: Option<bool>): Option<bool> {
+                let bit = (relay(input)?) |> consume(stage(owner), second?, _);
+                return Option.Some(bit);
+            }
+            function stop(input: Option<bool>.None, owner: string, second: Option<bool>): Option<bool> {
+                let _ = (input?) |> invalid(stage(owner), second?, _);
+                return Option.Some(true);
+            }
+            function bad(input: Option<bool>, owner: string, second: Option<bool>): Option<bool> {
+                let bit = (input?) |> invalid(stage(owner), second?, _);
+                return Option.Some(bit);
+            }
+            function identity(bit: bool): bool { return bit; }
+            function present(input: Option<bool>.Some): Option<bool> {
+                let bit = (input?) |> identity;
+                return Option.Some(bit);
+            }
+            function errorInput(input: Result<bool, i32>, owner: string): Result<bool, i32> {
+                let bit = (input?) |> consume(stage(owner), true, _);
+                return Result.Ok(bit);
+            }
+            function numbers(value: i32, bit: bool): bool { return bit; }
+            function unsupportedSkipped(input: Option<bool>.None): Option<bool> {
+                let bit = (input?) |> numbers(Option<i32>.Some(1i32)?, _);
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let report = lower("pipe", default);
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("pipe input: {:?}", report.completion()));
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"relay(input)");
+            let (both, second_no) = variant_edges(mir, yes, &option.some.id, b"second");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"owner: string"],
+            );
+            assert_return(
+                &linear(mir, second_no),
+                &option.none.id,
+                false,
+                &[b"stage(owner)"],
+            );
+            assert_return(&linear(mir, both), &option.some.id, true, &[]);
+            assert_eq!(calls_on_path(mir, [false]), [id("relay")]);
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("relay"), id("stage")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("relay"), id("stage"), id("consume")]
+            );
+            let stopped = lower("stop", default);
+            let mir = stopped
+                .mir()
+                .expect("known-empty input skips all written arguments and the outer call");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"owner: string"],
+            );
+            let bad = lower("bad", default);
+            assert_eq!(bad.completion(), Completion::SourceRejected);
+            assert!(bad.mir().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected one reached-callee finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(owner)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let present = lower("present", default);
+            let mir = present
+                .mir()
+                .expect("known-present input has no test or failure edge");
+            assert_eq!(calls_on_path(mir, []), [id("identity")]);
+            assert_return(&linear(mir, mir.entry), &option.some.id, true, &[]);
+            let error = lower("errorInput", default);
+            let mir = error
+                .mir()
+                .expect("scalar Result input retains its original Err wrapper");
+            let result = typed.result_role().unwrap();
+            let (ok, err) = variant_edges(mir, mir.entry, &result.ok.id, b"input");
+            assert_forward(&linear(mir, err), result, b"input", &[b"owner: string"]);
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(calls_on_path(mir, [true]), [id("stage"), id("consume")]);
+            assert_return(&linear(mir, ok), &result.ok.id, true, &[]);
+            let unsupported = lower("unsupportedSkipped", default);
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert!(unsupported.mir().is_none());
+            assert_eq!(
+                unsupported.blocked_at().unwrap().span.bytes(),
+                b"Option<i32>.Some(1i32)?"
+            );
+            let exact = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..default
+            };
+            assert!(lower("pipe", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("pipe", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
             }
         },
     );
