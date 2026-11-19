@@ -2135,8 +2135,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let piped = call.pipe_input.is_some();
         let mut tuple_or_leaf_admitted =
             piped && self.admits_direct_tuple_or_leaf_call(call, &facts.ty)?;
-        let mut destination = None;
-        let mut pipe_retained_contents = None;
+        let mut pipe_retention = None;
         if piped && !tuple_or_leaf_admitted {
             // Prove the exact retaining signature before building slots.
             if !matches!(call.arguments.len(), 2 | 3)
@@ -2147,13 +2146,12 @@ impl<'a, 'g> Build<'a, 'g> {
             for (position, &arg) in call.arguments.iter().enumerate() {
                 self.budget.step(1)?;
                 if retained_bool_contents_type(&self.value(arg)?.ty).is_some() {
-                    pipe_retained_contents =
-                        Some(self.retained_call_contents(node, call, position)?);
-                    destination = Some(position);
+                    pipe_retention =
+                        Some((position, self.retained_call_contents(node, call, position)?));
                     break;
                 }
             }
-            if destination.is_none() {
+            if pipe_retention.is_none() {
                 return Err(Stop::Pending(node));
             }
         }
@@ -2177,6 +2175,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         self.budget.reserve(1 + call.arguments.len())?;
         let mut args = Vec::with_capacity(call.arguments.len());
+        let mut destination = None;
         let mut pipe_argument = None;
         for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
@@ -2201,14 +2200,15 @@ impl<'a, 'g> Build<'a, 'g> {
             args.push(slot);
         }
         let index = self.calls.len();
-        let destination = destination
-            .map(|position| {
-                let contents = match pipe_retained_contents {
-                    Some(contents) => contents,
-                    None => self.retained_call_contents(node, call, position)?,
-                };
-                self.call_destination(call, position, &args, &contents)
-            })
+        let retention = match (pipe_retention, destination) {
+            (Some(checked), _) => Some(checked),
+            (None, Some(position)) => {
+                Some((position, self.retained_call_contents(node, call, position)?))
+            }
+            (None, None) => None,
+        };
+        let destination = retention
+            .map(|(position, contents)| self.call_destination(call, position, &args, &contents))
             .transpose()?;
         self.calls.push(Call {
             callee: call.callee,

@@ -1060,6 +1060,13 @@ fn paired_retention_pipes_keep_formal_roles_and_input_first() {
                 let early = *second;
                 return *saved;
             }
+            function overwritten(seed: &bool, first: &mut bool, second: &mut bool): bool {
+                let mut out = seed;
+                second |> stash(first, &mut out, _);
+                out = seed;
+                let after = *second;
+                return *out;
+            }
             function expires(seed: &bool, first: &mut bool): bool {
                 let mut out = seed;
                 { let mut inner = true; &mut inner |> stash(first, &mut out, _); }
@@ -1142,6 +1149,29 @@ fn paired_retention_pipes_keep_formal_roles_and_input_first() {
             ] if *callee == &declaration("stash").id && out.root.span.bytes() == b"out" && dest.root.node == out.root.node && read.root.node == out.root.node
                 && first.root.span.bytes() == b"first: &mut bool" && second.root.span.bytes() == b"second: &mut bool"
                 && a.root.node == first_stage.root.node && b.root.node == second_stage.root.node),
+                "{route:?}"
+            );
+            let overwritten = check("overwritten");
+            let mir = overwritten
+                .mir()
+                .expect("without a surviving copy, overwrite releases the piped source");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CallRetainingPair { .. }
+                            | Operation::Install { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::CallRetainingPair { destination: RetainedPlace::Local(dest), .. },
+                Operation::Install { target, .. }, Operation::Dereference(second), Operation::Dereference(read),
+            ] if dest.root.node == target.root.node && dest.root.node == read.root.node
+                && second.root.span.bytes() == b"second: &mut bool"),
                 "{route:?}"
             );
             for (name, code, related) in [
