@@ -1921,7 +1921,6 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut roots = Vec::new();
         let mut terminal_root_index = None;
         let mut can_return = false;
-        let mut has_composed_pipe = false;
         for (position, (_, arg)) in order() {
             self.budget.step(1)?;
             let root = self.ungroup(arg)?;
@@ -1954,10 +1953,6 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 }
                 let (continues, returns) = if composed_pipe {
-                    if has_composed_pipe {
-                        return Err(Stop::Pending(root));
-                    }
-                    has_composed_pipe = true;
                     // The last step's variant alone cannot describe a pipe
                     // that may return while staging its own arguments.
                     let flow = &fact.flow;

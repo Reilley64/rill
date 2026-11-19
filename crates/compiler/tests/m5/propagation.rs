@@ -5587,10 +5587,6 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
                 let _ = laterString(stage(before), gate?, ((input?) |> bounce?));
                 return Option.Some(true);
             }
-            function siblings(left: Option<string>, right: Option<string>): Option<bool> {
-                let bit = useAll(((left?) |> always?), ((right?) |> always?), true);
-                return Option.Some(bit);
-            }
             function twoPlain(left: string, right: string): Option<bool> {
                 let bit = useAll((left |> always?), (right |> always?), true);
                 return Option.Some(bit);
@@ -5763,19 +5759,11 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
                 false,
                 &[],
             );
-            for name in ["tooDeep", "skipped", "siblings"] {
+            for name in ["tooDeep", "skipped"] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
             }
-            assert_eq!(
-                lower("siblings", default)
-                    .blocked_at()
-                    .unwrap()
-                    .span
-                    .bytes(),
-                b"(right?) |> always?"
-            );
             let exact = AnalysisLimits {
                 max_work: nested.statistics().work,
                 max_entries: nested.statistics().entries,
@@ -5793,6 +5781,196 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
                 },
             ] {
                 let limited = lower("nested", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
+    probe_with_typed(
+        "propagation::sibling_composed_arguments_keep_their_own_cleanup_prefixes",
+        r#"
+            function stage(value: string): string { return value; }
+            function first(value: string): Option<string>.Some { return Option<string>.Some(value); }
+            function second(inside: string, bit: bool, value: string): Option<string> {
+                dispose(inside);
+                if (bit) { return Option<string>.Some(value); }
+                return Option<string>.None;
+            }
+            function useAll(left: string, right: string, bit: bool): bool {
+                dispose(right); dispose(left); return bit;
+            }
+            function last(tail: string): bool { dispose(tail); return true; }
+            function siblings(left: Option<string>, right: Option<string>, inside: string, gate: Option<bool>, tail: string): Option<bool> {
+                let bit = useAll(((left?) |> first?), ((right?) |> second(stage(inside), gate?, _)?), last(tail));
+                return Option.Some(bit);
+            }
+            function terminal(left: Option<string>.Some, right: Option<string>.Some, inside: string, gate: Option<bool>.None, tail: string): Option<bool> {
+                let _ = useAll(((left?) |> first?), ((right?) |> second(stage(inside), gate?, _)?), last(tail));
+                return Option.Some(true);
+            }
+            function skipped(left: Option<string>.None, right: Option<string>): Option<bool> {
+                let _ = useAll(((left?) |> first?), ((right?) |> first?), true);
+                return Option.Some(true);
+            }
+            function rejected(value: string): Option<string>.Some {
+                dispose(value); dispose(value); return Option<string>.Some("never reached safely");
+            }
+            function invalid(left: Option<string>.Some, right: Option<string>.Some): Option<bool> {
+                let bit = useAll(((left?) |> first?), ((right?) |> rejected?), true);
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let siblings = lower("siblings", default);
+            let mir = siblings
+                .mir()
+                .unwrap_or_else(|| panic!("siblings: {:?}", siblings.completion()));
+            let (left_yes, left_no) = variant_edges(mir, mir.entry, &option.some.id, b"left");
+            let (right_yes, right_no) = variant_edges(mir, left_yes, &option.some.id, b"right");
+            let (gate_yes, gate_no) = variant_edges(mir, right_yes, &option.some.id, b"gate");
+            let (step_yes, step_no) = variant_edges(
+                mir,
+                gate_yes,
+                &option.some.id,
+                b"(right?) |> second(stage(inside), gate?, _)?",
+            );
+            let left_stage = b"((left?) |> first?)";
+            let staged = straight_blocks(mir, left_yes)
+                .into_iter()
+                .find_map(|block| match &block.operation {
+                    Operation::TakeOptionPayload { into, .. }
+                        if into.root.span.bytes() == left_stage =>
+                    {
+                        Some(into.root.node)
+                    }
+                    _ => None,
+                })
+                .expect("first result is staged before testing the second input");
+            assert!(
+                matches!(path_drops(mir, gate_no).get(2), Some(Obligation::Drop(place)) if place.root.node == staged)
+            );
+            let first_failure = linear(mir, left_no);
+            let (export, output) = first_failure
+                .iter()
+                .enumerate()
+                .find_map(|(i, op)| match op {
+                    Operation::Export(place) => Some((i, place)),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(first_failure[..export].iter().any(
+                |op| matches!(op, Operation::ConstructVariant { variant, payload: None, into }
+                if *variant == &option.none.id && into.root.node == output.root.node)
+            ));
+            assert!(
+                first_failure[..export]
+                    .iter()
+                    .all(|op| !matches!(op, Operation::Drop(_) | Operation::Cleanup(_)))
+            );
+            assert!(
+                matches!(path_drops(mir, left_no).as_slice(), [Obligation::Drop(tail), Obligation::Drop(inside), Obligation::DropOptionPayload { operand, some }]
+                if tail.root.span.bytes() == b"tail: string" && inside.root.span.bytes() == b"inside: string"
+                && operand.root.span.bytes() == b"right: Option<string>" && *some == &option.some.id)
+            );
+            assert_return(
+                &linear(mir, right_no),
+                &option.none.id,
+                false,
+                &[left_stage, b"tail: string", b"inside: string"],
+            );
+            assert_return(
+                &linear(mir, gate_no),
+                &option.none.id,
+                false,
+                &[b"stage(inside)", b"(right?)", left_stage, b"tail: string"],
+            );
+            assert_return(
+                &linear(mir, step_no),
+                &option.none.id,
+                false,
+                &[left_stage, b"tail: string"],
+            );
+            assert_return(&linear(mir, step_yes), &option.some.id, true, &[]);
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(calls_on_path(mir, [true, false]), [id("first")]);
+            assert_eq!(
+                calls_on_path(mir, [true, true, false]),
+                [id("first"), id("stage")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true, false]),
+                [id("first"), id("stage"), id("second")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true, true]),
+                [
+                    id("first"),
+                    id("stage"),
+                    id("second"),
+                    id("last"),
+                    id("useAll")
+                ]
+            );
+            let terminal = lower("terminal", default);
+            let mir = terminal.mir().expect(
+                "known failure in the second sibling skips the step, suffix, and outer call",
+            );
+            assert_eq!(calls_on_path(mir, []), [id("first"), id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(inside)", b"(right?)", left_stage, b"tail: string"],
+            );
+            let skipped = lower("skipped", default);
+            assert_eq!(skipped.completion(), Completion::Incomplete);
+            assert!(skipped.mir().is_none());
+            assert_eq!(
+                skipped.blocked_at().unwrap().span.bytes(),
+                b"useAll(((left?) |> first?), ((right?) |> first?), true)"
+            );
+            let invalid = lower("invalid", default);
+            assert_eq!(invalid.completion(), Completion::SourceRejected);
+            assert!(invalid.mir().is_none());
+            let [finding] = invalid.findings() else {
+                panic!("expected the second sibling's reached-callee finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(value)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(value)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let exact = AnalysisLimits {
+                max_work: siblings.statistics().work,
+                max_entries: siblings.statistics().entries,
+                ..default
+            };
+            assert!(lower("siblings", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("siblings", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
