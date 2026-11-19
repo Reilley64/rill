@@ -1044,10 +1044,6 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
                 let named = parent;
                 return snapshot(named);
             }
-            function extraArgument(parent: &mut [[bool, string], [bool, i32]], flag: bool): bool { return flag; }
-            function extra(parent: &mut [[bool, string], [bool, i32]]): bool {
-                return extraArgument(parent, true);
-            }
             function tupleResult(parent: &mut [[bool, string], [bool, i32]]): [bool, bool] { return [true, false]; }
             function compound(parent: &mut [[bool, string], [bool, i32]]): [bool, bool] {
                 return tupleResult(parent);
@@ -1066,10 +1062,10 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             function wide(parent: &mut [[bool, string, i32], i32]): bool { return wideStep(parent); }
             function narrowUnary(parent: &mut [[bool], i32]): bool { return parent |> narrowStep; }
             function wideUnary(parent: &mut [[bool, string, i32], i32]): bool { return parent |> wideStep; }
-            function narrowTagged(bit: bool, parent: &mut [[bool], i32]): bool { return bit; }
-            function wideTagged(bit: bool, parent: &mut [[bool, string, i32], i32]): bool { return bit; }
-            function narrowPipe(parent: &mut [[bool], i32]): bool { return parent |> narrowTagged(true, _); }
-            function widePipe(parent: &mut [[bool, string, i32], i32]): bool { return parent |> wideTagged(true, _); }
+            function narrowPair(other: &[bool], parent: &mut [[bool], i32]): bool { return true; }
+            function widePair(other: &[bool], parent: &mut [[bool, string, i32], i32]): bool { return true; }
+            function narrowPipe(parent: &mut [[bool], i32], other: &[bool]): bool { return parent |> narrowPair(other, _); }
+            function widePipe(parent: &mut [[bool, string, i32], i32], other: &[bool]): bool { return parent |> widePair(other, _); }
         "#,
         |_, module, receipt| {
             let id = |name| {
@@ -1177,7 +1173,6 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             for (name, at) in [
                 ("explicit", b"&mut *parent".as_slice()),
                 ("alias", b"named"),
-                ("extra", b"parent"),
                 ("compound", b"parent"),
                 ("referenceLeaf", b"parent"),
                 ("deeper", b"parent"),
@@ -1275,14 +1270,6 @@ fn unary_pipes_reborrow_one_incoming_nested_exclusive_descriptor() {
             function explicit(parent: &mut [[bool, string], i32]): bool {
                 return (&mut *parent) |> snapshot;
             }
-            function tagged(bit: bool, parent: &mut [[bool, string], i32]): bool { return bit; }
-            function late(parent: &mut [[bool, string], i32]): bool {
-                return parent |> tagged(true, _);
-            }
-            function tail(parent: &mut [[bool, string], i32], bit: bool): bool { return bit; }
-            function implicitExtra(parent: &mut [[bool, string], i32]): bool {
-                return parent |> tail(true);
-            }
             function maybe(parent: &mut [[bool, string], i32]): Option<bool> { return Option.Some(true); }
             function compound(parent: &mut [[bool, string], i32]): Option<bool> {
                 return parent |> maybe;
@@ -1375,8 +1362,6 @@ fn unary_pipes_reborrow_one_incoming_nested_exclusive_descriptor() {
             for (name, at) in [
                 ("alias", b"named |> snapshot".as_slice()),
                 ("explicit", b"(&mut *parent) |> snapshot"),
-                ("late", b"parent |> tagged(true, _)"),
-                ("implicitExtra", b"parent |> tail(true)"),
                 ("compound", b"parent |> maybe"),
                 ("propagating", b"parent |> maybe?"),
             ] {
@@ -1419,6 +1404,226 @@ fn assert_exact_tuple_call_limits<'g>(
         assert_eq!(limited.completion(), Completion::ResourceLimit);
         assert!(limited.mir().is_none());
     }
+}
+
+#[test]
+fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
+    probe(
+        "tuples::nested_exclusive_calls_with_leaf_arguments_keep_both_backings",
+        r#"
+            function mark(): bool { return true; }
+            function select(flag: bool, fallback: &string, parent: &mut [[bool, string], i32]): &string {
+                let [[_, view], _] = &mut *parent;
+                return &*view;
+            }
+            function scalar(flag: bool, fallback: &string, parent: &mut [[bool, string], i32]): bool {
+                let [[bit, _], _] = &mut *parent;
+                return bit;
+            }
+            function touch(view: &string): void {}
+            function forward(parent: &mut [[bool, string], i32], fallback: &string): &string {
+                return select(mark(), fallback, (parent));
+            }
+            function pipeForward(parent: &mut [[bool, string], i32], fallback: &string): &string {
+                return (parent) |> select(mark(), fallback, _);
+            }
+            function leading(parent: &mut [[bool, string], i32], flag: bool, fallback: &string): &string {
+                return select(flag, fallback, parent);
+            }
+            function implicit(parent: &mut [[bool, string], i32], fallback: &string): &string {
+                return (parent) |> leading(mark(), fallback);
+            }
+            function releases(parent: &mut [[bool, string], i32]): bool {
+                let first = "first";
+                let bit = parent |> scalar(mark(), &first, _);
+                dispose(first);
+                let fallback = "fallback";
+                let view = parent |> select(mark(), &fallback, _);
+                touch(view);
+                dispose(fallback);
+                let moved = parent;
+                return bit;
+            }
+            function keepsParent(parent: &mut [[bool, string], i32], fallback: &string): void {
+                let view = parent |> select(mark(), fallback, _);
+                let copied = view;
+                let observer = &parent;
+                touch(copied);
+            }
+            function keepsFallback(parent: &mut [[bool, string], i32]): void {
+                let fallback = "local";
+                let view = parent |> select(mark(), &fallback, _);
+                dispose(fallback);
+                touch(view);
+            }
+            function escapeFallback(parent: &mut [[bool, string], i32]): &string {
+                let fallback = "local";
+                return select(mark(), &fallback, parent);
+            }
+            function bad(flag: bool, fallback: &string, parent: &mut [[bool, string], i32]): &string {
+                let owner = "local";
+                return &owner;
+            }
+            function reachedBad(parent: &mut [[bool, string], i32], fallback: &string): &string {
+                return parent |> bad(mark(), fallback, _);
+            }
+            function nestedFirst(parent: &mut [[bool, string], i32], other: &[bool, string]): bool { return true; }
+            function nestedLast(other: &[bool, string], parent: &mut [[bool, string], i32]): bool { return true; }
+            function twoFirst(parent: &mut [[bool, string], i32], other: &[bool, string]): bool {
+                return nestedFirst(parent, other);
+            }
+            function twoLast(parent: &mut [[bool, string], i32], other: &[bool, string]): bool {
+                return parent |> nestedLast(other, _);
+            }
+            function twoImplicit(parent: &mut [[bool, string], i32], other: &[bool, string]): bool {
+                return parent |> nestedFirst(other);
+            }
+            function mutableExtra(parent: &mut [[bool, string], i32], extra: &mut bool): bool { return true; }
+            function unsupportedMutable(parent: &mut [[bool, string], i32], extra: &mut bool): bool {
+                return mutableExtra(parent, extra);
+            }
+        "#,
+        |_, module, receipt| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            for (name, piped, expected_callee, source) in [
+                (
+                    "forward",
+                    false,
+                    "select",
+                    b"select(mark(), fallback, (parent))".as_slice(),
+                ),
+                (
+                    "pipeForward",
+                    true,
+                    "select",
+                    b"(parent) |> select(mark(), fallback, _)",
+                ),
+                (
+                    "implicit",
+                    true,
+                    "leading",
+                    b"(parent) |> leading(mark(), fallback)",
+                ),
+            ] {
+                let report = lower(name, default);
+                let mir = report.mir().unwrap_or_else(|| {
+                    panic!("nested leaf arguments {name}: {:?}", report.completion())
+                });
+                let ops: Vec<_> = linear(mir, mir.entry)
+                    .into_iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Call(_)
+                                | Operation::Reborrow { .. }
+                                | Operation::Copy { .. }
+                                | Operation::Export(_)
+                        )
+                    })
+                    .collect();
+                let [
+                    input,
+                    mark,
+                    fallback,
+                    Operation::Call(callee),
+                    Operation::Export(out),
+                ] = ops.as_slice()
+                else {
+                    panic!("expected one operand of each kind and the final call/export")
+                };
+                let (input, mark, fallback) = if piped {
+                    (input, mark, fallback)
+                } else {
+                    (fallback, input, mark)
+                };
+                assert!(
+                    matches!(input, Operation::Reborrow { parent, holder, exclusive: true }
+                    if parent.root.span.bytes() == b"parent: &mut [[bool, string], i32]" && holder.root.span.bytes() == b"(parent)"
+                        && parent.projection.is_none() && holder.projection.is_none())
+                );
+                assert!(matches!(mark, Operation::Call(callee) if *callee == id("mark")));
+                assert!(
+                    matches!(fallback, Operation::Copy { from, into: Some(slot) }
+                    if from.root.span.bytes() == b"fallback: &string" && slot.root.span.bytes() == b"fallback")
+                );
+                assert_eq!(*callee, id(expected_callee));
+                assert_eq!(out.root.span.bytes(), source);
+                assert!(path_drops(mir, mir.entry).is_empty());
+            }
+            let releases = lower("releases", default);
+            let mir = releases
+                .mir()
+                .expect("scalar release and reference last use restore both sources");
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::Borrow { .. }
+                            | Operation::Call(_)
+                            | Operation::Dispose { .. }
+                            | Operation::Move { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(ops.as_slice(), [
+                Operation::Reborrow { parent, exclusive: true, .. }, Operation::Call(mark_a), Operation::Borrow { source: first, exclusive: false, .. }, Operation::Call(scalar), Operation::Dispose { operand: disposed_first, .. },
+                Operation::Reborrow { parent: again, exclusive: true, .. }, Operation::Call(mark_b), Operation::Borrow { source: fallback, exclusive: false, .. }, Operation::Call(select), Operation::Call(touch),
+                Operation::Dispose { operand: disposed_fallback, .. }, Operation::Move { from, .. },
+            ] if [again, from].iter().all(|place| place.root.node == parent.root.node) && first.root.node == disposed_first.root.node
+                && fallback.root.node == disposed_fallback.root.node && *mark_a == id("mark") && *mark_b == id("mark")
+                && *scalar == id("scalar") && *select == id("select") && *touch == id("touch")));
+            for (name, code, site, cause) in [
+                (
+                    "keepsParent",
+                    "R0201",
+                    b"&parent".as_slice(),
+                    b"parent".as_slice(),
+                ),
+                ("keepsFallback", "R0203", b"dispose(fallback)", b"&fallback"),
+                (
+                    "escapeFallback",
+                    "R0202",
+                    b"return select(mark(), &fallback, parent);",
+                    b"fallback",
+                ),
+                ("reachedBad", "R0202", b"return &owner;", b"owner"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), cause);
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+            for (name, site) in [
+                ("twoFirst", b"parent".as_slice()),
+                ("twoLast", b"parent |> nestedLast(other, _)"),
+                ("twoImplicit", b"parent |> nestedFirst(other)"),
+                ("unsupportedMutable", b"parent"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
+            }
+            assert_exact_tuple_call_limits(&releases, |limits| lower("releases", limits));
+        },
+    );
 }
 
 #[test]

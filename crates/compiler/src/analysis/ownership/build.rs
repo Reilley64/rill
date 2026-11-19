@@ -415,23 +415,27 @@ impl<'a, 'g> Build<'a, 'g> {
         if parameters.len() != call.arguments.len() || output != result {
             return Ok(false);
         }
+        let mut saw_tuple = false;
+        let mut nested_exclusive = false;
         for (formal, &node) in parameters.iter().zip(&call.arguments) {
             self.budget.step(3)?;
             let actual = &self.value(node)?.ty;
             if !matches!(actual.as_ref(), TypeTerm::Primitive(_))
                 && !shared_primitive_reference(actual)
             {
+                // No second descriptor may accompany a nested exclusive input.
+                if nested_exclusive {
+                    return Ok(false);
+                }
                 let TypeTerm::Reference { mutable, referent } = actual.as_ref() else {
                     return Ok(false);
                 };
                 let TypeTerm::Tuple(elements) = referent.as_ref() else {
                     return Ok(false);
                 };
-                let Some((width, _)) = self.primitive_tuple_width(elements, |this| {
-                    // A nested exclusive argument must be the sole argument,
-                    // including when the pipe supplies it. Check before scanning leaves.
+                let Some((width, nested)) = self.primitive_tuple_width(elements, |this| {
                     Ok(!mutable
-                        || call.arguments.len() == 1
+                        || !saw_tuple
                             && this
                                 .whole_named_owned_place(node)?
                                 .is_some_and(|(_, path)| {
@@ -441,6 +445,8 @@ impl<'a, 'g> Build<'a, 'g> {
                 else {
                     return Ok(false);
                 };
+                saw_tuple = true;
+                nested_exclusive = *mutable && nested;
                 // Charge the proved tuple shape before comparing types.
                 self.budget.step(width.checked_add(2).ok_or(Stop::Limit)?)?;
             }
