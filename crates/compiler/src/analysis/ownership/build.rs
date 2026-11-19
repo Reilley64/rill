@@ -140,6 +140,7 @@ impl<'a, 'g> Build<'a, 'g> {
             projection: None,
             members: 0,
             reference_member: false,
+            has_guard_field: false,
             custom_disposer: None,
             moves,
             cleanup,
@@ -316,6 +317,7 @@ impl<'a, 'g> Build<'a, 'g> {
             projection: None,
             members: members.len(),
             reference_member: false,
+            has_guard_field: false,
             custom_disposer,
             moves: custom_disposer.is_some(),
             cleanup: StorageCleanup::End,
@@ -325,24 +327,30 @@ impl<'a, 'g> Build<'a, 'g> {
             let reference_member = custom_disposer.is_none()
                 && primitive_reference(ty)
                 && matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, .. });
-            if !reference_member && !matches!(ty.as_ref(), TypeTerm::Primitive(_)) {
+            let cleanup = if owns_text(ty) {
+                StorageCleanup::Drop
+            } else if reference_member || matches!(ty.as_ref(), TypeTerm::Primitive(_)) {
+                StorageCleanup::End
+            } else if matches!(projection, Projection::Field(_))
+                && let Some(release) = self.guard_release(ty)?
+            {
+                self.slots[root].has_guard_field = true;
+                StorageCleanup::ReleaseGuard(release)
+            } else {
                 return Err(Stop::Pending(node));
-            }
-            let owned = owns_text(ty);
-            self.slots[root].moves |= owned;
+            };
+            let moves = cleanup != StorageCleanup::End;
+            self.slots[root].moves |= moves;
             self.slots.push(Local {
                 node,
                 owner: root,
                 projection: Some(projection),
                 members: 0,
                 reference_member,
+                has_guard_field: false,
                 custom_disposer: None,
-                moves: owned,
-                cleanup: if owned {
-                    StorageCleanup::Drop
-                } else {
-                    StorageCleanup::End
-                },
+                moves,
+                cleanup,
             });
         }
         Ok(root)
@@ -621,6 +629,11 @@ impl<'a, 'g> Build<'a, 'g> {
                     return self.expression(value, Some(incoming), install, depth + 1);
                 }
                 let target = self.place(left)?;
+                if self.slots[target].projection.is_some()
+                    && self.slots[target].guard_release().is_some()
+                {
+                    return Err(Stop::Pending(left));
+                }
                 let ty = self.value(value)?.ty.clone();
                 let incoming = self.slot(value, &ty)?;
                 let initializer = self.ungroup(value)?;
@@ -647,7 +660,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if let Some(&value) = children.first() {
                     let ty = self.value(value)?.ty.clone();
                     let output = self.slot(value, &ty)?;
-                    if self.slots[output].guard_release().is_some() {
+                    if self.slots[output].contains_guard() {
                         return Err(Stop::Pending(value));
                     }
                     let export = self.emit(node, Action::Export(output), Edges::Next(returning))?;
@@ -888,7 +901,7 @@ impl<'a, 'g> Build<'a, 'g> {
         // temporary, then clean the remaining members at statement exit.
         let source = facts.source.node;
         let scratch = self.slot(source, &facts.ty)?;
-        if self.slots[scratch].custom_disposer.is_some() {
+        if self.slots[scratch].custom_disposer.is_some() || self.slots[scratch].contains_guard() {
             return Err(Stop::Pending(node));
         }
         let mut tail = self.cleanup(node, &[scratch], next)?;
@@ -1350,7 +1363,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         TypeTerm::Reference { mutable: true, .. }
                     );
                     let parent = self.place(parent)?;
-                    if self.slots[parent].guard_release().is_some() {
+                    if self.slots[parent].contains_guard() {
                         return Err(Stop::Pending(node));
                     }
                     Action::Reborrow {
@@ -1361,7 +1374,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 } else {
                     let from = self.place(operand)?;
-                    if self.slots[from].guard_release().is_some() {
+                    if self.slots[from].contains_guard() {
                         return Err(Stop::Pending(node));
                     }
                     // Initialization is per position. It does not establish a
@@ -1620,7 +1633,7 @@ impl<'a, 'g> Build<'a, 'g> {
             || call.callee.module.origin != Origin::Application
             || !call.substitution.is_empty()
             || !self.direct_call_type(&facts.ty)
-            || into.is_some_and(|slot| self.slots[slot].guard_release().is_some())
+            || into.is_some_and(|slot| self.slots[slot].contains_guard())
         {
             return Err(Stop::Pending(node));
         }
@@ -1656,7 +1669,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(arg));
             }
             let slot = self.slot(arg, &ty)?;
-            if self.slots[slot].guard_release().is_some() {
+            if self.slots[slot].contains_guard() {
                 return Err(Stop::Pending(arg));
             }
             args.push(slot);

@@ -506,7 +506,7 @@ fn lower<'g>(
             &parameter.ty,
         )?;
         params.push(slot);
-        owns_guard |= build.slots[slot].guard_release().is_some();
+        owns_guard |= build.slots[slot].contains_guard();
         if let Some(ty) = retained_bool_contents_type(&parameter.ty) {
             let contents = build.slot(parameter.declaration.node, ty)?;
             build.budget.reserve(1)?;
@@ -638,6 +638,7 @@ struct Local<'g> {
     projection: Option<Projection<'g>>,
     members: usize,
     reference_member: bool,
+    has_guard_field: bool,
     custom_disposer: Option<&'g DeclarationId>,
     moves: bool,
     cleanup: StorageCleanup<'g>,
@@ -681,6 +682,10 @@ impl<'g> Local<'g> {
             StorageCleanup::ReleaseGuard(release) => Some(release),
             _ => None,
         }
+    }
+
+    fn contains_guard(self) -> bool {
+        self.has_guard_field || self.guard_release().is_some()
     }
 
     fn carried_loan_root(self, slot: Slot) -> Slot {

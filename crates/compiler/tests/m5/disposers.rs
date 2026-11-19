@@ -280,6 +280,283 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
 }
 
 #[test]
+fn protected_fields_keep_their_obligation_through_disposer_cleanup() {
+    probe_with_typed(
+        "disposers::protected_fields_keep_their_obligation_through_disposer_cleanup",
+        r#"
+            import std::core::dispose as release;
+            type Plain = { plainHead: string; plainLock: LockGuard<i32>; plainTail: string; }
+            function ordinary(value: Plain): void { }
+            function partial(value: Plain): void { let held = value.plainLock; dispose(held); }
+            function duplicateRelease(value: Plain): void { dispose(value.plainLock); dispose(value.plainLock); }
+            function borrowedWrapper(value: Plain): void { let view = &value; }
+            function pass(value: Plain): Plain { return value; }
+            function callArgument(value: Plain): void { ordinary(value); }
+            function callOutput(value: Plain): void { let _ = pass(value); }
+            function replaceField(value: Plain, next: LockGuard<i32>): void {
+                let mut active = value;
+                active.plainLock = next;
+            }
+            type Other = { unsupported: LockGuard<bool>; }
+            function otherType(value: Other): void { }
+            type Empty = { emptyHead: string; emptyLock: LockGuard<i32>; emptyTail: string; }
+            implement release(value: Empty): void { }
+            function empty(value: Empty): void { release(value); }
+            function outside(value: Empty): void { let held = value.emptyLock; }
+            function outsideExplicit(value: Empty): void { dispose(value.emptyLock); }
+            type Branch = { head: string; lock: LockGuard<i32>; tail: string; take: bool; }
+            implement release(value: Branch): void {
+                {
+                    let active = value;
+                    if (active.take) { let held = active.lock; dispose(held); }
+                }
+                let marker = "marker";
+                dispose(marker);
+            }
+            function branch(value: Branch): void { }
+        "#,
+        |_, module, receipt, typed| {
+            use compiler::analysis::typed::{
+                NativeOwnershipAction, OwnershipCoverage, OwnershipRule,
+            };
+
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let field = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.id.kind == loader::DeclarationKind::Field
+                            && d.name.as_deref() == Some(name)
+                    })
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let provider = typed
+                .ownership_protection()
+                .iter()
+                .find(|scope| {
+                    scope.rule == OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
+                        && scope.coverage == OwnershipCoverage::Clear
+                })
+                .unwrap()
+                .provider
+                .as_ref()
+                .unwrap();
+            let is_release = |obligation| match obligation {
+                Obligation::ReleaseGuard {
+                    operand,
+                    implementation,
+                    entry,
+                } => {
+                    assert_eq!(implementation, &provider.implementation.id);
+                    assert_eq!(entry, &provider.entry.id);
+                    Some(operand)
+                }
+                _ => None,
+            };
+            let ordinary = lower("ordinary");
+            let mir = ordinary
+                .mir()
+                .unwrap_or_else(|| panic!("ordinary: {:?}", ordinary.completion()));
+            let drops = path_drops(mir, mir.entry);
+            let [Obligation::Drop(tail), guard, Obligation::Drop(head)] = drops.as_slice() else {
+                panic!("expected ordinary reverse field cleanup: {drops:?}");
+            };
+            let lock = is_release(*guard).unwrap();
+            for (place, expected) in [
+                (tail, "plainTail"),
+                (&lock, "plainLock"),
+                (head, "plainHead"),
+            ] {
+                assert_eq!(place.field().unwrap().id, field(expected).id);
+                assert_eq!(place.root.span.bytes(), b"value: Plain");
+            }
+            let partial = lower("partial");
+            let mir = partial.mir().expect("the moved guard has its own cleanup");
+            let ops = linear(mir, mir.entry);
+            let transfers: Vec<_> = ops
+                .iter()
+                .filter_map(|op| match op {
+                    Operation::Move {
+                        from,
+                        into: Some(to),
+                    } => Some((from, to)),
+                    _ => None,
+                })
+                .collect();
+            let [(from, held)] = transfers.as_slice() else {
+                panic!("expected a single field transfer")
+            };
+            assert_eq!(from.field().unwrap().id, field("plainLock").id);
+            let drops = path_drops(mir, mir.entry);
+            let [guard, Obligation::Drop(tail), Obligation::Drop(head)] = drops.as_slice() else {
+                panic!("the wrapper must not repeat release of the moved field");
+            };
+            assert_eq!(is_release(*guard).unwrap().root.node, held.root.node);
+            assert_eq!(tail.field().unwrap().id, field("plainTail").id);
+            assert_eq!(head.field().unwrap().id, field("plainHead").id);
+
+            let empty = lower("empty");
+            let mir = empty
+                .mir()
+                .expect("an empty custom disposer cannot suppress protected cleanup");
+            let drops = path_drops(mir, mir.entry);
+            let [
+                Obligation::InvokeDisposer {
+                    operand,
+                    implementation,
+                },
+            ] = drops.as_slice()
+            else {
+                panic!("the caller transfers the entire wrapper exactly once");
+            };
+            assert_eq!(operand.root.span.bytes(), b"value: Empty");
+            let disposer = mir.disposer(implementation).unwrap();
+            let drops = path_drops(disposer, disposer.entry);
+            let [Obligation::Drop(tail), guard, Obligation::Drop(head)] = drops.as_slice() else {
+                panic!("empty body's epilogue cleans the remaining fields");
+            };
+            let lock = is_release(*guard).unwrap();
+            for (place, expected) in [
+                (tail, "emptyTail"),
+                (&lock, "emptyLock"),
+                (head, "emptyHead"),
+            ] {
+                assert_eq!(place.field().unwrap().id, field(expected).id);
+            }
+
+            let branch = lower("branch");
+            let mir = branch
+                .mir()
+                .expect("checked disposer transfers cleanup into its epilogue");
+            let drops = path_drops(mir, mir.entry);
+            let [Obligation::InvokeDisposer { implementation, .. }] = drops.as_slice() else {
+                panic!("expected one outer disposer invocation");
+            };
+            let body = mir.disposer(implementation).unwrap();
+            let (yes, no) = branch_targets(body);
+            for (edge, moved) in [(yes, true), (no, false)] {
+                let mut events = Vec::new();
+                let mut transferred = None;
+                let mut deferred = None;
+                for operation in linear(body, edge) {
+                    match operation {
+                        Operation::Move {
+                            from,
+                            into: Some(to),
+                        } => {
+                            assert_eq!(from.field().unwrap().id, field("lock").id);
+                            assert_eq!(from.root.span.bytes(), b"active");
+                            transferred = Some(to.root.node);
+                            events.push("move");
+                        }
+                        Operation::Dispose { operand, .. } => {
+                            assert_eq!(operand.root.span.bytes(), b"marker");
+                            events.push("marker");
+                        }
+                        Operation::Cleanup(cleanup) => {
+                            for obligation in cleanup {
+                                match obligation {
+                                    Obligation::DeferDisposerFields { from, into } => {
+                                        assert_eq!(from.root.span.bytes(), b"active");
+                                        deferred = Some(into.root.node);
+                                        events.push("defer");
+                                    }
+                                    Obligation::ReleaseGuard { .. } => {
+                                        let operand = is_release(*obligation).unwrap();
+                                        if moved {
+                                            assert!(operand.field().is_none());
+                                            assert_eq!(Some(operand.root.node), transferred);
+                                        } else {
+                                            assert_eq!(
+                                                operand.field().unwrap().id,
+                                                field("lock").id
+                                            );
+                                            assert_eq!(Some(operand.root.node), deferred);
+                                        }
+                                        events.push("release");
+                                    }
+                                    Obligation::Drop(place) => {
+                                        assert_eq!(Some(place.root.node), deferred);
+                                        let member = place.field().unwrap();
+                                        if member.id == field("tail").id {
+                                            events.push("tail");
+                                        } else {
+                                            assert_eq!(member.id, field("head").id);
+                                            events.push("head");
+                                        }
+                                    }
+                                    Obligation::EndStorage(_) => {}
+                                    _ => panic!("the active outer disposer cannot run again"),
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let expected: &[&str] = if moved {
+                    &["move", "release", "defer", "marker", "tail", "head"]
+                } else {
+                    &["defer", "marker", "tail", "release", "head"]
+                };
+                assert_eq!(events, expected);
+            }
+            let limits = AnalysisLimits {
+                max_work: branch.statistics().work,
+                max_entries: branch.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(check("branch", limits).completion(), Completion::Checked);
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("branch", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            for (name, code) in [
+                ("duplicateRelease", "R0200"),
+                ("outside", "R0501"),
+                ("outsideExplicit", "R0501"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.findings()[0].code(), code, "{name}");
+            }
+            for name in [
+                "borrowedWrapper",
+                "pass",
+                "callArgument",
+                "callOutput",
+                "replaceField",
+                "otherType",
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn active_disposer_cleans_only_remaining_fields() {
     probe_with_typed(
         "disposers::active_disposer_cleans_only_remaining_fields",
@@ -607,10 +884,17 @@ fn active_disposer_cleans_only_remaining_fields() {
             );
 
             let protected = lower("protectedCleanup");
-            assert_eq!(protected.completion(), Completion::Incomplete);
+            let mir = protected
+                .mir()
+                .expect("the wrapper's disposer must retain its protected field cleanup");
+            let drops = path_drops(mir, mir.entry);
+            let [Obligation::InvokeDisposer { implementation, .. }] = drops.as_slice() else {
+                panic!("the caller must invoke only the outer disposer");
+            };
+            let body = mir.disposer(implementation).unwrap();
             assert!(
-                protected.mir().is_none(),
-                "an empty wrapper disposer cannot replace protected cleanup"
+                matches!(path_drops(body, body.entry).as_slice(), [Obligation::ReleaseGuard { operand, .. }]
+                if operand.field().is_some_and(|field| field.name.as_deref() == Some("lock")))
             );
 
             let normal = module
