@@ -115,7 +115,7 @@ fn liveness(
             }
             Action::ForbiddenBorrowedMove(slot) => use_one(Some(slot), None),
             Action::Borrow { from, into, .. } => use_one(Some(from), Some(into)),
-            Action::BindSharedTupleMember {
+            Action::BindSharedMember {
                 descriptor, into, ..
             } => use_one(Some(descriptor), Some(into)),
             Action::Reborrow { parent, into, .. } => {
@@ -1169,9 +1169,9 @@ pub(super) fn run<'g>(
                     }
                     Operation::Dereference(local(from))
                 }
-                Action::BindSharedTupleMember {
+                Action::BindSharedMember {
                     descriptor,
-                    position,
+                    projection,
                     into,
                     binding,
                 } => {
@@ -1186,15 +1186,15 @@ pub(super) fn run<'g>(
                         budget,
                     )?;
                     state[into] = State::Initialized(match binding {
-                        SharedTupleBinding::CopyScalar => empty.clone(),
-                        SharedTupleBinding::SharedView => Held {
+                        SharedMemberBinding::CopyScalar => empty.clone(),
+                        SharedMemberBinding::SharedView => Held {
                             loans: held.loans.clone(),
                             ..Held::default()
                         },
                     });
-                    Operation::BindSharedTupleMember {
+                    Operation::BindSharedMember {
                         descriptor: local(descriptor),
-                        position,
+                        projection,
                         into: local(into),
                         binding,
                     }

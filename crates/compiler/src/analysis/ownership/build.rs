@@ -40,15 +40,15 @@ fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>
 }
 
 fn product_member<'g>(
-    shared_tuple: bool,
+    shared: bool,
     route: &[PatternProjection<'g>],
 ) -> Option<PatternProjection<'g>> {
-    match (shared_tuple, route) {
+    match (shared, route) {
         (
             true,
             [
                 PatternProjection::Dereference,
-                member @ PatternProjection::TupleElement(_),
+                member @ (PatternProjection::TupleElement(_) | PatternProjection::Field(_)),
             ],
         )
         | (false, [member @ (PatternProjection::TupleElement(_) | PatternProjection::Field(_))]) => {
@@ -68,7 +68,7 @@ enum Binding<'a, 'g> {
     IrrefutableProduct {
         shape: NodeId,
         facts: &'a PatternFacts<'g>,
-        shared_tuple: bool,
+        shared: bool,
     },
 }
 
@@ -637,11 +637,9 @@ impl<'a, 'g> Build<'a, 'g> {
                         };
                         self.stage_value(value, into, tail, temporary, depth + 1)
                     }
-                    Binding::IrrefutableProduct {
-                        facts,
-                        shared_tuple,
-                        ..
-                    } => self.bind_product(node, facts, shared_tuple, next, depth + 1),
+                    Binding::IrrefutableProduct { facts, shared, .. } => {
+                        self.bind_product(node, facts, shared, next, depth + 1)
+                    }
                 }
             }
             NodeKind::ExpressionStatement => self.discard(node, children[0], next, depth + 1),
@@ -838,7 +836,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if facts.access != Access::Owned || !facts.coverage.exhaustive() {
                     return Err(Stop::Pending(pattern));
                 }
-                let shared_tuple = match (kind, facts.ty.as_ref()) {
+                let shared = match (kind, facts.ty.as_ref()) {
                     (NodeKind::BracketPattern, TypeTerm::Tuple(_))
                     | (NodeKind::RecordPattern, TypeTerm::Nominal { .. }) => false,
                     (
@@ -857,12 +855,19 @@ impl<'a, 'g> Build<'a, 'g> {
                         }
                         true
                     }
+                    (
+                        NodeKind::RecordPattern,
+                        TypeTerm::Reference {
+                            mutable: false,
+                            referent,
+                        },
+                    ) if matches!(referent.as_ref(), TypeTerm::Nominal { .. }) => true,
                     _ => return Err(Stop::Pending(pattern)),
                 };
                 Ok(Binding::IrrefutableProduct {
                     shape,
                     facts,
-                    shared_tuple,
+                    shared,
                 })
             }
             _ => {
@@ -897,7 +902,7 @@ impl<'a, 'g> Build<'a, 'g> {
             Binding::IrrefutableProduct {
                 shape,
                 facts,
-                shared_tuple,
+                shared,
             } => {
                 let syntax = &self.module.syntax.nodes[shape];
                 let record = syntax.kind == NodeKind::RecordPattern;
@@ -929,7 +934,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         return Err(Stop::Pending(name));
                     }
                     let binder = binders.next().ok_or(Stop::Pending(name))?;
-                    let flat = match product_member(shared_tuple, &binder.projections) {
+                    let flat = match product_member(shared, &binder.projections) {
                         Some(PatternProjection::TupleElement(index)) => {
                             !record && index == position
                         }
@@ -953,18 +958,38 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         node: NodeId,
         facts: &PatternFacts<'g>,
-        shared_tuple: bool,
+        shared: bool,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
+        let shared_fields = if shared
+            && let TypeTerm::Reference { referent, .. } = facts.ty.as_ref()
+            && matches!(referent.as_ref(), TypeTerm::Nominal { .. })
+        {
+            let pattern = self.module.syntax.nodes[node].children[0];
+            let fields = self
+                .record_fields(referent.as_ref())?
+                .ok_or(Stop::Pending(pattern))?;
+            self.budget.step(fields.len())?;
+            if !fields
+                .iter()
+                .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(_)))
+                || self.outer_disposer(pattern, referent)?.is_some()
+            {
+                return Err(Stop::Pending(pattern));
+            }
+            Some(fields)
+        } else {
+            None
+        };
         // Stage the initializer once. For borrowed patterns this is only
-        // the descriptor; the tuple storage stays with its original owner.
+        // the descriptor; the aggregate storage stays with its owner.
         let source = facts.source.node;
         let scratch = self.slot(source, &facts.ty)?;
         if self.slots[scratch].custom_disposer.is_some() || self.slots[scratch].contains_guard() {
             return Err(Stop::Pending(node));
         }
-        let mut tail = if shared_tuple {
+        let mut tail = if shared {
             self.emit(node, Action::End(scratch), Edges::Next(next))?
         } else {
             self.cleanup(node, &[scratch], next)?
@@ -976,33 +1001,48 @@ impl<'a, 'g> Build<'a, 'g> {
                 .get(binder.declaration)
                 .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
-            let action = match product_member(shared_tuple, &binder.projections) {
-                Some(PatternProjection::TupleElement(position)) if shared_tuple => {
-                    let binding = if binder.ty == binder.source_type {
-                        SharedTupleBinding::CopyScalar
-                    } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
-                        if *referent == binder.source_type)
-                    {
-                        SharedTupleBinding::SharedView
-                    } else {
-                        return Err(Stop::Pending(site));
-                    };
-                    Action::BindSharedTupleMember {
-                        descriptor: scratch,
-                        position,
-                        into,
-                        binding,
+            let member = product_member(shared, &binder.projections).ok_or(Stop::Pending(site))?;
+            let action = if shared {
+                let projection = match member {
+                    PatternProjection::TupleElement(position) => Projection::TupleElement(position),
+                    PatternProjection::Field(field) => {
+                        let fields = shared_fields.ok_or(Stop::Pending(site))?;
+                        self.budget.step(fields.len())?;
+                        let field = fields
+                            .iter()
+                            .find(|candidate| &candidate.declaration.id == field)
+                            .ok_or(Stop::Pending(site))?;
+                        Projection::Field(field.declaration)
                     }
+                    _ => return Err(Stop::Pending(site)),
+                };
+                let binding = if binder.ty == binder.source_type {
+                    SharedMemberBinding::CopyScalar
+                } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                    if *referent == binder.source_type)
+                {
+                    SharedMemberBinding::SharedView
+                } else {
+                    return Err(Stop::Pending(site));
+                };
+                Action::BindSharedMember {
+                    descriptor: scratch,
+                    projection,
+                    into,
+                    binding,
                 }
-                Some(PatternProjection::TupleElement(position)) => Action::Read {
-                    from: self.element(site, scratch, position)?,
+            } else {
+                let from = match member {
+                    PatternProjection::TupleElement(position) => {
+                        self.element(site, scratch, position)?
+                    }
+                    PatternProjection::Field(field) => self.field(site, scratch, field)?,
+                    _ => return Err(Stop::Pending(site)),
+                };
+                Action::Read {
+                    from,
                     into: Some(into),
-                },
-                Some(PatternProjection::Field(field)) => Action::Read {
-                    from: self.field(site, scratch, field)?,
-                    into: Some(into),
-                },
-                _ => return Err(Stop::Pending(node)),
+                }
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }

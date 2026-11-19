@@ -48,9 +48,6 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                 let Nested { coordinates: [x, _] } = value;
                 return x;
             }
-            function borrowed(value: &Packet): void {
-                let Packet { left: first } = value;
-            }
             type Custom = { text: string; };
             implement dispose(value: Custom): void {}
             function custom(value: Custom): string {
@@ -260,10 +257,212 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                     "{name} related"
                 );
             }
-            for name in ["borrowed", "custom", "nested"] {
+            for name in ["custom", "nested"] {
                 let incomplete = lower(name);
                 assert_eq!(incomplete.completion(), Completion::Incomplete, "{name}");
                 assert!(incomplete.mir().is_none(), "{name}");
+            }
+        },
+    );
+}
+
+#[test]
+fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
+    use compiler::analysis::ownership::{
+        Projection,
+        SharedMemberBinding::{CopyScalar, SharedView},
+    };
+
+    probe(
+        "patterns::shared_record_binding_uses_canonical_fields_and_retains_backing",
+        r#"
+            type Spare = { text: bool; flag: string; };
+            type Packet = { flag: bool; text: string; skip: string; omit: string; };
+            function forward(value: &Packet): &string {
+                let (Packet { text: (label), skip: _, flag }) = value;
+                let _ = flag;
+                return label;
+            }
+            function copied(value: Packet): bool {
+                let Packet { flag } = &value;
+                let moved = value;
+                return flag;
+            }
+            function escapes(value: Packet): &string {
+                let Packet { text: label } = &value;
+                return label;
+            }
+            function premature(value: Packet): void {
+                let mut owner = value;
+                let whole = &owner;
+                let Packet { text: label } = whole;
+                owner.skip = "new";
+                let _ = label;
+            }
+            function lastUse(value: Packet): void {
+                let mut owner = value;
+                let Packet { text: label } = &owner;
+                let _ = label;
+                owner.skip = "new";
+            }
+            function expires(seed: &string, flag: bool, value: Packet): &string {
+                let mut result = seed;
+                if (flag) { let local = value; let Packet { text: label } = &local; result = label; }
+                return result;
+            }
+            type Custom = { text: string; };
+            implement dispose(value: Custom): void {}
+            function custom(value: &Custom): &string {
+                let Custom { text } = value;
+                return text;
+            }
+            type Carrier = { saved: &bool; };
+            function carried(value: &Carrier): &bool {
+                let Carrier { saved } = value;
+                return saved;
+            }
+            type Nested = { inner: [bool, bool]; };
+            function nested(value: &Nested): bool {
+                let Nested { inner: [bit, _] } = value;
+                return bit;
+            }
+            function exclusive(value: &mut Packet): bool {
+                let Packet { flag } = value;
+                return flag;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let check = |name| lower(name, AnalysisLimits::default());
+            let forwarded = check("forward");
+            let mir = forwarded
+                .mir()
+                .unwrap_or_else(|| panic!("forward: {:?}", forwarded.completion()));
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let packet = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("Packet"))
+                .unwrap();
+            let field = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.id.kind == loader::DeclarationKind::Field
+                            && d.name.as_deref() == Some(name)
+                            && packet.span.start() < d.span.start()
+                            && d.span.end() < packet.span.end()
+                    })
+                    .unwrap()
+            };
+            let ops = linear(mir, mir.entry);
+            assert!(
+                !ops.iter()
+                    .any(|op| matches!(op, Operation::Move { .. } | Operation::Dispose { .. }))
+            );
+            let route: Vec<_> = ops
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. }
+                            | Operation::BindSharedMember { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Copy { from: incoming, into: Some(staged) },
+                Operation::BindSharedMember { descriptor: first, projection: Projection::Field(text), into: label, binding: SharedView },
+                Operation::BindSharedMember { descriptor: second, projection: Projection::Field(bit), into: flag, binding: CopyScalar },
+                Operation::Copy { from: used, .. },
+                Operation::Copy { from: view, into: Some(result) },
+                Operation::Export(output),
+            ] if incoming.root.span.bytes() == b"value: &Packet"
+                && staged.root.node == first.root.node && staged.root.node == second.root.node
+                && text.id == field("text").id && bit.id == field("flag").id
+                && label.root.span.bytes() == b"label" && label.root.node == view.root.node
+                && flag.root.span.bytes() == b"flag" && flag.root.node == used.root.node
+                && result.root.node == output.root.node));
+            let limits = AnalysisLimits {
+                max_work: forwarded.statistics().work,
+                max_entries: forwarded.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("forward", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("forward", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            for (name, expected) in [
+                ("copied", &["omit", "skip", "text"][..]),
+                ("lastUse", &["skip", "omit", "skip", "text"][..]),
+            ] {
+                let report = check(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let fields: Vec<_> = path_drops(mir, mir.entry)
+                    .into_iter()
+                    .map(|drop| match drop {
+                        Obligation::Drop(place) => place.field().unwrap().name.as_deref().unwrap(),
+                        _ => panic!("unexpected cleanup"),
+                    })
+                    .collect();
+                assert_eq!(fields, expected, "{name}");
+            }
+            for (name, code, site, related) in [
+                ("escapes", "R0202", "return label;", "value: Packet"),
+                ("premature", "R0203", "owner.skip = \"new\";", "&owner"),
+                (
+                    "expires",
+                    "R0203",
+                    "{ let local = value; let Packet { text: label } = &local; result = label; }",
+                    "&local",
+                ),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected a single finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            for (name, pattern) in [
+                ("custom", "Custom { text }"),
+                ("carried", "Carrier { saved }"),
+                ("nested", "[bit, _]"),
+                ("exclusive", "Packet { flag }"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    pattern.as_bytes(),
+                    "{name}"
+                );
             }
         },
     );
@@ -486,7 +685,10 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
 
 #[test]
 fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
-    use compiler::analysis::ownership::SharedTupleBinding::{CopyScalar, SharedView};
+    use compiler::analysis::ownership::{
+        Projection,
+        SharedMemberBinding::{CopyScalar, SharedView},
+    };
 
     probe(
         "patterns::shared_tuple_binding_copies_scalars_and_borrows_string_members",
@@ -572,15 +774,15 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                     matches!(
                         op,
                         Operation::Copy { .. }
-                            | Operation::BindSharedTupleMember { .. }
+                            | Operation::BindSharedMember { .. }
                             | Operation::Export(_)
                     )
                 })
                 .collect();
             assert!(matches!(route.as_slice(), [
                 Operation::Copy { from: incoming, into: Some(staged) },
-                Operation::BindSharedTupleMember { descriptor: first, position: 0, into: flag, binding: CopyScalar },
-                Operation::BindSharedTupleMember { descriptor: second, position: 1, into: text, binding: SharedView },
+                Operation::BindSharedMember { descriptor: first, projection: Projection::TupleElement(0), into: flag, binding: CopyScalar },
+                Operation::BindSharedMember { descriptor: second, projection: Projection::TupleElement(1), into: text, binding: SharedView },
                 Operation::Copy { from: bit, .. },
                 Operation::Copy { from: view, into: Some(result) },
                 Operation::Export(output),
@@ -619,7 +821,7 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                         Operation::Copy { .. }
                             | Operation::Move { .. }
                             | Operation::Dispose { .. }
-                            | Operation::BindSharedTupleMember { .. }
+                            | Operation::BindSharedMember { .. }
                     )
                 })
                 .collect();
