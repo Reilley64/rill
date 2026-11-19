@@ -249,8 +249,27 @@ fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
                                 assert_eq!(*success, &role.ok.id);
                                 tested = Some(operand);
                                 let success = linear(mir, yes);
-                                assert!(success.iter().any(|op| matches!(op,
-                                    Operation::TakeResultSuccess { operand: source, into: None } if source.root.node == operand.root.node)));
+                                assert!(!success.iter().any(|op| matches!(
+                                    op,
+                                    Operation::Call(_)
+                                        | Operation::ConstructResultError { .. }
+                                        | Operation::ForwardResultFailure { .. }
+                                )));
+                                let transfer: Vec<_> = success
+                                    .iter()
+                                    .copied()
+                                    .filter(|op| {
+                                        matches!(
+                                            op,
+                                            Operation::TakeResultSuccess { .. }
+                                                | Operation::Dispose { .. }
+                                        )
+                                    })
+                                    .collect();
+                                assert!(matches!(transfer.as_slice(), [
+                                    Operation::TakeResultSuccess { operand: source, into: None },
+                                    Operation::Dispose { operand: owner, .. },
+                                ] if source.root.node == operand.root.node && owner.root.span.bytes() == b"owner: string"));
                                 assert_return(&success, &role.ok.id, true, &[]);
                                 prefix.extend(linear(mir, no));
                                 break;
