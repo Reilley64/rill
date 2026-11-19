@@ -883,23 +883,9 @@ impl<'a, 'g> Build<'a, 'g> {
         if self.nested_record_values.is_empty() {
             return Ok(None);
         }
-        let root = self.ungroup(value)?;
-        self.budget.step(1)?;
-        if self.module.syntax.nodes[root].kind != NodeKind::ValueReference {
-            return Ok(None);
-        }
-        self.budget.step(1)?;
-        let facts = self.value(root)?;
-        let Some(path) = facts
-            .path
-            .as_ref()
-            .filter(|path| path.projections.is_empty())
-        else {
+        let Some((facts, path)) = self.whole_named_owned_place(value)? else {
             return Ok(None);
         };
-        if facts.access != Access::Owned {
-            return Ok(None);
-        }
         let Some(from) = self.nested_record_root(path)? else {
             return Ok(None);
         };
@@ -924,9 +910,12 @@ impl<'a, 'g> Build<'a, 'g> {
 
     fn binding_destination(&mut self, node: NodeId, id: &DeclarationId) -> ResultOf<Slot> {
         self.budget.step(1)?;
-        self.locals
+        if let Some(&slot) = self.locals.get(id) {
+            return Ok(slot);
+        }
+        self.budget.step(1)?;
+        self.nested_record_values
             .get(id)
-            .or_else(|| self.nested_record_values.get(id))
             .copied()
             .ok_or(Stop::Pending(node))
     }
@@ -1041,8 +1030,9 @@ impl<'a, 'g> Build<'a, 'g> {
                     self.budget.step(1)?;
                     let statement = &self.module.syntax.nodes[child];
                     let control = if matches!(statement.kind, NodeKind::Binding { .. }) {
-                        self.declare_binding(child, &mut locals)?;
-                        *statement.children.last().unwrap()
+                        let initializer = *statement.children.last().unwrap();
+                        self.declare_binding(child, initializer, &mut locals)?;
+                        initializer
                     } else {
                         child
                     };
@@ -1526,7 +1516,12 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(nested_reborrow)
     }
 
-    fn declare_binding(&mut self, node: NodeId, locals: &mut Vec<Slot>) -> ResultOf<()> {
+    fn declare_binding(
+        &mut self,
+        node: NodeId,
+        initializer: NodeId,
+        locals: &mut Vec<Slot>,
+    ) -> ResultOf<()> {
         let pattern = self.module.syntax.nodes[node].children[0];
         match self.binding(node)? {
             Binding::Discard => Ok(()),
@@ -1535,8 +1530,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 ty,
                 site,
             } => {
-                let value = *self.module.syntax.nodes[node].children.last().unwrap();
-                let local = if let Some(slot) = self.nested_transfer_slot(value, site, ty)? {
+                let local = if let Some(slot) = self.nested_transfer_slot(initializer, site, ty)? {
                     self.budget.reserve(1)?;
                     self.nested_record_values.insert(declaration, slot);
                     slot

@@ -506,7 +506,16 @@ fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children
                 let mut saved = value;
                 saved = replacement;
             }
-            function argument(value: Outer): Outer { return give(value); }
+            function consume(value: Outer): bool { return true; }
+            function argument(value: Outer): bool { return consume(value); }
+            function result(value: Outer): Outer { return give(value); }
+            type Bits = { ok: bool; }
+            type Flags = { child: Bits; ready: bool; }
+            function copyWhole(value: Flags): Flags {
+                let first = value;
+                let second = value;
+                return (second);
+            }
         "#,
         |_, module, receipt, typed| {
             let declaration = |name| {
@@ -565,8 +574,10 @@ fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children
             let mir = partial_transfer
                 .mir()
                 .expect("direct field transfers also work from the moved-to local");
-            let moves: Vec<_> = linear(mir, mir.entry)
-                .into_iter()
+            let ops = linear(mir, mir.entry);
+            let moves: Vec<_> = ops
+                .iter()
+                .copied()
                 .filter(|op| matches!(op, Operation::Move { .. } | Operation::Export(_)))
                 .collect();
             let [
@@ -595,6 +606,35 @@ fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
                 if text.root.node == taken.root.node && text.field().is_some_and(|member| &member.id == field("Inner", "text")))
             );
+            let export_at = ops
+                .iter()
+                .position(|op| matches!(op, Operation::Export(_)))
+                .unwrap();
+            let drop_at = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::Drop(_))))).unwrap();
+            assert!(export_at < drop_at);
+
+            let copied = lower("copyWhole", default);
+            let mir = copied
+                .mir()
+                .expect("copyable nested roots remain initialized");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. } | Operation::Move { .. } | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Copy { from: input, into: Some(first) },
+                Operation::Copy { from: same, into: Some(second) },
+                Operation::Copy { from: stored, into: Some(staged) }, Operation::Export(output),
+            ] if input.root.span.bytes() == b"value: Flags" && input.root.node == same.root.node
+                && first.root.span.bytes() == b"first" && second.root.span.bytes() == b"second"
+                && second.root.node == stored.root.node && staged.root.node == output.root.node
+                && [input, first, same, second, stored, staged, output].iter().all(|place| place.projection.is_none())));
+            assert!(path_drops(mir, mir.entry).is_empty());
             for (name, site, related) in [
                 ("partial", b"value".as_slice(), b"value.child".as_slice()),
                 ("partialLocal", b"saved", b"saved.child"),
@@ -614,7 +654,8 @@ fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children
             for (name, site) in [
                 ("borrowedLocal", b"saved".as_slice()),
                 ("replaceLocal", b"saved"),
-                ("argument", b"give(value)"),
+                ("argument", b"value"),
+                ("result", b"give(value)"),
             ] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::Incomplete);
