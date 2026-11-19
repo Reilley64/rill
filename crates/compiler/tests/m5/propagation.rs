@@ -4614,6 +4614,7 @@ fn option_text_factory_propagation_checks_the_reached_call_once() {
         r#"
             function stage(owner: string): string { return owner; }
             function after(bit: bool): bool { return bit; }
+            function choose(flag: bool): bool { return flag; }
             function make(flag: bool, owner: string): Option<string> {
                 if (flag) { return Option<string>.Some(owner); }
                 return Option<string>.None;
@@ -4621,9 +4622,18 @@ fn option_text_factory_propagation_checks_the_reached_call_once() {
             function makeSome(owner: string): Option<string>.Some { return Option<string>.Some(owner); }
             function makeNone(owner: string): Option<string>.None { dispose(owner); return Option<string>.None; }
             function named(flag: bool, owner: string, later: string): Option<bool> {
-                let output = (make(flag, stage(owner)))?;
+                let output = ( ( ( (make(choose(flag), stage(owner))) ) ) )?;
                 let bit = after(true);
                 return Option.Some(bit);
+            }
+            function flat(flag: bool, owner: string, later: string): Option<bool> {
+                let output = make(choose(flag), stage(owner))?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function ordinary(owner: string): bool {
+                let _ = makeSome(owner);
+                return true;
             }
             function discarded(owner: string): Option<bool> {
                 makeSome(owner)?;
@@ -4671,23 +4681,39 @@ fn option_text_factory_propagation_checks_the_reached_call_once() {
                 mir,
                 mir.entry,
                 &option.some.id,
-                b"(make(flag, stage(owner)))",
+                b"( ( ( (make(choose(flag), stage(owner))) ) ) )",
             );
             let prefix: Vec<_> = straight_blocks(mir, mir.entry)
                 .into_iter()
                 .map(|block| &block.operation)
                 .filter(|op| matches!(op, Operation::Call(_) | Operation::TestVariant { .. }))
                 .collect();
-            assert!(
-                matches!(prefix.as_slice(), [Operation::Call(stage), Operation::Call(make), Operation::TestVariant { .. }]
-                if *stage == id("stage") && *make == id("make")),
-                "{prefix:?}"
+            let [
+                Operation::Call(choose),
+                Operation::Call(stage),
+                Operation::Call(make),
+                Operation::TestVariant { operand, .. },
+            ] = prefix.as_slice()
+            else {
+                panic!("expected two ordered stages, one factory call, then one test: {prefix:?}")
+            };
+            assert_eq!(
+                [*choose, *stage, *make],
+                [id("choose"), id("stage"), id("make")]
             );
-            assert_eq!(calls_on_path(mir, [false]), [id("stage"), id("make")]);
+            assert_eq!(
+                calls_on_path(mir, [false]),
+                [id("choose"), id("stage"), id("make")]
+            );
             assert_eq!(
                 calls_on_path(mir, [true]),
-                [id("stage"), id("make"), id("after")]
+                [id("choose"), id("stage"), id("make"), id("after")]
             );
+            assert!(linear(mir, yes).iter().any(
+                |op| matches!(op, Operation::TakeOptionPayload { operand: consumed, into }
+                if consumed.root.node == operand.root.node && into.root.span.bytes() == b"output")
+            ));
+            assert!(linear(mir, no).iter().any(|op| matches!(op, Operation::EndEmptyOption(consumed) if consumed.root.node == operand.root.node)));
             assert_return(
                 &linear(mir, yes),
                 &option.some.id,
@@ -4755,6 +4781,21 @@ fn option_text_factory_propagation_checks_the_reached_call_once() {
             let embedded = lower("embedded", default);
             assert_eq!(embedded.completion(), Completion::Incomplete);
             assert!(embedded.mir().is_none());
+            let ordinary = lower("ordinary", default);
+            assert_eq!(ordinary.completion(), Completion::Incomplete);
+            assert!(ordinary.mir().is_none());
+            assert_eq!(
+                ordinary.blocked_at().unwrap().span.bytes(),
+                b"makeSome(owner)"
+            );
+            let depth = AnalysisLimits {
+                max_depth: named.statistics().max_depth - 1,
+                ..default
+            };
+            assert!(lower("flat", depth).mir().is_some());
+            let grouped = lower("named", depth);
+            assert_eq!(grouped.completion(), Completion::ResourceLimit);
+            assert!(grouped.mir().is_none());
             let exact = AnalysisLimits {
                 max_work: named.statistics().work,
                 max_entries: named.statistics().entries,

@@ -74,10 +74,10 @@ enum OptionPayload<'t, 'g> {
 }
 
 #[derive(Clone, Copy)]
-enum OptionTextSource<'a, 'g> {
+enum OptionTextSource {
     Move(Slot),
     Constructor,
-    Factory(NodeId, &'a ExpressionFacts<'g>),
+    Factory,
 }
 
 struct CheckedPropagation<'a, 'g> {
@@ -88,7 +88,7 @@ struct CheckedPropagation<'a, 'g> {
     source: NodeId,
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
-    option_text: Option<(&'a Type<'g>, OptionTextSource<'a, 'g>)>,
+    option_text: Option<(&'a Type<'g>, OptionTextSource)>,
 }
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
@@ -447,6 +447,27 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(node));
         }
         Ok((parameters, result))
+    }
+
+    fn check_exact_primitive_call(
+        &mut self,
+        node: NodeId,
+        call: &CallFacts<'g>,
+        expected: &Type<'g>,
+    ) -> ResultOf<()> {
+        let (parameters, result) = self.direct_application_signature(node, call)?;
+        if result != expected {
+            return Err(Stop::Pending(node));
+        }
+        for (formal, &arg) in parameters.iter().zip(&call.arguments) {
+            self.budget.step(2)?;
+            if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
+                || self.value(arg)?.ty != formal.ty
+            {
+                return Err(Stop::Pending(node));
+            }
+        }
+        Ok(())
     }
 
     fn direct_call_type(&self, ty: &TypeTerm<'g>) -> bool {
@@ -1572,20 +1593,8 @@ impl<'a, 'g> Build<'a, 'g> {
                             {
                                 return Err(Stop::Pending(node));
                             }
-                            let (parameters, result) =
-                                self.direct_application_signature(node, call)?;
-                            if result != operand {
-                                return Err(Stop::Pending(node));
-                            }
-                            for (formal, &arg) in parameters.iter().zip(&call.arguments) {
-                                self.budget.step(2)?;
-                                if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
-                                    || self.value(arg)?.ty != formal.ty
-                                {
-                                    return Err(Stop::Pending(node));
-                                }
-                            }
-                            OptionTextSource::Factory(root, origin)
+                            self.check_exact_primitive_call(node, call, operand)?;
+                            OptionTextSource::Factory
                         }
                     };
                     Some((ty, source))
@@ -1769,9 +1778,8 @@ impl<'a, 'g> Build<'a, 'g> {
             self.call_with_propagating_arguments(node, call, Some(scratch), split, depth, arguments)
         } else if piped {
             self.call(node, facts, Some(scratch), split, depth, Some(operand))
-        } else if let Some((_, OptionTextSource::Factory(factory, facts))) = option_text {
-            self.depth(depth)?;
-            self.call(factory, facts, Some(scratch), split, depth, Some(operand))
+        } else if let Some((_, OptionTextSource::Factory)) = option_text {
+            self.expression_with_carrier(source, Some(scratch), split, depth, Some(operand))
         } else if let Some((_, OptionTextSource::Move(from))) = option_text {
             self.depth(depth)?;
             self.emit(
@@ -1911,18 +1919,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 {
                     return Err(Stop::Pending(node));
                 }
-                let (parameters, result) = self.direct_application_signature(node, call)?;
-                if result != expected {
-                    return Err(Stop::Pending(node));
-                }
-                for (formal, &arg) in parameters.iter().zip(&call.arguments) {
-                    self.budget.step(2)?;
-                    if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
-                        || self.value(arg)?.ty != formal.ty
-                    {
-                        return Err(Stop::Pending(node));
-                    }
-                }
+                self.check_exact_primitive_call(node, call, expected)?;
             }
             PropagatingCallOutput::CheckedPipeCarrier => {
                 // The step signature already matched the actual arguments.
@@ -2278,7 +2275,21 @@ impl<'a, 'g> Build<'a, 'g> {
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
+        self.expression_with_carrier(node, into, next, depth, None)
+    }
+
+    fn expression_with_carrier(
+        &mut self,
+        node: NodeId,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+        checked_carrier: Option<&Type<'g>>,
+    ) -> ResultOf<Pc> {
         self.depth(depth)?;
+        if checked_carrier.is_some() {
+            self.budget.step(2)?;
+        }
         let syntax = &self.module.syntax.nodes[node];
         let facts = self.value(node)?;
         let flow = &self.facts[&node].flow;
@@ -2326,7 +2337,15 @@ impl<'a, 'g> Build<'a, 'g> {
             return self.emit(node, action, Edges::Next(next));
         }
         let action = match syntax.kind {
-            NodeKind::Group => return self.expression(syntax.children[0], into, next, depth + 1),
+            NodeKind::Group => {
+                return self.expression_with_carrier(
+                    syntax.children[0],
+                    into,
+                    next,
+                    depth + 1,
+                    checked_carrier,
+                );
+            }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
             NodeKind::ValueReference => Action::Read {
                 from: self.place(node)?,
@@ -2438,7 +2457,9 @@ impl<'a, 'g> Build<'a, 'g> {
             NodeKind::Arrow => {
                 return self.closure(node, into.ok_or(Stop::Pending(node))?, next, depth + 1);
             }
-            NodeKind::Call => return self.call(node, facts, into, next, depth + 1, None),
+            NodeKind::Call => {
+                return self.call(node, facts, into, next, depth + 1, checked_carrier);
+            }
             NodeKind::Pipe
                 if self.module.syntax.nodes[syntax.children[1]].kind
                     == (NodeKind::PipeStep { propagate: false })
