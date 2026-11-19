@@ -465,16 +465,22 @@ fn installed_multi_module_borrow_join_and_early_exit() {
                 })
                 .unwrap()
                 .id;
-            let id = |name| {
-                &module
+            let declaration = |name| {
+                module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap()
-                    .id
             };
-            let lower =
-                |name| lower_body(&receipt, module, id(name), AnalysisLimits::default()).unwrap();
+            let lower = |name| {
+                lower_body(
+                    &receipt,
+                    module,
+                    &declaration(name).id,
+                    AnalysisLimits::default(),
+                )
+                .unwrap()
+            };
             let accepted = lower("accepted");
             let mir = accepted.mir().unwrap_or_else(|| {
                 panic!(
@@ -524,17 +530,28 @@ fn installed_multi_module_borrow_join_and_early_exit() {
                 propagation::assert_return(&failure, &option.none.id, false, drops);
                 propagation::assert_return(&success, &option.some.id, true, drops);
                 assert!(!failure.iter().any(|op| matches!(op, Operation::Call(_))));
-                assert_eq!(
-                    success
-                        .iter()
-                        .filter_map(|op| if let Operation::Call(callee) = op {
-                            Some(*callee)
-                        } else {
-                            None
-                        })
-                        .collect::<Vec<_>>(),
-                    [id("observe")]
-                );
+                let route: Vec<_> = success
+                    .into_iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::CopyOptionPayload { .. }
+                                | Operation::Copy { .. }
+                                | Operation::Call(_)
+                                | Operation::ConstructVariant { .. }
+                                | Operation::Export(_)
+                        )
+                    })
+                    .collect();
+                assert!(matches!(route.as_slice(), [
+                    Operation::CopyOptionPayload { operand: taken, into: bit },
+                    Operation::Copy { from: view, into: Some(argument) }, Operation::Call(callee),
+                    Operation::Copy { from: returned, into: Some(staged) },
+                    Operation::ConstructVariant { variant, payload: Some(payload), into }, Operation::Export(result),
+                ] if taken.root.node == operand.root.node && bit.root.span.bytes() == b"bit"
+                    && view.root.span.bytes() == b"view" && argument.root.span.bytes() == b"view" && *callee == &declaration("observe").id
+                    && returned.root.node == bit.root.node && staged.root.node == payload.root.node
+                    && *variant == &option.some.id && into.root.node == result.root.node));
             }
             let rejected = lower("rejected");
             assert_eq!(rejected.completion(), Completion::SourceRejected);
@@ -543,6 +560,11 @@ fn installed_multi_module_borrow_join_and_early_exit() {
                 panic!("expected one joined dependency finding")
             };
             assert_eq!(finding.code(), "R0203");
+            let body = &module.syntax.nodes[declaration("rejected").node].span;
+            for site in [&finding.site, &finding.related] {
+                assert_eq!(site.module, &module.key);
+                assert!(body.start() <= site.span.start() && site.span.end() <= body.end());
+            }
             assert_eq!(finding.site.span.bytes(), b"dispose(right)");
             assert_eq!(finding.related.span.bytes(), b"&right");
         },

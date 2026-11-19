@@ -28,11 +28,11 @@ fn nested_owned_records_reach_the_m5_storage_boundary() {
                         .unwrap();
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
-                assert_eq!(
-                    report.blocked_at().unwrap().span.bytes(),
-                    b"value: Outer",
-                    "{name}"
-                );
+                let blocker = report.blocked_at().unwrap();
+                let body = &module.syntax.nodes[declaration.node].span;
+                assert_eq!(blocker.module, &module.key);
+                assert!(body.start() <= blocker.span.start() && blocker.span.end() <= body.end());
+                assert_eq!(blocker.span.bytes(), b"value: Outer", "{name}");
             }
         },
     );
