@@ -1551,11 +1551,13 @@ impl<'a, 'g> Build<'a, 'g> {
                         option_move_from = Some(self.resolve_place(source, path)?);
                     } else {
                         let root = self.ungroup(source)?;
-                        self.budget.step(1)?;
-                        if !matches!(
-                            self.value(root)?.data,
-                            Some(DataExpression::Construction(_))
-                        ) {
+                        let origin = if root == source {
+                            source_facts
+                        } else {
+                            self.budget.step(1)?;
+                            self.value(root)?
+                        };
+                        if !matches!(origin.data, Some(DataExpression::Construction(_))) {
                             return Err(Stop::Pending(node));
                         }
                     }
@@ -2101,8 +2103,9 @@ impl<'a, 'g> Build<'a, 'g> {
                         .scalar_result_role(&data.ty)
                         .is_some_and(|(role, _)| *declaration == &role.ok.id) =>
             {
-                let ty = self.value(*value)?.ty.clone();
-                Some((*value, self.slot(*value, &ty)?))
+                self.budget.step(1)?;
+                let ty = &self.value(*value)?.ty;
+                Some((*value, self.slot(*value, ty)?))
             }
             _ => return Err(Stop::Pending(node)),
         };

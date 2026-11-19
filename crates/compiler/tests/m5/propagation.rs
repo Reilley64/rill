@@ -4521,7 +4521,11 @@ fn fresh_option_text_propagation_stages_the_constructor_once() {
                 .iter()
                 .position(|op| matches!(op, Operation::Call(callee) if *callee == id("relay")))
                 .unwrap();
-            assert!(relay < construction && construction < take);
+            let after = ops
+                .iter()
+                .position(|op| matches!(op, Operation::Call(callee) if *callee == id("after")))
+                .unwrap();
+            assert!(relay < construction && construction < take && take < after);
             let discarded = lower("discarded", default);
             let mir = discarded
                 .mir()
@@ -4530,6 +4534,22 @@ fn fresh_option_text_propagation_stages_the_constructor_once() {
             assert!(
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(payload)]
                 if payload.root.span.bytes() == b"Option<string>.Some(relay(owner))?")
+            );
+            let staged: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::TakeOptionPayload { .. } => true,
+                    Operation::Cleanup(actions) => actions
+                        .iter()
+                        .any(|action| matches!(action, Obligation::Drop(_))),
+                    Operation::Call(callee) => *callee == id("after"),
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(staged.as_slice(), [Operation::TakeOptionPayload { into, .. }, Operation::Cleanup(actions), Operation::Call(_)]
+                if matches!(actions.as_slice(), [Obligation::Drop(payload)] if payload.root.node == into.root.node)),
+                "{staged:?}"
             );
             let empty = lower("empty", default);
             let mir = empty.mir().expect("fresh None has only the failure edge");
