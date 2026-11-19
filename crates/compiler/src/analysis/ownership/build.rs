@@ -100,8 +100,13 @@ enum Binding<'a, 'g> {
         shape: NodeId,
         facts: &'a PatternFacts<'g>,
         access: Access,
-        reborrow: Option<NodeId>,
+        reborrow: Option<PatternReborrow<'a, 'g>>,
     },
+}
+
+struct PatternReborrow<'a, 'g> {
+    site: NodeId,
+    parent: &'a PlacePath<'g>,
 }
 
 #[derive(Clone, Copy)]
@@ -905,7 +910,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         },
                     ) if let TypeTerm::Tuple(elements) = referent.as_ref() => (
                         Access::Writable,
-                        self.exclusive_pattern_parent(pattern, facts, elements)?,
+                        self.check_exclusive_pattern_source(pattern, facts, elements)?,
                     ),
                     _ => return Err(Stop::Pending(pattern)),
                 };
@@ -931,12 +936,12 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
-    fn exclusive_pattern_parent(
+    fn check_exclusive_pattern_source(
         &mut self,
         pattern: NodeId,
         facts: &PatternFacts<'g>,
         elements: &[Type<'g>],
-    ) -> ResultOf<Option<NodeId>> {
+    ) -> ResultOf<Option<PatternReborrow<'a, 'g>>> {
         let source = self.ungroup(facts.source.node)?;
         let syntax = &self.module.syntax.nodes[source];
         if syntax.kind != NodeKind::Prefix("&mut") {
@@ -989,7 +994,10 @@ impl<'a, 'g> Build<'a, 'g> {
         if !supported {
             return Err(Stop::Pending(pattern));
         }
-        Ok(parent)
+        Ok(parent.map(|_| PatternReborrow {
+            site: source,
+            parent: path,
+        }))
     }
 
     fn declare_binding(&mut self, node: NodeId, locals: &mut Vec<Slot>) -> ResultOf<()> {
@@ -1067,7 +1075,7 @@ impl<'a, 'g> Build<'a, 'g> {
         node: NodeId,
         facts: &PatternFacts<'g>,
         access: Access,
-        reborrow: Option<NodeId>,
+        reborrow: Option<PatternReborrow<'a, 'g>>,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
@@ -1147,12 +1155,10 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
-        if let Some(parent) = reborrow {
-            let site = self.ungroup(source)?;
-            self.budget.step(1)?;
-            let parent = self.place(parent)?;
+        if let Some(reborrow) = reborrow {
+            let parent = self.resolve_place(reborrow.site, reborrow.parent)?;
             self.emit(
-                site,
+                reborrow.site,
                 Action::Reborrow {
                     parent,
                     into: scratch,
