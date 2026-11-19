@@ -1483,13 +1483,17 @@ impl<'a, 'g> Build<'a, 'g> {
         let DeclarationShape::Function { parameters, result } = &signature.shape else {
             return Err(Stop::Pending(node));
         };
-        if parameters.len() != call.arguments.len() || self.bool_option_role(result).is_none() {
+        if parameters.len() != call.arguments.len()
+            || !(self.bool_option_role(result).is_some()
+                || self.scalar_result_role(result).is_some())
+        {
             return Err(Stop::Pending(node));
         }
         for (formal, &arg) in parameters.iter().zip(&call.arguments) {
             self.budget.step(2)?;
             if !(matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
-                || self.bool_option_role(&formal.ty).is_some())
+                || self.bool_option_role(&formal.ty).is_some()
+                || self.scalar_result_role(&formal.ty).is_some())
                 || self.value(arg)?.ty != formal.ty
             {
                 return Err(Stop::Pending(node));

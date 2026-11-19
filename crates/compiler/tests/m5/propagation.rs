@@ -1096,6 +1096,172 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
     );
 }
 
+#[test]
+fn result_pipe_forwards_the_existing_wrapper_after_a_single_call() {
+    probe_with_typed(
+        "propagation::result_pipe_forwards_the_existing_wrapper_after_a_single_call",
+        r#"
+            import std::result::Err as makeError;
+            function pass(value: Result<bool, i32>, taken: string): Result<bool, i32> { dispose(taken); return value; }
+            function paths(input: Result<bool, i32>, taken: string, owner: string, other: string, flag: bool): Result<i32, i32> {
+                if (flag) { dispose(other); }
+                let bit = taken |> pass(input, _)?;
+                dispose(owner);
+                return Result.Ok(4i32);
+            }
+            function onlyErr(input: Result<bool, i32>.Err): Result<bool, i32>.Err { return input; }
+            function knownError(input: Result<bool, i32>.Err, owner: string): Result<i32, i32> {
+                let _ = input |> onlyErr?;
+                dispose(owner);
+                return Result.Ok(6i32);
+            }
+            function onlyOk(input: Result<bool, i32>.Ok): Result<bool, i32>.Ok { return input; }
+            function knownOk(input: Result<bool, i32>.Ok, owner: string): Result<i32, i32> {
+                let _ = input |> onlyOk?;
+                dispose(owner);
+                return Result.Ok(6i32);
+            }
+            function text(value: string): Result<string, i32> { return Result.Ok(value); }
+            function unsupportedText(value: string): Result<bool, i32> {
+                let _ = value |> text?;
+                return Result.Ok(true);
+            }
+            function unsupportedFresh(code: i32): Result<bool, i32> {
+                let _ = code |> makeError<bool, i32>?;
+                return Result.Ok(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check = |name| {
+                lower_body(
+                    receipt,
+                    module,
+                    &declaration(name).id,
+                    AnalysisLimits::default(),
+                )
+                .unwrap()
+            };
+            let role = typed.result_role().unwrap();
+            let report = check("paths");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("paths: {:?}", report.completion()));
+            let (yes, no) = branch_targets(mir);
+            let pipe = b"taken |> pass(input, _)?";
+            for (flag, start, expected_drops) in [
+                (true, yes, &[b"owner: string".as_slice()][..]),
+                (
+                    false,
+                    no,
+                    &[b"other: string".as_slice(), b"owner: string"][..],
+                ),
+            ] {
+                for branch in [true, false] {
+                    assert_eq!(
+                        calls_on_path(mir, [flag, branch]),
+                        [&declaration("pass").id]
+                    );
+                }
+                let split = straight_blocks(mir, start);
+                let route: Vec<_> = split
+                    .iter()
+                    .map(|b| &b.operation)
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Move { .. }
+                                | Operation::Call(_)
+                                | Operation::TestVariant { .. }
+                        )
+                    })
+                    .collect();
+                assert!(
+                    matches!(route.as_slice(), [
+                    Operation::Move { from: taken, into: Some(taken_stage) },
+                    Operation::Move { from: input, into: Some(input_stage) },
+                    Operation::Call(pass), Operation::TestVariant { operand, success },
+                ] if taken.root.span.bytes() == b"taken: string" && taken_stage.root.span.bytes() == b"taken"
+                    && input.root.span.bytes() == b"input: Result<bool, i32>" && input_stage.root.span.bytes() == b"input"
+                    && *pass == &declaration("pass").id && *success == &role.ok.id
+                    && operand.root.span.bytes() == pipe),
+                    "{route:?}"
+                );
+                let Terminator::Branch { yes, no } = split.last().unwrap().terminator else {
+                    panic!("expected Result variant split")
+                };
+                let err = linear(mir, no);
+                assert_forward(&err, role, pipe, expected_drops);
+                assert!(!err.iter().any(|op| matches!(
+                    op,
+                    Operation::ConstructResultError { .. }
+                        | Operation::ConstructVariant { .. }
+                        | Operation::WrapResultFailure { .. }
+                        | Operation::TakeResultSuccess { .. }
+                        | Operation::Dispose { .. }
+                )));
+                let ok = linear(mir, yes);
+                assert!(ok.iter().any(
+                    |op| matches!(op, Operation::TakeResultSuccess { operand, into: Some(target) }
+                    if operand.root.span.bytes() == pipe && target.root.span.bytes() == b"bit")
+                ));
+                assert!(
+                    ok.iter()
+                        .any(|op| matches!(op, Operation::Dispose { operand, .. }
+                    if operand.root.span.bytes() == b"owner: string"))
+                );
+                assert_return(
+                    &ok,
+                    &role.ok.id,
+                    true,
+                    if flag { &[] } else { &[b"other: string"] },
+                );
+            }
+            let failed = check("knownError");
+            let mir = failed
+                .mir()
+                .expect("the declared Err variant skips the success edge");
+            assert_eq!(calls_on_path(mir, []), [&declaration("onlyErr").id]);
+            let err = linear(mir, mir.entry);
+            assert_forward(&err, role, b"input |> onlyErr?", &[b"owner: string"]);
+            assert!(!err.iter().any(|op| matches!(
+                op,
+                Operation::TakeResultSuccess { .. } | Operation::Dispose { .. }
+            )));
+            let succeeded = check("knownOk");
+            let mir = succeeded
+                .mir()
+                .expect("the declared Ok variant skips the failure edge");
+            assert_eq!(calls_on_path(mir, []), [&declaration("onlyOk").id]);
+            let ok = linear(mir, mir.entry);
+            assert_return(&ok, &role.ok.id, true, &[]);
+            assert!(ok.iter().any(
+                |op| matches!(op, Operation::TakeResultSuccess { operand, into: None }
+                if operand.root.span.bytes() == b"input |> onlyOk?")
+            ));
+            for (name, site) in [
+                ("unsupportedText", "value |> text?"),
+                ("unsupportedFresh", "code |> makeError<bool, i32>?"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
 fn variant_edges(mir: &Mir<'_>, mut pc: usize, expected: &loader::DeclarationId) -> (usize, usize) {
     for _ in 0..mir.blocks.len() {
         let block = &mir.blocks[pc];
