@@ -1028,6 +1028,34 @@ fn paired_retention_keeps_both_exclusive_source_restrictions() {
 }
 
 #[test]
+fn paired_retention_pipes_keep_formal_roles_and_input_first() {
+    probe(
+        "retained::paired_retention_pipes_keep_formal_roles_and_input_first",
+        r#"
+            function stash(first: &mut bool, out: &mut &bool, second: &mut bool): void { *out = &*first; }
+            function forward(first: &mut bool, out: &mut &bool, second: &mut bool): void {
+                second |> stash(first, out, _);
+            }
+        "#,
+        |_, module, receipt| {
+            let forward = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("forward"))
+                .unwrap();
+            let report =
+                lower_body(receipt, module, &forward.id, AnalysisLimits::default()).unwrap();
+            assert_eq!(report.completion(), Completion::Incomplete);
+            assert_eq!(
+                report.blocked_at().unwrap().span.bytes(),
+                b"second |> stash(first, out, _)"
+            );
+            assert!(report.mir().is_none());
+        },
+    );
+}
+
+#[test]
 fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
     probe(
         "retained::forwarding_reborrows_the_descriptor_and_keeps_its_contents",
