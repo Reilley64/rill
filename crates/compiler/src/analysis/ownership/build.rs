@@ -21,6 +21,17 @@ use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
+enum PropagatingCallOutput<'a, 'g> {
+    Value(&'a Type<'g>),
+    PipeCarrier(&'a Type<'g>),
+}
+
+#[derive(Clone, Copy)]
+enum PropagationSite {
+    Initializer,
+    Other,
+}
+
 struct PropagatingArguments {
     continuing: Vec<PropagatingArgument>,
     terminal_failure: Option<PropagatingArgument>,
@@ -807,7 +818,14 @@ impl<'a, 'g> Build<'a, 'g> {
                         Binding::Name { declaration, .. } => Some(self.locals[declaration]),
                         _ => return Err(Stop::Pending(node)),
                     };
-                    return self.propagate(initializer, into, next, exits.returning, depth + 1);
+                    return self.propagate(
+                        initializer,
+                        into,
+                        next,
+                        exits.returning,
+                        depth + 1,
+                        PropagationSite::Initializer,
+                    );
                 }
                 self.budget.step(1)?;
                 if matches!(
@@ -820,7 +838,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         && let Some(call) = facts.call.as_deref()
                         && let Some(arguments) = self.propagating_arguments(
                             initializer,
-                            facts,
+                            PropagatingCallOutput::Value(&facts.ty),
                             call,
                             exits.returning,
                             depth + 1,
@@ -868,7 +886,14 @@ impl<'a, 'g> Build<'a, 'g> {
                 let value = children[0];
                 let expression = self.ungroup(value)?;
                 if self.propagates_directly(expression)? {
-                    self.propagate(expression, None, next, exits.returning, depth + 1)
+                    self.propagate(
+                        expression,
+                        None,
+                        next,
+                        exits.returning,
+                        depth + 1,
+                        PropagationSite::Other,
+                    )
                 } else {
                     self.discard(node, value, next, depth + 1)
                 }
@@ -1510,6 +1535,7 @@ impl<'a, 'g> Build<'a, 'g> {
         next: Pc,
         return_cleanup: Pc,
         depth: usize,
+        site: PropagationSite,
     ) -> ResultOf<Pc> {
         let facts = self.value(node)?;
         let CheckedPropagation {
@@ -1521,6 +1547,35 @@ impl<'a, 'g> Build<'a, 'g> {
             operand,
             wrapper,
         } = self.checked_propagation(node, facts)?;
+        let pipe_arguments = if matches!(site, PropagationSite::Initializer)
+            && piped
+            && fresh.is_none()
+            && let Some(call) = facts.call.as_deref()
+            && let Some(arguments) = self.propagating_arguments(
+                node,
+                PropagatingCallOutput::PipeCarrier(operand),
+                call,
+                return_cleanup,
+                depth,
+            )? {
+            self.budget.step(1)?;
+            let flow = &self.facts.get(&node).ok_or(Stop::Pending(node))?.flow;
+            let reaches_step = arguments.terminal_failure.is_none();
+            if flow.pending
+                || flow.normal != (reaches_step && exit.can_continue)
+                || flow.returns != (arguments.can_return || reaches_step && exit.can_return)
+            {
+                return Err(Stop::Pending(node));
+            }
+            if !reaches_step {
+                // Only argument exits are reachable; do not stage a carrier or its edges.
+                return self
+                    .call_with_propagating_arguments(node, call, None, next, depth, arguments);
+            }
+            Some((call, arguments))
+        } else {
+            None
+        };
         let result = self.return_contract.1;
         let scratch = self.slot(source, operand)?;
         let return_slot = if exit.can_return {
@@ -1612,6 +1667,8 @@ impl<'a, 'g> Build<'a, 'g> {
         };
         if let Some(construction) = fresh {
             self.construct_scalar_error(node, facts, construction, scratch, split, depth)
+        } else if let Some((call, arguments)) = pipe_arguments {
+            self.call_with_propagating_arguments(node, call, Some(scratch), split, depth, arguments)
         } else if piped {
             self.call(node, facts, Some(scratch), split, depth, Some(operand))
         } else {
@@ -1641,7 +1698,7 @@ impl<'a, 'g> Build<'a, 'g> {
     fn propagating_arguments(
         &mut self,
         node: NodeId,
-        facts: &ExpressionFacts<'g>,
+        output: PropagatingCallOutput<'_, 'g>,
         call: &crate::analysis::scalars::CallFacts<'g>,
         returning: Pc,
         depth: usize,
@@ -1694,12 +1751,15 @@ impl<'a, 'g> Build<'a, 'g> {
         if roots.is_empty() {
             return Ok(None);
         }
-        if !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
-        {
-            return Err(Stop::Pending(node));
-        }
+        let expected = match output {
+            PropagatingCallOutput::Value(ty) if matches!(ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32")) => {
+                ty
+            }
+            PropagatingCallOutput::PipeCarrier(ty) => ty,
+            PropagatingCallOutput::Value(_) => return Err(Stop::Pending(node)),
+        };
         let (parameters, result) = self.direct_application_signature(node, call)?;
-        if *result != facts.ty {
+        if result != expected {
             return Err(Stop::Pending(node));
         }
         for (formal, &arg) in parameters.iter().zip(&call.arguments) {
@@ -2478,7 +2538,14 @@ impl<'a, 'g> Build<'a, 'g> {
     ) -> ResultOf<Pc> {
         // The proof already read this root; lowering reads its syntax and facts again.
         self.budget.step(2)?;
-        self.propagate(argument.root, into, next, failure_cleanup, depth + 1)
+        self.propagate(
+            argument.root,
+            into,
+            next,
+            failure_cleanup,
+            depth + 1,
+            PropagationSite::Other,
+        )
     }
 
     fn stage_propagating_argument(
