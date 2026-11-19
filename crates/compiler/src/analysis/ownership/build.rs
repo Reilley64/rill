@@ -1882,6 +1882,8 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             if let Some(fresh) = checked.fresh {
                 self.checked_scalar_error(root, facts, fresh)?;
+            } else if !checked.piped {
+                self.check_skipped_carrier_producer(checked.source)?;
             }
             if allows_composed_pipe && checked.piped && checked.fresh.is_none() {
                 let call = facts.call.as_deref().ok_or(Stop::Pending(root))?;
@@ -1896,6 +1898,31 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         if self.contains_unadmitted_propagation(arg, root, depth)? {
             return Err(Stop::Pending(enclosing));
+        }
+        Ok(())
+    }
+
+    fn check_skipped_carrier_producer(&mut self, source: NodeId) -> ResultOf<()> {
+        let node = self.ungroup(source)?;
+        self.budget.step(2)?;
+        let facts = self.value(node)?;
+        if let Some(DataExpression::ErrorConstruction(data)) = &facts.data {
+            self.checked_scalar_error(node, facts, data)?;
+        } else if let Some(DataExpression::Construction(data)) = &facts.data {
+            self.checked_variant_payload(node, data)?;
+        } else if self.module.syntax.nodes[node].kind == NodeKind::Call {
+            // A typed scalar carrier alone does not admit a generic or
+            // computed producer. Use the same call-target gate as lowering.
+            if !facts
+                .call
+                .as_deref()
+                .is_some_and(Self::direct_application_call)
+            {
+                return Err(Stop::Pending(node));
+            }
+        } else if self.module.syntax.nodes[node].kind == NodeKind::Pipe {
+            // An ordinary pipe returning a carrier has no admitted call route.
+            return Err(Stop::Pending(node));
         }
         Ok(())
     }
@@ -2289,20 +2316,12 @@ impl<'a, 'g> Build<'a, 'g> {
         let TypeTerm::Variant { declaration, .. } = data.ty.as_ref() else {
             return Err(Stop::Pending(node));
         };
-        let option = self.admitted_option(&data.ty).map(|(role, _)| role);
-        let payload = match data.arguments.as_slice() {
-            [] if option.is_some_and(|role| *declaration == &role.none.id) => None,
-            [value]
-                if option.is_some_and(|role| *declaration == &role.some.id)
-                    || self
-                        .scalar_result_role(&data.ty)
-                        .is_some_and(|(role, _)| *declaration == &role.ok.id) =>
-            {
-                self.budget.step(1)?;
-                let ty = &self.value(*value)?.ty;
-                Some((*value, self.slot(*value, ty)?))
-            }
-            _ => return Err(Stop::Pending(node)),
+        let payload = if let Some(value) = self.checked_variant_payload(node, data)? {
+            self.budget.step(1)?;
+            let ty = &self.value(value)?.ty;
+            Some((value, self.slot(value, ty)?))
+        } else {
+            None
         };
         let construct = self.emit(
             node,
@@ -2317,6 +2336,29 @@ impl<'a, 'g> Build<'a, 'g> {
             self.expression(value, Some(slot), construct, depth)
         } else {
             Ok(construct)
+        }
+    }
+
+    fn checked_variant_payload(
+        &self,
+        node: NodeId,
+        data: &Construction<'g>,
+    ) -> ResultOf<Option<NodeId>> {
+        let TypeTerm::Variant { declaration, .. } = data.ty.as_ref() else {
+            return Err(Stop::Pending(node));
+        };
+        let option = self.admitted_option(&data.ty).map(|(role, _)| role);
+        match data.arguments.as_slice() {
+            [] if option.is_some_and(|role| *declaration == &role.none.id) => Ok(None),
+            [value]
+                if option.is_some_and(|role| *declaration == &role.some.id)
+                    || self
+                        .scalar_result_role(&data.ty)
+                        .is_some_and(|(role, _)| *declaration == &role.ok.id) =>
+            {
+                Ok(Some(*value))
+            }
+            _ => Err(Stop::Pending(node)),
         }
     }
 
