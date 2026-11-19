@@ -178,6 +178,14 @@ Replacement links go both ways and name exact affected sections. For partial rep
 
 Accepted text may be maintained through these explicit approvals, with earlier revisions recoverable. It is not an invitation to silently make an old proposal describe different semantics. A future consolidated language/library reference requires its own explicit adoption and authority/supersession mapping.
 
+### Compatibility before the first release
+
+Before the first release, Rill does not guarantee backward compatibility. An approved breaking change may replace old syntax, behavior or APIs without a compatibility alias or a deprecation period.
+
+Update maintained examples and tests when the change lands. Preserve historical examples and verification records at their original revisions.
+
+This policy does not waive design review or change milestone scope. Work scheduled after a milestone still waits for that milestone to finish.
+
 ## Proposal register
 
 Register a proposal only when its substantive draft exists. IDs are independent of source-ticket order and are not reserved for the planning themes above.
