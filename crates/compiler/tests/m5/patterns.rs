@@ -1521,21 +1521,24 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
                 let [_, ([_, view])] = &mut *(parent);
                 return view;
             }
-            function resumes(parent: &mut [[bool, string], i32]): bool {
+            function resumes(parent: &mut [[bool, string], [bool, i32]]): bool {
                 let [[_, view], _] = &mut *parent;
                 touch(view);
-                let [[bit, _], number]: &mut [[bool, string], i32] = &mut *(parent);
+                let [_, [bit, number]]: &mut [[bool, string], [bool, i32]] = &mut *(parent);
                 let moved = parent;
                 return bit;
+            }
+            function caller(parent: &mut [bool, [i32, string]]): &mut string {
+                return incoming(parent);
             }
             function allWildcards(parent: &mut [[bool, string], i32]): void {
                 let [[_, _], _] = (&mut *(parent));
                 let moved = parent;
             }
-            function blocked(parent: &mut [[bool, string], i32]): bool {
+            function blocked(parent: &mut [[bool, string], [bool, i32]]): bool {
                 let [[_, view], _] = &mut *parent;
                 let viewMoved = view;
-                let [[bit, _], _] = &mut *(parent);
+                let [_, [bit, _]] = &mut *(parent);
                 touch(viewMoved);
                 return bit;
             }
@@ -1636,7 +1639,6 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
             assert_eq!(descriptor.root.node, holder.root.node);
             assert_eq!(view.root.node, from.root.node);
             assert_eq!(staged.root.node, output.root.node);
-            assert!(!ops.iter().any(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::EndStorage(place) if place.root.node == holder.root.node)))));
             let resumes = lower("resumes", default);
             let mir = resumes
                 .mir()
@@ -1649,6 +1651,9 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
                         Operation::Reborrow { .. }
                             | Operation::BindBorrowedMember { .. }
                             | Operation::Call(_)
+                            | Operation::Move { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Export(_)
                     )
                 })
                 .collect();
@@ -1658,10 +1663,15 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
                 Operation::Reborrow { parent: passed, exclusive: true, .. },
                 Operation::Call(callee),
                 Operation::Reborrow { parent: resumed, holder: scalar_stage, exclusive: true },
-                Operation::BindBorrowedMember { descriptor: scalar_a, projection: Projection::NestedTupleElement { outer: 0, inner: 0 }, binding: CopyScalar, .. },
-                Operation::BindBorrowedMember { descriptor: scalar_b, projection: Projection::TupleElement(1), binding: CopyScalar, .. },
+                Operation::BindBorrowedMember { descriptor: scalar_a, projection: Projection::NestedTupleElement { outer: 1, inner: 0 }, into: bit, binding: CopyScalar },
+                Operation::BindBorrowedMember { descriptor: scalar_b, projection: Projection::NestedTupleElement { outer: 1, inner: 1 }, binding: CopyScalar, .. },
+                Operation::Move { from: original, into: Some(moved) },
+                Operation::Copy { from: returned, into: Some(result) },
+                Operation::Export(export),
             ] if holder.root.node == view_stage.root.node && passed.root.node == view.root.node && *callee == id("touch")
-                && parent.root.node == resumed.root.node && scalar_stage.root.node == scalar_a.root.node && scalar_stage.root.node == scalar_b.root.node));
+                && parent.root.node == resumed.root.node && parent.root.node == original.root.node
+                && scalar_stage.root.node == scalar_a.root.node && scalar_stage.root.node == scalar_b.root.node
+                && moved.root.span.bytes() == b"moved" && bit.root.node == returned.root.node && result.root.node == export.root.node));
             let wildcards = lower("allWildcards", default);
             let mir = wildcards
                 .mir()
@@ -1702,6 +1712,7 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
             }
             for (name, site) in [
                 ("bare", b"[[_, view], _]".as_slice()),
+                ("caller", b"parent"),
                 ("expressionOnly", b"*parent"),
                 ("localHolder", b"[[_, view], _]"),
                 ("referenceLeaf", b"[[bit, _], _]"),

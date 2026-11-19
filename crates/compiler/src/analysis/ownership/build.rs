@@ -26,6 +26,12 @@ enum PropagatingCallOutput<'a, 'g> {
     CheckedPipeCarrier { primitive_arguments_checked: bool },
 }
 
+#[derive(Clone, Copy)]
+enum ExpressionProof<'t, 'g> {
+    CallCarrier(&'t Type<'g>),
+    NestedTupleParent(&'t PlacePath<'g>),
+}
+
 struct PropagatingValueCall<'a, 'g> {
     node: NodeId,
     call: &'a CallFacts<'g>,
@@ -1507,31 +1513,13 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
-        if let Some(path) = nested_reborrow {
-            // Only this pattern route has proved a nested parent; a general
-            // expression still uses the flat exclusive reborrow check.
-            let mut at = source;
-            let mut level = depth;
-            while self.module.syntax.nodes[at].kind == NodeKind::Group {
-                self.depth(level)?;
-                at = self.module.syntax.nodes[at].children[0];
-                level += 1;
-            }
-            self.depth(level)?;
-            let parent = self.resolve_place(at, path)?;
-            self.emit(
-                at,
-                Action::Reborrow {
-                    parent,
-                    into: scratch,
-                    exclusive: true,
-                    suspends: true,
-                },
-                Edges::Next(tail),
-            )
-        } else {
-            self.expression(source, Some(scratch), tail, depth)
-        }
+        self.expression_with_proof(
+            source,
+            Some(scratch),
+            tail,
+            depth,
+            nested_reborrow.map(ExpressionProof::NestedTupleParent),
+        )
     }
 
     fn propagates_directly(&mut self, node: NodeId) -> ResultOf<bool> {
@@ -1843,7 +1831,13 @@ impl<'a, 'g> Build<'a, 'g> {
         } else if piped {
             self.call(node, facts, Some(scratch), split, depth, Some(operand))
         } else if let Some((_, OptionTextSource::Factory)) = option_text {
-            self.expression_with_carrier(source, Some(scratch), split, depth, Some(operand))
+            self.expression_with_proof(
+                source,
+                Some(scratch),
+                split,
+                depth,
+                Some(ExpressionProof::CallCarrier(operand)),
+            )
         } else if let Some((_, OptionTextSource::Move(from))) = option_text {
             self.depth(depth)?;
             self.emit(
@@ -2493,18 +2487,22 @@ impl<'a, 'g> Build<'a, 'g> {
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        self.expression_with_carrier(node, into, next, depth, None)
+        self.expression_with_proof(node, into, next, depth, None)
     }
 
-    fn expression_with_carrier(
+    fn expression_with_proof(
         &mut self,
         node: NodeId,
         into: Option<Slot>,
         next: Pc,
         depth: usize,
-        checked_carrier: Option<&Type<'g>>,
+        proof: Option<ExpressionProof<'_, 'g>>,
     ) -> ResultOf<Pc> {
         self.depth(depth)?;
+        let checked_carrier = match proof {
+            Some(ExpressionProof::CallCarrier(carrier)) => Some(carrier),
+            _ => None,
+        };
         if checked_carrier.is_some() {
             self.budget.step(2)?;
         }
@@ -2556,12 +2554,12 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let action = match syntax.kind {
             NodeKind::Group => {
-                return self.expression_with_carrier(
+                return self.expression_with_proof(
                     syntax.children[0],
                     into,
                     next,
                     depth + 1,
-                    checked_carrier,
+                    proof,
                 );
             }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
@@ -2574,9 +2572,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 let into = into.ok_or(Stop::Pending(node))?;
                 let exclusive = syntax.kind == NodeKind::Prefix("&mut");
                 let source = &self.module.syntax.nodes[operand];
-                if exclusive
-                    && let Some(path) = self.exclusive_tuple_reborrow_path(operand, &facts.ty)?
-                {
+                let tuple_parent = if exclusive {
+                    match proof {
+                        // Only the exact pattern gate supplies a nested parent.
+                        Some(ExpressionProof::NestedTupleParent(path)) => Some(path),
+                        _ => self.exclusive_tuple_reborrow_path(operand, &facts.ty)?,
+                    }
+                } else {
+                    None
+                };
+                if let Some(path) = tuple_parent {
                     Action::Reborrow {
                         parent: self.resolve_place(operand, path)?,
                         into,
