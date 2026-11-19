@@ -29,7 +29,7 @@ enum PropagatingCallOutput<'a, 'g> {
 #[derive(Clone, Copy)]
 enum PropagationSite {
     StatementRoot,
-    DirectCallArgument,
+    ComposedArgument,
     NestedArgument,
 }
 
@@ -1649,7 +1649,7 @@ impl<'a, 'g> Build<'a, 'g> {
         depth: usize,
         site: PropagationSite,
     ) -> ResultOf<Pc> {
-        if matches!(site, PropagationSite::DirectCallArgument) {
+        if matches!(site, PropagationSite::ComposedArgument) {
             self.depth(depth)?;
         }
         let facts = self.value(node)?;
@@ -1665,7 +1665,7 @@ impl<'a, 'g> Build<'a, 'g> {
         } = self.checked_propagation(node, facts)?;
         let pipe_arguments = if matches!(
             site,
-            PropagationSite::StatementRoot | PropagationSite::DirectCallArgument
+            PropagationSite::StatementRoot | PropagationSite::ComposedArgument
         ) && piped
             && fresh.is_none()
             && let Some(call) = facts.call.as_deref()
@@ -1914,10 +1914,9 @@ impl<'a, 'g> Build<'a, 'g> {
             None
         };
         let order = || argument_staging_order(&call.arguments, pipe_formal).enumerate();
-        // Only an enclosing direct call can admit one composed pipe layer.
-        // A pipe's own arguments use the noncomposing route.
-        let allows_composed_pipe =
-            pipe_formal.is_none() && matches!(output, PropagatingCallOutput::Value(_));
+        // A scalar or string call or ordinary pipe can admit one composed
+        // argument layer. A propagating step's arguments cannot compose again.
+        let allows_composed_pipe = matches!(output, PropagatingCallOutput::Value(_));
         let mut roots = Vec::new();
         let mut terminal_root_index = None;
         let mut can_return = false;
@@ -2812,7 +2811,7 @@ impl<'a, 'g> Build<'a, 'g> {
             failure_cleanup,
             depth + 1,
             if argument.composed_pipe {
-                PropagationSite::DirectCallArgument
+                PropagationSite::ComposedArgument
             } else {
                 PropagationSite::NestedArgument
             },

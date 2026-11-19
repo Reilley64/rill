@@ -5834,11 +5834,6 @@ fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
                 let bit = useThree(((left?) |> first?), ((middle?) |> first?), ((right?) |> first?));
                 return Option.Some(bit);
             }
-            function unknown(value: string): Option<string> { return Option<string>.Some(value); }
-            function outerPipe(before: string, input: Option<string>): Option<bool> {
-                let bit = before |> useAll(((input?) |> unknown?), true);
-                return Option.Some(bit);
-            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -5994,10 +5989,6 @@ fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
             assert!(wide.statistics().work > narrow.statistics().work);
             assert!(wide.statistics().entries > narrow.statistics().entries);
             assert_eq!(wide.statistics().max_depth, narrow.statistics().max_depth);
-            let pipe = lower("outerPipe", default);
-            assert_eq!(pipe.completion(), Completion::Incomplete);
-            assert!(pipe.mir().is_none());
-            assert_eq!(pipe.blocked_at().unwrap().span.bytes(), b"(input?)");
             let exact = AnalysisLimits {
                 max_work: siblings.statistics().work,
                 max_entries: siblings.statistics().entries,
@@ -6015,6 +6006,198 @@ fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
                 },
             ] {
                 let limited = lower("siblings", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
+    probe_with_typed(
+        "propagation::composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup",
+        r#"
+            function stage(value: string): string { return value; }
+            function finish(inside: string, bit: bool, value: string): Option<string> {
+                dispose(inside);
+                if (bit) { return Option<string>.Some(value); }
+                return Option<string>.None;
+            }
+            function present(value: string): Option<string>.Some { return Option<string>.Some(value); }
+            function unknown(value: string): Option<string> { return Option<string>.Some(value); }
+            function useAll(value: string, bit: bool, prefix: string): bool {
+                dispose(value); dispose(prefix); return bit;
+            }
+            function last(tail: string): bool { dispose(tail); return true; }
+            function written(outer: string, input: Option<string>, inside: string, gate: Option<bool>, tail: string): Option<bool> {
+                let bit = stage(outer) |> useAll(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _);
+                return Option.Some(bit);
+            }
+            function inputPosition(input: Option<string>, between: string, later: Option<bool>): Option<bool> {
+                let bit = ((input?) |> present?) |> useAll(stage(between), later?, _);
+                return Option.Some(bit);
+            }
+            function terminal(outer: string, input: Option<string>.None, inside: string, gate: Option<bool>, tail: string): Option<bool> {
+                let _ = stage(outer) |> useAll(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _);
+                return Option.Some(true);
+            }
+            function outerStep(value: string, bit: bool, prefix: string): Option<bool> {
+                dispose(value); dispose(prefix); return Option.Some(bit);
+            }
+            function excluded(outer: string, input: Option<string>): Option<bool> {
+                let bit = outer |> outerStep(((input?) |> unknown?), true, _)?;
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let written = lower("written", default);
+            let mir = written
+                .mir()
+                .unwrap_or_else(|| panic!("written composition: {:?}", written.completion()));
+            let before_test: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .filter_map(|block| {
+                    matches!(block.operation, Operation::Call(_)).then_some(block.site.span.bytes())
+                })
+                .collect();
+            assert_eq!(before_test, [b"stage(outer)".as_slice()]);
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (gate_yes, gate_no) = variant_edges(mir, yes, &option.some.id, b"gate");
+            let (step_yes, step_no) = variant_edges(
+                mir,
+                gate_yes,
+                &option.some.id,
+                b"(input?) |> finish(stage(inside), gate?, _)?",
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(outer)", b"tail: string", b"inside: string"],
+            );
+            assert_return(
+                &linear(mir, gate_no),
+                &option.none.id,
+                false,
+                &[
+                    b"stage(inside)",
+                    b"(input?)",
+                    b"stage(outer)",
+                    b"tail: string",
+                ],
+            );
+            assert_return(
+                &linear(mir, step_no),
+                &option.none.id,
+                false,
+                &[b"stage(outer)", b"tail: string"],
+            );
+            assert_return(&linear(mir, step_yes), &option.some.id, true, &[]);
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("stage"), id("stage")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, false]),
+                [id("stage"), id("stage"), id("finish")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true]),
+                [
+                    id("stage"),
+                    id("stage"),
+                    id("finish"),
+                    id("last"),
+                    id("useAll")
+                ]
+            );
+            let input = lower("inputPosition", default);
+            let mir = input
+                .mir()
+                .expect("the composed input stages first despite its late formal slot");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (later_yes, later_no) = variant_edges(mir, yes, &option.some.id, b"later");
+            let transferred = straight_blocks(mir, yes)
+                .into_iter()
+                .find_map(|block| match &block.operation {
+                    Operation::TakeOptionPayload { into, .. }
+                        if into.root.span.bytes() == b"((input?) |> present?)" =>
+                    {
+                        Some(into.root.node)
+                    }
+                    _ => None,
+                })
+                .expect("stage the composed input result before the later argument test");
+            assert!(
+                matches!(path_drops(mir, later_no).as_slice(), [Obligation::Drop(_), Obligation::Drop(staged)] if staged.root.node == transferred)
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"between: string"],
+            );
+            assert_return(
+                &linear(mir, later_no),
+                &option.none.id,
+                false,
+                &[b"stage(between)", b"((input?) |> present?)"],
+            );
+            assert_return(&linear(mir, later_yes), &option.some.id, true, &[]);
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("present"), id("stage")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("present"), id("stage"), id("useAll")]
+            );
+            let stopped = lower("terminal", default);
+            let mir = stopped
+                .mir()
+                .expect("known inner failure skips the inner and outer steps and the suffix");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(outer)", b"tail: string", b"inside: string"],
+            );
+            let excluded = lower("excluded", default);
+            assert_eq!(excluded.completion(), Completion::Incomplete);
+            assert!(excluded.mir().is_none());
+            assert_eq!(excluded.blocked_at().unwrap().span.bytes(), b"(input?)");
+            let exact = AnalysisLimits {
+                max_work: written.statistics().work,
+                max_entries: written.statistics().entries,
+                ..default
+            };
+            assert!(lower("written", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("written", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
