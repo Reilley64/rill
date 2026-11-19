@@ -1516,7 +1516,6 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         node: NodeId,
         facts: &'a ExpressionFacts<'g>,
-        site: PropagationSite,
     ) -> ResultOf<CheckedPropagation<'a, 'g>> {
         let syntax = &self.module.syntax.nodes[node];
         let (id, result) = self.return_contract;
@@ -1575,9 +1574,6 @@ impl<'a, 'g> Build<'a, 'g> {
             let text = match payload {
                 OptionPayload::Bool => None,
                 OptionPayload::Text(ty) => {
-                    if !matches!(site, PropagationSite::StatementRoot) {
-                        return Err(Stop::Pending(node));
-                    }
                     let source = if piped {
                         OptionTextSource::PipeStep
                     } else if syntax.kind == NodeKind::Propagate {
@@ -1661,7 +1657,7 @@ impl<'a, 'g> Build<'a, 'g> {
             operand,
             wrapper,
             option_text,
-        } = self.checked_propagation(node, facts, site)?;
+        } = self.checked_propagation(node, facts)?;
         let pipe_arguments = if matches!(site, PropagationSite::StatementRoot)
             && piped
             && fresh.is_none()
@@ -1989,8 +1985,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     // allocating slots or lowering any skipped expression.
                     self.budget.step(2)?;
                     let facts = self.value(root)?;
-                    let checked =
-                        self.checked_propagation(root, facts, PropagationSite::NestedArgument)?;
+                    let checked = self.checked_propagation(root, facts)?;
                     if let Some(wrap) = checked.wrap
                         && checked.exit.can_return
                     {

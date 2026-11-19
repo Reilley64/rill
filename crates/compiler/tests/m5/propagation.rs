@@ -4009,11 +4009,6 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
                 let _ = input?;
                 return Option.Some(true);
             }
-            function useText(value: string): bool { dispose(value); return true; }
-            function embedded(input: Option<string>): Option<bool> {
-                let bit = useText(input?);
-                return Option.Some(bit);
-            }
             function relay(value: Option<string>): Option<string> { return value; }
             function piped(input: Option<string>): Option<bool> {
                 let _ = input |> relay?;
@@ -4180,15 +4175,10 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
             assert_eq!(finding.site.span.bytes(), b"input");
             assert_eq!(finding.related.span.bytes(), b"input");
             assert!(finding.related.span.start() < finding.site.span.start());
-            for (name, site) in [
-                ("embedded", b"input?".as_slice()),
-                ("piped", b"input |> relay?".as_slice()),
-            ] {
-                let report = lower(name, default);
-                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert!(report.mir().is_none());
-                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
-            }
+            let piped = lower("piped", default);
+            assert_eq!(piped.completion(), Completion::Incomplete);
+            assert!(piped.mir().is_none());
+            assert_eq!(piped.blocked_at().unwrap().span.bytes(), b"input |> relay?");
             let exact = AnalysisLimits {
                 max_work: discarded.statistics().work,
                 max_entries: discarded.statistics().entries,
@@ -5092,6 +5082,196 @@ fn option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner() 
                 },
             ] {
                 let limited = lower("named", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn owning_option_argument_propagation_cleans_only_reached_stages() {
+    probe_with_typed(
+        "propagation::owning_option_argument_propagation_cleans_only_reached_stages",
+        r#"
+            function stage(value: string): string { return value; }
+            function useAll(before: string, value: string, bit: bool): bool {
+                dispose(value); dispose(before); return bit;
+            }
+            function useLate(before: string, bit: bool, value: string): bool {
+                dispose(value); dispose(before); return bit;
+            }
+            function make(value: string): Option<string>.Some { return Option<string>.Some(value); }
+            function paired(before: string, input: Option<string>, later: Option<bool>, keep: string): Option<bool> {
+                let bit = useAll(stage(before), input?, later?);
+                return Option.Some(bit);
+            }
+            function knownLater(before: string, input: Option<string>.Some, later: Option<bool>.None): Option<bool> {
+                let _ = useAll(stage(before), input?, later?);
+                return Option.Some(true);
+            }
+            function skipped(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
+                let _ = useLate(stage(before), gate?, input?);
+                return Option.Some(true);
+            }
+            function noneFirst(before: string, input: Option<string>.None, later: Option<bool>): Option<bool> {
+                let _ = useAll(stage(before), input?, later?);
+                return Option.Some(true);
+            }
+            function factory(before: string, value: string, gate: Option<bool>): Option<bool> {
+                let bit = useAll(stage(before), make(value)?, gate?);
+                return Option.Some(bit);
+            }
+            function piped(before: string, value: string, gate: Option<bool>): Option<bool> {
+                let bit = useAll(stage(before), (value |> make?), gate?);
+                return Option.Some(bit);
+            }
+            function deeper(before: string, input: Option<string>, flag: bool): Option<bool> {
+                let bit = useAll(stage(before), stage(input?), flag);
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let paired = lower("paired", default);
+            let mir = paired
+                .mir()
+                .unwrap_or_else(|| panic!("paired: {:?}", paired.completion()));
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (both, later_no) = variant_edges(mir, yes, &option.some.id, b"later");
+            let prefix = straight_blocks(mir, yes);
+            let transferred = prefix
+                .iter()
+                .find_map(|block| match &block.operation {
+                    Operation::TakeOptionPayload { operand, into }
+                        if operand.root.span.bytes() == b"input"
+                            && into.root.span.bytes() == b"input?" =>
+                    {
+                        Some(into.root.node)
+                    }
+                    _ => None,
+                })
+                .expect("stage the owning payload before checking the later argument");
+            assert!(
+                matches!(path_drops(mir, later_no).first(), Some(Obligation::Drop(place)) if place.root.node == transferred)
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"keep: string"],
+            );
+            assert_return(
+                &linear(mir, later_no),
+                &option.none.id,
+                false,
+                &[b"input?", b"stage(before)", b"keep: string"],
+            );
+            assert_return(
+                &linear(mir, both),
+                &option.some.id,
+                true,
+                &[b"keep: string"],
+            );
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
+            assert_eq!(calls_on_path(mir, [true, false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("stage"), id("useAll")]
+            );
+            let known = lower("knownLater", default);
+            let mir = known
+                .mir()
+                .expect("a reached Some string needs cleanup even when the later exit is certain");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"input?", b"stage(before)"],
+            );
+            let skipped = lower("skipped", default);
+            let mir = skipped
+                .mir()
+                .expect("a skipped owning argument is still a live lexical carrier");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(staged), Obligation::DropOptionPayload { operand, some }]
+                if staged.root.span.bytes() == b"stage(before)" && operand.root.span.bytes() == b"input: Option<string>" && *some == &option.some.id)
+            );
+            let ops = linear(mir, mir.entry);
+            let export = ops
+                .iter()
+                .position(|op| matches!(op, Operation::Export(_)))
+                .unwrap();
+            assert!(ops[..export].iter().all(|op| !matches!(
+                op,
+                Operation::Cleanup(_) | Operation::TakeOptionPayload { .. } | Operation::Drop(_)
+            )));
+            let none = lower("noneFirst", default);
+            let mir = none
+                .mir()
+                .expect("known None skips the owning success slot and the suffix");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            let ops = linear(mir, mir.entry);
+            assert_return(&ops, &option.none.id, false, &[b"stage(before)"]);
+            assert!(ops.iter().any(|op| matches!(op, Operation::EndEmptyOption(carrier) if carrier.root.span.bytes() == b"input")));
+            assert!(
+                ops.iter()
+                    .all(|op| !matches!(op, Operation::TakeOptionPayload { .. }))
+            );
+            for (name, arg) in [
+                ("factory", b"make(value)?".as_slice()),
+                ("piped", b"(value |> make?)".as_slice()),
+            ] {
+                let report = lower(name, default);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"gate");
+                assert_return(
+                    &linear(mir, no),
+                    &option.none.id,
+                    false,
+                    &[arg, b"stage(before)"],
+                );
+                assert_return(&linear(mir, yes), &option.some.id, true, &[]);
+                assert_eq!(calls_on_path(mir, [false]), [id("stage"), id("make")]);
+                assert_eq!(
+                    calls_on_path(mir, [true]),
+                    [id("stage"), id("make"), id("useAll")]
+                );
+            }
+            let deeper = lower("deeper", default);
+            assert_eq!(deeper.completion(), Completion::Incomplete);
+            assert!(deeper.mir().is_none());
+            let exact = AnalysisLimits {
+                max_work: paired.statistics().work,
+                max_entries: paired.statistics().entries,
+                ..default
+            };
+            assert!(lower("paired", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("paired", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
