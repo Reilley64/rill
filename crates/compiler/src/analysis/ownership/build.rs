@@ -25,16 +25,16 @@ struct PropagatingArguments {
     continuing: Vec<PropagatingArgument>,
     terminal_failure: Option<PropagatingArgument>,
     can_return: bool,
-    pipe_position: Option<usize>,
+    pipe_formal: Option<usize>,
     returning: Pc,
 }
 
 fn argument_staging_order(
     arguments: &[NodeId],
-    pipe_position: Option<usize>,
+    pipe_formal: Option<usize>,
 ) -> impl DoubleEndedIterator<Item = (usize, NodeId)> + ExactSizeIterator + Clone {
     (0..arguments.len()).map(move |position| {
-        let formal = match pipe_position {
+        let formal = match pipe_formal {
             Some(pipe) if position == 0 => pipe,
             Some(pipe) if position <= pipe => position - 1,
             _ => position,
@@ -45,7 +45,7 @@ fn argument_staging_order(
 
 #[derive(Clone, Copy)]
 struct PropagatingArgument {
-    position: usize,
+    evaluation_position: usize,
     root: NodeId,
     can_return: bool,
 }
@@ -1646,7 +1646,7 @@ impl<'a, 'g> Build<'a, 'g> {
         returning: Pc,
         depth: usize,
     ) -> ResultOf<Option<PropagatingArguments>> {
-        let pipe_position = if let Some(input) = call.pipe_input {
+        let pipe_formal = if let Some(input) = call.pipe_input {
             let mut position = None;
             for (i, &arg) in call.arguments.iter().enumerate() {
                 self.budget.step(1)?;
@@ -1659,7 +1659,7 @@ impl<'a, 'g> Build<'a, 'g> {
         } else {
             None
         };
-        let order = || argument_staging_order(&call.arguments, pipe_position).enumerate();
+        let order = || argument_staging_order(&call.arguments, pipe_formal).enumerate();
         let mut roots = Vec::new();
         let mut terminal_root_index = None;
         let mut can_return = false;
@@ -1667,7 +1667,7 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(1)?;
             let root = self.ungroup(arg)?;
             if self.propagates_directly(root)? {
-                if position == 0 && pipe_position.is_some() {
+                if position == 0 && pipe_formal.is_some() {
                     return Err(Stop::Pending(node));
                 }
                 self.budget.step(1)?;
@@ -1688,7 +1688,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
                 self.budget.reserve(1)?;
                 roots.push(PropagatingArgument {
-                    position,
+                    evaluation_position: position,
                     root,
                     can_return: exit.can_return,
                 });
@@ -1719,10 +1719,10 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(1)?;
             let terminal = roots[index];
             let mut skipped = roots[index + 1..].iter().peekable();
-            for (position, (_, arg)) in order().skip(terminal.position + 1) {
+            for (position, (_, arg)) in order().skip(terminal.evaluation_position + 1) {
                 self.budget.step(1)?;
                 let admitted_root = skipped
-                    .next_if(|argument| argument.position == position)
+                    .next_if(|argument| argument.evaluation_position == position)
                     .map(|argument| argument.root);
                 if self.contains_unadmitted_propagation(arg, admitted_root, depth + 1)? {
                     return Err(Stop::Pending(node));
@@ -1765,7 +1765,7 @@ impl<'a, 'g> Build<'a, 'g> {
             continuing: roots,
             terminal_failure,
             can_return,
-            pipe_position,
+            pipe_formal,
             returning,
         }))
     }
@@ -2497,7 +2497,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         self.budget.step(1)?;
         let Some((argument, failure_cleanup)) =
-            exits.pop_if(|(argument, _)| argument.position == position)
+            exits.pop_if(|(argument, _)| argument.evaluation_position == position)
         else {
             return Ok(None);
         };
@@ -2522,12 +2522,12 @@ impl<'a, 'g> Build<'a, 'g> {
         let PropagatingArguments {
             continuing,
             terminal_failure,
-            pipe_position,
+            pipe_formal,
             returning,
             ..
         } = arguments;
-        let reached = terminal_failure.map_or(call.arguments.len(), |arg| arg.position);
-        let order = argument_staging_order(&call.arguments, pipe_position).take(reached);
+        let reached = terminal_failure.map_or(call.arguments.len(), |arg| arg.evaluation_position);
+        let order = argument_staging_order(&call.arguments, pipe_formal).take(reached);
         self.budget
             .reserve(reached + usize::from(terminal_failure.is_none()))?;
         let mut args = Vec::with_capacity(reached);
@@ -2542,7 +2542,11 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(1)?;
             // These slots are still in evaluation order, not formal order.
             let failure_cleanup = if argument.can_return {
-                self.cleanup(argument.root, &args[..argument.position], returning)?
+                self.cleanup(
+                    argument.root,
+                    &args[..argument.evaluation_position],
+                    returning,
+                )?
             } else {
                 returning
             };
@@ -2555,7 +2559,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 self.lower_propagating_argument(argument, None, next, failure_cleanup, depth)?,
             )
         } else {
-            if let Some(pipe) = pipe_position {
+            if let Some(pipe) = pipe_formal {
                 // Restore formal order after using evaluation order for cleanup.
                 self.budget.step(pipe + 1)?;
                 args[..=pipe].rotate_left(1);
@@ -2689,11 +2693,11 @@ impl<'a, 'g> Build<'a, 'g> {
         self.budget.reserve(call.arguments.len() + 1)?;
         let mut args = Vec::with_capacity(call.arguments.len());
         let mut destination = None;
-        let mut pipe_position = None;
+        let mut pipe_formal = None;
         for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
             if Some(arg) == call.pipe_input {
-                pipe_position = Some(position);
+                pipe_formal = Some(position);
             }
             let ty = self.value(arg)?.ty.clone();
             if retained_bool_contents_type(&ty).is_some() {
@@ -2733,7 +2737,8 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;
         // Slots follow parameter order. Build edges backwards so the
         // pipe input runs once, ahead of all written arguments.
-        for (i, arg) in argument_staging_order(&call.arguments, pipe_position).rev() {
+        for (i, arg) in argument_staging_order(&call.arguments, pipe_formal).rev() {
+            self.budget.step(1)?;
             let slot = self.calls[index].args[i];
             let root = self.ungroup(arg)?;
             let existing_exclusive = matches!(
