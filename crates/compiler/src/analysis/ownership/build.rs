@@ -428,10 +428,10 @@ impl<'a, 'g> Build<'a, 'g> {
                     return Ok(false);
                 };
                 let Some((width, _)) = self.primitive_tuple_width(elements, |this| {
-                    // Check the exclusive call boundary before scanning inner leaves.
+                    // A nested exclusive argument must be the sole argument,
+                    // including when the pipe supplies it. Check before scanning leaves.
                     Ok(!mutable
-                        || call.pipe_input.is_none()
-                            && call.arguments.len() == 1
+                        || call.arguments.len() == 1
                             && this
                                 .whole_named_owned_place(node)?
                                 .is_some_and(|(_, path)| {

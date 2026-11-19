@@ -1044,9 +1044,6 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
                 let named = parent;
                 return snapshot(named);
             }
-            function piped(parent: &mut [[bool, string], [bool, i32]]): bool {
-                return parent |> snapshot;
-            }
             function extraArgument(parent: &mut [[bool, string], [bool, i32]], flag: bool): bool { return flag; }
             function extra(parent: &mut [[bool, string], [bool, i32]]): bool {
                 return extraArgument(parent, true);
@@ -1067,8 +1064,10 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             function wideStep(parent: &mut [[bool, string, i32], i32]): bool { return true; }
             function narrow(parent: &mut [[bool], i32]): bool { return narrowStep(parent); }
             function wide(parent: &mut [[bool, string, i32], i32]): bool { return wideStep(parent); }
-            function narrowPipe(parent: &mut [[bool], i32]): bool { return parent |> narrowStep; }
-            function widePipe(parent: &mut [[bool, string, i32], i32]): bool { return parent |> wideStep; }
+            function narrowTagged(bit: bool, parent: &mut [[bool], i32]): bool { return bit; }
+            function wideTagged(bit: bool, parent: &mut [[bool, string, i32], i32]): bool { return bit; }
+            function narrowPipe(parent: &mut [[bool], i32]): bool { return parent |> narrowTagged(true, _); }
+            function widePipe(parent: &mut [[bool, string, i32], i32]): bool { return parent |> wideTagged(true, _); }
         "#,
         |_, module, receipt| {
             let id = |name| {
@@ -1176,7 +1175,6 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             for (name, at) in [
                 ("explicit", b"&mut *parent".as_slice()),
                 ("alias", b"named"),
-                ("piped", b"parent |> snapshot"),
                 ("extra", b"parent"),
                 ("compound", b"parent"),
                 ("referenceLeaf", b"parent"),
@@ -1200,6 +1198,190 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
                 assert!(pipe.mir().is_none());
             }
             assert_eq!(wide_pipe.statistics().work, narrow_pipe.statistics().work);
+            let exact = AnalysisLimits {
+                max_work: resumes.statistics().work,
+                max_entries: resumes.statistics().entries,
+                max_depth: resumes.statistics().max_depth,
+            };
+            assert!(lower("resumes", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("resumes", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn unary_pipes_reborrow_one_incoming_nested_exclusive_descriptor() {
+    probe(
+        "tuples::unary_pipes_reborrow_one_incoming_nested_exclusive_descriptor",
+        r#"
+            function project(parent: &mut [[bool, string], i32]): &mut string {
+                let [[_, view], _] = &mut *parent;
+                return view;
+            }
+            function readOnly(parent: &mut [[bool, string], i32]): &string {
+                let [[_, view], _] = &mut *parent;
+                return &*view;
+            }
+            function snapshot(parent: &mut [[bool, string], i32]): bool {
+                let [[bit, _], _] = &mut *parent;
+                return bit;
+            }
+            function touch(view: &string): void {}
+            function returns(parent: &mut [[bool, string], i32]): &mut string {
+                return (parent) |> project(_);
+            }
+            function resumes(parent: &mut [[bool, string], i32]): bool {
+                let first = parent |> snapshot;
+                let view = (parent) |> readOnly(_);
+                let copied = view;
+                touch(copied);
+                let observer = &(parent);
+                let bit = parent |> snapshot(_);
+                let moved = parent;
+                return bit;
+            }
+            function blocked(parent: &mut [[bool, string], i32]): void {
+                let view = parent |> readOnly;
+                let copied = view;
+                let observer = &(parent);
+                touch(copied);
+            }
+            function consumed(parent: &mut [[bool, string], i32]): bool {
+                let moved = parent;
+                return (parent) |> snapshot;
+            }
+            function bad(parent: &mut [[bool, string], i32]): &mut string {
+                let mut owner = "local";
+                return &mut owner;
+            }
+            function reachedBad(parent: &mut [[bool, string], i32]): &mut string {
+                return parent |> bad(_);
+            }
+            function alias(parent: &mut [[bool, string], i32]): bool {
+                let named = parent;
+                return named |> snapshot;
+            }
+            function explicit(parent: &mut [[bool, string], i32]): bool {
+                return (&mut *parent) |> snapshot;
+            }
+            function tagged(bit: bool, parent: &mut [[bool, string], i32]): bool { return bit; }
+            function late(parent: &mut [[bool, string], i32]): bool {
+                return parent |> tagged(true, _);
+            }
+            function maybe(parent: &mut [[bool, string], i32]): Option<bool> { return Option.Some(true); }
+            function propagating(parent: &mut [[bool, string], i32]): Option<bool> {
+                let bit = parent |> maybe?;
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let returns = lower("returns", default);
+            let mir = returns
+                .mir()
+                .unwrap_or_else(|| panic!("nested exclusive pipe: {:?}", returns.completion()));
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::Call(_) | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::Reborrow { parent, holder, exclusive: true }, Operation::Call(callee), Operation::Export(output)]
+                if parent.root.span.bytes() == b"parent: &mut [[bool, string], i32]" && holder.root.span.bytes() == b"(parent)"
+                    && parent.projection.is_none() && holder.projection.is_none() && *callee == id("project")
+                    && output.root.span.bytes() == b"(parent) |> project(_)")
+            );
+            let resumes = lower("resumes", default);
+            let mir = resumes
+                .mir()
+                .expect("the scalar return and last use both release the staged parent");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::Borrow { .. }
+                            | Operation::Call(_)
+                            | Operation::Move { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Reborrow { parent, holder: first, exclusive: true }, Operation::Call(before),
+                Operation::Reborrow { parent: second, holder: shared, exclusive: true }, Operation::Call(read_only), Operation::Call(touch),
+                Operation::Borrow { source, exclusive: false, .. },
+                Operation::Reborrow { parent: third, holder: last, exclusive: true }, Operation::Call(after),
+                Operation::Move { from: original, into: Some(moved) }, Operation::Export(result),
+            ] if [second, source, third, original].iter().all(|place| place.root.node == parent.root.node && place.projection.is_none())
+                && [parent, first, shared, last].iter().all(|place| place.projection.is_none()) && first.root.span.bytes() == b"parent"
+                && shared.root.span.bytes() == b"(parent)" && last.root.span.bytes() == b"parent"
+                && *before == id("snapshot") && *read_only == id("readOnly") && *touch == id("touch") && *after == id("snapshot")
+                && moved.root.span.bytes() == b"moved" && result.root.span.bytes() == b"bit"));
+            for (name, code, site, cause) in [
+                (
+                    "blocked",
+                    "R0201",
+                    b"&(parent)".as_slice(),
+                    b"parent".as_slice(),
+                ),
+                ("consumed", "R0200", b"(parent)", b"parent"),
+                ("reachedBad", "R0202", b"return &mut owner;", b"owner"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), cause);
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+            for (name, at) in [
+                ("alias", b"named |> snapshot".as_slice()),
+                ("explicit", b"(&mut *parent) |> snapshot"),
+                ("late", b"parent |> tagged(true, _)"),
+                ("propagating", b"parent |> maybe?"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), at, "{name}");
+            }
             let exact = AnalysisLimits {
                 max_work: resumes.statistics().work,
                 max_entries: resumes.statistics().entries,
