@@ -1915,20 +1915,12 @@ impl<'a, 'g> Build<'a, 'g> {
             let root = self.ungroup(arg)?;
             if self.propagates_directly(root)? {
                 self.budget.step(1)?;
-                let value = self.value(root)?;
-                let exit = match &value.data {
+                let exit = match &self.value(root)?.data {
                     Some(DataExpression::Propagation(exit)) => exit.as_ref(),
                     Some(DataExpression::Wrapping(wrap)) => &wrap.branch,
                     Some(DataExpression::ErrorPipe { propagation, .. }) => propagation.as_ref(),
                     _ => return Err(Stop::Pending(root)),
                 };
-                // The composed outer-step route still admits only scalar
-                // argument exits, even when an earlier exit skips this one.
-                if matches!(output, PropagatingCallOutput::CheckedPipeCarrier { .. })
-                    && owns_text(&value.ty)
-                {
-                    return Err(Stop::Pending(root));
-                }
                 if !(exit.can_return || exit.can_continue) {
                     return Err(Stop::Pending(node));
                 }

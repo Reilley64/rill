@@ -5134,18 +5134,6 @@ fn owning_option_argument_propagation_cleans_only_reached_stages() {
                 let bit = useAll(stage(before), stage(input?), flag);
                 return Option.Some(bit);
             }
-            function outerStep(value: string): Option<bool> { dispose(value); return Option.Some(true); }
-            function excludedStep(input: Option<string>): Option<bool> {
-                let bit = (input?) |> outerStep?;
-                return Option.Some(bit);
-            }
-            function skippedStep(gate: bool, value: string, before: string): Option<bool> {
-                dispose(value); dispose(before); return Option.Some(gate);
-            }
-            function excludedSkipped(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
-                let _ = stage(before) |> skippedStep(gate?, input?, _)?;
-                return Option.Some(true);
-            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -5298,12 +5286,6 @@ fn owning_option_argument_propagation_cleans_only_reached_stages() {
             let deeper = lower("deeper", default);
             assert_eq!(deeper.completion(), Completion::Incomplete);
             assert!(deeper.mir().is_none());
-            for name in ["excludedStep", "excludedSkipped"] {
-                let report = lower(name, default);
-                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert!(report.mir().is_none());
-                assert_eq!(report.blocked_at().unwrap().span.bytes(), b"input?");
-            }
             let exact = AnalysisLimits {
                 max_work: paired.statistics().work,
                 max_entries: paired.statistics().entries,
@@ -5321,6 +5303,208 @@ fn owning_option_argument_propagation_cleans_only_reached_stages() {
                 },
             ] {
                 let limited = lower("paired", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
+    probe_with_typed(
+        "propagation::owning_option_arguments_before_propagating_steps_have_distinct_exits",
+        r#"
+            function stage(value: string): string { return value; }
+            function finish(before: string, bit: bool, value: string): Option<string> {
+                dispose(before);
+                if (bit) { return Option<string>.Some(value); }
+                return Option<string>.None;
+            }
+            function after(bit: bool): bool { return bit; }
+            function composed(input: Option<string>, before: string, gate: Option<bool>, later: string): Option<bool> {
+                let output = (input?) |> finish(stage(before), gate?, _)?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function invalid(bit: bool, value: string, before: string): Option<bool> {
+                dispose(before); dispose(before); dispose(value); return Option.Some(bit);
+            }
+            function skipped(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
+                let _ = stage(before) |> invalid(gate?, input?, _)?;
+                return Option.Some(true);
+            }
+            function reached(before: string, input: Option<string>.Some): Option<bool> {
+                let bit = stage(before) |> invalid(true, input?, _)?;
+                return Option.Some(bit);
+            }
+            function scalar(value: string): Option<bool>.Some { dispose(value); return Option<bool>.Some(true); }
+            function plain(flag: bool): bool { return flag; }
+            function consume(before: string, bit: bool, value: string): bool { dispose(value); dispose(before); return bit; }
+            function terminal(input: Option<string>.None, before: string, gate: Option<bool>): Option<bool> {
+                let _ = (input?) |> finish(stage(before), gate?, _)?;
+                return Option.Some(true);
+            }
+            function ordinaryTerminal(input: Option<string>.None, before: string, gate: Option<bool>): Option<bool> {
+                let _ = (input?) |> consume(stage(before), gate?, _);
+                return Option.Some(true);
+            }
+            function statement(input: Option<string>): Option<bool> {
+                (input?) |> scalar?;
+                return Option.Some(after(true));
+            }
+            function deeper(input: Option<string>): Option<bool> {
+                let bit = plain(((input?) |> scalar?));
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let composed = lower("composed", default);
+            let mir = composed
+                .mir()
+                .unwrap_or_else(|| panic!("composed owning input: {:?}", composed.completion()));
+            let (input_yes, input_no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (gate_yes, gate_no) = variant_edges(mir, input_yes, &option.some.id, b"gate");
+            let (step_yes, step_no) = variant_edges(
+                mir,
+                gate_yes,
+                &option.some.id,
+                b"(input?) |> finish(stage(before), gate?, _)?",
+            );
+            let prefix: Vec<_> = straight_blocks(mir, input_yes)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::TakeOptionPayload { .. }
+                            | Operation::Call(_)
+                            | Operation::TestVariant { .. }
+                    )
+                })
+                .collect();
+            let [
+                Operation::TakeOptionPayload { operand, into },
+                Operation::Call(stage),
+                Operation::TestVariant { .. },
+            ] = prefix.as_slice()
+            else {
+                panic!("expected input transfer before written arguments: {prefix:?}")
+            };
+            assert_eq!(operand.root.span.bytes(), b"input");
+            assert_eq!(into.root.span.bytes(), b"(input?)");
+            assert_eq!(*stage, id("stage"));
+            assert!(
+                matches!(path_drops(mir, gate_no).as_slice(), [Obligation::Drop(_), Obligation::Drop(staged), Obligation::Drop(_)]
+                if staged.root.node == into.root.node)
+            );
+            assert_return(
+                &linear(mir, input_no),
+                &option.none.id,
+                false,
+                &[b"later: string", b"before: string"],
+            );
+            assert_return(
+                &linear(mir, gate_no),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"(input?)", b"later: string"],
+            );
+            assert_return(
+                &linear(mir, step_no),
+                &option.none.id,
+                false,
+                &[b"later: string"],
+            );
+            assert_return(
+                &linear(mir, step_yes),
+                &option.some.id,
+                true,
+                &[b"output", b"later: string"],
+            );
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(calls_on_path(mir, [true, false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, true, false]),
+                [id("stage"), id("finish")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true]),
+                [id("stage"), id("finish"), id("after")]
+            );
+            let terminal = lower("terminal", default);
+            let mir = terminal
+                .mir()
+                .expect("known empty input never stages the written arguments or the step carrier");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"before: string"],
+            );
+            let ordinary = lower("ordinaryTerminal", default);
+            assert!(ordinary.mir().is_some());
+            assert_eq!(terminal.statistics().entries, ordinary.statistics().entries);
+            let skipped = lower("skipped", default);
+            let mir = skipped
+                .mir()
+                .expect("known earlier failure skips the owning argument and invalid step");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(stage), Obligation::DropOptionPayload { operand, some }]
+                if stage.root.span.bytes() == b"stage(before)" && operand.root.span.bytes() == b"input: Option<string>" && *some == &option.some.id)
+            );
+            let reached = lower("reached", default);
+            assert_eq!(reached.completion(), Completion::SourceRejected);
+            assert!(reached.mir().is_none());
+            let [finding] = reached.findings() else {
+                panic!("expected a reached-step double disposal")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(before)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(before)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let statement = lower("statement", default);
+            let mir = statement
+                .mir()
+                .expect("an owning input does not change the scalar statement result rule");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(calls_on_path(mir, [true]), [id("scalar"), id("after")]);
+            assert_return(&linear(mir, no), &option.none.id, false, &[]);
+            assert_return(&linear(mir, yes), &option.some.id, true, &[]);
+            let deeper = lower("deeper", default);
+            assert_eq!(deeper.completion(), Completion::Incomplete);
+            assert!(deeper.mir().is_none());
+            let exact = AnalysisLimits {
+                max_work: composed.statistics().work,
+                max_entries: composed.statistics().entries,
+                ..default
+            };
+            assert!(lower("composed", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("composed", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
