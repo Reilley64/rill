@@ -5823,6 +5823,22 @@ fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
                 let bit = useAll(((left?) |> first?), ((right?) |> rejected?), true);
                 return Option.Some(bit);
             }
+            function useThree(left: string, middle: string, right: string): bool {
+                dispose(right); dispose(middle); dispose(left); return true;
+            }
+            function widthTwo(left: Option<string>, middle: Option<string>, right: Option<string>, fallback: string): Option<bool> {
+                let bit = useThree(((left?) |> first?), ((middle?) |> first?), fallback);
+                return Option.Some(bit);
+            }
+            function widthThree(left: Option<string>, middle: Option<string>, right: Option<string>, fallback: string): Option<bool> {
+                let bit = useThree(((left?) |> first?), ((middle?) |> first?), ((right?) |> first?));
+                return Option.Some(bit);
+            }
+            function unknown(value: string): Option<string> { return Option<string>.Some(value); }
+            function outerPipe(before: string, input: Option<string>): Option<bool> {
+                let bit = before |> useAll(((input?) |> unknown?), true);
+                return Option.Some(bit);
+            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -5873,10 +5889,8 @@ fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
                     _ => None,
                 })
                 .unwrap();
-            assert!(first_failure[..export].iter().any(
-                |op| matches!(op, Operation::ConstructVariant { variant, payload: None, into }
-                if *variant == &option.none.id && into.root.node == output.root.node)
-            ));
+            assert_eq!(first_failure[..export].iter().filter(|op| matches!(op, Operation::ConstructVariant { variant, payload: None, into }
+                if *variant == &option.none.id && into.root.node == output.root.node)).count(), 1);
             assert!(
                 first_failure[..export]
                     .iter()
@@ -5954,6 +5968,36 @@ fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
             assert_eq!(finding.site.span.bytes(), b"dispose(value)");
             assert_eq!(finding.related.span.bytes(), b"dispose(value)");
             assert!(finding.related.span.start() < finding.site.span.start());
+            let narrow = lower("widthTwo", default);
+            assert!(narrow.mir().is_some());
+            let wide = lower("widthThree", default);
+            let mir = wide
+                .mir()
+                .expect("three siblings do not add a nesting layer");
+            let (yes, _) = variant_edges(mir, mir.entry, &option.some.id, b"left");
+            let (yes, _) = variant_edges(mir, yes, &option.some.id, b"middle");
+            let (_, no) = variant_edges(mir, yes, &option.some.id, b"right");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"((middle?) |> first?)", left_stage, b"fallback: string"],
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, false]),
+                [id("first"), id("first")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true]),
+                [id("first"), id("first"), id("first"), id("useThree")]
+            );
+            assert!(wide.statistics().work > narrow.statistics().work);
+            assert!(wide.statistics().entries > narrow.statistics().entries);
+            assert_eq!(wide.statistics().max_depth, narrow.statistics().max_depth);
+            let pipe = lower("outerPipe", default);
+            assert_eq!(pipe.completion(), Completion::Incomplete);
+            assert!(pipe.mir().is_none());
+            assert_eq!(pipe.blocked_at().unwrap().span.bytes(), b"(input?)");
             let exact = AnalysisLimits {
                 max_work: siblings.statistics().work,
                 max_entries: siblings.statistics().entries,
