@@ -33,9 +33,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 // Track the external origin, not another ownership permission.
                 if component.is_empty()
                     && retained_bool_contents_type(&value.ty).is_some()
-                    && let Some(parameter) = state.caller_bool_access(from, self.budget)?
+                    && let Some(parameter) = state.caller_bool_origin(from, self.budget)?
                 {
-                    state.store(root, &[], Content::CallerBoolAccess(parameter), self.budget)?;
+                    state.store(root, &[], Content::CallerBoolOrigin(parameter), self.budget)?;
                 }
                 for alias in state.aliases_under(from, &component, self.budget)? {
                     state.store(root, &[], Content::PossibleAlias(alias), self.budget)?;
@@ -242,7 +242,13 @@ impl<'a, 'g> Check<'a, 'g> {
         site: NodeId,
     ) -> Work<()> {
         let affected = state.take(*root, path, self.budget)?;
-        if !affected.is_empty() {
+        // Invalidating a location can discard a hint without losing a
+        // tracked residence or handing a later store an incoming origin.
+        self.budget.step(affected.len())?;
+        if affected
+            .iter()
+            .any(|entry| !matches!(entry.content, Content::CallerBoolOrigin(_)))
+        {
             self.pending(site, ResultUseBlocker::Storage)?;
         }
         Ok(())

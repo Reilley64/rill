@@ -1068,7 +1068,7 @@ impl<'a, 'g> Check<'a, 'g> {
     ) -> Work<bool> {
         let origin = match root.kind {
             DeclarationKind::Parameter => Some(root),
-            DeclarationKind::Binding => state.caller_bool_access(Root::Local(root), self.budget)?,
+            DeclarationKind::Binding => state.caller_bool_origin(Root::Local(root), self.budget)?,
             _ => None,
         };
         let Some(origin) = origin else {

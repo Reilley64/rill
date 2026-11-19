@@ -92,7 +92,7 @@ impl<'a, 'g> Check<'a, 'g> {
             states = self.seed(states, root, parameter.declaration.node, &parameter.ty)?;
             if retained_bool_contents_type(&parameter.ty).is_some() {
                 for state in &mut states {
-                    state.store(root, &[], Content::CallerBoolAccess(id), self.budget)?;
+                    state.store(root, &[], Content::CallerBoolOrigin(id), self.budget)?;
                 }
             }
         }

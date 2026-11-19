@@ -36,7 +36,7 @@ pub(super) enum Content<'g> {
     Alias(Address<'g>),
     PossibleAlias(Address<'g>),
     /// A borrowed Bool descriptor from a named function's incoming parameter.
-    CallerBoolAccess(&'g DeclarationId),
+    CallerBoolOrigin(&'g DeclarationId),
     /// Typed source origin of the callable stored at this exact residence.
     Callable(NodeId),
     /// Containment is unresolved at this origin, not known empty.
@@ -56,7 +56,7 @@ impl Located<'_> {
                 Content::Result(value) => value.component.len(),
                 Content::Test(tag, _) => tag_size(tag),
                 Content::Alias((_, path)) | Content::PossibleAlias((_, path)) => path.len(),
-                Content::CallerBoolAccess(_) | Content::Callable(_) | Content::Unclassified(_) => 0,
+                Content::CallerBoolOrigin(_) | Content::Callable(_) | Content::Unclassified(_) => 0,
             }
     }
 }
@@ -217,7 +217,7 @@ impl<'g> Residence<'g> {
         Ok(None)
     }
 
-    pub(super) fn caller_bool_access(
+    pub(super) fn caller_bool_origin(
         &self,
         root: Root<'g>,
         budget: &mut Budget,
@@ -226,7 +226,7 @@ impl<'g> Residence<'g> {
             budget.step(1)?;
             if *candidate == root
                 && value.component.is_empty()
-                && let Content::CallerBoolAccess(parameter) = value.content
+                && let Content::CallerBoolOrigin(parameter) = value.content
             {
                 return Ok(Some(parameter));
             }

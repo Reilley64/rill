@@ -1404,6 +1404,11 @@ fn moved_incoming_write_checks_the_original_caller_contents() {
                 *slot = seed;
                 *access = seed;
             }
+            function touch(place: &mut &mut &bool): void {}
+            function forgetOrigin(slot: &mut &bool): void {
+                let mut access = slot;
+                touch(&mut access);
+            }
         "#,
         |_, module, receipt| {
             let lower = |name| {
@@ -1496,6 +1501,11 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
                 let access = forward(slot);
                 *access = (input);
             }
+            function joined(slot: &mut &bool, other: &mut &bool, input: &bool, choose: bool): void {
+                let mut access = slot;
+                if (choose) { access = forward(other); }
+                *access = ((input));
+            }
             function unknown(slot: &mut Result<bool, i32>, incoming: Result<bool, i32>): void {
                 *slot = incoming;
             }
@@ -1509,6 +1519,7 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
                 b"*slot = input;".as_slice(),
                 b"*access = input;",
                 b"*access = (input);",
+                b"*access = ((input));",
                 b"*slot = incoming;",
             ] {
                 assert!(
