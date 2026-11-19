@@ -1325,16 +1325,27 @@ impl<'a, 'g> Build<'a, 'g> {
         let syntax = &self.module.syntax.nodes[node];
         let facts = self.value(node)?;
         let (id, result) = self.return_contract;
-        let (exit, wrap) = match &facts.data {
-            Some(DataExpression::Propagation(exit)) => (exit.as_ref(), None),
-            Some(DataExpression::Wrapping(wrap)) => (&wrap.branch, Some(&wrap.construction)),
+        let (exit, wrap, fresh) = match &facts.data {
+            Some(DataExpression::Propagation(exit)) => (exit.as_ref(), None, None),
+            Some(DataExpression::Wrapping(wrap)) => (&wrap.branch, Some(&wrap.construction), None),
+            Some(DataExpression::ErrorPipe {
+                construction,
+                propagation,
+            }) if syntax.kind == NodeKind::Pipe
+                && propagation.can_return
+                && !propagation.can_continue =>
+            {
+                (propagation.as_ref(), None, Some(construction.as_ref()))
+            }
             _ => return Err(Stop::Pending(node)),
         };
         if !matches!(exit.target, PropagationTarget::Callable(target) if target == id) {
             return Err(Stop::Pending(node));
         }
         let piped = syntax.kind == NodeKind::Pipe;
-        let (source, operand) = if piped {
+        let (source, operand) = if let Some(construction) = fresh {
+            (node, &construction.result)
+        } else if piped {
             (node, self.propagating_pipe_result(node, facts)?)
         } else {
             let source = syntax.children[0];
@@ -1456,7 +1467,9 @@ impl<'a, 'g> Build<'a, 'g> {
             (Some(edge), None) | (None, Some(edge)) => edge,
             (None, None) => return Err(Stop::Pending(node)),
         };
-        if piped {
+        if let Some(construction) = fresh {
+            self.construct_scalar_error(node, facts, construction, scratch, split, depth)
+        } else if piped {
             self.call(node, facts, Some(scratch), split, depth, Some(operand))
         } else {
             self.expression(source, Some(scratch), split, depth)
@@ -1642,20 +1655,28 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(node));
         };
         let syntax = &self.module.syntax.nodes[node];
+        let piped = syntax.kind == NodeKind::Pipe;
+        let origin_node = match syntax.kind {
+            NodeKind::Call if facts.ty == data.result => node,
+            NodeKind::Pipe if matches!(facts.data, Some(DataExpression::ErrorPipe { .. })) => {
+                syntax.children[1]
+            }
+            _ => return Err(Stop::Pending(node)),
+        };
+        let origin = &self.module.syntax.nodes[origin_node].span;
         let providers = role.providers.ok_or(Stop::Pending(node))?;
-        if syntax.kind != NodeKind::Call
-            || data.operation != ErrorOperation::Construct
+        if data.operation != ErrorOperation::Construct
             || data.retained.is_some()
-            || facts.ty != data.result
             || data.failure != &role.err.id
             || data.wrapper != &role.wrapper.id
-            || data.origin.snapshot() != syntax.span.snapshot()
-            || data.origin.start() != syntax.span.start()
-            || data.origin.end() != syntax.span.start()
+            || data.origin.snapshot() != origin.snapshot()
+            || data.origin.start() != origin.start()
+            || data.origin.end() != origin.start()
             || !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
             || !facts.call.as_ref().is_some_and(|call| {
                 call.callee == &providers.constructor.id
                     && call.arguments.as_slice() == [data.value]
+                    && (!piped || call.pipe_input == Some(data.value))
             })
         {
             return Err(Stop::Pending(node));
@@ -1666,7 +1687,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let payload = self.slot(data.value, &data.payload)?;
         let construct = self.emit(
-            node,
+            origin_node,
             Action::ConstructResultError {
                 constructor: &providers.constructor.id,
                 variant: data.failure,

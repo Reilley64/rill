@@ -1110,7 +1110,6 @@ fn result_pipe_forwards_the_existing_wrapper_after_a_single_call() {
     probe_with_typed(
         "propagation::result_pipe_forwards_the_existing_wrapper_after_a_single_call",
         r#"
-            import std::result::Err as makeError;
             function pass(value: Result<bool, i32>, taken: string): Result<bool, i32> { dispose(taken); return value; }
             function paths(input: Result<bool, i32>, taken: string, owner: string, other: string, flag: bool): Result<i32, i32> {
                 if (flag) { dispose(other); }
@@ -1139,10 +1138,6 @@ fn result_pipe_forwards_the_existing_wrapper_after_a_single_call() {
             function text(value: string): Result<string, i32> { return Result.Ok(value); }
             function unsupportedText(value: string): Result<bool, i32> {
                 let _ = value |> text?;
-                return Result.Ok(true);
-            }
-            function unsupportedFresh(code: i32): Result<bool, i32> {
-                let _ = code |> makeError<bool, i32>?;
                 return Result.Ok(true);
             }
         "#,
@@ -1269,18 +1264,196 @@ fn result_pipe_forwards_the_existing_wrapper_after_a_single_call() {
             assert_return(&ops, &role.ok.id, true, &[]);
             assert!(ops.iter().any(|op| matches!(op, Operation::TakeResultSuccess { operand, into: Some(target) }
                 if operand.root.span.bytes() == b"value |> numberStep?" && target.root.span.bytes() == b"number")));
+            let unsupported = check("unsupportedText");
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert_eq!(
+                unsupported.blocked_at().unwrap().span.bytes(),
+                b"value |> text?"
+            );
+            assert!(unsupported.mir().is_none());
+        },
+    );
+}
+
+#[test]
+fn fresh_error_pipe_keeps_the_written_constructor_anchor() {
+    use compiler::analysis::scalars::{NodeFactKind, data::DataExpression};
+
+    probe_with_typed(
+        "propagation::fresh_error_pipe_keeps_the_written_constructor_anchor",
+        r#"
+            import std::result::Err as makeFailure;
+            function payload(taken: string): i32 { dispose(taken); return 17i32; }
+            function bad(taken: string): i32 { dispose(taken); dispose(taken); return 17i32; }
+            function failed(taken: string, owner: string): Result<i32, i32> {
+                let remaining = owner;
+                let _ = payload(taken) |> makeFailure<bool, i32>?;
+                dispose(remaining);
+                return Result.Ok(1i32);
+            }
+            function moved(taken: string): Result<i32, i32> {
+                dispose(taken);
+                let _ = payload(taken) |> makeFailure<bool, i32>?;
+                return Result.Ok(1i32);
+            }
+            function reachedBad(taken: string): Result<i32, i32> {
+                let _ = bad(taken) |> makeFailure<bool, i32>?;
+                return Result.Ok(1i32);
+            }
+            function placeholder(code: i32, owner: string): Result<bool, i32> {
+                let _ = code |> makeFailure<bool, i32>(_)?;
+                dispose(owner);
+                return Result.Ok(true);
+            }
+            function unsupportedPlain(code: i32): Result<bool, i32> { return code |> makeFailure<bool, i32>; }
+            function unsupportedText(message: string): Result<bool, string> {
+                let _ = message |> makeFailure<bool, string>?;
+                return Result.Ok(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let report = check("failed");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("failed: {:?}", report.completion()));
+            let pipe = b"payload(taken) |> makeFailure<bool, i32>?";
+            let role = typed.result_role().unwrap();
+            let canonical = &role.providers.unwrap().constructor.id;
+            let route: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .filter(|b| {
+                    matches!(
+                        b.operation,
+                        Operation::Call(_)
+                            | Operation::ConstructResultError { .. }
+                            | Operation::ForwardResultFailure { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            let [call, construct, forward, export] = route.as_slice() else {
+                panic!("expected one call, construction and export: {route:?}")
+            };
+            assert!(
+                matches!(call.operation, Operation::Call(callee) if callee == &declaration("payload").id)
+            );
+            assert_eq!(call.site.span.bytes(), b"payload(taken)");
+            assert!(
+                matches!((&construct.operation, &forward.operation, &export.operation), (
+                Operation::ConstructResultError { constructor, variant, wrapper, payload, into },
+                Operation::ForwardResultFailure { operand, into: forwarded, variant: failure, wrapper: forwarded_wrapper }, Operation::Export(result),
+            ) if *constructor == canonical && *variant == &role.err.id && *failure == *variant && *wrapper == &role.wrapper.id
+                && *forwarded_wrapper == *wrapper && payload.root.span.bytes() == b"payload(taken)"
+                && into.root.node == operand.root.node && operand.root.span.bytes() == pipe && forwarded.root.node == result.root.node),
+                "{route:?}"
+            );
+            assert_eq!(construct.site.span.bytes(), b"makeFailure<bool, i32>?");
+            let typed_pipe = typed
+                .bodies()
+                .node(module, forward.site.node)
+                .unwrap()
+                .unwrap();
+            let NodeFactKind::Expression(facts) = &typed_pipe.kind else {
+                panic!("expected typed pipe")
+            };
+            let Some(DataExpression::ErrorPipe {
+                construction,
+                propagation,
+            }) = &facts.data
+            else {
+                panic!("expected typed pipe construction and propagation")
+            };
+            assert!(propagation.can_return && !propagation.can_continue);
+            assert_eq!(
+                construction.origin.snapshot(),
+                construct.site.span.snapshot()
+            );
+            assert_eq!(construct.site.span.start(), construction.origin.start());
+            assert_eq!(construction.origin.start(), construction.origin.end());
+            assert_eq!(construction.value, call.site.node);
+            assert!(construction.retained.is_none());
+            let ops = linear(mir, mir.entry);
+            assert_forward(&ops, role, pipe, &[b"remaining"]);
+            assert!(!ops.iter().any(|op| matches!(
+                op,
+                Operation::TakeResultSuccess { .. }
+                    | Operation::TestVariant { .. }
+                    | Operation::Dispose { .. }
+            )));
+            let placeholder = check("placeholder");
+            let mir = placeholder
+                .mir()
+                .expect("one placeholder stages the input once");
+            assert!(calls_on_path(mir, []).is_empty());
+            let ops = linear(mir, mir.entry);
+            assert_forward(
+                &ops,
+                role,
+                b"code |> makeFailure<bool, i32>(_)?",
+                &[b"owner: string"],
+            );
+            assert_eq!(
+                ops.iter()
+                    .filter(
+                        |op| matches!(op, Operation::ConstructResultError { payload, .. }
+                if payload.root.span.bytes() == b"code")
+                    )
+                    .count(),
+                1
+            );
+            for (name, site) in [("moved", "taken"), ("reachedBad", "dispose(taken)")] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected exactly one moved-owner finding")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes());
+                assert_eq!(finding.related.span.bytes(), b"dispose(taken)");
+            }
             for (name, site) in [
-                ("unsupportedText", "value |> text?"),
-                ("unsupportedFresh", "code |> makeError<bool, i32>?"),
+                ("unsupportedPlain", "code |> makeFailure<bool, i32>"),
+                ("unsupportedText", "message |> makeFailure<bool, string>?"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
                 assert_eq!(
                     report.blocked_at().unwrap().span.bytes(),
                     site.as_bytes(),
                     "{name}"
                 );
-                assert!(report.mir().is_none());
+            }
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("failed", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("failed", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
             }
         },
     );
