@@ -316,6 +316,11 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 value[1] = true;
                 return value[1];
             }
+            function expires(flag: bool, seed: &bool): bool {
+                let mut held = seed;
+                if (flag) { let pair: [bool, bool] = [false, true]; held = &pair[0]; }
+                return *held;
+            }
             function escape(value: [bool, bool]): &bool { return &value[0]; }
             function descriptorSlot(value: [&bool, bool]): &&bool { return &value[0]; }
         "#,
@@ -359,15 +364,20 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 .filter(|op| {
                     matches!(
                         op,
-                        Operation::Borrow { .. } | Operation::Install { .. } | Operation::Export(_)
+                        Operation::Borrow { .. }
+                            | Operation::Dereference(_)
+                            | Operation::Install { .. }
+                            | Operation::Export(_)
                     )
                 })
                 .collect();
             assert!(matches!(route.as_slice(), [
-                Operation::Borrow { source, exclusive: true, .. },
+                Operation::Borrow { source, holder, exclusive: true },
+                Operation::Dereference(used),
                 Operation::Install { target, .. },
                 Operation::Export(_),
-            ] if source.root.node == target.root.node && source.tuple_element() == Some(0) && target.tuple_element() == Some(1)));
+            ] if holder.root.node == used.root.node && source.root.node == target.root.node
+                && source.tuple_element() == Some(0) && target.tuple_element() == Some(1)));
 
             for (name, code, site, related) in [
                 ("moved", "R0200", "&value[0]", "value[0]"),
@@ -375,6 +385,12 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 ("writeWhileShared", "R0203", "value[1] = true;", "&value[0]"),
                 ("readWhileExclusive", "R0201", "value[1]", "&mut value[0]"),
                 ("moveWhileShared", "R0203", "value[1]", "&value[0]"),
+                (
+                    "expires",
+                    "R0203",
+                    "{ let pair: [bool, bool] = [false, true]; held = &pair[0]; }",
+                    "&pair[0]",
+                ),
                 ("escape", "R0202", "return &value[0];", "&value[0]"),
             ] {
                 let report = check(name);

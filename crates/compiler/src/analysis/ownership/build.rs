@@ -1386,20 +1386,17 @@ impl<'a, 'g> Build<'a, 'g> {
                         suspends,
                     }
                 } else {
-                    let from = self.place(operand)?;
-                    if self.slots[from].contains_guard() {
+                    let operand_facts = self.value(operand)?;
+                    let path = operand_facts.path.as_ref().ok_or(Stop::Pending(operand))?;
+                    let from = self.resolve_place(operand, path)?;
+                    if self.slots[from].contains_guard()
+                        || (matches!(
+                            self.slots[from].projection,
+                            Some(Projection::TupleElement(_))
+                        ) && (operand_facts.access != Access::Owned
+                            || !matches!(operand_facts.ty.as_ref(), TypeTerm::Primitive(_))))
+                    {
                         return Err(Stop::Pending(node));
-                    }
-                    if matches!(
-                        self.slots[from].projection,
-                        Some(Projection::TupleElement(_))
-                    ) {
-                        let element = self.value(operand)?;
-                        if element.access != Access::Owned
-                            || !matches!(element.ty.as_ref(), TypeTerm::Primitive(_))
-                        {
-                            return Err(Stop::Pending(node));
-                        }
                     }
                     Action::Borrow {
                         from,
