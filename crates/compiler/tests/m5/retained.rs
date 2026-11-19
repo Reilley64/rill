@@ -665,9 +665,9 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
                 bad(seed, &mut out, seed);
                 return *out;
             }
-            function exclusive(first: &bool, slot: &mut &bool, second: &mut bool): void { *slot = first; }
-            function unsupportedExclusive(first: &bool, slot: &mut &bool, second: &mut bool): void {
-                exclusive(first, slot, second);
+            function wrongExclusive(first: &bool, slot: &mut &bool, second: &mut string): void { *slot = first; }
+            function unsupportedExclusiveType(first: &bool, slot: &mut &bool, second: &mut string): void {
+                wrongExclusive(first, slot, second);
             }
             function wrong(first: &bool, slot: &mut &bool, second: &string): void { *slot = first; }
             function unsupportedType(first: &bool, slot: &mut &bool, second: &string): void { wrong(first, slot, second); }
@@ -794,7 +794,10 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
             for (name, site) in [
-                ("unsupportedExclusive", "exclusive(first, slot, second)"),
+                (
+                    "unsupportedExclusiveType",
+                    "wrongExclusive(first, slot, second)",
+                ),
                 ("unsupportedType", "wrong(first, slot, second)"),
                 ("unsupportedDestinations", "second"),
                 ("unsupportedPipe", "second |> keep(first, slot, _)"),
@@ -825,6 +828,198 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
                 },
             ] {
                 let limited = lower("checked", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn paired_retention_keeps_both_exclusive_source_restrictions() {
+    probe(
+        "retained::paired_retention_keeps_both_exclusive_source_restrictions",
+        r#"
+            function stash(first: &mut bool, out: &mut &bool, second: &mut bool): void { *out = &*first; }
+            function mixed(first: &bool, out: &mut &bool, second: &mut bool): void { *out = &*second; }
+            function forward(first: &mut bool, out: &mut &bool, second: &mut bool): void {
+                stash(first, out, second);
+            }
+            function forwardMixed(first: &bool, out: &mut &bool, second: &mut bool): void {
+                mixed(first, out, second);
+            }
+            function resumes(seed: &bool, first: &mut bool, second: &mut bool): bool {
+                let mut out = seed;
+                stash(first, &mut out, second);
+                let snapshot = *out;
+                let one = *first;
+                let two = *second;
+                return snapshot;
+            }
+            function blockedFirst(seed: &bool, first: &mut bool, second: &mut bool): bool {
+                let mut out = seed;
+                stash(first, &mut out, second);
+                let early = *first;
+                return *out;
+            }
+            function blockedSecond(seed: &bool, first: &mut bool, second: &mut bool): bool {
+                let mut out = seed;
+                stash(first, &mut out, second);
+                let early = *second;
+                return *out;
+            }
+            function same(seed: &bool, input: &mut bool): void {
+                let mut out = seed;
+                stash(input, &mut out, (input));
+            }
+            function mixedOverlap(seed: &bool, input: &mut bool): void {
+                let mut out = seed;
+                mixed(&*input, &mut out, input);
+            }
+            function overwritten(seed: &bool, first: &mut bool, second: &mut bool): bool {
+                let mut out = seed;
+                stash(first, &mut out, second);
+                out = seed;
+                let one = *first;
+                let two = *second;
+                return *out;
+            }
+            function escapes(first: &mut bool, out: &mut &bool): void {
+                let mut second = true;
+                stash(first, out, &mut second);
+            }
+            function bad(first: &mut bool, out: &mut &bool, second: &mut bool): void {
+                let mut local = true;
+                *out = &local;
+            }
+            function reachesBad(first: &mut bool, out: &mut &bool, second: &mut bool): void { bad(first, out, second); }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let forwarded = check("forward");
+            let mir = forwarded
+                .mir()
+                .unwrap_or_else(|| panic!("forward: {:?}", forwarded.completion()));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::CallRetainingPair { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Reborrow { parent: first, holder: first_stage, exclusive: true },
+                Operation::Reborrow { parent: out, exclusive: true, .. },
+                Operation::Reborrow { parent: second, holder: second_stage, exclusive: true },
+                Operation::CallRetainingPair { callee, destination: RetainedPlace::ThroughParameter(dest), inputs: [a, b] },
+            ] if *callee == &declaration("stash").id && first.root.span.bytes() == b"first: &mut bool"
+                && second.root.span.bytes() == b"second: &mut bool" && out.root.span.bytes() == b"out: &mut &bool"
+                && dest.root.node == out.root.node && a.root.node == first_stage.root.node && b.root.node == second_stage.root.node),
+                "{route:?}"
+            );
+            let mixed = check("forwardMixed");
+            let mir = mixed
+                .mir()
+                .expect("both shared and exclusive formals can feed the same destination");
+            assert!(linear(mir, mir.entry).iter().any(|op| matches!(op,
+                Operation::CallRetainingPair { callee, destination: RetainedPlace::ThroughParameter(dest), inputs: [a, b] }
+                if *callee == &declaration("mixed").id && dest.root.span.bytes() == b"out: &mut &bool"
+                    && a.root.span.bytes() == b"first" && b.root.span.bytes() == b"second")));
+            let resumed = check("resumes");
+            let mir = resumed
+                .mir()
+                .expect("both sources resume after the destination's last use");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CallRetainingPair { .. } | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::CallRetainingPair { destination: RetainedPlace::Local(dest), .. },
+                Operation::Dereference(last), Operation::Dereference(first), Operation::Dereference(second),
+            ] if dest.root.node == last.root.node && first.root.span.bytes() == b"first: &mut bool" && second.root.span.bytes() == b"second: &mut bool"),
+                "{route:?}"
+            );
+            let overwritten = check("overwritten");
+            let mir = overwritten
+                .mir()
+                .expect("exact overwrite releases both exclusive restrictions");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CallRetainingPair { .. }
+                            | Operation::Install { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::CallRetainingPair { destination: RetainedPlace::Local(dest), .. }, Operation::Install { target, .. },
+                Operation::Dereference(first), Operation::Dereference(second), Operation::Dereference(read),
+            ] if dest.root.node == target.root.node && dest.root.node == read.root.node
+                && first.root.span.bytes() == b"first: &mut bool" && second.root.span.bytes() == b"second: &mut bool"),
+                "{route:?}"
+            );
+            for (name, code, site, related) in [
+                ("blockedFirst", "R0201", "*first", "first"),
+                ("blockedSecond", "R0201", "*second", "second"),
+                ("same", "R0201", "(input)", "input"),
+                ("mixedOverlap", "R0201", "input", "&*input"),
+                (
+                    "escapes",
+                    "R0202",
+                    "stash(first, out, &mut second)",
+                    "&mut second",
+                ),
+                ("reachesBad", "R0202", "*out = &local;", "&local"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected exactly one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            let limits = AnalysisLimits {
+                max_work: forwarded.statistics().work,
+                max_entries: forwarded.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("forward", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("forward", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }

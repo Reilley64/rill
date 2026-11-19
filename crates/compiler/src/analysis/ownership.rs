@@ -190,7 +190,7 @@ pub enum Operation<'g> {
         destination: RetainedPlace<'g>,
         input: Place<'g>,
     },
-    /// A direct call can retain either of two compatible shared inputs.
+    /// A direct call can retain either of two compatible Bool inputs.
     /// Input stages are listed in parameter order, omitting the destination.
     CallRetainingPair {
         callee: &'g DeclarationId,
@@ -509,16 +509,26 @@ fn lower<'g>(
     let Some(&body) = module.syntax.nodes[entry_site].children.get(1) else {
         return Err(Stop::Pending(entry_site));
     };
-    budget.step(2)?;
-    let retains_exclusive_bool = parameters.len() == 2
-        && [0, 1].into_iter().any(|destination| {
-            retained_bool_call_types(&header.shape, destination).is_some_and(|(_, parameters)| {
-                matches!(
-                    parameters[1 - destination].ty.as_ref(),
-                    TypeTerm::Reference { mutable: true, .. }
-                )
-            })
-        });
+    let mut retains_exclusive_bool = false;
+    if matches!(parameters.len(), 2 | 3) {
+        budget.step(parameters.len())?;
+        if let Some(destination) = parameters
+            .iter()
+            .position(|parameter| retained_bool_contents_type(&parameter.ty).is_some())
+        {
+            budget.step(2 * parameters.len())?;
+            retains_exclusive_bool = retained_bool_call_types(&header.shape, destination)
+                .is_some_and(|(_, formals)| {
+                    formals.iter().enumerate().any(|(index, formal)| {
+                        index != destination
+                            && matches!(
+                                formal.ty.as_ref(),
+                                TypeTerm::Reference { mutable: true, .. }
+                            )
+                    })
+                });
+        }
+    }
     let mut build = Build {
         typed,
         module,
@@ -616,7 +626,7 @@ fn lower<'g>(
 }
 
 // A scalar retention call has one destination and one or two compatible
-// sources. Only the single-source signature admits an exclusive source formal.
+// sources. Each input can supply a shared view of the same Bool backing.
 fn retained_bool_call_types<'a, 'g>(
     shape: &'a DeclarationShape<'g>,
     destination: usize,
@@ -634,8 +644,7 @@ fn retained_bool_call_types<'a, 'g>(
         if index == destination || formal.ty == *contents {
             continue;
         }
-        if parameters.len() != 2
-            || !matches!((contents.as_ref(), formal.ty.as_ref()), (
+        if !matches!((contents.as_ref(), formal.ty.as_ref()), (
             TypeTerm::Reference { referent: stored, .. },
             TypeTerm::Reference { mutable: true, referent: source },
         ) if stored == source)
