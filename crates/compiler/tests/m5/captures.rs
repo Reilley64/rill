@@ -452,6 +452,11 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 let _ = job();
                 return job();
             }
+            function groupedRepeat(left: &bool, right: string): [&bool, string] {
+                let job: once () => [&bool, string] = () => [(left), (right)];
+                let _ = (job)();
+                return (job)();
+            }
             function conditionalRepeat(flag: bool, first: string, second: string): [string, string] {
                 let job: once () => [string, string] = () => [first, second];
                 if (flag) { let _ = job(); }
@@ -672,7 +677,11 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
             assert_eq!(finding.code(), "R0200");
             assert_eq!(finding.site.span.bytes(), b"job");
             assert_eq!(finding.related.span.bytes(), b"job()");
-            for name in ["repeated", "conditionalRepeat"] {
+            for (name, site) in [
+                ("repeated", b"job()".as_slice()),
+                ("conditionalRepeat", b"job()".as_slice()),
+                ("groupedRepeat", b"(job)()".as_slice()),
+            ] {
                 let report = lower(name);
                 assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
                 assert!(report.mir().is_none());
@@ -680,8 +689,8 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                     panic!("{name}: expected a consumed receiver")
                 };
                 assert_eq!(finding.code(), "R0200");
-                assert_eq!(finding.site.span.bytes(), b"job()");
-                assert_eq!(finding.related.span.bytes(), b"job()");
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), site);
                 assert!(finding.related.span.start() < finding.site.span.start());
             }
             let restored = lower("restored");
@@ -1090,6 +1099,12 @@ fn broader_invocations_still_need_typed_evidence() {
                 if (flag) { job = erased; }
                 return job();
             }
+            function migrated(left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let _ = job();
+                let other = job;
+                return other();
+            }
             type Box = { item: Result<bool, i32>; }
             function unknown(view: &Box, owner: string): void {
                 let opaque: once () => [&Box, string] = () => [view, owner];
@@ -1108,6 +1123,7 @@ fn broader_invocations_still_need_typed_evidence() {
             let pending = typed.result_use().unwrap().pending();
             for (written, call) in [
                 (b"return job();".as_slice(), b"job()".as_slice()),
+                (b"return other();", b"other()"),
                 (b"= opaque();", b"opaque()"),
                 (b"= work();", b"work()"),
             ] {

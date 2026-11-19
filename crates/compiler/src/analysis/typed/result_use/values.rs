@@ -256,6 +256,17 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
+    pub(super) fn ungroup_value(&mut self, mut node: NodeId) -> Work<NodeId> {
+        loop {
+            self.budget.step(1)?;
+            let syntax = &self.module.syntax.nodes[node];
+            if syntax.kind != NodeKind::Group {
+                return Ok(node);
+            }
+            node = syntax.children[0];
+        }
+    }
+
     pub(super) fn expression_facts(
         &mut self,
         node: NodeId,

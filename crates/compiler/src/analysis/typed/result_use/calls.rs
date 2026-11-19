@@ -244,18 +244,18 @@ impl<'a, 'g> Check<'a, 'g> {
             && let TypeTerm::Tuple(elements) = value.ty.as_ref()
             && elements.len() == 2
         {
-            self.budget.step(2)?;
-            elements
-                .iter()
-                .all(|element| match element.as_ref() {
+            let name = self.ungroup_value(receiver)?;
+            self.budget.step(3)?;
+            (self.module.syntax.nodes[name].kind == NodeKind::ValueReference
+                && elements.iter().all(|element| match element.as_ref() {
                     TypeTerm::Primitive(_) => true,
                     TypeTerm::Reference {
                         mutable: false,
                         referent,
                     } => matches!(referent.as_ref(), TypeTerm::Primitive(_)),
                     _ => false,
-                })
-                .then_some(Root::Local(path.root))
+                }))
+            .then_some(Root::Local(path.root))
         } else {
             None
         };
@@ -288,7 +288,22 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         let root = Root::Temporary(receiver);
         let mut states = Vec::new();
+        let mut repeated = Vec::new();
         for mut state in initial {
+            if let Some(local) = pair_receiver
+                && self
+                    .address(&state, invocation.path.as_ref())?
+                    .is_some_and(|(exact, parts)| exact == local && parts.is_empty())
+                && matches!(state.contents(local, &[], self.budget)?.as_slice(), [value]
+                    if value.component.is_empty() && matches!(value.content, Content::ConsumedPair))
+            {
+                // No environment remains to evaluate and there are no
+                // Result inputs or outputs. Keep checking unrelated
+                // residences; M5 diagnoses the invalid ownership use.
+                self.budget.reserve(1)?;
+                repeated.push(state);
+                continue;
+            }
             if invocation.mode != crate::analysis::InvocationMode::Once
                 && let Some(address) = self.address(&state, invocation.path.as_ref())?
             {
@@ -312,33 +327,18 @@ impl<'a, 'g> Check<'a, 'g> {
                 && address.1.is_empty()
                 && let [value] = values.as_slice()
                 && value.component.is_empty()
+                && let Content::Callable(origin) = value.content
                 && self
                     .address(state, invocation.path.as_ref())?
                     .is_some_and(|(exact, parts)| exact == local && parts.is_empty())
                 && state.contents(local, &[], self.budget)?.is_empty()
+                && let Some(arrow) = self
+                    .facts(origin)?
+                    .and_then(|f| f.callable.as_ref()?.arrow.as_deref())
+                    .filter(|arrow| arrow.site.node == origin && arrow.premise.is_none())
+                && self.primitive_capture_pair(origin, arrow)?
             {
-                match value.content {
-                    Content::ConsumedPair => {
-                        // No environment remains to prove and no Result
-                        // residence can arrive through this scalar pair.
-                        // Keep checking unrelated residences on the path;
-                        // ownership diagnoses consumption at this call.
-                        state.take(root, &[], self.budget)?;
-                        state.store(local, &[], Content::ConsumedPair, self.budget)?;
-                        continue;
-                    }
-                    Content::Callable(origin) => {
-                        if let Some(arrow) = self
-                            .facts(origin)?
-                            .and_then(|f| f.callable.as_ref()?.arrow.as_deref())
-                            .filter(|arrow| arrow.site.node == origin && arrow.premise.is_none())
-                            && self.primitive_capture_pair(origin, arrow)?
-                        {
-                            consumed = Some(local);
-                        }
-                    }
-                    _ => {}
-                }
+                consumed = Some(local);
             }
             let checked = if invocation.assumption.is_some() {
                 self.symbolic_callback(invocation, &values)?
@@ -356,6 +356,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 state.store(local, &[], Content::ConsumedPair, self.budget)?;
             }
         }
+        states.append(&mut repeated);
         self.call_output(node, value, states)
     }
 }

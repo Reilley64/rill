@@ -120,26 +120,15 @@ impl<'a, 'g> Check<'a, 'g> {
         let [left, right] = elements.as_slice() else {
             return Ok(false);
         };
-        let nodes = &self.module.syntax.nodes;
-        let ungroup = |mut node: NodeId, budget: &mut Budget| -> Work<NodeId> {
-            loop {
-                budget.step(1)?;
-                let syntax = &nodes[node];
-                if syntax.kind != NodeKind::Group {
-                    return Ok(node);
-                }
-                node = syntax.children[0];
-            }
-        };
-        let written = [ungroup(*left, self.budget)?, ungroup(*right, self.budget)?];
-        let a = ungroup(first.site.node, self.budget)?;
-        let b = ungroup(second.site.node, self.budget)?;
+        let written = [self.ungroup_value(*left)?, self.ungroup_value(*right)?];
+        let a = self.ungroup_value(first.site.node)?;
+        let b = self.ungroup_value(second.site.node)?;
         if written != [a, b] && written != [b, a] {
             return Ok(false);
         }
         for (capture, source) in [(first, a), (second, b)] {
             self.budget.step(1)?;
-            let kind = nodes[source].kind;
+            let kind = self.module.syntax.nodes[source].kind;
             if !capture.reachable
                 || capture.through.is_some()
                 || !capture.path.projections.is_empty()

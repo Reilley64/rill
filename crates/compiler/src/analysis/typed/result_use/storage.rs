@@ -331,6 +331,11 @@ impl<'g> Residence<'g> {
         budget: &mut Budget,
     ) -> Work<()> {
         for mut value in values {
+            if matches!(value.content, Content::ConsumedPair) {
+                // Consumption describes the storage version, not a value in it.
+                budget.step(1)?;
+                continue;
+            }
             budget.reserve(1 + component.len())?;
             // Rebase only the current location, not the diagnostic's origin path.
             if !component.is_empty() {
