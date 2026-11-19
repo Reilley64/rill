@@ -29,6 +29,25 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                 let Ref { carried: saved } = Ref { carried: &flag, tag: "tag" };
                 return saved;
             }
+            function liveBacking(seed: &bool): bool {
+                let mut out = seed;
+                {
+                    let flag = true;
+                    let Ref { carried: saved } = Ref { carried: &flag, tag: "tag" };
+                    out = saved;
+                }
+                return *out;
+            }
+            type Flags = { selected: bool; answer: bool; };
+            function copyable(value: Flags): bool {
+                let Flags { selected: bit } = value;
+                return value.answer;
+            }
+            type Nested = { coordinates: [bool, bool]; };
+            function nested(value: Nested): bool {
+                let Nested { coordinates: [x, _] } = value;
+                return x;
+            }
             function borrowed(value: &Packet): void {
                 let Packet { left: first } = value;
             }
@@ -179,6 +198,45 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                 if place.field().is_some_and(|member| member.id == field("tag").id))
             );
 
+            let copyable = lower("copyable");
+            let mir = copyable
+                .mir()
+                .expect("an owned copyable record remains readable");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. } | Operation::Move { .. } | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Copy { from: original, into: Some(scratch) },
+                Operation::Copy { from: selected, into: Some(bit) },
+                Operation::Copy { from: answer, into: Some(output) },
+                Operation::Export(exported),
+            ] if original.root.span.bytes() == b"value: Flags" && selected.root.node == scratch.root.node
+                && selected.field().is_some_and(|member| member.id == field("selected").id)
+                && bit.root.span.bytes() == b"bit" && answer.root.node == original.root.node
+                && answer.field().is_some_and(|member| member.id == field("answer").id)
+                && output.root.node == exported.root.node));
+
+            let live = lower("liveBacking");
+            assert_eq!(live.completion(), Completion::SourceRejected);
+            assert!(live.mir().is_none());
+            let [finding] = live.findings() else {
+                panic!("expected live carried backing conflict")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.related.span.bytes(), b"&flag");
+            assert!(
+                finding
+                    .site
+                    .span
+                    .bytes()
+                    .starts_with(b"{\n                    let flag")
+            );
             for (name, code, at, cause) in [
                 ("reuse", "R0200", "value.left", "value"),
                 ("alreadyPartial", "R0200", "value", "value.omit"),
@@ -202,7 +260,7 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                     "{name} related"
                 );
             }
-            for name in ["borrowed", "custom"] {
+            for name in ["borrowed", "custom", "nested"] {
                 let incomplete = lower(name);
                 assert_eq!(incomplete.completion(), Completion::Incomplete, "{name}");
                 assert!(incomplete.mir().is_none(), "{name}");
