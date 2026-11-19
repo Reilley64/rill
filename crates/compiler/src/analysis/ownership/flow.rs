@@ -16,6 +16,8 @@ enum State {
 struct Held {
     loans: Arc<[Loan]>,
     capture_drops: [Option<NodeId>; 2],
+    /// A checked pair body acquired at this local arrow, not just a callable type.
+    pair_origin: Option<NodeId>,
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
     stored_at: Option<NodeId>,
@@ -127,6 +129,7 @@ fn liveness(
                 ..
             } => ([Some(capture), second], Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
+            Action::InvokeClosurePair { receiver, into } => use_one(Some(receiver), Some(into)),
             // External contents are already live at every instruction.
             Action::CopyThrough {
                 descriptor, into, ..
@@ -1164,6 +1167,7 @@ pub(super) fn run<'g>(
                     state[into] = State::Initialized(Held {
                         loans,
                         capture_drops: [drop_of(capture), second.and_then(drop_of)],
+                        pair_origin: second.map(|_| node),
                         ..Held::default()
                     });
                     state[capture] = State::Vacant;
@@ -1181,6 +1185,36 @@ pub(super) fn run<'g>(
                             capture: local(capture).root,
                             mode,
                         }
+                    }
+                }
+                Action::InvokeClosurePair { receiver, into } => {
+                    let held = initialized(&state[receiver], node)?;
+                    let origin = held.pair_origin.ok_or(Stop::Pending(node))?;
+                    let loans = held.loans.clone();
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        receiver,
+                        (node, Conflict::Release),
+                        Access::Exclusive,
+                        budget,
+                    )?;
+                    let storage = slots[into].storage(into);
+                    budget.step(storage.len())?;
+                    state[storage].fill(State::Initialized(empty.clone()));
+                    // As with a direct tuple call result, a reference member
+                    // consults the conservative carried sources at the root.
+                    state[into] = State::Initialized(Held {
+                        loans,
+                        ..Held::default()
+                    });
+                    state[receiver] = State::Moved(node);
+                    retire_loans(&slots, &mut state, &[receiver], budget)?;
+                    Operation::InvokeClosurePair {
+                        receiver: local(receiver),
+                        origin: site_at(module, origin),
+                        into: local(into),
                     }
                 }
                 Action::Dispose(slot) => {

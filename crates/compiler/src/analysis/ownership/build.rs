@@ -1655,9 +1655,47 @@ impl<'a, 'g> Build<'a, 'g> {
         })
     }
 
+    fn invoke_closure_pair(&mut self, node: NodeId, into: Slot, next: Pc) -> ResultOf<Pc> {
+        self.budget.step(2)?;
+        let invocation = self
+            .facts
+            .get(&node)
+            .and_then(|fact| fact.callable.as_ref()?.invocation.as_deref())
+            .ok_or(Stop::Pending(node))?;
+        let syntax = &self.module.syntax.nodes[node];
+        let path = invocation.path.as_ref().ok_or(Stop::Pending(node))?;
+        if syntax.kind != NodeKind::Call
+            || syntax.children.as_slice() != [invocation.receiver]
+            || invocation.mode != InvocationMode::Once
+            || invocation.access != Access::Owned
+            || invocation.assumption.is_some()
+            || path.root.kind != DeclarationKind::Binding
+            || !path.projections.is_empty()
+        {
+            return Err(Stop::Pending(node));
+        }
+        let receiver = self.ungroup(invocation.receiver)?;
+        if self.module.syntax.nodes[receiver].kind != NodeKind::ValueReference
+            || !matches!(self.value(receiver)?.ty.as_ref(), TypeTerm::Callable {
+                mode: InvocationMode::Once, parameters, result
+            } if parameters.is_empty() && matches!(result.as_ref(), TypeTerm::Tuple(elements) if elements.len() == 2))
+            || self.slots[into].members != 2
+        {
+            return Err(Stop::Pending(node));
+        }
+        let receiver = self.resolve_place(receiver, path)?;
+        self.emit(
+            node,
+            Action::InvokeClosurePair { receiver, into },
+            Edges::Next(next),
+        )
+    }
+
     fn call(&mut self, node: NodeId, into: Option<Slot>, next: Pc, depth: usize) -> ResultOf<Pc> {
         let facts = self.value(node)?;
-        let call = facts.call.as_deref().ok_or(Stop::Pending(node))?;
+        let Some(call) = facts.call.as_deref() else {
+            return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next);
+        };
         if Some(call.callee) == self.dispose {
             let [arg] = call.arguments.as_slice() else {
                 return Err(Stop::Pending(node));

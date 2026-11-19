@@ -163,6 +163,13 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
+    /// Consume a known once environment and transfer its two captured values
+    /// into the corresponding result tuple positions.
+    InvokeClosurePair {
+        receiver: Place<'g>,
+        origin: Site<'g>,
+        into: Place<'g>,
+    },
     /// A direct call may retain an input's backing in the destination's
     /// contents, including the exclusive restriction on a shared view.
     CallRetaining {
@@ -736,6 +743,10 @@ enum Action<'g> {
         into: Option<Slot>,
     },
     Call(usize),
+    InvokeClosurePair {
+        receiver: Slot,
+        into: Slot,
+    },
     TestVariant {
         operand: Slot,
         success: &'g DeclarationId,

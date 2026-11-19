@@ -65,10 +65,6 @@ fn stored_pair_captures_transfer_backing_and_cleanup() {
                 let job: once () => [i32, string] = () => [payload(flag), text];
             }
             function payload(flag: bool): i32 { return 7i32; }
-            function invoked(left: string, right: string): [string, string] {
-                let job: once () => [string, string] = () => [left, right];
-                return job();
-            }
         "#,
         |_, module, receipt, _| {
             let declaration = |name| {
@@ -409,17 +405,264 @@ fn stored_pair_captures_transfer_backing_and_cleanup() {
                     .collect();
                 assert_eq!(standalone, [capture], "{name}");
             }
-            for (name, site) in [
-                ("computed", "() => [payload(flag), text]"),
-                ("invoked", "job()"),
+            let computed = lower("computed");
+            assert_eq!(computed.completion(), Completion::Incomplete);
+            assert!(computed.mir().is_none());
+            assert_eq!(
+                computed.blocked_at().unwrap().span.bytes(),
+                b"() => [payload(flag), text]"
+            );
+        },
+    );
+}
+
+#[test]
+fn invokes_a_known_once_pair_and_transfers_its_contents() {
+    probe_with_typed(
+        "captures::invokes_a_known_once_pair_and_transfers_its_contents",
+        r#"
+            function direct(left: string, right: string): string {
+                let job: once () => [string, string] = () => [right, left];
+                let [first, _] = job();
+                return first;
+            }
+            function moved(left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let now = job;
+                return now();
+            }
+            function selected(flag: bool, first: string, second: string, third: string, fourth: string): [string, string] {
+                let mut job: once () => [string, string] = () => [first, second];
+                if (flag) { job = () => [third, fourth]; }
+                return job();
+            }
+            function consumed(left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let result = job();
+                let old = job;
+                return result;
+            }
+            function repeatable(flag: bool, other: bool): [bool, bool] {
+                let job: () => [bool, bool] = () => [flag, other];
+                return job();
+            }
+        "#,
+        |_, module, receipt, typed| {
+            use compiler::analysis::InvocationMode;
+            use compiler::analysis::scalars::data::Access;
+
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let direct = lower("direct");
+            let mir = direct
+                .mir()
+                .unwrap_or_else(|| panic!("direct: {:?}", direct.completion()));
+            let blocks = straight_blocks(mir, mir.entry);
+            assert!(matches!(
+                blocks.last().unwrap().terminator,
+                Terminator::Return
+            ));
+            let route: Vec<_> = blocks
+                .iter()
+                .copied()
+                .filter(|block| match &block.operation {
+                    Operation::FormClosurePair { .. } | Operation::InvokeClosurePair { .. } => true,
+                    Operation::Move { from, .. } => from.tuple_element().is_some(),
+                    _ => false,
+                })
+                .collect();
+            let [form, call, transfer] = route.as_slice() else {
+                panic!("expected formation, invocation, and tuple transfer");
+            };
+            let (
+                Operation::FormClosurePair {
+                    closure,
+                    captures,
+                    mode,
+                },
+                Operation::InvokeClosurePair {
+                    receiver,
+                    origin,
+                    into,
+                },
+                Operation::Move {
+                    from,
+                    into: Some(first),
+                },
+            ) = (&form.operation, &call.operation, &transfer.operation)
+            else {
+                panic!("expected the direct once invocation route");
+            };
+            assert_eq!(*mode, InvocationMode::Once);
+            assert_eq!(closure.node, receiver.root.node);
+            assert_eq!(origin.node, form.site.node);
+            assert_eq!(origin.span.bytes(), b"() => [right, left]");
+            assert_eq!(captures[0].span.bytes(), b"right");
+            assert_eq!(captures[1].span.bytes(), b"left");
+            assert_eq!(from.root.node, into.root.node);
+            assert_eq!(from.tuple_element(), Some(0));
+            assert_eq!(first.root.span.bytes(), b"first");
+            assert_eq!(call.site.span.bytes(), b"job()");
+            let typed_call = typed
+                .bodies()
+                .node(module, call.site.node)
+                .unwrap()
+                .unwrap();
+            let invocation = typed_call
+                .callable
+                .as_ref()
+                .unwrap()
+                .invocation
+                .as_ref()
+                .unwrap();
+            assert_eq!(invocation.mode, InvocationMode::Once);
+            assert_eq!(invocation.access, Access::Owned);
+            assert!(invocation.assumption.is_none());
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(unbound)]
+                if unbound.root.node == into.root.node && unbound.tuple_element() == Some(1))
+            );
+
+            let moved = lower("moved");
+            let mir = moved
+                .mir()
+                .expect("formation identity moves with its environment");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::FormClosurePair { .. }
+                            | Operation::InvokeClosurePair { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [_, _,
+                Operation::FormClosurePair { closure, .. },
+                Operation::Move { from, into: Some(moved) },
+                Operation::InvokeClosurePair { receiver, into, .. },
+                Operation::Export(output),
+            ] if from.root.node == closure.node && moved.root.span.bytes() == b"now"
+                && moved.root.node == receiver.root.node && into.root.node == output.root.node));
+            assert!(path_drops(mir, mir.entry).is_empty());
+
+            let selected = lower("selected");
+            let mir = selected
+                .mir()
+                .expect("each continuing path invokes the origin it stored");
+            let (yes, no) = branch_targets(mir);
+            for (edge, expected) in [
+                (yes, b"() => [third, fourth]".as_slice()),
+                (no, b"() => [first, second]".as_slice()),
             ] {
-                let report = lower(name);
-                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                let ops = linear(mir, edge);
+                let route: Vec<_> = ops
+                    .iter()
+                    .copied()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::InvokeClosurePair { .. } | Operation::Export(_)
+                        )
+                    })
+                    .collect();
+                assert!(matches!(route.as_slice(), [
+                    Operation::InvokeClosurePair { receiver, origin, into }, Operation::Export(output),
+                ] if receiver.root.span.bytes() == b"job" && origin.span.bytes() == expected
+                    && into.root.node == output.root.node));
+            }
+            assert!(matches!(path_drops(mir, yes).as_slice(), [
+                Obligation::DropCapture { field: second, .. }, Obligation::DropCapture { field: first, .. },
+            ] if second.span.bytes() == b"second" && first.span.bytes() == b"first"));
+            assert!(
+                matches!(path_drops(mir, no).as_slice(), [Obligation::Drop(fourth), Obligation::Drop(third)]
+                if fourth.root.span.bytes() == b"fourth: string" && third.root.span.bytes() == b"third: string")
+            );
+
+            let limits = AnalysisLimits {
+                max_work: selected.statistics().work,
+                max_entries: selected.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(check("selected", limits).completion(), Completion::Checked);
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let report = check("selected", short);
+                assert_eq!(report.completion(), Completion::ResourceLimit);
                 assert!(report.mir().is_none());
-                assert_eq!(
-                    std::str::from_utf8(report.blocked_at().unwrap().span.bytes()),
-                    Ok(site),
-                    "{name}"
+            }
+            let consumed = lower("consumed");
+            assert_eq!(consumed.completion(), Completion::SourceRejected);
+            assert!(consumed.mir().is_none());
+            let [finding] = consumed.findings() else {
+                panic!("expected use after invocation")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"job");
+            assert_eq!(finding.related.span.bytes(), b"job()");
+            let repeatable = lower("repeatable");
+            assert_eq!(repeatable.completion(), Completion::Incomplete);
+            assert!(repeatable.mir().is_none());
+            assert_eq!(repeatable.blocked_at().unwrap().span.bytes(), b"job()");
+        },
+    );
+}
+
+#[test]
+fn repeated_invocation_and_borrowed_pair_still_need_typed_evidence() {
+    use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
+
+    probe_report(
+        "captures::repeated_invocation_and_borrowed_pair_still_need_typed_evidence",
+        r#"
+            function again(left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let _ = job();
+                return job();
+            }
+            function loan(text: string, owner: string): &string {
+                let borrowed: once () => [&string, string] = () => [&text, owner];
+                let [view, _] = borrowed();
+                return view;
+            }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.core_blockers().is_empty());
+            assert!(typed.receipt().is_none());
+            let pending = typed.result_use().unwrap().pending();
+            for written in [b"return job();".as_slice(), b"= borrowed();"] {
+                let at = module
+                    .snapshot
+                    .bytes()
+                    .windows(written.len())
+                    .position(|w| w == written)
+                    .unwrap();
+                let skip = written.iter().position(|&b| b == b' ').unwrap() + 1;
+                assert!(
+                    pending
+                        .iter()
+                        .any(|p| p.blocker == ResultUseBlocker::CallBoundary
+                            && p.site.module == &module.key
+                            && p.site.span.start() == at + skip)
                 );
             }
         },
