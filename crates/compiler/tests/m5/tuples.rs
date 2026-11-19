@@ -1196,55 +1196,20 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             assert!(wide.statistics().work >= narrow.statistics().work + 4);
             assert_eq!(wide.statistics().entries, narrow.statistics().entries);
             assert_eq!(wide.statistics().max_depth, narrow.statistics().max_depth);
-            let narrow_unary = lower("narrowUnary", default);
-            let wide_unary = lower("wideUnary", default);
-            assert!(narrow_unary.mir().is_some() && wide_unary.mir().is_some());
-            assert_eq!(
-                wide_unary.statistics().work - narrow_unary.statistics().work,
-                wide.statistics().work - narrow.statistics().work
-            );
-            assert_eq!(
-                wide_unary.statistics().entries,
-                narrow_unary.statistics().entries
-            );
-            assert_eq!(
-                wide_unary.statistics().max_depth,
-                narrow_unary.statistics().max_depth
-            );
-            let narrow_pipe = lower("narrowPipe", default);
-            let wide_pipe = lower("widePipe", default);
-            let narrow_trailing = lower("narrowTrailing", default);
-            let wide_trailing = lower("wideTrailing", default);
-            for (pipe, source) in [
-                (&narrow_pipe, b"parent |> narrowPair(other, _)".as_slice()),
-                (&wide_pipe, b"parent |> widePair(other, _)"),
-                (&narrow_trailing, b"parent |> narrowTail(extra)"),
-                (&wide_trailing, b"parent |> wideTail(extra)"),
+            let width_work = wide.statistics().work - narrow.statistics().work;
+            for (base, wider) in [
+                ("narrowUnary", "wideUnary"),
+                ("narrowMixed", "wideMixed"),
+                ("narrowPipe", "widePipe"),
+                ("narrowTrailing", "wideTrailing"),
             ] {
-                assert_eq!(pipe.completion(), Completion::Incomplete);
-                assert!(pipe.mir().is_none());
-                assert_eq!(pipe.blocked_at().unwrap().span.bytes(), source);
+                let base = lower(base, default);
+                let wider = lower(wider, default);
+                assert!(base.mir().is_some() && wider.mir().is_some());
+                assert_eq!(wider.statistics().work - base.statistics().work, width_work);
+                assert_eq!(wider.statistics().entries, base.statistics().entries);
+                assert_eq!(wider.statistics().max_depth, base.statistics().max_depth);
             }
-            assert_eq!(wide_pipe.statistics().work, narrow_pipe.statistics().work);
-            assert_eq!(
-                wide_trailing.statistics().work,
-                narrow_trailing.statistics().work
-            );
-            let narrow_mixed = lower("narrowMixed", default);
-            let wide_mixed = lower("wideMixed", default);
-            assert!(narrow_mixed.mir().is_some() && wide_mixed.mir().is_some());
-            assert_eq!(
-                wide_mixed.statistics().work - narrow_mixed.statistics().work,
-                wide_unary.statistics().work - narrow_unary.statistics().work
-            );
-            assert_eq!(
-                wide_mixed.statistics().entries,
-                narrow_mixed.statistics().entries
-            );
-            assert_eq!(
-                wide_mixed.statistics().max_depth,
-                narrow_mixed.statistics().max_depth
-            );
             assert_exact_tuple_call_limits(&resumes, |limits| lower("resumes", limits));
         },
     );
@@ -1674,11 +1639,11 @@ fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
                 assert_eq!(finding.related.span.bytes(), cause);
                 assert!(finding.related.span.start() < finding.site.span.start());
             }
+            for name in ["twoFirst", "twoLast", "twoImplicit"] {
+                assert!(lower(name, default).mir().is_some(), "{name}");
+            }
             for (name, site) in [
-                ("twoFirst", b"parent".as_slice()),
-                ("twoLast", b"parent |> nestedLast(other, _)"),
-                ("twoImplicit", b"parent |> nestedFirst(other)"),
-                ("unsupportedMutable", b"parent"),
+                ("unsupportedMutable", b"parent".as_slice()),
                 ("propagating", b"parent |> maybe(mark(), fallback, _)?"),
             ] {
                 let report = lower(name, default);
@@ -1686,6 +1651,238 @@ fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
                 assert!(report.mir().is_none());
                 assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
             }
+            assert_exact_tuple_call_limits(&releases, |limits| lower("releases", limits));
+        },
+    );
+}
+
+#[test]
+fn nested_tuple_calls_keep_each_staged_parent_restriction() {
+    probe(
+        "tuples::nested_tuple_calls_keep_each_staged_parent_restriction",
+        r#"
+            function view(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): &string {
+                let [[_, member], _] = &mut *first;
+                return &*member;
+            }
+            function scalar(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): bool {
+                let [[bit, _], _] = &mut *second;
+                return bit;
+            }
+            function touch(view: &string): void {}
+            function direct(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): &string {
+                return view((first), second);
+            }
+            function piped(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): &string {
+                return second |> view((first), _);
+            }
+            function releases(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): bool {
+                let bit = scalar(first, second);
+                let output = second |> view(first, _);
+                touch(output);
+                let movedFirst = first;
+                let movedSecond = second;
+                return bit;
+            }
+            function directOverlap(parent: &mut [[bool, string], i32]): &string {
+                return view((parent), parent);
+            }
+            function pipeOverlap(parent: &mut [[bool, string], i32]): &string {
+                return parent |> view((parent), _);
+            }
+            function firstSuspended(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): void {
+                let output = view(first, second);
+                let observer = &first;
+                touch(output);
+            }
+            function secondSuspended(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): void {
+                let output = view(first, second);
+                let copied = output;
+                let observer = &second;
+                touch(copied);
+            }
+            function mixed(first: &mut [[bool, string], i32], other: &[bool, string]): &string {
+                let [[_, member], _] = &mut *first;
+                return &*member;
+            }
+            function mixedIncoming(first: &mut [[bool, string], i32], other: &[bool, string]): &string {
+                return first |> mixed(other);
+            }
+            function escapeOther(first: &mut [[bool, string], i32]): &string {
+                let owner: [bool, string] = [true, "local"];
+                return first |> mixed(&owner);
+            }
+            function alias(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): &string {
+                let local = first;
+                return second |> view(local, _);
+            }
+            function bad(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): &string {
+                let owner = "local";
+                return &owner;
+            }
+            function reachedBad(first: &mut [[bool, string], i32], second: &mut [[bool, string], i32]): &string {
+                return second |> bad(first, _);
+            }
+        "#,
+        |_, module, receipt| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            for (name, source, order) in [
+                (
+                    "direct",
+                    b"view((first), second)".as_slice(),
+                    [b"(first)".as_slice(), b"second"],
+                ),
+                (
+                    "piped",
+                    b"second |> view((first), _)",
+                    [b"second".as_slice(), b"(first)"],
+                ),
+            ] {
+                let report = lower(name, default);
+                let mir = report.mir().unwrap_or_else(|| {
+                    panic!("two nested parents {name}: {:?}", report.completion())
+                });
+                assert!(path_drops(mir, mir.entry).is_empty());
+                let ops: Vec<_> = linear(mir, mir.entry)
+                    .into_iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Reborrow { .. } | Operation::Call(_) | Operation::Export(_)
+                        )
+                    })
+                    .collect();
+                let [
+                    Operation::Reborrow {
+                        parent,
+                        holder,
+                        exclusive: true,
+                    },
+                    Operation::Reborrow {
+                        parent: second,
+                        holder: other,
+                        exclusive: true,
+                    },
+                    Operation::Call(callee),
+                    Operation::Export(output),
+                ] = ops.as_slice()
+                else {
+                    panic!("expected two whole-parent reborrows followed by call and export")
+                };
+                assert_ne!(parent.root.node, second.root.node);
+                assert!(
+                    [parent, holder, second, other]
+                        .iter()
+                        .all(|place| place.projection.is_none())
+                );
+                let parent_order: [&[u8]; 2] = if name == "direct" {
+                    [
+                        b"first: &mut [[bool, string], i32]",
+                        b"second: &mut [[bool, string], i32]",
+                    ]
+                } else {
+                    [
+                        b"second: &mut [[bool, string], i32]",
+                        b"first: &mut [[bool, string], i32]",
+                    ]
+                };
+                assert_eq!(
+                    [parent.root.span.bytes(), second.root.span.bytes()],
+                    parent_order
+                );
+                assert_eq!([holder.root.span.bytes(), other.root.span.bytes()], order);
+                assert_eq!(*callee, id("view"));
+                assert_eq!(output.root.span.bytes(), source);
+            }
+            let releases = lower("releases", default);
+            let mir = releases
+                .mir()
+                .expect("scalar result and last use release both staged parents");
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::Call(_)
+                            | Operation::Move { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(ops.as_slice(), [
+                Operation::Reborrow { parent: first, exclusive: true, .. }, Operation::Reborrow { parent: second, exclusive: true, .. }, Operation::Call(scalar),
+                Operation::Reborrow { parent: second_again, exclusive: true, .. }, Operation::Reborrow { parent: first_again, exclusive: true, .. }, Operation::Call(view), Operation::Call(touch),
+                Operation::Move { from: first_move, .. }, Operation::Move { from: second_move, .. }, Operation::Export(bit),
+            ] if first.root.node != second.root.node && first.root.node == first_again.root.node && first.root.node == first_move.root.node
+                && second.root.node == second_again.root.node && second.root.node == second_move.root.node
+                && *scalar == id("scalar") && *view == id("view") && *touch == id("touch") && bit.root.span.bytes() == b"bit"));
+            let mixed = lower("mixedIncoming", default);
+            let mir = mixed
+                .mir()
+                .expect("the other tuple descriptor can be shared");
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Call(_)
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(ops.as_slice(), [Operation::Reborrow { parent, holder, exclusive: true }, Operation::Copy { from: shared, into: Some(other) }, Operation::Call(callee), Operation::Export(_)]
+                if parent.root.span.bytes() == b"first: &mut [[bool, string], i32]" && holder.root.span.bytes() == b"first"
+                    && shared.root.span.bytes() == b"other: &[bool, string]" && other.root.span.bytes() == b"other" && *callee == id("mixed"))
+            );
+            for (name, code, site, cause) in [
+                (
+                    "directOverlap",
+                    "R0201",
+                    b"parent".as_slice(),
+                    b"(parent)".as_slice(),
+                ),
+                ("pipeOverlap", "R0201", b"(parent)", b"parent"),
+                ("firstSuspended", "R0201", b"&first", b"first"),
+                ("secondSuspended", "R0201", b"&second", b"second"),
+                (
+                    "escapeOther",
+                    "R0202",
+                    b"return first |> mixed(&owner);",
+                    b"owner",
+                ),
+                ("reachedBad", "R0202", b"return &owner;", b"owner"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), cause);
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+            let alias = lower("alias", default);
+            assert_eq!(alias.completion(), Completion::Incomplete);
+            assert!(alias.mir().is_none());
+            assert_eq!(
+                alias.blocked_at().unwrap().span.bytes(),
+                b"second |> view(local, _)"
+            );
             assert_exact_tuple_call_limits(&releases, |limits| lower("releases", limits));
         },
     );
