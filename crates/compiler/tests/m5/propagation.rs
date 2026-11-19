@@ -200,8 +200,7 @@ fn option_pipe_propagates_the_staged_call_output_once() {
             }
             function absent(taken: string): Option<bool>.None { dispose(taken); return Option<bool>.None; }
             function failure(taken: string, owner: string): Option<bool> {
-                let _ = taken |> absent?;
-                dispose(owner);
+                { let inner = owner; let _ = taken |> absent?; dispose(inner); }
                 return Option.Some(true);
             }
             function present(taken: string): Option<bool>.Some { dispose(taken); return Option.Some(true); }
@@ -227,6 +226,10 @@ fn option_pipe_propagates_the_staged_call_output_once() {
             function passText(value: string): Option<string> { return Option.Some(value); }
             function unsupported(input: string): Option<bool> {
                 let _ = input |> passText?;
+                return Option.Some(true);
+            }
+            function nonExact(taken: string): Option<bool> {
+                let _ = taken |> pass(Option<bool>.Some(true), _)?;
                 return Option.Some(true);
             }
         "#,
@@ -296,7 +299,7 @@ fn option_pipe_propagates_the_staged_call_output_once() {
                     "absent",
                     &role.none.id,
                     false,
-                    &[b"owner: string".as_slice()][..],
+                    &[b"inner".as_slice()][..],
                 ),
                 ("success", "present", &role.some.id, true, &[][..]),
             ] {
@@ -324,13 +327,19 @@ fn option_pipe_propagates_the_staged_call_output_once() {
                 assert_eq!(finding.site.span.bytes(), b"dispose(taken)");
                 assert_eq!(finding.related.span.bytes(), related.as_bytes());
             }
-            let unsupported = check("unsupported");
-            assert_eq!(unsupported.completion(), Completion::Incomplete);
-            assert_eq!(
-                unsupported.blocked_at().unwrap().span.bytes(),
-                b"input |> passText?"
-            );
-            assert!(unsupported.mir().is_none());
+            for (name, site) in [
+                ("unsupported", "input |> passText?"),
+                ("nonExact", "taken |> pass(Option<bool>.Some(true), _)?"),
+            ] {
+                let unsupported = check(name);
+                assert_eq!(unsupported.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(
+                    unsupported.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+                assert!(unsupported.mir().is_none());
+            }
             let limits = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,
@@ -1121,6 +1130,12 @@ fn result_pipe_forwards_the_existing_wrapper_after_a_single_call() {
                 dispose(owner);
                 return Result.Ok(6i32);
             }
+            function numberStep(value: i32): Result<i32, i32>.Ok { return Result<i32, i32>.Ok(value); }
+            function knownNumber(value: i32, owner: string): Result<bool, i32> {
+                let number = value |> numberStep?;
+                dispose(owner);
+                return Result.Ok(true);
+            }
             function text(value: string): Result<string, i32> { return Result.Ok(value); }
             function unsupportedText(value: string): Result<bool, i32> {
                 let _ = value |> text?;
@@ -1245,6 +1260,15 @@ fn result_pipe_forwards_the_existing_wrapper_after_a_single_call() {
                 |op| matches!(op, Operation::TakeResultSuccess { operand, into: None }
                 if operand.root.span.bytes() == b"input |> onlyOk?")
             ));
+            let number = check("knownNumber");
+            let mir = number
+                .mir()
+                .expect("an i32 success payload can feed a Bool Result caller");
+            assert_eq!(calls_on_path(mir, []), [&declaration("numberStep").id]);
+            let ops = linear(mir, mir.entry);
+            assert_return(&ops, &role.ok.id, true, &[]);
+            assert!(ops.iter().any(|op| matches!(op, Operation::TakeResultSuccess { operand, into: Some(target) }
+                if operand.root.span.bytes() == b"value |> numberStep?" && target.root.span.bytes() == b"number")));
             for (name, site) in [
                 ("unsupportedText", "value |> text?"),
                 ("unsupportedFresh", "code |> makeError<bool, i32>?"),

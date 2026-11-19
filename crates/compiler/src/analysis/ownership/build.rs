@@ -338,6 +338,12 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(true)
     }
 
+    fn direct_application_call(call: &crate::analysis::scalars::CallFacts<'g>) -> bool {
+        call.callee.kind == DeclarationKind::Function
+            && call.callee.module.origin == Origin::Application
+            && call.substitution.is_empty()
+    }
+
     fn direct_call_type(&self, ty: &TypeTerm<'g>) -> bool {
         matches!(
             ty,
@@ -1451,7 +1457,7 @@ impl<'a, 'g> Build<'a, 'g> {
             (None, None) => return Err(Stop::Pending(node)),
         };
         if piped {
-            self.call(node, Some(scratch), split, depth, Some(operand))
+            self.call(node, facts, Some(scratch), split, depth, Some(operand))
         } else {
             self.expression(source, Some(scratch), split, depth)
         }
@@ -1463,11 +1469,7 @@ impl<'a, 'g> Build<'a, 'g> {
         facts: &ExpressionFacts<'g>,
     ) -> ResultOf<&'a Type<'g>> {
         let call = facts.call.as_deref().ok_or(Stop::Pending(node))?;
-        if call.pipe_input.is_none()
-            || call.callee.kind != DeclarationKind::Function
-            || call.callee.module.origin != Origin::Application
-            || !call.substitution.is_empty()
-        {
+        if call.pipe_input.is_none() || !Self::direct_application_call(call) {
             return Err(Stop::Pending(node));
         }
         // The pipe node's expression type describes the success payload.
@@ -1884,7 +1886,7 @@ impl<'a, 'g> Build<'a, 'g> {
             NodeKind::Arrow => {
                 return self.closure(node, into.ok_or(Stop::Pending(node))?, next, depth + 1);
             }
-            NodeKind::Call => return self.call(node, into, next, depth + 1, None),
+            NodeKind::Call => return self.call(node, facts, into, next, depth + 1, None),
             NodeKind::Pipe
                 if self.module.syntax.nodes[syntax.children[1]].kind
                     == (NodeKind::PipeStep { propagate: false })
@@ -1893,7 +1895,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         .as_ref()
                         .is_some_and(|call| call.pipe_input.is_some()) =>
             {
-                return self.call(node, into, next, depth + 1, None);
+                return self.call(node, facts, into, next, depth + 1, None);
             }
             _ => return Err(Stop::Pending(node)),
         };
@@ -2150,12 +2152,12 @@ impl<'a, 'g> Build<'a, 'g> {
     fn call(
         &mut self,
         node: NodeId,
+        facts: &ExpressionFacts<'g>,
         into: Option<Slot>,
         next: Pc,
         depth: usize,
-        step_result: Option<&Type<'g>>,
+        proved_propagation_carrier: Option<&Type<'g>>,
     ) -> ResultOf<Pc> {
-        let facts = self.value(node)?;
         let Some(call) = facts.call.as_deref() else {
             return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next);
         };
@@ -2193,17 +2195,16 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             return self.emit(node, Action::Dispose(operand), Edges::Next(next));
         }
-        let result = step_result.unwrap_or(&facts.ty);
-        if call.callee.kind != DeclarationKind::Function
-            || call.callee.module.origin != Origin::Application
-            || !call.substitution.is_empty()
+        let result = proved_propagation_carrier.unwrap_or(&facts.ty);
+        if !Self::direct_application_call(call)
             || !self.direct_call_type(result)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())
         {
             return Err(Stop::Pending(node));
         }
         let piped = call.pipe_input.is_some();
-        let ordinary_pipe = piped && step_result.is_none();
+        // A propagating pipe already passed its exact carrier signature check.
+        let ordinary_pipe = piped && proved_propagation_carrier.is_none();
         let mut tuple_or_leaf_admitted =
             ordinary_pipe && self.admits_direct_tuple_or_leaf_call(call, result)?;
         let mut pipe_retention = None;
