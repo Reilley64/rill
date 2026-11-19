@@ -151,8 +151,8 @@ pub enum Operation<'g> {
         exclusive: bool,
     },
     Dereference(Place<'g>),
-    /// Bind a fixed member through an initialized shared descriptor.
-    /// Neither binding mode moves the member out of its owner.
+    /// Bind a fixed projection relative to a shared descriptor's referent.
+    /// Neither mode consumes the descriptor or moves the member.
     BindSharedMember {
         descriptor: Place<'g>,
         projection: Projection<'g>,

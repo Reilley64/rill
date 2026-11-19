@@ -283,6 +283,7 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
                 let _ = flag;
                 return label;
             }
+            function ignores(value: &Packet): void { let Packet { skip: _, text: _ } = value; }
             function copied(value: Packet): bool {
                 let Packet { flag } = &value;
                 let moved = value;
@@ -324,6 +325,11 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
             type Nested = { inner: [bool, bool]; };
             function nested(value: &Nested): bool {
                 let Nested { inner: [bit, _] } = value;
+                return bit;
+            }
+            type Protected = { lock: LockGuard<i32>; bit: bool; };
+            function protected(value: &Protected): bool {
+                let Protected { bit } = value;
                 return bit;
             }
             function exclusive(value: &mut Packet): bool {
@@ -412,9 +418,35 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
-            for (name, expected) in [
-                ("copied", &["omit", "skip", "text"][..]),
-                ("lastUse", &["skip", "omit", "skip", "text"][..]),
+            let ignored = check("ignores");
+            let mir = ignored
+                .mir()
+                .expect("wildcards and omissions observe no member");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. }
+                            | Operation::Move { .. }
+                            | Operation::Dispose { .. }
+                            | Operation::BindSharedMember { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::Copy { from, into: Some(_) }]
+                if from.root.span.bytes() == b"value: &Packet")
+            );
+            assert!(path_drops(mir, mir.entry).is_empty());
+
+            for (name, owner, expected) in [
+                ("copied", b"moved".as_slice(), &["omit", "skip", "text"][..]),
+                (
+                    "lastUse",
+                    b"owner".as_slice(),
+                    &["skip", "omit", "skip", "text"][..],
+                ),
             ] {
                 let report = check(name);
                 let mir = report
@@ -423,7 +455,10 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
                 let fields: Vec<_> = path_drops(mir, mir.entry)
                     .into_iter()
                     .map(|drop| match drop {
-                        Obligation::Drop(place) => place.field().unwrap().name.as_deref().unwrap(),
+                        Obligation::Drop(place) => {
+                            assert_eq!(place.root.span.bytes(), owner, "{name}");
+                            place.field().unwrap().name.as_deref().unwrap()
+                        }
                         _ => panic!("unexpected cleanup"),
                     })
                     .collect();
@@ -454,6 +489,7 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
                 ("carried", "Carrier { saved }"),
                 ("nested", "[bit, _]"),
                 ("exclusive", "Packet { flag }"),
+                ("protected", "Protected { bit }"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");

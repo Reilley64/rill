@@ -364,6 +364,7 @@ pub(super) fn eligible_captured_family<'a, 'g>(
     id: &DeclarationId,
     budget: &mut Budget,
 ) -> Work<Result<&'a FamilyFacts<'g>, SelectionBlocker>> {
+    budget.step(1)?;
     let Some(family) = analysis.families.get(id) else {
         return Ok(Err(SelectionBlocker::HeaderOrPlacement));
     };
