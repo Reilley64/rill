@@ -168,7 +168,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 && Some(scope.family) == self.dispose
                 && scope.rule == OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
                 && scope.coverage == OwnershipCoverage::Clear)
-                .then(|| scope.provider.as_ref())
+                .then_some(scope.provider.as_ref())
                 .flatten()
         }) else {
             return Ok(None);
