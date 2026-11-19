@@ -291,7 +291,7 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(root)
     }
 
-    fn record_fields(&self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<&'a [MemberType<'g>]> {
+    fn record_fields(&mut self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<&'a [MemberType<'g>]> {
         let TypeTerm::Nominal {
             declaration,
             arguments,
@@ -302,6 +302,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if declaration.module.origin != Origin::Application || !arguments.is_empty() {
             return Err(Stop::Pending(node));
         }
+        self.budget.step(1)?;
         let inventory = self.typed.inventory();
         let facts = inventory
             .type_facts()
@@ -338,6 +339,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     .iter()
                     .find(|choice| &choice.body.source.declaration == winner && choice.covers)
                     .ok_or(Stop::Pending(node))?;
+                self.budget.step(2)?;
                 if selected.body.header.binders.is_empty()
                     && selected.substitution.is_empty()
                     && [dispose, winner].into_iter().all(|id| {

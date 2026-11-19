@@ -66,6 +66,7 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
             let mut scratch = None;
             let mut result = None;
             let mut bound = None;
+            let mut returned = false;
             let mut pc = mir.entry;
             for _ in 0..mir.blocks.len() {
                 let block = &mir.blocks[pc];
@@ -91,6 +92,7 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                         into: Some(to),
                     } if Some(from.root.node) == bound && bound.is_some() => {
                         result = Some(to.root.node);
+                        events.push(("stage return", None));
                     }
                     Operation::Export(output) => {
                         assert_eq!(Some(output.root.node), result);
@@ -113,10 +115,14 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                 }
                 match block.terminator {
                     Terminator::Goto(next) => pc = next,
-                    Terminator::Return => break,
+                    Terminator::Return => {
+                        returned = true;
+                        break;
+                    }
                     _ => panic!("expected a straight binding path"),
                 }
             }
+            assert!(returned, "the path must reach Return");
             assert_eq!(
                 events,
                 [
@@ -125,6 +131,7 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                     ("left", Some(&field("left").id)),
                     ("remaining", Some(&field("omit").id)),
                     ("remaining", Some(&field("skip").id)),
+                    ("stage return", None),
                     ("export", None),
                     ("local", None),
                 ]
@@ -155,12 +162,18 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                 .mir()
                 .expect("copying a carried field does not borrow the pattern temporary");
             let ops = linear(mir, mir.entry);
-            assert!(
-                ops.iter()
-                    .any(|op| matches!(op, Operation::Copy { from, into: Some(to) }
-                if from.field().is_some_and(|member| member.id == field("carried").id)
-                    && to.root.span.bytes() == b"carried"))
-            );
+            let route: Vec<_> = ops
+                .iter()
+                .copied()
+                .filter(|op| matches!(op, Operation::Copy { .. } | Operation::Export(_)))
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Copy { from: member, into: Some(bound) },
+                Operation::Copy { from: read, into: Some(output) },
+                Operation::Export(exported),
+            ] if member.field().is_some_and(|member| member.id == field("carried").id)
+                && bound.root.span.bytes() == b"carried" && bound.root.node == read.root.node
+                && output.root.node == exported.root.node));
             assert!(
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)]
                 if place.field().is_some_and(|member| member.id == field("tag").id))
