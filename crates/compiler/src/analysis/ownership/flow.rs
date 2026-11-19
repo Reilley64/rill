@@ -1467,9 +1467,9 @@ pub(super) fn run<'g>(
                         }
                     }
                 }
-                Action::Displace { target, .. } if slots[target].needs_boundary_cleanup() => {
-                    // Installing a child can restore a partial move, not rebuild
-                    // the enclosing storage after a whole move.
+                Action::Displace { target, .. } => {
+                    // Check the enclosing storage, not its fields: this write
+                    // can repair a partial move but cannot rebuild a moved owner.
                     let owner = slots[target].owner;
                     if owner != target {
                         budget.step(1)?;
@@ -1477,36 +1477,33 @@ pub(super) fn run<'g>(
                             return Err(Stop::Pending(node));
                         }
                     }
-                    if disposal_origin(&state[target]).is_some() {
-                        return Err(Stop::Pending(node));
+                    if slots[target].needs_boundary_cleanup() {
+                        if disposal_origin(&state[target]).is_some() {
+                            return Err(Stop::Pending(node));
+                        }
+                        cleanup_boundary(
+                            module,
+                            &slots,
+                            &mut state,
+                            &[target],
+                            &live[pc],
+                            (node, remainder),
+                            budget,
+                        )?
+                    } else {
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            target,
+                            (node, Conflict::Release),
+                            Access::Exclusive,
+                            budget,
+                        )?;
+                        let displaced = std::mem::replace(&mut state[target], State::Vacant);
+                        retire_loans(&slots, &mut state, &[target], budget)?;
+                        cleanup_operation(module, slots[target], displaced, node, budget)?
                     }
-                    cleanup_boundary(
-                        module,
-                        &slots,
-                        &mut state,
-                        &[target],
-                        &live[pc],
-                        (node, remainder),
-                        budget,
-                    )?
-                }
-                Action::Displace { target, .. } => {
-                    let owner = slots[target].owner;
-                    if owner != target && !matches!(state[owner], State::Initialized(_)) {
-                        return Err(Stop::Pending(node));
-                    }
-                    conflict(
-                        &slots,
-                        &state,
-                        &live[pc],
-                        target,
-                        (node, Conflict::Release),
-                        Access::Exclusive,
-                        budget,
-                    )?;
-                    let displaced = std::mem::replace(&mut state[target], State::Vacant);
-                    retire_loans(&slots, &mut state, &[target], budget)?;
-                    cleanup_operation(module, slots[target], displaced, node, budget)?
                 }
                 Action::Install { target, incoming } => {
                     require_initialized(&slots, &state, incoming, node, budget)?;

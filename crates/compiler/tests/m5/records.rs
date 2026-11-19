@@ -718,6 +718,12 @@ fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
                     saved.child = taken;
                 }
             }
+            function repairOneEdge(seed: Outer, repair: bool): Outer {
+                let mut saved = seed;
+                let taken = saved.child;
+                if (repair) { saved.child = taken; }
+                return saved;
+            }
             function movedRoot(seed: Outer, fresh: Inner): void {
                 let mut saved = seed;
                 let gone = saved;
@@ -726,6 +732,14 @@ fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
             function deep(seed: Outer, fresh: string): void {
                 let mut saved = seed;
                 saved.child.first = fresh;
+            }
+            function scalar(seed: Outer, fresh: string): void {
+                let mut saved = seed;
+                saved.sibling = fresh;
+            }
+            function projected(seed: Outer, fresh: Outer): void {
+                let mut saved = seed;
+                saved.child = fresh.child;
             }
             function construct(seed: Outer, first: string, last: string): void {
                 let mut saved = seed;
@@ -848,9 +862,25 @@ fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
                 *path.last().unwrap(),
                 *loop_test.last().unwrap()
             ));
-            assert!(!path.iter().any(|block| matches!(&block.operation, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::Drop(_))))));
+            assert!(!path.iter().any(|block| {
+                match &block.operation {
+                    Operation::Drop(_) => true,
+                    Operation::Cleanup(actions) => actions
+                        .iter()
+                        .any(|action| matches!(action, Obligation::Drop(_))),
+                    _ => false,
+                }
+            }));
             assert!(path_drops(mir, exit).is_empty());
-            assert!(linear(mir, exit).iter().any(|op| matches!(op, Operation::Export(output) if output.root.span.bytes() == b"saved" && output.projection.is_none())));
+            let route: Vec<_> = linear(mir, exit)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Export(_)))
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::Move { from, into: Some(staged) }, Operation::Export(output)]
+                if from.root.node == child.root.node && staged.root.node == output.root.node
+                    && [from, staged, output].iter().all(|place| place.projection.is_none()))
+            );
 
             let skipped = lower("skipRestore", default);
             assert_eq!(skipped.completion(), Completion::SourceRejected);
@@ -861,9 +891,21 @@ fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
             assert_eq!(finding.code(), "R0200");
             assert_eq!(finding.site.span.bytes(), b"saved.child");
             assert_eq!(finding.related.node, finding.site.node);
+            let one_edge = lower("repairOneEdge", default);
+            assert_eq!(one_edge.completion(), Completion::SourceRejected);
+            assert!(one_edge.mir().is_none());
+            let [finding] = one_edge.findings() else {
+                panic!("expected a whole read rejection on the unrepaired edge")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"saved");
+            assert_eq!(finding.related.span.bytes(), b"saved.child");
+            assert!(finding.related.span.start() < finding.site.span.start());
             for (name, site) in [
                 ("movedRoot", b"saved.child = fresh;".as_slice()),
                 ("deep", b"saved.child.first"),
+                ("scalar", b"saved.sibling"),
+                ("projected", b"fresh.child"),
                 (
                     "construct",
                     b"Inner { first: first, flag: false, last: last }",

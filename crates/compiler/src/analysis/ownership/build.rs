@@ -875,8 +875,12 @@ impl<'a, 'g> Build<'a, 'g> {
         self.resolve_place(node, path)
     }
 
-    fn assignment_target(&mut self, left: NodeId, value: NodeId) -> ResultOf<Slot> {
-        let facts = self.value(left)?;
+    fn assignment_target(
+        &mut self,
+        left: NodeId,
+        facts: &'a ExpressionFacts<'g>,
+        value: NodeId,
+    ) -> ResultOf<(Slot, Option<&'a Type<'g>>)> {
         let path = facts.path.as_ref().ok_or(Stop::Pending(left))?;
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
@@ -896,9 +900,9 @@ impl<'a, 'g> Build<'a, 'g> {
             if source.ty != facts.ty {
                 return Err(Stop::Pending(value));
             }
-            return Ok(child);
+            return Ok((child, Some(&source.ty)));
         }
-        self.resolve_place(left, path)
+        Ok((self.resolve_place(left, path)?, None))
     }
 
     fn nested_transfer_slot(
@@ -1154,12 +1158,15 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::Assignment("=") => {
                 let (left, value) = (children[0], children[1]);
-                if let Some(path) = &self.value(left)?.path
+                self.budget.step(1)?;
+                let facts = self.value(left)?;
+                if let Some(path) = &facts.path
                     && path.projections.as_slice() == [PathProjection::Dereference]
                 {
                     let descriptor = self.bool_deref_descriptor_slot(left, path)?;
-                    let ty = self.value(value)?.ty.clone();
-                    let incoming = self.slot(value, &ty)?;
+                    self.budget.step(1)?;
+                    let ty = &self.value(value)?.ty;
+                    let incoming = self.slot(value, ty)?;
                     let install = self.emit(
                         node,
                         Action::InstallThrough {
@@ -1170,14 +1177,19 @@ impl<'a, 'g> Build<'a, 'g> {
                     )?;
                     return self.expression(value, Some(incoming), install, depth + 1);
                 }
-                let target = self.assignment_target(left, value)?;
+                let (target, proved_type) = self.assignment_target(left, facts, value)?;
                 if self.slots[target].projection.is_some()
                     && self.slots[target].guard_release().is_some()
                 {
                     return Err(Stop::Pending(left));
                 }
-                let ty = self.value(value)?.ty.clone();
-                let incoming = self.slot(value, &ty)?;
+                let ty = if let Some(ty) = proved_type {
+                    ty
+                } else {
+                    self.budget.step(1)?;
+                    &self.value(value)?.ty
+                };
+                let incoming = self.slot(value, ty)?;
                 let initializer = self.ungroup(value)?;
                 let temporary = self.temporary_projection(initializer, false)?;
                 let next = if let Some(temp) = temporary {
