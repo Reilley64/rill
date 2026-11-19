@@ -110,6 +110,11 @@ pub struct Place<'g> {
 pub enum Projection<'g> {
     Field(&'g Declaration),
     TupleElement(usize),
+    /// A borrowed pattern's two positions, relative to the descriptor's referent.
+    NestedTupleElement {
+        outer: usize,
+        inner: usize,
+    },
 }
 
 impl<'g> Place<'g> {

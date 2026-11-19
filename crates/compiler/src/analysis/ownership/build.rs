@@ -39,6 +39,9 @@ fn borrowed_binding_mode(
     access: Access,
     binder: &PatternBinder<'_>,
 ) -> Option<BorrowedMemberBinding> {
+    if !shared_pattern_member_type(binder.source_type.as_ref()) {
+        return None;
+    }
     if binder.ty == binder.source_type {
         Some(if shared_primitive_reference(binder.ty.as_ref()) {
             BorrowedMemberBinding::CopyReference
@@ -70,21 +73,31 @@ fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>
     }
 }
 
+enum ProductMember<'g> {
+    Field(&'g DeclarationId),
+    TupleElement(usize),
+    NestedTupleElement { outer: usize, inner: usize },
+}
+
 fn product_member<'g>(
     access: Access,
     route: &[PatternProjection<'g>],
-) -> Option<PatternProjection<'g>> {
-    match (access != Access::Owned, route) {
-        (
-            true,
-            [
-                PatternProjection::Dereference,
-                member @ (PatternProjection::TupleElement(_) | PatternProjection::Field(_)),
-            ],
-        )
-        | (false, [member @ (PatternProjection::TupleElement(_) | PatternProjection::Field(_))]) => {
-            Some(*member)
-        }
+) -> Option<ProductMember<'g>> {
+    let members = match (access, route) {
+        (Access::Owned, members) => members,
+        (_, [PatternProjection::Dereference, members @ ..]) => members,
+        _ => return None,
+    };
+    match members {
+        [PatternProjection::Field(field)] => Some(ProductMember::Field(field)),
+        [PatternProjection::TupleElement(position)] => Some(ProductMember::TupleElement(*position)),
+        [
+            PatternProjection::TupleElement(outer),
+            PatternProjection::TupleElement(inner),
+        ] if access == Access::ReadOnly => Some(ProductMember::NestedTupleElement {
+            outer: *outer,
+            inner: *inner,
+        }),
         _ => None,
     }
 }
@@ -584,6 +597,7 @@ impl<'a, 'g> Build<'a, 'g> {
         match projection {
             Projection::Field(field) => self.field(node, root, &field.id),
             Projection::TupleElement(position) => self.element(node, root, position),
+            Projection::NestedTupleElement { .. } => Err(Stop::Pending(node)),
         }
     }
 
@@ -926,11 +940,16 @@ impl<'a, 'g> Build<'a, 'g> {
                         },
                     ) if let TypeTerm::Tuple(elements) = referent.as_ref() => {
                         self.budget.step(elements.len())?;
-                        if !elements
-                            .iter()
-                            .all(|ty| shared_pattern_member_type(ty.as_ref()))
-                        {
-                            return Err(Stop::Pending(pattern));
+                        for element in elements {
+                            if shared_pattern_member_type(element.as_ref()) {
+                                continue;
+                            }
+                            let TypeTerm::Tuple(inner) = element.as_ref() else {
+                                return Err(Stop::Pending(pattern));
+                            };
+                            if !self.primitive_tuple_elements(inner)? {
+                                return Err(Stop::Pending(pattern));
+                            }
                         }
                         Access::ReadOnly
                     }
@@ -1104,6 +1123,29 @@ impl<'a, 'g> Build<'a, 'g> {
                     };
                     let name = self.ungroup(component)?;
                     let syntax = &self.module.syntax.nodes[name];
+                    if !record
+                        && access == Access::ReadOnly
+                        && syntax.kind == NodeKind::BracketPattern
+                    {
+                        for (inner, &child) in syntax.children.iter().enumerate() {
+                            self.budget.step(1)?;
+                            let leaf = self.ungroup(child)?;
+                            match self.module.syntax.nodes[leaf].kind {
+                                NodeKind::Wildcard => continue,
+                                NodeKind::NamePattern => {}
+                                _ => return Err(Stop::Pending(leaf)),
+                            }
+                            let binder = binders.next().ok_or(Stop::Pending(leaf))?;
+                            if !matches!(product_member(access, &binder.projections),
+                                Some(ProductMember::NestedTupleElement { outer, inner: index })
+                                    if outer == position && index == inner)
+                            {
+                                return Err(Stop::Pending(leaf));
+                            }
+                            self.declare_product_local(leaf, binder, locals)?;
+                        }
+                        continue;
+                    }
                     if syntax.kind == NodeKind::Wildcard {
                         continue;
                     }
@@ -1112,16 +1154,14 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                     let binder = binders.next().ok_or(Stop::Pending(name))?;
                     let flat = match product_member(access, &binder.projections) {
-                        Some(PatternProjection::TupleElement(index)) => {
-                            !record && index == position
-                        }
-                        Some(PatternProjection::Field(_)) => record,
+                        Some(ProductMember::TupleElement(index)) => !record && index == position,
+                        Some(ProductMember::Field(_)) => record,
                         _ => false,
                     };
-                    if !flat || binder.declaration.start != syntax.span.start() {
+                    if !flat {
                         return Err(Stop::Pending(name));
                     }
-                    locals.push(self.local(binder.declaration, name, &binder.ty)?);
+                    self.declare_product_local(name, binder, locals)?;
                 }
                 if binders.next().is_some() {
                     return Err(Stop::Pending(pattern));
@@ -1129,6 +1169,19 @@ impl<'a, 'g> Build<'a, 'g> {
                 Ok(())
             }
         }
+    }
+
+    fn declare_product_local(
+        &mut self,
+        name: NodeId,
+        binder: &PatternBinder<'g>,
+        locals: &mut Vec<Slot>,
+    ) -> ResultOf<()> {
+        if binder.declaration.start != self.module.syntax.nodes[name].span.start() {
+            return Err(Stop::Pending(name));
+        }
+        locals.push(self.local(binder.declaration, name, &binder.ty)?);
+        Ok(())
     }
 
     fn bind_product(
@@ -1181,8 +1234,11 @@ impl<'a, 'g> Build<'a, 'g> {
             let member = product_member(access, &binder.projections).ok_or(Stop::Pending(site))?;
             let action = if access != Access::Owned {
                 let projection = match member {
-                    PatternProjection::TupleElement(position) => Projection::TupleElement(position),
-                    PatternProjection::Field(field) => {
+                    ProductMember::TupleElement(position) => Projection::TupleElement(position),
+                    ProductMember::NestedTupleElement { outer, inner } => {
+                        Projection::NestedTupleElement { outer, inner }
+                    }
+                    ProductMember::Field(field) => {
                         let fields = shared_fields.ok_or(Stop::Pending(site))?;
                         self.budget.step(fields.len())?;
                         let field = fields
@@ -1191,7 +1247,6 @@ impl<'a, 'g> Build<'a, 'g> {
                             .ok_or(Stop::Pending(site))?;
                         Projection::Field(field.declaration)
                     }
-                    _ => return Err(Stop::Pending(site)),
                 };
                 let binding = borrowed_binding_mode(access, binder).ok_or(Stop::Pending(site))?;
                 Action::BindBorrowedMember {
@@ -1202,11 +1257,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
             } else {
                 let from = match member {
-                    PatternProjection::TupleElement(position) => {
+                    ProductMember::TupleElement(position) => {
                         self.element(site, scratch, position)?
                     }
-                    PatternProjection::Field(field) => self.field(site, scratch, field)?,
-                    _ => return Err(Stop::Pending(site)),
+                    ProductMember::Field(field) => self.field(site, scratch, field)?,
+                    ProductMember::NestedTupleElement { .. } => return Err(Stop::Pending(site)),
                 };
                 Action::Read {
                     from,

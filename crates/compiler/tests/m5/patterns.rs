@@ -1507,6 +1507,213 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
 }
 
 #[test]
+fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
+    use compiler::analysis::ownership::{
+        BorrowedMemberBinding::{CopyScalar, SharedView},
+        Projection,
+    };
+
+    probe(
+        "patterns::shared_nested_tuple_patterns_keep_exact_leaf_routes",
+        r#"
+            function view(value: &[[bool, string], bool]): &string {
+                let ([([flag, (text)]), _]) = value;
+                let _ = flag;
+                return text;
+            }
+            function mixed(value: &[bool, [bool, bool]]): bool {
+                let [outer, [_, inner]] = value;
+                let _ = outer;
+                return inner;
+            }
+            function aliasEnds(value: &[[bool, string], bool], fallback: &string): &string {
+                let mut out = fallback;
+                { let alias = value; let [[_, text], _] = alias; out = text; }
+                return out;
+            }
+            function ignores(value: &[[string, string], bool]): bool {
+                let [[_, _], bit] = value;
+                return bit;
+            }
+            function caller(value: &[[bool, string], bool]): &string { return view(value); }
+            function ownedNested(value: [[bool, string], bool]): bool {
+                let [[bit, _], _] = value;
+                return bit;
+            }
+            function nestedName(value: &[[bool, bool], bool]): bool {
+                let [pair, bit] = value;
+                let _ = pair;
+                return bit;
+            }
+            function deeper(value: &[[[bool, bool], bool], bool]): bool {
+                let [[[bit, _], _], _] = value;
+                return bit;
+            }
+            function nestedReference(value: &[[&bool, bool], bool]): &bool {
+                let [[saved, _], _] = value;
+                return saved;
+            }
+            function exclusive(value: &mut [[bool, string], bool]): &mut string {
+                let [[_, text], _] = &mut *value;
+                return text;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let check = |name| lower(name, AnalysisLimits::default());
+            for name in ["view", "mixed", "aliasEnds", "ignores"] {
+                let report = check(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                assert!(path_drops(mir, mir.entry).is_empty());
+                let ops = linear(mir, mir.entry);
+                assert!(
+                    !ops.iter()
+                        .any(|op| matches!(op, Operation::Move { .. } | Operation::Dispose { .. }))
+                );
+                match name {
+                    "view" => {
+                        let route: Vec<_> = ops
+                            .into_iter()
+                            .filter(|op| {
+                                matches!(
+                                    op,
+                                    Operation::Copy { .. }
+                                        | Operation::BindBorrowedMember { .. }
+                                        | Operation::Export(_)
+                                )
+                            })
+                            .collect();
+                        assert!(
+                            matches!(route.as_slice(), [
+                            Operation::Copy { from, into: Some(staged) },
+                            Operation::BindBorrowedMember { descriptor: first,
+                                projection: Projection::NestedTupleElement { outer: 0, inner: 0 }, into: flag, binding: CopyScalar },
+                            Operation::BindBorrowedMember { descriptor: second,
+                                projection: Projection::NestedTupleElement { outer: 0, inner: 1 }, into: text, binding: SharedView },
+                            Operation::Copy { from: bit, .. },
+                            Operation::Copy { from: returned, into: Some(result) },
+                            Operation::Export(output),
+                        ] if from.root.span.bytes() == b"value: &[[bool, string], bool]"
+                            && staged.root.node == first.root.node && staged.root.node == second.root.node
+                            && flag.root.span.bytes() == b"flag" && text.root.span.bytes() == b"text"
+                            && flag.root.node == bit.root.node && text.root.node == returned.root.node
+                            && output.root.node == result.root.node),
+                            "{route:?}"
+                        );
+                    }
+                    "mixed" | "ignores" => {
+                        let routes: Vec<_> = ops
+                            .into_iter()
+                            .filter(|op| matches!(op, Operation::BindBorrowedMember { .. }))
+                            .collect();
+                        if name == "mixed" {
+                            assert!(
+                                matches!(
+                                    routes.as_slice(),
+                                    [
+                                        Operation::BindBorrowedMember {
+                                            projection: Projection::TupleElement(0),
+                                            binding: CopyScalar,
+                                            ..
+                                        },
+                                        Operation::BindBorrowedMember {
+                                            projection: Projection::NestedTupleElement {
+                                                outer: 1,
+                                                inner: 1
+                                            },
+                                            binding: CopyScalar,
+                                            ..
+                                        },
+                                    ]
+                                ),
+                                "{routes:?}"
+                            );
+                        } else {
+                            assert!(
+                                matches!(
+                                    routes.as_slice(),
+                                    [Operation::BindBorrowedMember {
+                                        projection: Projection::TupleElement(1),
+                                        binding: CopyScalar,
+                                        ..
+                                    }]
+                                ),
+                                "{routes:?}"
+                            );
+                        }
+                    }
+                    "aliasEnds" => {
+                        let ended = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action|
+                            matches!(action, Obligation::EndStorage(place) if place.root.span.bytes() == b"alias")))).unwrap();
+                        assert!(ops[..ended].iter().any(|op| matches!(
+                            op,
+                            Operation::BindBorrowedMember {
+                                projection: Projection::NestedTupleElement { outer: 0, inner: 1 },
+                                binding: SharedView,
+                                ..
+                            }
+                        )));
+                        assert!(
+                            matches!(ops[ended + 1..].iter().copied().filter(|op| matches!(op, Operation::Copy { .. } | Operation::Export(_))).collect::<Vec<_>>().as_slice(), [
+                            Operation::Copy { from, into: Some(result) }, Operation::Export(output)
+                        ] if from.root.span.bytes() == b"out" && result.root.node == output.root.node)
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            let view = check("view");
+            let limits = AnalysisLimits {
+                max_work: view.statistics().work,
+                max_entries: view.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("view", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("view", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            for (name, site) in [
+                ("nestedName", "pair"),
+                ("caller", "value"),
+                ("ownedNested", "value: [[bool, string], bool]"),
+                ("deeper", "[[[bit, _], _], _]"),
+                ("nestedReference", "[[saved, _], _]"),
+                ("exclusive", "[[_, text], _]"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
     use compiler::analysis::ownership::{
         BorrowedMemberBinding::{CopyScalar, SharedView},
@@ -1559,10 +1766,6 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
             }
             function exclusive(value: &mut [bool, bool]): bool {
                 let [bit, _] = value;
-                return bit;
-            }
-            function nested(value: &[[bool, bool], bool]): bool {
-                let [[bit, _], _] = value;
                 return bit;
             }
         "#,
@@ -1680,11 +1883,7 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                 assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
-            for (name, pattern) in [
-                ("exclusive", "[bit, _]"),
-                ("nested", "[[bit, _], _]"),
-                ("temporary", "pass(value)"),
-            ] {
+            for (name, pattern) in [("exclusive", "[bit, _]"), ("temporary", "pass(value)")] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
