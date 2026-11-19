@@ -2409,6 +2409,11 @@ fn two_propagating_arguments_clean_their_own_staged_prefixes() {
                 let _ = consume(first, input?, middle, (produce(flag) ? error(message)), last);
                 return Result.Ok(7i32);
             }
+            function badError(message: string): i32 { dispose(message); dispose(message); return 19i32; }
+            function reachedAfterFirst(first: string, input: Result<bool, i32>, middle: string, flag: bool, last: string, message: string): Result<i32, i32> {
+                let _ = consume(first, input?, middle, (produce(flag) ? badError(message)), last);
+                return Result.Ok(7i32);
+            }
         "#,
         |_, module, receipt, typed| {
             let declaration = |name| {
@@ -2546,6 +2551,16 @@ fn two_propagating_arguments_clean_their_own_staged_prefixes() {
                 true,
                 &[b"owner: string", b"message: string"],
             );
+            let rejected = check("reachedAfterFirst");
+            assert_eq!(rejected.completion(), Completion::SourceRejected);
+            assert!(rejected.mir().is_none());
+            let [finding] = rejected.findings() else {
+                panic!("expected one reached RHS finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(message)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(message)");
+            assert!(finding.related.span.start() < finding.site.span.start());
             let limits = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,

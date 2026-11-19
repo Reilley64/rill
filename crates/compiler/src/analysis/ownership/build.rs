@@ -30,6 +30,7 @@ enum CallPropagation<'a, 'g> {
 #[derive(Clone, Copy)]
 struct PropagatingArguments {
     first: PropagatingArgument,
+    // A pair is admitted only when both arguments have both feasible edges.
     second: Option<PropagatingArgument>,
 }
 
