@@ -1465,6 +1465,160 @@ fn fresh_error_pipe_keeps_the_written_constructor_anchor() {
     );
 }
 
+#[test]
+fn propagation_statements_discard_only_the_feasible_success_payload() {
+    probe_with_typed(
+        "propagation::propagation_statements_discard_only_the_feasible_success_payload",
+        r#"
+            function option(input: Option<bool>, owner: string): Option<bool> {
+                ((input?));
+                dispose(owner);
+                return Option.Some(true);
+            }
+            function result(input: Result<i32, i32>, owner: string): Result<bool, i32> {
+                input?;
+                dispose(owner);
+                return Result.Ok(true);
+            }
+            function pass(input: Result<i32, i32>): Result<i32, i32> { return input; }
+            function pipe(input: Result<i32, i32>, owner: string): Result<bool, i32> {
+                input |> pass?;
+                dispose(owner);
+                return Result.Ok(true);
+            }
+            function rhs(message: string): i32 { dispose(message); return 1i32; }
+            function wrap(input: Result<i32, i32>, message: string, owner: string): Result<bool, i32> {
+                input ? rhs(message);
+                return Result.Ok(true);
+            }
+            function embedded(input: Option<bool>): Option<bool> { return Option.Some(input?); }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let option = typed.option_role().unwrap();
+            let result = typed.result_role().unwrap();
+            let report = check("option");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("option: {:?}", report.completion()));
+            let (yes, no) = branch_targets(mir);
+            let success = linear(mir, yes);
+            let failure = linear(mir, no);
+            assert_return(&success, &option.some.id, true, &[]);
+            assert!(
+                !success
+                    .iter()
+                    .any(|op| matches!(op, Operation::CopyOptionPayload { .. }))
+            );
+            assert_return(&failure, &option.none.id, false, &[b"owner: string"]);
+            for (name, source) in [
+                ("result", b"input".as_slice()),
+                ("pipe", b"input |> pass?".as_slice()),
+            ] {
+                let report = check(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let (yes, no) = branch_targets(mir);
+                let success = linear(mir, yes);
+                let failure = linear(mir, no);
+                assert!(success.iter().any(
+                    |op| matches!(op, Operation::TakeResultSuccess { operand, into: None }
+                    if operand.root.span.bytes() == source)
+                ));
+                assert_return(&success, &result.ok.id, true, &[]);
+                assert_forward(&failure, result, source, &[b"owner: string"]);
+                for branch in [true, false] {
+                    let calls = calls_on_path(mir, [branch]);
+                    if name == "pipe" {
+                        assert_eq!(calls, [&declaration("pass").id]);
+                    } else {
+                        assert!(calls.is_empty());
+                    }
+                }
+            }
+            let wrap = check("wrap");
+            let mir = wrap
+                .mir()
+                .expect("infix statement retains the complete failed wrapper");
+            let (yes, no) = branch_targets(mir);
+            let ok = linear(mir, yes);
+            let err = linear(mir, no);
+            assert!(calls_on_path(mir, [true]).is_empty());
+            assert_eq!(calls_on_path(mir, [false]), [&declaration("rhs").id]);
+            assert!(
+                ok.iter()
+                    .any(|op| matches!(op, Operation::TakeResultSuccess { into: None, .. }))
+            );
+            assert_return(
+                &ok,
+                &result.ok.id,
+                true,
+                &[b"owner: string", b"message: string"],
+            );
+            assert_export(&err, &[b"owner: string"], |op, out| {
+                matches!(op, Operation::WrapResultFailure { into, .. }
+                if into.root.node == out.root.node)
+            });
+            let embedded = check("embedded");
+            assert_eq!(embedded.completion(), Completion::Incomplete);
+            assert!(embedded.mir().is_none());
+            let limits = AnalysisLimits {
+                max_work: wrap.statistics().work,
+                max_entries: wrap.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("wrap", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("wrap", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn result_expression_statements_still_require_acknowledgement() {
+    use compiler::analysis::typed::TypedCompletion;
+
+    probe_report(
+        "propagation::result_expression_statements_still_require_acknowledgement",
+        r#"
+            function rejected(input: Result<bool, i32>.Ok): void { input; }
+        "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::SourceRejected);
+            assert!(typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty());
+            let [discard] = uses.discards() else {
+                panic!("expected one unacknowledged Result")
+            };
+            assert_eq!(discard.code(), "R0103");
+            assert_eq!(discard.origin.span.bytes(), b"input: Result<bool, i32>.Ok");
+        },
+    );
+}
+
 fn variant_edges(mir: &Mir<'_>, mut pc: usize, expected: &loader::DeclarationId) -> (usize, usize) {
     for _ in 0..mir.blocks.len() {
         let block = &mir.blocks[pc];

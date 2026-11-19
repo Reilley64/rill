@@ -735,16 +735,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 let value = *children.last().unwrap();
                 let binding = self.binding(node)?;
                 let initializer = self.ungroup(value)?;
-                let syntax = &self.module.syntax.nodes[initializer];
-                let propagates = match syntax.kind {
-                    NodeKind::Propagate | NodeKind::Wrap => true,
-                    NodeKind::Pipe => {
-                        self.module.syntax.nodes[syntax.children[1]].kind
-                            == (NodeKind::PipeStep { propagate: true })
-                    }
-                    _ => false,
-                };
-                if propagates {
+                if self.propagates_directly(initializer)? {
                     let into = match binding {
                         Binding::Discard => None,
                         Binding::Name { declaration, .. } => Some(self.locals[declaration]),
@@ -769,7 +760,15 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 }
             }
-            NodeKind::ExpressionStatement => self.discard(node, children[0], next, depth + 1),
+            NodeKind::ExpressionStatement => {
+                let value = children[0];
+                let expression = self.ungroup(value)?;
+                if self.propagates_directly(expression)? {
+                    self.propagate(expression, None, next, exits.returning, depth + 1)
+                } else {
+                    self.discard(node, value, next, depth + 1)
+                }
+            }
             NodeKind::Assignment("=") => {
                 let (left, value) = (children[0], children[1]);
                 if let Some(path) = &self.value(left)?.path
@@ -1312,6 +1311,20 @@ impl<'a, 'g> Build<'a, 'g> {
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
         self.expression(source, Some(scratch), tail, depth)
+    }
+
+    fn propagates_directly(&mut self, node: NodeId) -> ResultOf<bool> {
+        self.budget.step(1)?;
+        let syntax = &self.module.syntax.nodes[node];
+        Ok(match syntax.kind {
+            NodeKind::Propagate | NodeKind::Wrap => true,
+            NodeKind::Pipe => {
+                self.budget.step(1)?;
+                self.module.syntax.nodes[syntax.children[1]].kind
+                    == (NodeKind::PipeStep { propagate: true })
+            }
+            _ => false,
+        })
     }
 
     fn propagate(
