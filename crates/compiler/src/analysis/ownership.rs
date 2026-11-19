@@ -525,7 +525,7 @@ fn lower<'g>(
         build.budget.step(parameters.len())?;
         for parameter in parameters {
             if let TypeTerm::Reference { referent, .. } = parameter.ty.as_ref()
-                && build.guard_provider(referent)?.is_some()
+                && build.guard_bearing_type(referent)?
             {
                 return Err(Stop::Pending(parameter.declaration.node));
             }

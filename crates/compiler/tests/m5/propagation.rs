@@ -944,22 +944,6 @@ fn variant_edges(mir: &Mir<'_>, mut pc: usize, expected: &loader::DeclarationId)
     panic!("path did not reach the variant test");
 }
 
-fn straight_blocks<'a, 'g>(
-    mir: &'a Mir<'g>,
-    mut pc: usize,
-) -> Vec<&'a compiler::analysis::ownership::Block<'g>> {
-    let mut path = Vec::new();
-    for _ in 0..mir.blocks.len() {
-        let block = &mir.blocks[pc];
-        path.push(block);
-        match block.terminator {
-            Terminator::Goto(next) => pc = next,
-            _ => return path,
-        }
-    }
-    panic!("expected a finite path to a branch or return");
-}
-
 fn calls_on_path<'g, const N: usize>(
     mir: &Mir<'g>,
     branches: [bool; N],

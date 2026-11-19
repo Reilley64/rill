@@ -107,7 +107,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
             }
             TypeTerm::Nominal { .. } => {
-                let fields = self.record_fields(node, ty)?;
+                let fields = self.record_fields(ty)?.ok_or(Stop::Pending(node))?;
                 let disposer = self.outer_disposer(node, ty)?;
                 return self.aggregate(
                     node,
@@ -180,7 +180,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }))
     }
 
-    pub(super) fn guard_provider(
+    fn guard_provider(
         &mut self,
         ty: &TypeTerm<'g>,
     ) -> ResultOf<Option<&'a NativeOwnershipProvider<'g>>> {
@@ -356,31 +356,41 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(root)
     }
 
-    fn record_fields(&mut self, node: NodeId, ty: &TypeTerm<'g>) -> ResultOf<&'a [MemberType<'g>]> {
+    fn record_fields(&mut self, ty: &TypeTerm<'g>) -> ResultOf<Option<&'a [MemberType<'g>]>> {
         let TypeTerm::Nominal {
             declaration,
             arguments,
         } = ty
         else {
-            return Err(Stop::Pending(node));
+            return Ok(None);
         };
         if declaration.module.origin != Origin::Application || !arguments.is_empty() {
-            return Err(Stop::Pending(node));
+            return Ok(None);
         }
         self.budget.step(1)?;
         let inventory = self.typed.inventory();
-        let facts = inventory
-            .type_facts()
-            .declarations
-            .get(declaration)
-            .ok_or(Stop::Pending(node))?;
-        let DeclarationShape::Record { fields } = &facts.shape else {
-            return Err(Stop::Pending(node));
+        let Some(facts) = inventory.type_facts().declarations.get(declaration) else {
+            return Ok(None);
         };
-        if !facts.binders.is_empty() {
-            return Err(Stop::Pending(node));
+        let DeclarationShape::Record { fields } = &facts.shape else {
+            return Ok(None);
+        };
+        Ok(facts.binders.is_empty().then_some(fields.as_slice()))
+    }
+
+    pub(super) fn guard_bearing_type(&mut self, ty: &TypeTerm<'g>) -> ResultOf<bool> {
+        if self.guard_provider(ty)?.is_some() {
+            return Ok(true);
         }
-        Ok(fields)
+        if let Some(fields) = self.record_fields(ty)? {
+            for field in fields {
+                self.budget.step(1)?;
+                if self.guard_provider(&field.ty)?.is_some() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     fn outer_disposer(
