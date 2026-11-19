@@ -1645,6 +1645,26 @@ fn result_expression_statements_still_require_acknowledgement() {
 }
 
 #[test]
+fn a_propagating_input_does_not_acknowledge_a_pipe_result() {
+    use compiler::analysis::typed::TypedCompletion;
+
+    probe_report(
+        "propagation::a_propagating_input_does_not_acknowledge_a_pipe_result",
+        r#"
+            function step(value: bool): Result<bool, i32> { return Result.Ok(value); }
+            function unchecked(input: Result<bool, i32>): Result<bool, i32> {
+                (input?) |> step;
+                return Result.Ok(true);
+            }
+        "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+        },
+    );
+}
+
+#[test]
 fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
     probe_with_typed(
         "propagation::an_early_call_argument_exit_cleans_only_the_staged_prefix",
@@ -3456,6 +3476,10 @@ fn composed_pipe_statements_discard_only_the_success_payload() {
                 let bit = nested((input?) |> round?);
                 return Option.Some(bit);
             }
+            function ordinaryStep(input: Option<bool>): Option<bool> {
+                (input?) |> nested;
+                return Option.Some(true);
+            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -3543,10 +3567,30 @@ fn composed_pipe_statements_discard_only_the_success_payload() {
                 false,
                 &[b"later: string", b"owner: string"],
             );
-            for name in ["deeper", "nestedComposition"] {
+            for name in ["deeper", "nestedComposition", "ordinaryStep"] {
                 let blocked = lower(name, default);
                 assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");
                 assert!(blocked.mir().is_none());
+            }
+            let exact = AnalysisLimits {
+                max_work: results.statistics().work,
+                max_entries: results.statistics().entries,
+                ..default
+            };
+            assert!(lower("results", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("results", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
             }
         },
     );
