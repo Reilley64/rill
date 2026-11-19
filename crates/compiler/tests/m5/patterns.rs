@@ -760,6 +760,12 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                 }
                 return *out;
             }
+            function survivesMove(flag: bool, tag: string): bool {
+                let pair: [&bool, string] = [&flag, tag];
+                let [view, _] = &pair;
+                let moved = pair;
+                return *view;
+            }
             function carry(seed: &bool): [&bool, string] { return [seed, "callee"]; }
             function rootBacking(flag: bool): &bool {
                 let pair = carry(&flag);
@@ -773,6 +779,15 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                 let pair: [&bool, string] = [first, "retained"];
                 let [view, _] = &pair;
                 let _ = *access;
+                return *view;
+            }
+            function exclusiveBacking(seed: bool): bool {
+                let mut source = seed;
+                let access = &mut source;
+                let first = &*access;
+                let pair: [&bool, string] = [first, "retained"];
+                let [view, _] = &pair;
+                let _ = source;
                 return *view;
             }
             function projectedStringStillBorrowsOwner(seed: &bool): &string {
@@ -943,6 +958,28 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                     if from.root.node == bound.root.node && result.root.node == output.root.node)
                 );
             }
+            let moved = check("survivesMove");
+            let mir = moved
+                .mir()
+                .expect("the stored local reference survives the container move");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::BindSharedMember { .. }
+                    | Operation::Dereference(_)
+                    | Operation::Export(_) => true,
+                    Operation::Move {
+                        into: Some(into), ..
+                    } => into.root.span.bytes() == b"moved",
+                    _ => false,
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::BindSharedMember { into: view, binding: CopyReference, .. },
+                Operation::Move { from, into: Some(owner) },
+                Operation::Dereference(read),
+                Operation::Export(_),
+            ] if view.root.node == read.root.node && from.root.span.bytes() == b"pair" && owner.root.span.bytes() == b"moved"));
             let forward = check("tupleForward");
             let limits = AnalysisLimits {
                 max_work: forward.statistics().work,
@@ -975,6 +1012,7 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                 ),
                 ("rootBacking", "R0202", "return view;", "flag: bool"),
                 ("suspended", "R0201", "*access", "&*access"),
+                ("exclusiveBacking", "R0201", "source", "&mut source"),
                 (
                     "projectedStringStillBorrowsOwner",
                     "R0202",
