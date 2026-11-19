@@ -953,6 +953,208 @@ fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
 }
 
 #[test]
+fn explicit_exclusive_tuple_pattern_reborrow_suspends_the_named_parent() {
+    use compiler::analysis::ownership::{
+        BorrowedMemberBinding::{CopyScalar, ExclusiveView},
+        Projection,
+    };
+
+    probe(
+        "patterns::explicit_exclusive_tuple_pattern_reborrow_suspends_the_named_parent",
+        r#"
+            function touch(view: &mut string): void {}
+            function resumes(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let [_, view] = &mut *(parent);
+                touch(view);
+                let [bit, _] = &mut *parent;
+                let _ = parent;
+                owner[1] = "replacement";
+                return bit;
+            }
+            function suspended(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let [_, view] = &mut *parent;
+                let [bit, _] = &mut *(parent);
+                touch(view);
+                return bit;
+            }
+            function ownerStillBorrowed(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let [_, view] = &mut *parent;
+                let bit = owner[0];
+                touch(view);
+                return bit;
+            }
+            function localEscape(seed: [bool, string]): &mut string {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let [_, view] = &mut *parent;
+                return view;
+            }
+            function incoming(parent: &mut [bool, string]): &mut string {
+                let [_, view] = &mut *parent;
+                return view;
+            }
+            function holderEnds(seed: [bool, string], fallback: &mut string): bool {
+                let mut owner = seed;
+                let mut out = fallback;
+                { let parent = &mut owner; let [_, view] = &mut *parent; out = view; }
+                touch(out);
+                owner[1] = "replacement";
+                return owner[0];
+            }
+            function backingEnds(seed: [bool, string], fallback: &mut string, branch: bool): void {
+                let mut out = fallback;
+                if (branch) { let mut owner = seed; let parent = &mut owner; let [_, view] = &mut *parent; out = view; }
+                touch(out);
+            }
+            function movedParent(seed: [bool, string]): void {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let moved = parent;
+                let [_, view] = &mut *parent;
+                touch(view);
+            }
+            function indirect(parent: &mut &mut [bool, string]): bool {
+                let [bit, _] = &mut **parent;
+                return bit;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let check = |name| lower(name, AnalysisLimits::default());
+            let resumes = check("resumes");
+            let mir = resumes
+                .mir()
+                .unwrap_or_else(|| panic!("resumes: {:?}", resumes.completion()));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(replacement)]
+                if old.root.node == replacement.root.node && old.root.span.bytes() == b"owner"
+                    && old.tuple_element() == Some(1) && replacement.tuple_element() == Some(1))
+            );
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. }
+                            | Operation::Reborrow { .. }
+                            | Operation::BindBorrowedMember { .. }
+                            | Operation::Call(_)
+                            | Operation::Install { .. }
+                    )
+                })
+                .collect();
+            let touch = module
+                .declarations
+                .iter()
+                .find(|decl| decl.name.as_deref() == Some("touch"))
+                .unwrap();
+            assert!(matches!(route.as_slice(), [
+                Operation::Borrow { source: owner, holder: parent, exclusive: true },
+                Operation::Reborrow { parent: before, holder: staged, exclusive: true },
+                Operation::BindBorrowedMember { descriptor, projection: Projection::TupleElement(1), into: view, binding: ExclusiveView },
+                Operation::Reborrow { parent: used, exclusive: true, .. },
+                Operation::Call(callee),
+                Operation::Reborrow { parent: resumed, holder: scalar_stage, exclusive: true },
+                Operation::BindBorrowedMember { descriptor: scalar, projection: Projection::TupleElement(0), binding: CopyScalar, .. },
+                Operation::Install { target, .. },
+            ] if owner.projection.is_none() && owner.root.node == target.root.node && target.tuple_element() == Some(1)
+                && before.root.node == parent.root.node && resumed.root.node == parent.root.node
+                && staged.root.node == descriptor.root.node && scalar_stage.root.node == scalar.root.node
+                && used.root.node == view.root.node && **callee == touch.id));
+            let limits = AnalysisLimits {
+                max_work: resumes.statistics().work,
+                max_entries: resumes.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("resumes", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("resumes", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            let incoming = check("incoming");
+            let mir = incoming
+                .mir()
+                .expect("a view of incoming backing may be returned");
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::BindBorrowedMember { .. }
+                            | Operation::Move { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Reborrow { parent, holder: staged, exclusive: true },
+                Operation::BindBorrowedMember { descriptor, projection: Projection::TupleElement(1), into: view, binding: ExclusiveView },
+                Operation::Move { from, into: Some(result) },
+                Operation::Export(output),
+            ] if parent.root.span.bytes() == b"parent: &mut [bool, string]" && staged.root.node == descriptor.root.node
+                && view.root.node == from.root.node && result.root.node == output.root.node));
+            let holder_ends = check("holderEnds");
+            assert!(
+                holder_ends.mir().is_some(),
+                "closing the parent slot must not end its original backing: {:?}",
+                holder_ends.completion()
+            );
+            for (name, code, at, cause) in [
+                ("suspended", "R0201", "&mut *(parent)", "&mut *parent"),
+                ("ownerStillBorrowed", "R0201", "owner[0]", "&mut owner"),
+                ("localEscape", "R0202", "return view;", "owner"),
+                (
+                    "backingEnds",
+                    "R0203",
+                    "{ let mut owner = seed; let parent = &mut owner; let [_, view] = &mut *parent; out = view; }",
+                    "&mut owner",
+                ),
+                ("movedParent", "R0200", "&mut *parent", "parent"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), at.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), cause.as_bytes(), "{name}");
+            }
+            let indirect = check("indirect");
+            assert_eq!(indirect.completion(), Completion::Incomplete);
+            assert!(indirect.mir().is_none());
+            assert_eq!(indirect.blocked_at().unwrap().span.bytes(), b"[bit, _]");
+        },
+    );
+}
+
+#[test]
 fn shared_product_binding_copies_carried_references_not_container_access() {
     use compiler::analysis::ownership::{BorrowedMemberBinding::CopyReference, Projection};
 
