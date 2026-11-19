@@ -673,7 +673,7 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
             function unsupportedType(first: &bool, slot: &mut &bool, second: &string): void { wrong(first, slot, second); }
             function two(first: &mut &bool, second: &mut &bool, source: &bool): void {}
             function unsupportedDestinations(first: &mut &bool, second: &mut &bool, source: &bool): void { two(first, second, source); }
-            function unsupportedPipe(first: &bool, slot: &mut &bool, second: &bool): void { second |> keep(first, slot, _); }
+            function pipedShared(first: &bool, slot: &mut &bool, second: &bool): void { second |> keep(first, slot, _); }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -800,7 +800,6 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
                 ),
                 ("unsupportedType", "wrong(first, slot, second)"),
                 ("unsupportedDestinations", "second"),
-                ("unsupportedPipe", "second |> keep(first, slot, _)"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
@@ -816,6 +815,14 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
                 max_entries: report.statistics().entries,
                 ..AnalysisLimits::default()
             };
+            let piped = check("pipedShared");
+            let mir = piped
+                .mir()
+                .expect("two compatible shared sources can also be piped");
+            assert!(linear(mir, mir.entry).iter().any(|op| matches!(op,
+                Operation::CallRetainingPair { callee, destination: RetainedPlace::ThroughParameter(dest), inputs: [first, second] }
+                if *callee == &declaration("keep").id && dest.root.span.bytes() == b"slot: &mut &bool"
+                    && first.root.span.bytes() == b"first" && second.root.span.bytes() == b"second")));
             assert!(lower("checked", limits).mir().is_some());
             for short in [
                 AnalysisLimits {
@@ -1036,21 +1043,164 @@ fn paired_retention_pipes_keep_formal_roles_and_input_first() {
             function forward(first: &mut bool, out: &mut &bool, second: &mut bool): void {
                 second |> stash(first, out, _);
             }
+            function destination(seed: &bool, first: &mut bool, second: &mut bool): bool {
+                let mut out = seed;
+                &mut out |> stash(first, _, second);
+                return *out;
+            }
+            function conflict(seed: &bool, input: &mut bool): void {
+                let mut out = seed;
+                input |> stash((input), &mut out, _);
+            }
+            function keepsCopy(seed: &bool, first: &mut bool, second: &mut bool): bool {
+                let mut out = seed;
+                second |> stash(first, &mut out, _);
+                let saved = out;
+                out = seed;
+                let early = *second;
+                return *saved;
+            }
+            function expires(seed: &bool, first: &mut bool): bool {
+                let mut out = seed;
+                { let mut inner = true; &mut inner |> stash(first, &mut out, _); }
+                return *out;
+            }
+            function bad(first: &mut bool, out: &mut &bool, second: &mut bool): void {
+                let local = true;
+                *out = &local;
+            }
+            function reachedBad(first: &mut bool, out: &mut &bool, second: &mut bool): void {
+                second |> bad(first, out, _);
+            }
+            function nested(value: [[bool, bool], bool], out: &mut &bool, source: &bool): void { *out = source; }
+            function unsupportedNested(out: &mut &bool, source: &bool): void {
+                source |> nested([[true, false], true], out, _);
+            }
+            function extra(first: &bool, out: &mut &bool, second: &bool, fourth: &bool): void { *out = first; }
+            function unsupportedArity(first: &bool, out: &mut &bool, second: &bool, fourth: &bool): void {
+                fourth |> extra(first, out, second, _);
+            }
         "#,
         |_, module, receipt| {
-            let forward = module
-                .declarations
-                .iter()
-                .find(|d| d.name.as_deref() == Some("forward"))
-                .unwrap();
-            let report =
-                lower_body(receipt, module, &forward.id, AnalysisLimits::default()).unwrap();
-            assert_eq!(report.completion(), Completion::Incomplete);
-            assert_eq!(
-                report.blocked_at().unwrap().span.bytes(),
-                b"second |> stash(first, out, _)"
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let forwarded = check("forward");
+            let mir = forwarded
+                .mir()
+                .unwrap_or_else(|| panic!("forward: {:?}", forwarded.completion()));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::CallRetainingPair { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Reborrow { parent: second, holder: second_stage, exclusive: true },
+                Operation::Reborrow { parent: first, holder: first_stage, exclusive: true },
+                Operation::Reborrow { parent: out, exclusive: true, .. },
+                Operation::CallRetainingPair { callee, destination: RetainedPlace::ThroughParameter(dest), inputs: [a, b] },
+            ] if *callee == &declaration("stash").id && first.root.span.bytes() == b"first: &mut bool"
+                && second.root.span.bytes() == b"second: &mut bool" && out.root.span.bytes() == b"out: &mut &bool"
+                && dest.root.node == out.root.node && a.root.node == first_stage.root.node && b.root.node == second_stage.root.node),
+                "{route:?}"
             );
-            assert!(report.mir().is_none());
+            let dest = check("destination");
+            let mir = dest
+                .mir()
+                .expect("the destination can evaluate first without becoming a source");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. }
+                            | Operation::Reborrow { .. }
+                            | Operation::CallRetainingPair { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source: out, exclusive: true, .. },
+                Operation::Reborrow { parent: first, holder: first_stage, exclusive: true },
+                Operation::Reborrow { parent: second, holder: second_stage, exclusive: true },
+                Operation::CallRetainingPair { callee, destination: RetainedPlace::Local(dest), inputs: [a, b] },
+                Operation::Dereference(read),
+            ] if *callee == &declaration("stash").id && out.root.span.bytes() == b"out" && dest.root.node == out.root.node && read.root.node == out.root.node
+                && first.root.span.bytes() == b"first: &mut bool" && second.root.span.bytes() == b"second: &mut bool"
+                && a.root.node == first_stage.root.node && b.root.node == second_stage.root.node),
+                "{route:?}"
+            );
+            for (name, code, related) in [
+                ("conflict", "R0201", "input"),
+                ("keepsCopy", "R0201", "second"),
+                ("expires", "R0203", "&mut inner"),
+                ("reachedBad", "R0202", "&local"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected exactly one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+                if name == "conflict" {
+                    assert_eq!(finding.site.span.bytes(), b"(input)");
+                }
+                if name == "keepsCopy" {
+                    assert_eq!(finding.site.span.bytes(), b"*second");
+                }
+            }
+            for (name, site) in [
+                (
+                    "unsupportedNested",
+                    "source |> nested([[true, false], true], out, _)",
+                ),
+                ("unsupportedArity", "fourth |> extra(first, out, second, _)"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
+            let limits = AnalysisLimits {
+                max_work: forwarded.statistics().work,
+                max_entries: forwarded.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("forward", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("forward", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
         },
     );
 }

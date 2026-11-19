@@ -1950,13 +1950,12 @@ impl<'a, 'g> Build<'a, 'g> {
         self.slot(node, &capture.ty)
     }
 
-    fn call_destination(
+    fn retained_call_contents(
         &mut self,
         node: NodeId,
         call: &crate::analysis::scalars::CallFacts<'g>,
         position: usize,
-        args: &[Slot],
-    ) -> ResultOf<CallDestination> {
+    ) -> ResultOf<Type<'g>> {
         // The declaration determines the possible inputs. Do not use the
         // callee body to narrow them.
         self.budget.step(1)?;
@@ -1973,17 +1972,26 @@ impl<'a, 'g> Build<'a, 'g> {
         if formals.len() != call.arguments.len() {
             return Err(Stop::Pending(node));
         }
-        let mut sources = (0..formals.len()).filter(|&i| i != position);
-        let input = sources.next().unwrap();
-        let second_input = sources.next();
-        for index in std::iter::once(input).chain(second_input) {
+        for (formal, &actual) in formals.iter().zip(&call.arguments) {
             self.budget.step(1)?;
-            if self.value(call.arguments[index])?.ty != formals[index].ty {
+            if self.value(actual)?.ty != formal.ty {
                 return Err(Stop::Pending(node));
             }
         }
-        let input = args[input];
-        let second_input = second_input.map(|i| args[i]);
+        Ok(contents.clone())
+    }
+
+    fn call_destination(
+        &mut self,
+        call: &crate::analysis::scalars::CallFacts<'g>,
+        position: usize,
+        args: &[Slot],
+        contents: &Type<'g>,
+    ) -> ResultOf<CallDestination> {
+        self.budget.step(args.len())?;
+        let mut sources = (0..args.len()).filter(|&i| i != position).map(|i| args[i]);
+        let input = sources.next().unwrap();
+        let second_input = sources.next();
         let argument = self.ungroup(call.arguments[position])?;
         let syntax = &self.module.syntax.nodes[argument];
         if syntax.kind == NodeKind::ValueReference {
@@ -2127,21 +2135,25 @@ impl<'a, 'g> Build<'a, 'g> {
         let piped = call.pipe_input.is_some();
         let mut tuple_or_leaf_admitted =
             piped && self.admits_direct_tuple_or_leaf_call(call, &facts.ty)?;
+        let mut destination = None;
+        let mut pipe_retained_contents = None;
         if piped && !tuple_or_leaf_admitted {
-            // Only the bounded two-slot retention route can proceed to
-            // call_destination. Reject other shapes before building slots.
-            let [first, second] = call.arguments.as_slice() else {
-                return Err(Stop::Pending(node));
-            };
-            if !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "void") {
+            // Prove the exact retaining signature before building slots.
+            if !matches!(call.arguments.len(), 2 | 3)
+                || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
+            {
                 return Err(Stop::Pending(node));
             }
-            self.budget.step(2)?;
-            let first = &self.value(*first)?.ty;
-            let second = &self.value(*second)?.ty;
-            if !(retained_bool_contents_type(first).is_some() && primitive_reference(second)
-                || retained_bool_contents_type(second).is_some() && primitive_reference(first))
-            {
+            for (position, &arg) in call.arguments.iter().enumerate() {
+                self.budget.step(1)?;
+                if retained_bool_contents_type(&self.value(arg)?.ty).is_some() {
+                    pipe_retained_contents =
+                        Some(self.retained_call_contents(node, call, position)?);
+                    destination = Some(position);
+                    break;
+                }
+            }
+            if destination.is_none() {
                 return Err(Stop::Pending(node));
             }
         }
@@ -2165,7 +2177,6 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         self.budget.reserve(1 + call.arguments.len())?;
         let mut args = Vec::with_capacity(call.arguments.len());
-        let mut destination = None;
         let mut pipe_argument = None;
         for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
@@ -2174,7 +2185,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             let ty = self.value(arg)?.ty.clone();
             if retained_bool_contents_type(&ty).is_some() {
-                if destination.replace(position).is_some() {
+                if !piped && destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
             } else if !self.direct_call_type(&ty) && !tuple_or_leaf_admitted {
@@ -2191,7 +2202,13 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let index = self.calls.len();
         let destination = destination
-            .map(|position| self.call_destination(node, call, position, &args))
+            .map(|position| {
+                let contents = match pipe_retained_contents {
+                    Some(contents) => contents,
+                    None => self.retained_call_contents(node, call, position)?,
+                };
+                self.call_destination(call, position, &args, &contents)
+            })
             .transpose()?;
         self.calls.push(Call {
             callee: call.callee,
