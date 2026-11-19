@@ -99,7 +99,7 @@ pub struct Block<'g> {
     pub terminator: Terminator,
 }
 
-/// A named or temporary storage root, optionally projected to one member.
+/// A named or temporary storage root, optionally projected to member storage.
 #[derive(Clone, Copy, Debug)]
 pub struct Place<'g> {
     pub root: Site<'g>,
@@ -109,6 +109,11 @@ pub struct Place<'g> {
 #[derive(Clone, Copy, Debug)]
 pub enum Projection<'g> {
     Field(&'g Declaration),
+    /// A leaf of a two-level owned record, relative to the owned root.
+    NestedField {
+        outer: &'g Declaration,
+        inner: &'g Declaration,
+    },
     TupleElement(usize),
     /// A borrowed pattern's two positions, relative to the descriptor's referent.
     NestedTupleElement {
@@ -573,11 +578,7 @@ fn lower<'g>(
         if matches!(parameter.ty.as_ref(), TypeTerm::Callable { .. }) {
             return Err(Stop::Pending(parameter.declaration.node));
         }
-        let slot = build.local(
-            &parameter.declaration.id,
-            parameter.declaration.node,
-            &parameter.ty,
-        )?;
+        let slot = build.parameter(parameter)?;
         params.push(slot);
         owns_guard |= build.slots[slot].contains_guard();
         if let Some(ty) = retained_bool_contents_type(&parameter.ty) {

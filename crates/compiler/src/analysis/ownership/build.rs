@@ -208,12 +208,74 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(())
     }
 
-    pub(super) fn local(
+    pub(super) fn parameter(&mut self, parameter: &MemberType<'g>) -> ResultOf<Slot> {
+        let node = parameter.declaration.node;
+        let ty = &parameter.ty;
+        if let Some(slot) = self.nested_record_cleanup_parameter(node, ty)? {
+            // Cleanup owns this initialized region, but it is not yet a
+            // source place: reads, projections and borrows must stay pending.
+            return Ok(slot);
+        }
+        self.local(&parameter.declaration.id, node, ty)
+    }
+
+    fn nested_record_cleanup_parameter(
         &mut self,
-        id: &'g DeclarationId,
         node: NodeId,
         ty: &Type<'g>,
-    ) -> ResultOf<Slot> {
+    ) -> ResultOf<Option<Slot>> {
+        let Some(fields) = self.record_fields(ty.as_ref())? else {
+            return Ok(None);
+        };
+        let mut nested = false;
+        for field in fields {
+            self.budget.step(1)?;
+            if self.record_fields(&field.ty)?.is_some() {
+                nested = true;
+                break;
+            }
+        }
+        if !nested {
+            return Ok(None);
+        }
+        if self.outer_disposer(node, ty)?.is_some() {
+            return Err(Stop::Pending(node));
+        }
+        // Lay out initialized leaves in declaration order. The ordinary
+        // boundary reverses that order without acquiring another disposer.
+        let mut leaves = Vec::new();
+        for outer in fields {
+            self.budget.step(1)?;
+            if matches!(outer.ty.as_ref(), TypeTerm::Primitive(_)) {
+                self.budget.reserve(1)?;
+                leaves.push((Projection::Field(outer.declaration), &outer.ty));
+                continue;
+            }
+            let inner_fields = self.record_fields(&outer.ty)?.ok_or(Stop::Pending(node))?;
+            self.budget.step(inner_fields.len())?;
+            if !inner_fields
+                .iter()
+                .all(|inner| matches!(inner.ty.as_ref(), TypeTerm::Primitive(_)))
+                || self.outer_disposer(node, &outer.ty)?.is_some()
+            {
+                return Err(Stop::Pending(node));
+            }
+            self.budget.step(inner_fields.len())?;
+            self.budget.reserve(inner_fields.len())?;
+            leaves.extend(inner_fields.iter().map(|inner| {
+                (
+                    Projection::NestedField {
+                        outer: outer.declaration,
+                        inner: inner.declaration,
+                    },
+                    &inner.ty,
+                )
+            }));
+        }
+        self.aggregate(node, None, leaves.into_iter()).map(Some)
+    }
+
+    fn local(&mut self, id: &'g DeclarationId, node: NodeId, ty: &Type<'g>) -> ResultOf<Slot> {
         let slot = self.slot(node, ty)?;
         self.budget.reserve(1)?;
         self.locals.insert(id, slot);
@@ -811,7 +873,9 @@ impl<'a, 'g> Build<'a, 'g> {
         match projection {
             Projection::Field(field) => self.field(node, root, &field.id),
             Projection::TupleElement(position) => self.element(node, root, position),
-            Projection::NestedTupleElement { .. } => Err(Stop::Pending(node)),
+            Projection::NestedField { .. } | Projection::NestedTupleElement { .. } => {
+                Err(Stop::Pending(node))
+            }
         }
     }
 

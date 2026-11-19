@@ -1,13 +1,18 @@
 use super::*;
 
 #[test]
-fn nested_owned_records_reach_the_m5_storage_boundary() {
-    probe(
-        "records::nested_owned_records_reach_the_m5_storage_boundary",
+fn nested_owned_records_clean_initialized_leaves_on_exit() {
+    use compiler::analysis::DeclarationShape;
+    use compiler::analysis::ownership::Projection;
+
+    probe_with_typed(
+        "records::nested_owned_records_clean_initialized_leaves_on_exit",
         r#"
+            import std::core::dispose as release;
             type Inner = { text: string; }
             type Outer = { child: Inner; sibling: string; }
             function cleanup(value: Outer): void {}
+            function exits(flag: bool, value: Outer): void { if (flag) { return; } }
             function branch(flag: bool, value: Outer): string {
                 if (flag) { let taken = value.child; }
                 return value.sibling;
@@ -15,24 +20,107 @@ fn nested_owned_records_reach_the_m5_storage_boundary() {
             function backedge(flag: bool, value: Outer): void {
                 while (flag) { let taken = value.child; continue; }
             }
+            function wholeMove(value: Outer): Outer { return value; }
+            function borrow(value: Outer): void { let held = &value; }
+            type CustomLeaf = { text: string; }
+            implement release(value: CustomLeaf): void {}
+            type CustomChild = { child: CustomLeaf; sibling: string; }
+            function customChild(value: CustomChild): void {}
+            type CustomRoot = { child: Inner; sibling: string; }
+            implement release(value: CustomRoot): void {}
+            function customRoot(value: CustomRoot): void {}
+            type Deeper = { child: Outer; }
+            function deeper(value: Deeper): void {}
+            type RefLeaf = { view: &bool; }
+            type RefRoot = { child: RefLeaf; sibling: string; }
+            function referenceLeaf(value: RefRoot): void {}
         "#,
-        |_, module, receipt| {
-            for name in ["cleanup", "branch", "backedge"] {
-                let declaration = module
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
                     .declarations
                     .iter()
                     .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let field = |record, name| {
+                let facts = typed
+                    .inventory()
+                    .type_facts()
+                    .declarations()
+                    .find(|facts| facts.declaration.id == declaration(record).id)
                     .unwrap();
-                let report =
-                    lower_body(receipt, module, &declaration.id, AnalysisLimits::default())
-                        .unwrap();
+                let DeclarationShape::Record { fields } = &facts.shape else {
+                    panic!("expected checked record fields")
+                };
+                &fields
+                    .iter()
+                    .find(|member| member.declaration.name.as_deref() == Some(name))
+                    .unwrap()
+                    .declaration
+                    .id
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let default = AnalysisLimits::default();
+            let check_drops = |mir: &Mir<'_>, entry| {
+                assert!(
+                    matches!(path_drops(mir, entry).as_slice(), [Obligation::Drop(sibling), Obligation::Drop(text)]
+                    if sibling.root.span.bytes() == b"value: Outer" && text.root.node == sibling.root.node
+                        && matches!(sibling.projection, Some(Projection::Field(decl)) if &decl.id == field("Outer", "sibling"))
+                        && matches!(text.projection, Some(Projection::NestedField { outer, inner }) if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "text")))
+                );
+            };
+            let cleanup = lower("cleanup", default);
+            let mir = cleanup
+                .mir()
+                .unwrap_or_else(|| panic!("nested cleanup: {:?}", cleanup.completion()));
+            check_drops(mir, mir.entry);
+            let exits = lower("exits", default);
+            let mir = exits
+                .mir()
+                .expect("the explicit return and fallthrough both clean the record");
+            let (yes, no) = branch_targets(mir);
+            check_drops(mir, yes);
+            check_drops(mir, no);
+            for (name, at) in [
+                ("branch", b"value.sibling".as_slice()),
+                ("backedge", b"value.child"),
+                ("wholeMove", b"value"),
+                ("borrow", b"value"),
+                ("customChild", b"value: CustomChild"),
+                ("customRoot", b"value: CustomRoot"),
+                ("deeper", b"value: Deeper"),
+                ("referenceLeaf", b"value: RefRoot"),
+            ] {
+                let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
                 let blocker = report.blocked_at().unwrap();
-                let body = &module.syntax.nodes[declaration.node].span;
+                let body = &module.syntax.nodes[declaration(name).node].span;
                 assert_eq!(blocker.module, &module.key);
                 assert!(body.start() <= blocker.span.start() && blocker.span.end() <= body.end());
-                assert_eq!(blocker.span.bytes(), b"value: Outer", "{name}");
+                assert_eq!(blocker.span.bytes(), at, "{name}");
+            }
+            let exact = AnalysisLimits {
+                max_work: cleanup.statistics().work,
+                max_entries: cleanup.statistics().entries,
+                ..default
+            };
+            assert!(lower("cleanup", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("cleanup", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
             }
         },
     );
