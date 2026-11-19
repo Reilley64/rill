@@ -13,15 +13,23 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
             type Outer = { child: Inner; sibling: string; }
             function cleanup(value: Outer): void {}
             function exits(flag: bool, value: Outer): void { if (flag) { return; } }
-            function branch(flag: bool, value: Outer): string {
+            function branch(flag: bool, value: Outer): void {
                 if (flag) { let taken = value.child; }
-                return value.sibling;
             }
+            function projection(value: Outer): string { return value.sibling; }
             function backedge(flag: bool, value: Outer): void {
                 while (flag) { let taken = value.child; continue; }
             }
             function wholeMove(value: Outer): Outer { return value; }
             function borrow(value: Outer): void { let held = &value; }
+            function construct(child: Inner): void { let value = Outer { child: child, sibling: "sibling" }; }
+            type Pair = { front: string; marker: i32; back: string; }
+            type Stacked = { first: Pair; middle: string; last: Pair; }
+            function ordered(flag: bool, value: Stacked): void {
+                if (flag) { let arm = "early"; return; }
+            }
+            type GuardRoot = { child: Inner; lock: LockGuard<i32>; }
+            function protectedSibling(value: GuardRoot): void {}
             type CustomLeaf = { text: string; }
             implement release(value: CustomLeaf): void {}
             type CustomChild = { child: CustomLeaf; sibling: string; }
@@ -83,11 +91,57 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
             let (yes, no) = branch_targets(mir);
             check_drops(mir, yes);
             check_drops(mir, no);
+            let ordered = lower("ordered", default);
+            let mir = ordered
+                .mir()
+                .expect("each initialized nested leaf has its own exact cleanup place");
+            let (yes, no) = branch_targets(mir);
+            let expected = [
+                ("last", Some("back")),
+                ("last", Some("front")),
+                ("middle", None),
+                ("first", Some("back")),
+                ("first", Some("front")),
+            ];
+            for (entry, local) in [(yes, true), (no, false)] {
+                let drops = path_drops(mir, entry);
+                if local {
+                    assert!(matches!(drops.first(), Some(Obligation::Drop(arm))
+                        if arm.root.span.bytes() == b"arm" && arm.projection.is_none()));
+                }
+                let fields = &drops[usize::from(local)..];
+                assert_eq!(fields.len(), expected.len());
+                for (drop, (outer, inner)) in fields.iter().zip(expected) {
+                    let Obligation::Drop(place) = drop else {
+                        panic!("expected a string leaf drop")
+                    };
+                    assert_eq!(place.root.span.bytes(), b"value: Stacked");
+                    match (place.projection, inner) {
+                        (Some(Projection::Field(member)), None) => {
+                            assert_eq!(&member.id, field("Stacked", outer))
+                        }
+                        (
+                            Some(Projection::NestedField {
+                                outer: parent,
+                                inner: member,
+                            }),
+                            Some(inner),
+                        ) => {
+                            assert_eq!(&parent.id, field("Stacked", outer));
+                            assert_eq!(&member.id, field("Pair", inner));
+                        }
+                        _ => panic!("expected the canonical field path"),
+                    }
+                }
+            }
             for (name, at) in [
-                ("branch", b"value.sibling".as_slice()),
+                ("branch", b"value.child".as_slice()),
+                ("projection", b"value.sibling"),
                 ("backedge", b"value.child"),
                 ("wholeMove", b"value"),
                 ("borrow", b"value"),
+                ("construct", b"value"),
+                ("protectedSibling", b"value: GuardRoot"),
                 ("customChild", b"value: CustomChild"),
                 ("customRoot", b"value: CustomRoot"),
                 ("deeper", b"value: Deeper"),

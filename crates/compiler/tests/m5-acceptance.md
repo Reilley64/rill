@@ -92,6 +92,16 @@ At `b35d250` on macOS AArch64, `mise run test:compiler` passed 425 tests, `mise 
 
 No workflow changed, so `check:ci` was not run. The hosted scaffold runs for this revision were pending at recording time. Product build, language, standard-library, runtime and client acceptance remain unavailable. LLVM and provider ABI acceptance were not run.
 
+## Normal-exit cleanup of two-level owned records
+
+At `6e598ae8025c7e22d2f022c1107516f5a5696db9`, [#74](https://github.com/Reilley64/rill/issues/74) admits untouched, fully initialized incoming application records with two levels and primitive leaves. The canonical `dispose` family must establish that neither the outer nor the inner record has a custom disposer. The compiler records nested leaves with both canonical field identities in `Projection::NestedField`. The ordinary cleanup boundary reverses declaration order at both levels. It drops each string leaf once and ends storage for the other primitives.
+
+`nested_owned_records_clean_initialized_leaves_on_exit` replaces the preflight that stopped at `value: Outer`. Both installed modes now drop `sibling` before `child.text`, exactly once each, on fallthrough and an explicit return. A separate record with two fields of the same inner type around a string field drops `last.back`, `last.front`, `middle`, `first.back`, then `first.front`. The return arm drops its own local before those parameter fields. Moves, projections and borrows of the parameter still have no source place. Nested construction, a third level, stored references, protected fields, and a selected outer or inner disposer still produce no MIR. The branch and backedge probes now stop at `value.child`, not at parameter admission.
+
+Independent Standards and Spec reviews of `6e598ae` found no documented breach or spec discrepancy. The follow-up checks exact outer and inner order, distinct return-arm cleanup, and the protected and projection boundaries. Exact and one-short work and entry limits run in both modes.
+
+All four local gates and whitespace passed at both pins: 509 compiler tests, including 86 M5 tests, and 525 workspace tests. Staged M4 replay issued both receipts for the baseline, the nested record source and the multi-module check without ownership or execution. At prior `50552e0`, all four hosted [scaffold checks](https://github.com/Reilley64/rill/actions/runs/44628032561) passed. The [native jobs](https://github.com/Reilley64/rill/actions/runs/44628021310) stopped at the unimplemented `test:runtime` task. Native execution is unrun.
+
 ## Carried references in owned fields
 
 [#68](https://github.com/Reilley64/rill/issues/68) starts at M5 publication `e62a85da1107bd9ddb0c05c7bdbbd2091ae45523` on the same M4 input. The [approved #15 decision](https://github.com/Reilley64/rill/issues/15#issuecomment-6853088155) permits returning contained references while forbidding escape from body-local storage. The [layered dependency model](../../../docs/rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#layered-dependency-model) explains why `x.value` and `&x.value` have different dependencies. This increment does not accept the full RFC or establish a nested destination contract.
@@ -897,7 +907,7 @@ At `917ee289e615a37fbc57c5312affe0ea14c0616c`, `mise run test:compiler`, `mise r
 
 ## Priority across the nine open M5 blockers
 
-The [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) stay open. Each row names one remaining acceptance behavior and the smallest test that would advance it. A typed receipt permits an M5 query. It does not establish an ownership judgment. The stage column describes a checked witness, not every case in the issue.
+At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
 
 | Issue | Missing acceptance behavior | Observed stage boundary | Smallest next proof |
 | --- | --- | --- | --- |
@@ -911,7 +921,7 @@ The [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) stay open
 | [#75](https://github.com/Reilley64/rill/issues/75), irrefutable patterns | Transfer named nested owned leaves and clean just the unbound ones. | M5. `ownedNested` in [`patterns.rs`](m5/patterns.rs) has a receipt and stops at the owned tuple parameter before pattern lowering. | Bind one nested string leaf from an owned tuple temporary and drop the remaining initialized leaves in reverse order. Check that a moved name is not dropped with the temporary. |
 | [#76](https://github.com/Reilley64/rill/issues/76), propagation | Clean an owning compound call result when a complete argument can propagate. | M5 for `unsupported` in the owning call-output probe in [`propagation.rs`](m5/propagation.rs), which calls `compound(input?)` for a `[string, string]` result. Borrowed and unacknowledged Result shapes can still block at M4. | On success, discard the two strings in reverse order before the next operation. On failure, export `None` without producing or dropping a result. |
 
-**Next slice:** Start with #74's `cleanup` witness. The integration pair already works on the supported scalar/reference routes. The new preflight identifies nested owned storage as an earlier common blocker for #67, #70, and #74. A checked normal cleanup case would provide the storage and field-order evidence needed for later nested transfers and patterns, without adding a new call form. Do not extend that slice to custom disposal, protected representations, cancellation, or aggregate call contracts.
+**Selected slice at `50552e0`:** Start with #74's `cleanup` witness. The integration pair already works on the supported scalar/reference routes. The preflight identified nested owned storage as an earlier common blocker for #67, #70, and #74. The [normal cleanup slice](#normal-exit-cleanup-of-two-level-owned-records) now verifies initialized leaf order without adding a new call form. It does not yet give those parameters source places for transfers, backedges, or patterns.
 
 Native `test:runtime` is separate, unrun execution evidence. The hosted job reaches the unimplemented task; it does not run a Rill program. No work on M6 or #78 is part of this plan.
 
