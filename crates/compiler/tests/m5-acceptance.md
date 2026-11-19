@@ -413,6 +413,14 @@ Independent Standards review of `c11ad67` found an uncharged capture-site lookup
 
 All four local gates and whitespace passed at `c11ad67` (447 compiler tests and 463 workspace tests). The staged M4 baseline issued both typed receipts. Hosted [pull-request scaffold checks](https://github.com/Reilley64/rill/actions/runs/44443295704) passed all four profiles at `7f8b6ef`; its [native checks](https://github.com/Reilley64/rill/actions/runs/44443295635) reached unimplemented `test:runtime`. No Rill program ran.
 
+## Known local once invocation of a pair environment
+
+At `fcb3b410481ca54f20df7283117d364daef1b0db`, [#71](https://github.com/Reilley64/rill/issues/71) admits a zero-argument call to a local, named, owned `once` receiver whose current value came from the checked direct pair formation above. [RFC 0004](../../../docs/rfcs/0004-functions-overloads-and-generic-requirements.md#callable-modes-and-requirements) requires ownership for consuming invocation. The [RFC 0007 dependency rules](../../../docs/rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#layered-dependency-model) preserve sources carried through the tuple result instead of borrowing the receiver slot. `InvokeClosurePair` identifies the receiver, its reaching arrow origin, and the result storage. It consumes the environment and transfers its two positional captures, so the result owns their cleanup and the old environment does not.
+
+`invokes_a_known_once_pair_and_transfers_its_contents` went from `Incomplete` with a typed receipt to checked in both installed modes. It ties formation, invocation, tuple transfer and cleanup together. It also invokes after moving the environment, and on each path after a branch-local replacement, where the selected arrow and cleanup differ. Reuse of the consumed binding rejects with `R0200` at the later read, with the call as the move site. The repeatable receiver probe is typed but has no MIR. A literal second invocation and invocation of the borrowed pair in the separate negative fixture still hit M4 `CallBoundary` without a receipt, so those are not M5 judgments. Erased and computed callable routes stay outside scope.
+
+All four local gates and whitespace passed at `fcb3b41` (449 compiler tests and 465 workspace tests). Exact work and entry budgets pass in both installed modes; either one-short limit exposes no MIR. The staged M4 baseline issued both typed receipts. Independent Standards and Spec reviews are pending. Hosted scaffold passed all four profiles at `93effc7`; native execution remains unavailable. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
