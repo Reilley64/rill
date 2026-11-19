@@ -787,6 +787,16 @@ fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
                 let _ = flag;
                 let _ = view;
             }
+            type Wrapper = { pair: [bool, string]; };
+            function indirect(input: &mut Wrapper): bool {
+                let [flag, _] = &mut input.pair;
+                return flag;
+            }
+            function carried(seed: [&bool, string]): &bool {
+                let mut owner = seed;
+                let [saved, _] = &mut owner;
+                return saved;
+            }
         "#,
         |_, module, receipt| {
             let lower = |name, limits| {
@@ -909,6 +919,8 @@ fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
                 ("named", "[_, view]"),
                 ("both", "[first, second]"),
                 ("mixed", "[flag, view]"),
+                ("indirect", "[flag, _]"),
+                ("carried", "[saved, _]"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
