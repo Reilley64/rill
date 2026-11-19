@@ -23,7 +23,10 @@ use std::sync::Arc;
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
-    CheckedPipeCarrier { primitive_arguments: bool },
+    CheckedPipeCarrier {
+        primitive_arguments: bool,
+        site: PropagationSite,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -1676,6 +1679,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         option_text,
                         Some((_, OptionTextSource::PipeStep))
                     ),
+                    site,
                 },
                 call,
                 return_cleanup,
@@ -1914,9 +1918,16 @@ impl<'a, 'g> Build<'a, 'g> {
             None
         };
         let order = || argument_staging_order(&call.arguments, pipe_formal).enumerate();
-        // A scalar or string call or ordinary pipe can admit one composed
-        // argument layer. A propagating step's arguments cannot compose again.
-        let allows_composed_pipe = matches!(output, PropagatingCallOutput::Value(_));
+        // A top-level call or pipe can admit one composed argument layer.
+        // A pipe lowered as that argument cannot admit another layer.
+        let allows_composed_pipe = matches!(
+            output,
+            PropagatingCallOutput::Value(_)
+                | PropagatingCallOutput::CheckedPipeCarrier {
+                    site: PropagationSite::StatementRoot,
+                    ..
+                }
+        );
         let mut roots = Vec::new();
         let mut terminal_root_index = None;
         let mut can_return = false;
@@ -1998,9 +2009,11 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             PropagatingCallOutput::CheckedPipeCarrier {
                 primitive_arguments: true,
+                ..
             } => {}
             PropagatingCallOutput::CheckedPipeCarrier {
                 primitive_arguments: false,
+                ..
             } => {
                 // The step signature already matched the actual arguments.
                 // Composition is narrower: every argument must be primitive.

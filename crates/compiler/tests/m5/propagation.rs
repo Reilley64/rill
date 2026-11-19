@@ -6025,7 +6025,6 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
                 return Option<string>.None;
             }
             function present(value: string): Option<string>.Some { return Option<string>.Some(value); }
-            function unknown(value: string): Option<string> { return Option<string>.Some(value); }
             function useAll(value: string, bit: bool, prefix: string): bool {
                 dispose(value); dispose(prefix); return bit;
             }
@@ -6047,13 +6046,6 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
             }
             function reached(outer: string, input: Option<string>.Some, inside: string, gate: Option<bool>.Some, tail: string): Option<bool> {
                 let bit = stage(outer) |> invalid(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _);
-                return Option.Some(bit);
-            }
-            function outerStep(value: string, bit: bool, prefix: string): Option<bool> {
-                dispose(value); dispose(prefix); return Option.Some(bit);
-            }
-            function excluded(outer: string, input: Option<string>): Option<bool> {
-                let bit = outer |> outerStep(((input?) |> unknown?), true, _)?;
                 return Option.Some(bit);
             }
             function siblings(input: Option<string>, written: Option<string>, inside: string, gate: Option<bool>): Option<bool> {
@@ -6202,10 +6194,6 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
             assert_eq!(finding.site.span.bytes(), b"dispose(prefix)");
             assert_eq!(finding.related.span.bytes(), b"dispose(prefix)");
             assert!(finding.related.span.start() < finding.site.span.start());
-            let excluded = lower("excluded", default);
-            assert_eq!(excluded.completion(), Completion::Incomplete);
-            assert!(excluded.mir().is_none());
-            assert_eq!(excluded.blocked_at().unwrap().span.bytes(), b"(input?)");
             let siblings = lower("siblings", default);
             let mir = siblings
                 .mir()
@@ -6254,6 +6242,256 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
             assert_eq!(
                 skipped.blocked_at().unwrap().span.bytes(),
                 b"((input?) |> present?) |> useAll(((written?) |> present?), true, _)"
+            );
+            let exact = AnalysisLimits {
+                max_work: written.statistics().work,
+                max_entries: written.statistics().entries,
+                ..default
+            };
+            assert!(lower("written", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("written", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
+    probe_with_typed(
+        "propagation::composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes",
+        r#"
+            function stage(value: string): string { return value; }
+            function finish(inside: string, bit: bool, value: string): Option<string> {
+                dispose(inside);
+                if (bit) { return Option<string>.Some(value); }
+                return Option<string>.None;
+            }
+            function outer(value: string, bit: bool, prefix: string): Option<string> {
+                dispose(prefix);
+                if (bit) { return Option<string>.Some(value); }
+                return Option<string>.None;
+            }
+            function present(value: string): Option<string>.Some { return Option<string>.Some(value); }
+            function last(tail: string): bool { dispose(tail); return true; }
+            function after(bit: bool): bool { return bit; }
+            function written(prefix: string, input: Option<string>, inside: string, gate: Option<bool>, tail: string): Option<bool> {
+                let output = stage(prefix) |> outer(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _)?;
+                return Option.Some(after(true));
+            }
+            function inputPosition(input: Option<string>, between: string, later: Option<bool>): Option<bool> {
+                ((input?) |> present?) |> outer(stage(between), later?, _)?;
+                return Option.Some(after(true));
+            }
+            function terminal(prefix: string, input: Option<string>.None, inside: string, gate: Option<bool>, tail: string): Option<bool> {
+                let _ = stage(prefix) |> outer(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _)?;
+                return Option.Some(true);
+            }
+            function plain(value: string, bit: bool, prefix: string): bool { dispose(prefix); dispose(value); return bit; }
+            function terminalPlain(prefix: string, input: Option<string>.None, inside: string, gate: Option<bool>, tail: string): Option<bool> {
+                let _ = stage(prefix) |> plain(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _);
+                return Option.Some(true);
+            }
+            function invalid(value: string, bit: bool, prefix: string): Option<string>.None {
+                dispose(prefix); dispose(prefix); dispose(value); return Option<string>.None;
+            }
+            function reached(prefix: string, input: Option<string>.Some): Option<bool> {
+                let _ = stage(prefix) |> invalid(((input?) |> present?), true, _)?;
+                return Option.Some(true);
+            }
+            function boolStep(value: string, bit: bool, prefix: string): Option<bool>.Some {
+                dispose(value); dispose(prefix); return Option<bool>.Some(bit);
+            }
+            function scalarStep(prefix: string, input: Option<string>): Option<bool> {
+                let bit = stage(prefix) |> boolStep(((input?) |> present?), true, _)?;
+                return Option.Some(bit);
+            }
+            function skippedSibling(input: Option<string>.None, written: Option<string>): Option<bool> {
+                let _ = ((input?) |> present?) |> outer(((written?) |> present?), true, _)?;
+                return Option.Some(true);
+            }
+            function tooDeep(prefix: string, input: Option<string>): Option<bool> {
+                let _ = stage(prefix) |> outer((((input?) |> present?) |> present?), true, _)?;
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let written = lower("written", default);
+            let mir = written
+                .mir()
+                .unwrap_or_else(|| panic!("written before outer step: {:?}", written.completion()));
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (gate_yes, gate_no) = variant_edges(mir, yes, &option.some.id, b"gate");
+            let (inner_yes, inner_no) = variant_edges(
+                mir,
+                gate_yes,
+                &option.some.id,
+                b"(input?) |> finish(stage(inside), gate?, _)?",
+            );
+            let (outer_yes, outer_no) = variant_edges(mir, inner_yes, &option.some.id, b"stage(prefix) |> outer(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _)?");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(prefix)", b"tail: string", b"inside: string"],
+            );
+            assert_return(
+                &linear(mir, gate_no),
+                &option.none.id,
+                false,
+                &[
+                    b"stage(inside)",
+                    b"(input?)",
+                    b"stage(prefix)",
+                    b"tail: string",
+                ],
+            );
+            assert_return(
+                &linear(mir, inner_no),
+                &option.none.id,
+                false,
+                &[b"stage(prefix)", b"tail: string"],
+            );
+            assert_return(&linear(mir, outer_no), &option.none.id, false, &[]);
+            assert_return(&linear(mir, outer_yes), &option.some.id, true, &[b"output"]);
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("stage"), id("stage")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, false]),
+                [id("stage"), id("stage"), id("finish")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true, false]),
+                [
+                    id("stage"),
+                    id("stage"),
+                    id("finish"),
+                    id("last"),
+                    id("outer")
+                ]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true, true]),
+                [
+                    id("stage"),
+                    id("stage"),
+                    id("finish"),
+                    id("last"),
+                    id("outer"),
+                    id("after")
+                ]
+            );
+            let input = lower("inputPosition", default);
+            let mir = input
+                .mir()
+                .expect("composed input still evaluates before written arguments");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (later_yes, later_no) = variant_edges(mir, yes, &option.some.id, b"later");
+            let (outer_yes, outer_no) = variant_edges(
+                mir,
+                later_yes,
+                &option.some.id,
+                b"((input?) |> present?) |> outer(stage(between), later?, _)?",
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"between: string"],
+            );
+            assert_return(
+                &linear(mir, later_no),
+                &option.none.id,
+                false,
+                &[b"stage(between)", b"((input?) |> present?)"],
+            );
+            assert_return(&linear(mir, outer_no), &option.none.id, false, &[]);
+            assert!(
+                matches!(path_drops(mir, outer_yes).as_slice(), [Obligation::Drop(result)]
+                if result.root.span.bytes() == b"((input?) |> present?) |> outer(stage(between), later?, _)?")
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true]),
+                [id("present"), id("stage"), id("outer"), id("after")]
+            );
+            let terminal = lower("terminal", default);
+            let mir = terminal
+                .mir()
+                .expect("known inner failure never reaches the outer step");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(prefix)", b"tail: string", b"inside: string"],
+            );
+            let plain = lower("terminalPlain", default);
+            assert!(plain.mir().is_some());
+            assert_eq!(terminal.statistics().entries, plain.statistics().entries);
+            let reached = lower("reached", default);
+            assert_eq!(reached.completion(), Completion::SourceRejected);
+            assert!(reached.mir().is_none());
+            let [finding] = reached.findings() else {
+                panic!("expected reached outer step failure")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(prefix)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(prefix)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let scalar = lower("scalarStep", default);
+            let mir = scalar
+                .mir()
+                .expect("a checked primitive carrier admits the same argument layer");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(prefix)"],
+            );
+            assert_return(&linear(mir, yes), &option.some.id, true, &[]);
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("present"), id("boolStep")]
+            );
+            let skipped = lower("skippedSibling", default);
+            assert_eq!(skipped.completion(), Completion::Incomplete);
+            assert!(skipped.mir().is_none());
+            assert_eq!(
+                skipped.blocked_at().unwrap().span.bytes(),
+                b"((input?) |> present?) |> outer(((written?) |> present?), true, _)?"
+            );
+            let deeper = lower("tooDeep", default);
+            assert_eq!(deeper.completion(), Completion::Incomplete);
+            assert!(deeper.mir().is_none());
+            assert_eq!(
+                deeper.blocked_at().unwrap().span.bytes(),
+                b"((input?) |> present?) |> present?"
             );
             let exact = AnalysisLimits {
                 max_work: written.statistics().work,
