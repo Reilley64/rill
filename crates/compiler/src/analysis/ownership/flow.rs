@@ -50,6 +50,15 @@ enum LoanKind {
     Backing,
     Contents,
     Suspension,
+    // External backing carried by an incoming exclusive Bool descriptor,
+    // not a borrow of the parameter's local storage.
+    IncomingExclusive,
+}
+
+impl LoanKind {
+    fn borrows_local_storage(self) -> bool {
+        matches!(self, Self::Backing | Self::Contents)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -203,10 +212,13 @@ fn conflict(
     budget: &mut Budget,
 ) -> ResultOf<()> {
     let check = |loan: Loan, _: &mut Budget| -> ResultOf<()> {
+        if loan.kind == LoanKind::IncomingExclusive {
+            return Ok(());
+        }
         let blocks = match access {
             Access::Observe => loan.exclusive,
             Access::Exclusive => true,
-            Access::EndScope => loan.kind != LoanKind::Suspension,
+            Access::EndScope => loan.kind.borrows_local_storage(),
         };
         if blocks && overlap(slots, loan.source, source) {
             return Err(Stop::Rejected {
@@ -428,7 +440,7 @@ fn cleanup_boundary<'g>(
     let mut remaining = 0usize;
     let mut grouped_dependencies = false;
     let source_rank = |loan: &Loan, state: &[State]| {
-        if loan.kind == LoanKind::Suspension {
+        if !loan.kind.borrows_local_storage() {
             return None;
         }
         let owner = slots[loan.source].owner;
@@ -568,7 +580,10 @@ fn retire_loans(
             continue;
         };
         budget.step(held.loans.len().saturating_mul(retired.len()))?;
-        let current = |loan: &Loan| !retired.iter().any(|&old| overlap(slots, old, loan.source));
+        let current = |loan: &Loan| {
+            loan.kind == LoanKind::IncomingExclusive
+                || !retired.iter().any(|&old| overlap(slots, old, loan.source))
+        };
         if held.loans.iter().any(|loan| !current(loan)) {
             budget.reserve(held.loans.len())?;
             held.loans = Arc::from_iter(held.loans.iter().copied().filter(current));
@@ -591,6 +606,8 @@ pub(super) fn run<'g>(
         cleanups,
         dispose,
         retained,
+        retains_exclusive_bool,
+        incoming_exclusive_bools,
         budget,
         ..
     } = build;
@@ -628,6 +645,19 @@ pub(super) fn run<'g>(
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
+    }
+    for source in incoming_exclusive_bools {
+        budget.step(1)?;
+        budget.reserve(1)?;
+        state[source] = State::Initialized(Held {
+            loans: Arc::from([Loan {
+                source,
+                site: slots[source].node,
+                exclusive: true,
+                kind: LoanKind::IncomingExclusive,
+            }]),
+            ..Held::default()
+        });
     }
     for (&parameter, &contents) in &retained {
         budget.step(1)?;
@@ -839,10 +869,10 @@ pub(super) fn run<'g>(
                             insert_loan(
                                 &mut loans,
                                 Loan {
-                                    kind: if loan.kind == LoanKind::Suspension {
-                                        LoanKind::Suspension
-                                    } else {
+                                    kind: if loan.kind.borrows_local_storage() {
                                         LoanKind::Contents
+                                    } else {
+                                        loan.kind
                                     },
                                     ..loan
                                 },
@@ -1197,8 +1227,10 @@ pub(super) fn run<'g>(
                         let site = value.stored_at.unwrap_or(node);
                         for loan in value.loans.iter() {
                             budget.step(1)?;
-                            if loan.kind == LoanKind::Suspension {
-                                suspended_input.get_or_insert(site);
+                            if !loan.kind.borrows_local_storage() {
+                                if !retains_exclusive_bool {
+                                    suspended_input.get_or_insert(site);
+                                }
                             } else {
                                 return Err(Stop::Rejected {
                                     site,
@@ -1208,9 +1240,9 @@ pub(super) fn run<'g>(
                             }
                         }
                     }
-                    // Suspending an incoming descriptor does not borrow its
-                    // local storage. Its outward exclusive restriction needs a
-                    // call contract beyond the admitted shared-input route.
+                    // A suspension restricts the local access holder. Its
+                    // incoming backing can survive that holder and needs a
+                    // supported outward contract. Local backing still rejects.
                     if let Some(site) = suspended_input {
                         return Err(Stop::Pending(site));
                     }
@@ -1221,7 +1253,7 @@ pub(super) fn run<'g>(
                     forbid_active_escape(&state[slot], node)?;
                     let mut escape: Option<Loan> = None;
                     visit_loans(&state, slots[slot].storage(slot), budget, |loan, _| {
-                        if loan.kind != LoanKind::Suspension
+                        if loan.kind.borrows_local_storage()
                             && escape.is_none_or(|old| loan.kind < old.kind)
                         {
                             escape = Some(loan);

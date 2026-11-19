@@ -379,6 +379,13 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
             function forwardsIncomingReborrow(slot: &mut &bool, src: &mut bool): void {
                 relay(slot, &*src);
             }
+            function broaderContract(slot: &mut &bool, src: &mut bool, extra: bool): void {
+                *slot = &*src;
+            }
+            function broaderMoved(slot: &mut &bool, src: &mut bool, choose: bool): void {
+                let access = slot;
+                if (choose) { let holder = src; *access = &*holder; }
+            }
             function forwardsLocalReborrow(slot: &mut &bool, input: &bool): void {
                 let mut local = true;
                 let src = &mut local;
@@ -523,9 +530,14 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
             assert_eq!(finding.related.span.bytes(), b"&mut local");
 
             for name in ["storesIncomingReborrow", "forwardsIncomingReborrow"] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Checked, "{name}");
+                assert!(report.mir().is_some(), "{name}");
+            }
+            for name in ["broaderContract", "broaderMoved"] {
                 let pending = lower(name);
                 assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
-                assert!(pending.mir().is_none());
+                assert!(pending.mir().is_none(), "{name}");
             }
 
             let limits = AnalysisLimits {
@@ -1377,6 +1389,165 @@ fn exact_alias_reads_and_writes_keep_value_and_access_separate() {
 }
 
 #[test]
+fn retained_shared_view_preserves_incoming_exclusive_access() {
+    probe(
+        "retained::retained_shared_view_preserves_incoming_exclusive_access",
+        r#"
+            function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function stash(slot: &mut &bool, src: &mut bool): void { *slot = &*src; }
+            function forward(src: &mut bool, slot: &mut &bool): void {
+                { let access = src; remember(slot, &*access); }
+            }
+            function resumes(seed: &bool): bool {
+                let mut flag = true;
+                let access = &mut flag;
+                let mut out = seed;
+                forward(access, &mut out);
+                let snapshot = *out;
+                let after = *access;
+                return snapshot;
+            }
+            function suspended(seed: &bool): bool {
+                let mut flag = true;
+                let access = &mut flag;
+                let mut out = seed;
+                stash(&mut out, access);
+                let early = *access;
+                return *out;
+            }
+            function blockedOwner(seed: &bool): bool {
+                let mut flag = true;
+                let mut out = seed;
+                stash(&mut out, &mut flag);
+                let early = flag;
+                return *out;
+            }
+            function expires(seed: &bool): bool {
+                let mut out = seed;
+                { let mut flag = true; stash(&mut out, &mut flag); }
+                return *out;
+            }
+            function localEscape(slot: &mut &bool): void {
+                let mut flag = true;
+                stash(slot, &mut flag);
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let stash = lower("stash");
+            let mir = stash
+                .mir()
+                .unwrap_or_else(|| panic!("stash: {:?}", stash.completion()));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::InstallThrough { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Reborrow { parent, holder, exclusive: false },
+                Operation::InstallThrough { descriptor, incoming },
+            ] if parent.root.span.bytes() == b"src: &mut bool" && descriptor.root.span.bytes() == b"slot: &mut &bool"
+                && holder.root.node == incoming.root.node));
+            let forward = lower("forward");
+            let mir = forward
+                .mir()
+                .expect("the caller backing outlives the moved local descriptor");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Reborrow { .. }
+                            | Operation::CallRetaining { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Move { from: source, into: Some(access) },
+                Operation::Reborrow { parent: slot, exclusive: true, .. },
+                Operation::Reborrow { parent, holder, exclusive: false },
+                Operation::CallRetaining { callee, destination: RetainedPlace::ThroughParameter(destination), input },
+            ] if source.root.span.bytes() == b"src: &mut bool" && access.root.span.bytes() == b"access"
+                && access.root.node == parent.root.node && holder.root.node == input.root.node
+                && slot.root.span.bytes() == b"slot: &mut &bool" && slot.root.node == destination.root.node
+                && *callee == &declaration("remember").id));
+            let resumes = lower("resumes");
+            let mir = resumes
+                .mir()
+                .unwrap_or_else(|| panic!("resumes: {:?}", resumes.completion()));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::CallRetaining { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Reborrow { parent, holder, exclusive: true },
+                Operation::CallRetaining { callee, destination: RetainedPlace::Local(out), input },
+                Operation::Dereference(view),
+                Operation::Dereference(resumed),
+            ] if *callee == &declaration("forward").id && parent.root.span.bytes() == b"access"
+                && out.root.span.bytes() == b"out" && out.root.node == view.root.node
+                && parent.root.node == resumed.root.node && holder.root.node == input.root.node));
+            let limits = AnalysisLimits {
+                max_entries: resumes.statistics().entries,
+                max_work: resumes.statistics().work,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(check("resumes", limits).completion(), Completion::Checked);
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let report = check("resumes", short);
+                assert_eq!(report.completion(), Completion::ResourceLimit);
+                assert!(report.mir().is_none());
+            }
+            for (name, code, cause) in [
+                ("suspended", "R0201", b"access".as_slice()),
+                ("blockedOwner", "R0201", b"&mut flag".as_slice()),
+                ("expires", "R0203", b"&mut flag".as_slice()),
+                ("localEscape", "R0202", b"&mut flag".as_slice()),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.related.span.bytes(), cause, "{name}");
+            }
+        },
+    );
+}
+
+#[test]
 fn moved_incoming_write_checks_the_original_caller_contents() {
     probe(
         "retained::moved_incoming_write_checks_the_original_caller_contents",
@@ -1501,6 +1672,12 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
                 let access = forward(slot);
                 *access = (input);
             }
+            function touch(place: &mut &mut &bool): void {}
+            function invalidated(slot: &mut &bool, input: &bool): void {
+                let mut access = slot;
+                touch(&mut access);
+                *access = (((input)));
+            }
             function joined(slot: &mut &bool, other: &mut &bool, input: &bool, choose: bool): void {
                 let mut access = slot;
                 if (choose) { access = forward(other); }
@@ -1520,6 +1697,7 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
                 b"*access = input;",
                 b"*access = (input);",
                 b"*access = ((input));",
+                b"*access = (((input)));",
                 b"*slot = incoming;",
             ] {
                 assert!(

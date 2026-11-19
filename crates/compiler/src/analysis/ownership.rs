@@ -431,6 +431,12 @@ fn lower<'g>(
     let Some(&body) = module.syntax.nodes[entry_site].children.get(1) else {
         return Err(Stop::Pending(entry_site));
     };
+    budget.step(2)?;
+    let retains_exclusive_bool = [0, 1].into_iter().any(|destination| {
+        retained_bool_call_types(&header.shape, destination).is_some_and(|(_, input)| {
+            matches!(input.as_ref(), TypeTerm::Reference { mutable: true, .. })
+        })
+    });
     let mut build = Build {
         typed,
         module,
@@ -438,6 +444,8 @@ fn lower<'g>(
         facts: BTreeMap::new(),
         locals: BTreeMap::new(),
         retained: BTreeMap::new(),
+        retains_exclusive_bool,
+        incoming_exclusive_bools: Vec::new(),
         slots: Vec::new(),
         code: Vec::new(),
         calls: Vec::new(),
@@ -470,6 +478,12 @@ fn lower<'g>(
             let contents = build.slot(parameter.declaration.node, ty)?;
             build.budget.reserve(1)?;
             build.retained.insert(slot, contents);
+        } else if matches!(parameter.ty.as_ref(),
+            TypeTerm::Reference { mutable: true, referent }
+                if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+        {
+            build.budget.reserve(1)?;
+            build.incoming_exclusive_bools.push(slot);
         }
     }
     let active = if start_disposer {
@@ -503,6 +517,41 @@ fn lower<'g>(
         1,
     )?;
     flow::run(build, entry, &params, active)
+}
+
+// The only admitted scalar retention contract has one destination and
+// one compatible source. A shared view of an exclusive source retains the
+// same Bool backing and its exclusive restriction.
+fn retained_bool_call_types<'a, 'g>(
+    shape: &'a DeclarationShape<'g>,
+    destination: usize,
+) -> Option<(&'a Type<'g>, &'a Type<'g>)> {
+    let DeclarationShape::Function { parameters, result } = shape else {
+        return None;
+    };
+    let [first, second] = parameters.as_slice() else {
+        return None;
+    };
+    if !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void") {
+        return None;
+    }
+    let (out, input) = match destination {
+        0 => (first, second),
+        1 => (second, first),
+        _ => return None,
+    };
+    let contents = retained_bool_contents_type(&out.ty)?;
+    match (contents.as_ref(), input.ty.as_ref()) {
+        (
+            TypeTerm::Reference {
+                referent: stored, ..
+            },
+            TypeTerm::Reference {
+                referent: source, ..
+            },
+        ) if stored == source => Some((contents, &input.ty)),
+        _ => None,
+    }
 }
 
 fn site_at(module: &Module, node: NodeId) -> Site<'_> {
@@ -692,6 +741,8 @@ struct Build<'a, 'g> {
     locals: BTreeMap<&'g DeclarationId, Slot>,
     /// Separate contents of checked caller destinations from the access descriptors.
     retained: BTreeMap<Slot, Slot>,
+    retains_exclusive_bool: bool,
+    incoming_exclusive_bools: Vec<Slot>,
     slots: Vec<Local<'g>>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'g>>,

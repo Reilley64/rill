@@ -1261,27 +1261,14 @@ impl<'a, 'g> Build<'a, 'g> {
             .declarations
             .get(call.callee)
             .ok_or(Stop::Pending(node))?;
-        let DeclarationShape::Function { parameters, result } = &signature.shape else {
-            return Err(Stop::Pending(node));
-        };
-        let [first, second] = parameters.as_slice() else {
-            return Err(Stop::Pending(node));
-        };
-        if call.arguments.len() != 2
-            || call.pipe_input.is_some()
-            || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
-        {
+        let (contents, formal) =
+            retained_bool_call_types(&signature.shape, position).ok_or(Stop::Pending(node))?;
+        if call.arguments.len() != 2 || call.pipe_input.is_some() {
             return Err(Stop::Pending(node));
         }
-        let (destination_formal, input_formal, input) = match position {
-            0 => (first, second, 1),
-            1 => (second, first, 0),
-            _ => return Err(Stop::Pending(node)),
-        };
-        let contents =
-            retained_bool_contents_type(&destination_formal.ty).ok_or(Stop::Pending(node))?;
+        let input = 1 - position;
         self.budget.step(1)?;
-        if input_formal.ty != *contents || self.value(call.arguments[input])?.ty != *contents {
+        if self.value(call.arguments[input])?.ty != *formal {
             return Err(Stop::Pending(node));
         }
         let argument = self.ungroup(call.arguments[position])?;
@@ -1424,13 +1411,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 NodeKind::Prefix("&mut")
             );
             next = if existing_exclusive {
-                let parent = match destination.map(|destination| destination.storage) {
-                    Some(
-                        CallStorage::ThroughParameter { descriptor, .. }
-                        | CallStorage::ThroughAlias { descriptor, .. },
-                    ) => descriptor,
-                    _ => self.place(arg)?,
-                };
+                // The retained source and the destination may both be
+                // exclusive arguments. Reborrow each argument's own place.
+                let parent = self.place(root)?;
                 self.emit(
                     arg,
                     Action::Reborrow {
