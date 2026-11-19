@@ -10,7 +10,9 @@ use crate::analysis::scalars::generics::{
     GoalState,
     callables::{CaptureFact, CaptureForm},
 };
-use crate::analysis::scalars::{ErrorConstruction, ExpressionFacts, PropagationTarget};
+use crate::analysis::scalars::{
+    ErrorConstruction, ExpressionFacts, Propagation, PropagationTarget,
+};
 use crate::analysis::typed::{
     ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
     OptionRole, OwnershipCoverage, OwnershipRule, ResultRole,
@@ -57,6 +59,16 @@ struct PropagatingArgument {
 }
 
 type StagedArgumentExits = [Option<(PropagatingArgument, Pc)>; 2];
+
+struct CheckedPropagation<'a, 'g> {
+    exit: &'a Propagation<'g>,
+    wrap: Option<&'a ErrorConstruction<'g>>,
+    fresh: Option<&'a ErrorConstruction<'g>>,
+    piped: bool,
+    source: NodeId,
+    operand: &'a Type<'g>,
+    wrapper: Option<&'g DeclarationId>,
+}
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(p) if p.name() == "string")
@@ -1423,16 +1435,12 @@ impl<'a, 'g> Build<'a, 'g> {
         })
     }
 
-    fn propagate(
+    fn checked_propagation(
         &mut self,
         node: NodeId,
-        into: Option<Slot>,
-        next: Pc,
-        return_cleanup: Pc,
-        depth: usize,
-    ) -> ResultOf<Pc> {
+        facts: &'a ExpressionFacts<'g>,
+    ) -> ResultOf<CheckedPropagation<'a, 'g>> {
         let syntax = &self.module.syntax.nodes[node];
-        let facts = self.value(node)?;
         let (id, result) = self.return_contract;
         let (exit, wrap, fresh) = match &facts.data {
             Some(DataExpression::Propagation(exit)) => (exit.as_ref(), None, None),
@@ -1488,6 +1496,36 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             None
         };
+        Ok(CheckedPropagation {
+            exit,
+            wrap,
+            fresh,
+            piped,
+            source,
+            operand,
+            wrapper,
+        })
+    }
+
+    fn propagate(
+        &mut self,
+        node: NodeId,
+        into: Option<Slot>,
+        next: Pc,
+        return_cleanup: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let facts = self.value(node)?;
+        let CheckedPropagation {
+            exit,
+            wrap,
+            fresh,
+            piped,
+            source,
+            operand,
+            wrapper,
+        } = self.checked_propagation(node, facts)?;
+        let result = self.return_contract.1;
         let scratch = self.slot(source, operand)?;
         let return_slot = if exit.can_return {
             let output = self.slot(node, result)?;
@@ -1592,7 +1630,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
-    fn contains_propagation(
+    fn contains_unadmitted_propagation(
         &mut self,
         node: NodeId,
         admitted_root: Option<NodeId>,
@@ -1604,7 +1642,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         self.budget.step(1)?;
         for &child in &self.module.syntax.nodes[node].children {
-            if self.contains_propagation(child, admitted_root, depth + 1)? {
+            if self.contains_unadmitted_propagation(child, admitted_root, depth + 1)? {
                 return Ok(true);
             }
         }
@@ -1688,8 +1726,23 @@ impl<'a, 'g> Build<'a, 'g> {
                     .second
                     .filter(|argument| argument.position == position)
                     .map(|argument| argument.root);
-                if self.contains_propagation(arg, admitted_root, depth + 1)? {
+                if self.contains_unadmitted_propagation(arg, admitted_root, depth + 1)? {
                     return Err(Stop::Pending(node));
+                }
+                if let Some(root) = admitted_root {
+                    // Check the same carrier and constructor contracts without
+                    // allocating slots or lowering any skipped expression.
+                    self.budget.step(2)?;
+                    let facts = self.value(root)?;
+                    let checked = self.checked_propagation(root, facts)?;
+                    if let Some(wrap) = checked.wrap
+                        && checked.exit.can_return
+                    {
+                        self.checked_wrap_failure(root, wrap)?;
+                    }
+                    if let Some(fresh) = checked.fresh {
+                        self.checked_scalar_error(root, facts, fresh)?;
+                    }
                 }
             }
         }
@@ -1702,7 +1755,7 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(1)?;
             let syntax = &self.module.syntax.nodes[argument.root];
             if syntax.kind == NodeKind::Wrap
-                && self.contains_propagation(syntax.children[1], None, depth + 1)?
+                && self.contains_unadmitted_propagation(syntax.children[1], None, depth + 1)?
             {
                 return Err(Stop::Pending(node));
             }
@@ -1738,15 +1791,11 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(result)
     }
 
-    fn wrap_result_failure(
+    fn checked_wrap_failure(
         &mut self,
         node: NodeId,
-        operand: Slot,
         data: &ErrorConstruction<'g>,
-        into: Slot,
-        next: Pc,
-        depth: usize,
-    ) -> ResultOf<Pc> {
+    ) -> ResultOf<(NodeId, &'g Span, &'g DeclarationId)> {
         let role = self.typed.result_role().ok_or(Stop::Pending(node))?;
         let [left, right] = self.module.syntax.nodes[node].children[..] else {
             return Err(Stop::Pending(node));
@@ -1795,6 +1844,19 @@ impl<'a, 'g> Build<'a, 'g> {
             .filter(|token| token.span == data.origin && token.span.bytes() == b"?")
             .ok_or(Stop::Pending(node))?
             .span;
+        Ok((right, origin, selected.implementation))
+    }
+
+    fn wrap_result_failure(
+        &mut self,
+        node: NodeId,
+        operand: Slot,
+        data: &ErrorConstruction<'g>,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let (right, origin, cause_display) = self.checked_wrap_failure(node, data)?;
         let payload = self.slot(right, &data.payload)?;
         let source = self.ungroup(right)?;
         let temporary = self.temporary_projection(source, false)?;
@@ -1812,7 +1874,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 variant: data.failure,
                 wrapper: data.wrapper,
                 origin,
-                cause_display: selected.implementation,
+                cause_display,
             },
             Edges::Next(next),
         )?;
@@ -1860,15 +1922,12 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
-    fn construct_scalar_error(
+    fn checked_scalar_error(
         &mut self,
         node: NodeId,
         facts: &ExpressionFacts<'g>,
         data: &ErrorConstruction<'g>,
-        into: Slot,
-        next: Pc,
-        depth: usize,
-    ) -> ResultOf<Pc> {
+    ) -> ResultOf<(NodeId, &'g DeclarationId)> {
         let (role, None) = self
             .scalar_result_role(&data.result)
             .ok_or(Stop::Pending(node))?
@@ -1907,11 +1966,24 @@ impl<'a, 'g> Build<'a, 'g> {
         if self.value(data.value)?.ty != data.payload {
             return Err(Stop::Pending(node));
         }
+        Ok((origin_node, &providers.constructor.id))
+    }
+
+    fn construct_scalar_error(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        data: &ErrorConstruction<'g>,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let (origin_node, constructor) = self.checked_scalar_error(node, facts, data)?;
         let payload = self.slot(data.value, &data.payload)?;
         let construct = self.emit(
             origin_node,
             Action::ConstructResultError {
-                constructor: &providers.constructor.id,
+                constructor,
                 variant: data.failure,
                 wrapper: data.wrapper,
                 payload,

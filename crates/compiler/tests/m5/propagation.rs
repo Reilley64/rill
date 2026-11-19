@@ -2628,6 +2628,16 @@ fn paired_arguments_use_only_their_feasible_edges() {
                 let _ = pair(left?, nested(right?)?);
                 return Option.Some(true);
             }
+            function number(a: bool, b: i32): bool { return a; }
+            function widerSkipped(left: Option<bool>.None): Option<bool> {
+                let _ = number(left?, Option<i32>.Some(1i32)?);
+                return Option.Some(true);
+            }
+            function triple(a: bool, b: bool, c: bool): bool { return a; }
+            function thirdSkipped(left: Option<bool>.None, right: Option<bool>, extra: Option<bool>): Option<bool> {
+                let _ = triple(left?, right?, extra?);
+                return Option.Some(true);
+            }
         "#,
         |_, module, receipt, typed| {
             let declaration = |name| {
@@ -2745,13 +2755,20 @@ fn paired_arguments_use_only_their_feasible_edges() {
                     .count(),
                 2
             );
-            let deeper = check("deeper");
-            assert_eq!(deeper.completion(), Completion::Incomplete);
-            assert!(deeper.mir().is_none());
-            assert_eq!(
-                deeper.blocked_at().unwrap().span.bytes(),
-                b"pair(left?, nested(right?)?)"
-            );
+            for (name, site) in [
+                ("deeper", "pair(left?, nested(right?)?)"),
+                ("widerSkipped", "Option<i32>.Some(1i32)?"),
+                ("thirdSkipped", "triple(left?, right?, extra?)"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
             let limits = AnalysisLimits {
                 max_work: stopped.statistics().work,
                 max_entries: stopped.statistics().entries,
