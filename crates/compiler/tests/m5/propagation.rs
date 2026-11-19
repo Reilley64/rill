@@ -1301,9 +1301,9 @@ fn fresh_error_pipe_keeps_the_written_constructor_anchor() {
                 return Result.Ok(1i32);
             }
             function placeholder(code: i32, owner: string): Result<bool, i32> {
-                let _ = code |> makeFailure<bool, i32>(_)?;
+                let answer = code |> makeFailure<bool, i32>(_)?;
                 dispose(owner);
-                return Result.Ok(true);
+                return Result.Ok(answer);
             }
             function unsupportedPlain(code: i32): Result<bool, i32> { return code |> makeFailure<bool, i32>; }
             function unsupportedText(message: string): Result<bool, string> {
@@ -1329,8 +1329,14 @@ fn fresh_error_pipe_keeps_the_written_constructor_anchor() {
             let pipe = b"payload(taken) |> makeFailure<bool, i32>?";
             let role = typed.result_role().unwrap();
             let canonical = &role.providers.unwrap().constructor.id;
-            let route: Vec<_> = straight_blocks(mir, mir.entry)
-                .into_iter()
+            let path = straight_blocks(mir, mir.entry);
+            assert!(matches!(
+                path.last().unwrap().terminator,
+                Terminator::Return
+            ));
+            let route: Vec<_> = path
+                .iter()
+                .copied()
                 .filter(|b| {
                     matches!(
                         b.operation,
@@ -1382,7 +1388,7 @@ fn fresh_error_pipe_keeps_the_written_constructor_anchor() {
             assert_eq!(construction.origin.start(), construction.origin.end());
             assert_eq!(construction.value, call.site.node);
             assert!(construction.retained.is_none());
-            let ops = linear(mir, mir.entry);
+            let ops: Vec<_> = path.iter().map(|block| &block.operation).collect();
             assert_forward(&ops, role, pipe, &[b"remaining"]);
             assert!(!ops.iter().any(|op| matches!(
                 op,

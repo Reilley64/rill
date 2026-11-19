@@ -1656,14 +1656,15 @@ impl<'a, 'g> Build<'a, 'g> {
         };
         let syntax = &self.module.syntax.nodes[node];
         let piped = syntax.kind == NodeKind::Pipe;
-        let origin_node = match syntax.kind {
-            NodeKind::Call if facts.ty == data.result => node,
+        let (origin_node, origin) = match syntax.kind {
+            NodeKind::Call if facts.ty == data.result => (node, &syntax.span),
             NodeKind::Pipe if matches!(facts.data, Some(DataExpression::ErrorPipe { .. })) => {
-                syntax.children[1]
+                self.budget.step(1)?;
+                let step = syntax.children[1];
+                (step, &self.module.syntax.nodes[step].span)
             }
             _ => return Err(Stop::Pending(node)),
         };
-        let origin = &self.module.syntax.nodes[origin_node].span;
         let providers = role.providers.ok_or(Stop::Pending(node))?;
         if data.operation != ErrorOperation::Construct
             || data.retained.is_some()
