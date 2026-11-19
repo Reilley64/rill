@@ -48,10 +48,10 @@ fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>
 }
 
 fn product_member<'g>(
-    shared: bool,
+    access: Access,
     route: &[PatternProjection<'g>],
 ) -> Option<PatternProjection<'g>> {
-    match (shared, route) {
+    match (access != Access::Owned, route) {
         (
             true,
             [
@@ -76,7 +76,7 @@ enum Binding<'a, 'g> {
     IrrefutableProduct {
         shape: NodeId,
         facts: &'a PatternFacts<'g>,
-        shared: bool,
+        access: Access,
     },
 }
 
@@ -643,8 +643,8 @@ impl<'a, 'g> Build<'a, 'g> {
                         };
                         self.stage_value(value, into, tail, temporary, depth + 1)
                     }
-                    Binding::IrrefutableProduct { facts, shared, .. } => {
-                        self.bind_product(node, facts, shared, next, depth + 1)
+                    Binding::IrrefutableProduct { facts, access, .. } => {
+                        self.bind_product(node, facts, access, next, depth + 1)
                     }
                 }
             }
@@ -842,9 +842,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 if facts.access != Access::Owned || !facts.coverage.exhaustive() {
                     return Err(Stop::Pending(pattern));
                 }
-                let shared = match (kind, facts.ty.as_ref()) {
+                let access = match (kind, facts.ty.as_ref()) {
                     (NodeKind::BracketPattern, TypeTerm::Tuple(_))
-                    | (NodeKind::RecordPattern, TypeTerm::Nominal { .. }) => false,
+                    | (NodeKind::RecordPattern, TypeTerm::Nominal { .. }) => Access::Owned,
                     (
                         NodeKind::BracketPattern,
                         TypeTerm::Reference {
@@ -859,7 +859,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         {
                             return Err(Stop::Pending(pattern));
                         }
-                        true
+                        Access::ReadOnly
                     }
                     (
                         NodeKind::RecordPattern,
@@ -867,13 +867,23 @@ impl<'a, 'g> Build<'a, 'g> {
                             mutable: false,
                             referent,
                         },
-                    ) if matches!(referent.as_ref(), TypeTerm::Nominal { .. }) => true,
+                    ) if matches!(referent.as_ref(), TypeTerm::Nominal { .. }) => Access::ReadOnly,
+                    (
+                        NodeKind::BracketPattern,
+                        TypeTerm::Reference {
+                            mutable: true,
+                            referent,
+                        },
+                    ) if let TypeTerm::Tuple(elements) = referent.as_ref() => {
+                        self.require_fresh_exclusive_pattern(pattern, facts, elements)?;
+                        Access::Writable
+                    }
                     _ => return Err(Stop::Pending(pattern)),
                 };
                 Ok(Binding::IrrefutableProduct {
                     shape,
                     facts,
-                    shared,
+                    access,
                 })
             }
             _ => {
@@ -889,6 +899,41 @@ impl<'a, 'g> Build<'a, 'g> {
                 })
             }
         }
+    }
+
+    fn require_fresh_exclusive_pattern(
+        &mut self,
+        pattern: NodeId,
+        facts: &PatternFacts<'g>,
+        elements: &[Type<'g>],
+    ) -> ResultOf<()> {
+        let source = self.ungroup(facts.source.node)?;
+        let syntax = &self.module.syntax.nodes[source];
+        if syntax.kind != NodeKind::Prefix("&mut") {
+            return Err(Stop::Pending(pattern));
+        }
+        let operand = self.ungroup(syntax.children[0])?;
+        self.budget.step(1 + elements.len() + facts.binders.len())?;
+        let input = self.value(operand)?;
+        // Restrict the whole named tuple. Do not introduce either a
+        // reborrow of a named descriptor or a split into sibling views.
+        if input.access != Access::Owned
+            || !matches!(&input.path, Some(path) if path.root.kind == DeclarationKind::Binding
+                && path.projections.is_empty())
+            || !elements
+                .iter()
+                .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
+            || !(facts
+                .binders
+                .iter()
+                .all(|binder| binder.ty == binder.source_type)
+                || matches!(facts.binders.as_slice(), [binder]
+                    if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable: true, referent }
+                        if *referent == binder.source_type)))
+        {
+            return Err(Stop::Pending(pattern));
+        }
+        Ok(())
     }
 
     fn declare_binding(&mut self, node: NodeId, locals: &mut Vec<Slot>) -> ResultOf<()> {
@@ -908,7 +953,7 @@ impl<'a, 'g> Build<'a, 'g> {
             Binding::IrrefutableProduct {
                 shape,
                 facts,
-                shared,
+                access,
             } => {
                 let syntax = &self.module.syntax.nodes[shape];
                 let record = syntax.kind == NodeKind::RecordPattern;
@@ -940,7 +985,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         return Err(Stop::Pending(name));
                     }
                     let binder = binders.next().ok_or(Stop::Pending(name))?;
-                    let flat = match product_member(shared, &binder.projections) {
+                    let flat = match product_member(access, &binder.projections) {
                         Some(PatternProjection::TupleElement(index)) => {
                             !record && index == position
                         }
@@ -964,11 +1009,11 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         node: NodeId,
         facts: &PatternFacts<'g>,
-        shared: bool,
+        access: Access,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        let shared_fields = if shared
+        let shared_fields = if access == Access::ReadOnly
             && let TypeTerm::Reference { referent, .. } = facts.ty.as_ref()
             && matches!(referent.as_ref(), TypeTerm::Nominal { .. })
         {
@@ -995,7 +1040,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if self.slots[scratch].custom_disposer.is_some() || self.slots[scratch].contains_guard() {
             return Err(Stop::Pending(node));
         }
-        let mut tail = if shared {
+        let mut tail = if access != Access::Owned {
             self.emit(node, Action::End(scratch), Edges::Next(next))?
         } else {
             self.cleanup(node, &[scratch], next)?
@@ -1007,8 +1052,8 @@ impl<'a, 'g> Build<'a, 'g> {
                 .get(binder.declaration)
                 .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
-            let member = product_member(shared, &binder.projections).ok_or(Stop::Pending(site))?;
-            let action = if shared {
+            let member = product_member(access, &binder.projections).ok_or(Stop::Pending(site))?;
+            let action = if access != Access::Owned {
                 let projection = match member {
                     PatternProjection::TupleElement(position) => Projection::TupleElement(position),
                     PatternProjection::Field(field) => {
@@ -1024,18 +1069,22 @@ impl<'a, 'g> Build<'a, 'g> {
                 };
                 let binding = if binder.ty == binder.source_type {
                     if shared_primitive_reference(binder.ty.as_ref()) {
-                        SharedMemberBinding::CopyReference
+                        BorrowedMemberBinding::CopyReference
                     } else {
-                        SharedMemberBinding::CopyScalar
+                        BorrowedMemberBinding::CopyScalar
                     }
-                } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
-                    if *referent == binder.source_type)
+                } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable, referent }
+                    if *mutable == (access == Access::Writable) && *referent == binder.source_type)
                 {
-                    SharedMemberBinding::SharedView
+                    if access == Access::Writable {
+                        BorrowedMemberBinding::ExclusiveView
+                    } else {
+                        BorrowedMemberBinding::SharedView
+                    }
                 } else {
                     return Err(Stop::Pending(site));
                 };
-                Action::BindSharedMember {
+                Action::BindBorrowedMember {
                     descriptor: scratch,
                     projection,
                     into,

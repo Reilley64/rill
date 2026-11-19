@@ -115,7 +115,7 @@ fn liveness(
             }
             Action::ForbiddenBorrowedMove(slot) => use_one(Some(slot), None),
             Action::Borrow { from, into, .. } => use_one(Some(from), Some(into)),
-            Action::BindSharedMember {
+            Action::BindBorrowedMember {
                 descriptor, into, ..
             } => use_one(Some(descriptor), Some(into)),
             Action::Reborrow { parent, into, .. } => {
@@ -1169,25 +1169,30 @@ pub(super) fn run<'g>(
                     }
                     Operation::Dereference(local(from))
                 }
-                Action::BindSharedMember {
+                Action::BindBorrowedMember {
                     descriptor,
                     projection,
                     into,
                     binding,
                 } => {
                     let held = initialized(&state[descriptor], node)?;
+                    let transfers = binding == BorrowedMemberBinding::ExclusiveView;
                     conflict(
                         &slots,
                         &state,
                         &live[pc],
                         descriptor,
                         (node, Conflict::Access),
-                        Access::Observe,
+                        if transfers {
+                            Access::Exclusive
+                        } else {
+                            Access::Observe
+                        },
                         budget,
                     )?;
                     state[into] = State::Initialized(match binding {
-                        SharedMemberBinding::CopyScalar => empty.clone(),
-                        SharedMemberBinding::CopyReference => {
+                        BorrowedMemberBinding::CopyScalar => empty.clone(),
+                        BorrowedMemberBinding::CopyReference => {
                             // Borrow marks every local-storage loan already in
                             // the aggregate as Contents. Only Backing describes
                             // the new access to the enclosing storage.
@@ -1203,12 +1208,16 @@ pub(super) fn run<'g>(
                                 ..Held::default()
                             }
                         }
-                        SharedMemberBinding::SharedView => Held {
+                        BorrowedMemberBinding::SharedView
+                        | BorrowedMemberBinding::ExclusiveView => Held {
                             loans: held.loans.clone(),
                             ..Held::default()
                         },
                     });
-                    Operation::BindSharedMember {
+                    if transfers {
+                        state[descriptor] = State::Vacant;
+                    }
+                    Operation::BindBorrowedMember {
                         descriptor: local(descriptor),
                         projection,
                         into: local(into),

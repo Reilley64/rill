@@ -151,13 +151,13 @@ pub enum Operation<'g> {
         exclusive: bool,
     },
     Dereference(Place<'g>),
-    /// Bind a fixed projection relative to a shared descriptor's referent.
-    /// No binding mode consumes the descriptor or moves the member.
-    BindSharedMember {
+    /// Bind a fixed projection relative to a staged borrow's referent.
+    /// No mode moves a member out of the aggregate.
+    BindBorrowedMember {
         descriptor: Place<'g>,
         projection: Projection<'g>,
         into: Place<'g>,
-        binding: SharedMemberBinding,
+        binding: BorrowedMemberBinding,
     },
     FormClosure {
         closure: Site<'g>,
@@ -263,7 +263,7 @@ pub enum Operation<'g> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SharedMemberBinding {
+pub enum BorrowedMemberBinding {
     /// Copy a primitive value with no carried backing.
     CopyScalar,
     /// Copy a stored shared reference with carried dependencies, not the
@@ -271,6 +271,9 @@ pub enum SharedMemberBinding {
     CopyReference,
     /// Retain the original backing for a shared view of the member.
     SharedView,
+    /// Consume the fresh staged descriptor and transfer its original
+    /// exclusive restriction to the sole writable member view.
+    ExclusiveView,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -761,11 +764,11 @@ enum Action<'g> {
         from: Slot,
         into: Option<Slot>,
     },
-    BindSharedMember {
+    BindBorrowedMember {
         descriptor: Slot,
         projection: Projection<'g>,
         into: Slot,
-        binding: SharedMemberBinding,
+        binding: BorrowedMemberBinding,
     },
     Call(usize),
     InvokeClosurePair {

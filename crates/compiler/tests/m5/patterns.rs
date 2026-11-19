@@ -269,8 +269,8 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
 #[test]
 fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
     use compiler::analysis::ownership::{
+        BorrowedMemberBinding::{CopyScalar, SharedView},
         Projection,
-        SharedMemberBinding::{CopyScalar, SharedView},
     };
 
     probe(
@@ -375,15 +375,15 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
                     matches!(
                         op,
                         Operation::Copy { .. }
-                            | Operation::BindSharedMember { .. }
+                            | Operation::BindBorrowedMember { .. }
                             | Operation::Export(_)
                     )
                 })
                 .collect();
             assert!(matches!(route.as_slice(), [
                 Operation::Copy { from: incoming, into: Some(staged) },
-                Operation::BindSharedMember { descriptor: first, projection: Projection::Field(text), into: label, binding: SharedView },
-                Operation::BindSharedMember { descriptor: second, projection: Projection::Field(bit), into: flag, binding: CopyScalar },
+                Operation::BindBorrowedMember { descriptor: first, projection: Projection::Field(text), into: label, binding: SharedView },
+                Operation::BindBorrowedMember { descriptor: second, projection: Projection::Field(bit), into: flag, binding: CopyScalar },
                 Operation::Copy { from: used, .. },
                 Operation::Copy { from: view, into: Some(result) },
                 Operation::Export(output),
@@ -425,7 +425,7 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
                         Operation::Copy { .. }
                             | Operation::Move { .. }
                             | Operation::Dispose { .. }
-                            | Operation::BindSharedMember { .. }
+                            | Operation::BindBorrowedMember { .. }
                     )
                 })
                 .collect();
@@ -714,8 +714,217 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
 }
 
 #[test]
+fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
+    use compiler::analysis::ownership::{
+        BorrowedMemberBinding::{CopyScalar, ExclusiveView},
+        Projection,
+    };
+
+    probe(
+        "patterns::fresh_exclusive_tuple_pattern_keeps_the_original_restriction",
+        r#"
+            function copies(seed: [bool, bool, string]): bool {
+                let mut owner = seed;
+                let ([(first), second, _]) = (&mut owner);
+                let _ = first;
+                let moved = owner;
+                return second;
+            }
+            function touch(view: &mut string): void {}
+            function resumes(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let [_, view] = &mut owner;
+                touch(view);
+                owner[1] = "new";
+                return owner[0];
+            }
+            function conflicts(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let [_, view] = &mut owner;
+                let moved = view;
+                let bit = owner[0];
+                let _ = moved;
+                return bit;
+            }
+            function acquisition(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let shared = &owner;
+                let [bit, _] = &mut owner;
+                let _ = shared;
+                return bit;
+            }
+            function replaceEarly(seed: [bool, string]): void {
+                let mut owner = seed;
+                let [_, view] = &mut owner;
+                owner[0] = true;
+                let _ = view;
+            }
+            function escapes(seed: [bool, string]): &mut string {
+                let mut owner = seed;
+                let [_, view] = &mut owner;
+                return view;
+            }
+            function expires(seed: &mut string, input: [bool, string], branch: bool): void {
+                let mut out = seed;
+                if (branch) { let mut owner = input; let [_, view] = &mut owner; out = view; }
+                let _ = out;
+            }
+            function named(seed: [bool, string]): void {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let [_, view] = parent;
+                let _ = view;
+            }
+            function both(seed: [string, string]): void {
+                let mut owner = seed;
+                let [first, second] = &mut owner;
+                let _ = first;
+                let _ = second;
+            }
+            function mixed(seed: [bool, string]): void {
+                let mut owner = seed;
+                let [flag, view] = &mut owner;
+                let _ = flag;
+                let _ = view;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let check = |name| lower(name, AnalysisLimits::default());
+            let copies = check("copies");
+            let mir = copies
+                .mir()
+                .unwrap_or_else(|| panic!("copies: {:?}", copies.completion()));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)]
+                if place.root.span.bytes() == b"moved" && place.tuple_element() == Some(2))
+            );
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Borrow { .. }
+                    | Operation::BindBorrowedMember { .. }
+                    | Operation::Export(_) => true,
+                    Operation::Move { into: Some(to), .. } => to.root.span.bytes() == b"moved",
+                    Operation::Copy { from, .. } => from.root.span.bytes() == b"second",
+                    _ => false,
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Borrow { source, holder, exclusive: true },
+                Operation::BindBorrowedMember { descriptor: a, projection: Projection::TupleElement(0), into: first, binding: CopyScalar },
+                Operation::BindBorrowedMember { descriptor: b, projection: Projection::TupleElement(1), into: second, binding: CopyScalar },
+                Operation::Move { from: owner, .. },
+                Operation::Copy { from: read, into: Some(result) },
+                Operation::Export(output),
+            ] if source.root.node == owner.root.node && holder.root.node == a.root.node && holder.root.node == b.root.node
+                && first.root.span.bytes() == b"first" && second.root.span.bytes() == b"second"
+                && read.root.node == second.root.node && output.root.node == result.root.node));
+            let resumes = check("resumes");
+            let mir = resumes
+                .mir()
+                .expect("owner assignment resumes after the view's last use");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. }
+                            | Operation::BindBorrowedMember { .. }
+                            | Operation::Reborrow { .. }
+                            | Operation::Call(_)
+                            | Operation::Install { .. }
+                    )
+                })
+                .collect();
+            let touch = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("touch"))
+                .unwrap();
+            assert!(matches!(route.as_slice(), [
+                Operation::Borrow { source, holder, exclusive: true },
+                Operation::BindBorrowedMember { descriptor, projection: Projection::TupleElement(1), into: view, binding: ExclusiveView },
+                Operation::Reborrow { parent, exclusive: true, .. },
+                Operation::Call(callee),
+                Operation::Install { target, .. },
+            ] if source.root.node == target.root.node && target.tuple_element() == Some(1)
+                && holder.root.node == descriptor.root.node && parent.root.node == view.root.node && **callee == touch.id));
+            let limits = AnalysisLimits {
+                max_work: resumes.statistics().work,
+                max_entries: resumes.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("resumes", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("resumes", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(replacement)]
+                if old.root.node == replacement.root.node && old.root.span.bytes() == b"owner"
+                    && old.tuple_element() == Some(1) && replacement.tuple_element() == Some(1))
+            );
+            for (name, code, at, cause) in [
+                ("conflicts", "R0201", "owner[0]", "&mut owner"),
+                ("acquisition", "R0201", "&mut owner", "&owner"),
+                ("replaceEarly", "R0203", "owner[0] = true;", "&mut owner"),
+                ("escapes", "R0202", "return view;", "owner"),
+                (
+                    "expires",
+                    "R0203",
+                    "{ let mut owner = input; let [_, view] = &mut owner; out = view; }",
+                    "&mut owner",
+                ),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), at.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), cause.as_bytes(), "{name}");
+            }
+            for (name, pattern) in [
+                ("named", "[_, view]"),
+                ("both", "[first, second]"),
+                ("mixed", "[flag, view]"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    pattern.as_bytes(),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn shared_product_binding_copies_carried_references_not_container_access() {
-    use compiler::analysis::ownership::{Projection, SharedMemberBinding::CopyReference};
+    use compiler::analysis::ownership::{BorrowedMemberBinding::CopyReference, Projection};
 
     probe(
         "patterns::shared_product_binding_copies_carried_references_not_container_access",
@@ -830,7 +1039,7 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                     .into_iter()
                     .filter(|op| match op {
                         Operation::Borrow { .. }
-                        | Operation::BindSharedMember { .. }
+                        | Operation::BindBorrowedMember { .. }
                         | Operation::Export(_) => true,
                         Operation::Move {
                             into: Some(into), ..
@@ -844,11 +1053,11 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                     .collect();
                 let bind = route
                     .iter()
-                    .position(|op| matches!(op, Operation::BindSharedMember { .. }))
+                    .position(|op| matches!(op, Operation::BindBorrowedMember { .. }))
                     .unwrap();
                 let (stage, uses) = route.split_at(bind);
                 let [
-                    Operation::BindSharedMember {
+                    Operation::BindBorrowedMember {
                         descriptor,
                         projection,
                         into: bound,
@@ -965,7 +1174,7 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
             let route: Vec<_> = linear(mir, mir.entry)
                 .into_iter()
                 .filter(|op| match op {
-                    Operation::BindSharedMember { .. }
+                    Operation::BindBorrowedMember { .. }
                     | Operation::Dereference(_)
                     | Operation::Export(_) => true,
                     Operation::Move {
@@ -975,7 +1184,7 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                 })
                 .collect();
             assert!(matches!(route.as_slice(), [
-                Operation::BindSharedMember { into: view, binding: CopyReference, .. },
+                Operation::BindBorrowedMember { into: view, binding: CopyReference, .. },
                 Operation::Move { from, into: Some(owner) },
                 Operation::Dereference(read),
                 Operation::Export(_),
@@ -1050,8 +1259,8 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
 #[test]
 fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
     use compiler::analysis::ownership::{
+        BorrowedMemberBinding::{CopyScalar, SharedView},
         Projection,
-        SharedMemberBinding::{CopyScalar, SharedView},
     };
 
     probe(
@@ -1134,15 +1343,15 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                     matches!(
                         op,
                         Operation::Copy { .. }
-                            | Operation::BindSharedMember { .. }
+                            | Operation::BindBorrowedMember { .. }
                             | Operation::Export(_)
                     )
                 })
                 .collect();
             assert!(matches!(route.as_slice(), [
                 Operation::Copy { from: incoming, into: Some(staged) },
-                Operation::BindSharedMember { descriptor: first, projection: Projection::TupleElement(0), into: flag, binding: CopyScalar },
-                Operation::BindSharedMember { descriptor: second, projection: Projection::TupleElement(1), into: text, binding: SharedView },
+                Operation::BindBorrowedMember { descriptor: first, projection: Projection::TupleElement(0), into: flag, binding: CopyScalar },
+                Operation::BindBorrowedMember { descriptor: second, projection: Projection::TupleElement(1), into: text, binding: SharedView },
                 Operation::Copy { from: bit, .. },
                 Operation::Copy { from: view, into: Some(result) },
                 Operation::Export(output),
@@ -1181,7 +1390,7 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                         Operation::Copy { .. }
                             | Operation::Move { .. }
                             | Operation::Dispose { .. }
-                            | Operation::BindSharedMember { .. }
+                            | Operation::BindBorrowedMember { .. }
                     )
                 })
                 .collect();
