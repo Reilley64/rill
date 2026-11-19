@@ -403,6 +403,14 @@ All four local gates and whitespace passed at `4604603` and `5a0334f` (441 compi
 
 Hosted [scaffold checks](https://github.com/Reilley64/rill/actions/runs/44428552804) passed all four profiles at `836df19`. The [native run](https://github.com/Reilley64/rill/actions/runs/44428552788) did not establish execution. No workflow changed. No Rill program ran.
 
+## Direct pair captures in owned environments
+
+At `c11ad67455e3b6651bc29661bc53f30ca750e981`, [#71](https://github.com/Reilley64/rill/issues/71) checks a zero-parameter arrow whose body is a typed tuple of two distinct direct stable captures. The [#28 capture and cleanup policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379) and [RFC 0007](../../../docs/rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#capture-formation-and-erased-evidence) govern this slice. The typed capture sites identify the tuple positions. Formation stages the two sources in written order under the existing move, implicit copy and explicit shared borrow rules. It does not execute the body or construct its return tuple at formation. `FormClosurePair` names the staged sources, destination and checked mode. Cleanup of an uninvoked environment retires the initialized owned captures in reverse position order. This does not define order for arbitrary capture graphs.
+
+`stored_pair_captures_transfer_backing_and_cleanup` went from `Incomplete` with a typed receipt to checked in both installed modes. The probes tie the two staging moves and drops to the environment's current owner, verify that copying a scalar does not consume the original, and check stage-before-displace order when replacing the closure. Export can carry a caller-backed reference, but borrowing a local source in either capture position rejects with `R0202`. A moved owned source rejects with `R0200`. Computed capture bodies and invocation remain `Incomplete`. None of these negative outcomes exposes MIR. Exact and one-short work and entry limits are tested.
+
+All four local gates and whitespace passed at `c11ad67` (447 compiler tests and 463 workspace tests). The staged M4 baseline issued both typed receipts. Independent Standards and Spec reviews are pending. Hosted [pull-request scaffold checks](https://github.com/Reilley64/rill/actions/runs/44443295704) passed all four profiles at `7f8b6ef`; its [native checks](https://github.com/Reilley64/rill/actions/runs/44443295635) reached unimplemented `test:runtime`. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
