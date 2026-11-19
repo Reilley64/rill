@@ -1064,6 +1064,8 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             function wideStep(parent: &mut [[bool, string, i32], i32]): bool { return true; }
             function narrow(parent: &mut [[bool], i32]): bool { return narrowStep(parent); }
             function wide(parent: &mut [[bool, string, i32], i32]): bool { return wideStep(parent); }
+            function narrowUnary(parent: &mut [[bool], i32]): bool { return parent |> narrowStep; }
+            function wideUnary(parent: &mut [[bool, string, i32], i32]): bool { return parent |> wideStep; }
             function narrowTagged(bit: bool, parent: &mut [[bool], i32]): bool { return bit; }
             function wideTagged(bit: bool, parent: &mut [[bool, string, i32], i32]): bool { return bit; }
             function narrowPipe(parent: &mut [[bool], i32]): bool { return parent |> narrowTagged(true, _); }
@@ -1191,6 +1193,21 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             assert!(wide.statistics().work >= narrow.statistics().work + 4);
             assert_eq!(wide.statistics().entries, narrow.statistics().entries);
             assert_eq!(wide.statistics().max_depth, narrow.statistics().max_depth);
+            let narrow_unary = lower("narrowUnary", default);
+            let wide_unary = lower("wideUnary", default);
+            assert!(narrow_unary.mir().is_some() && wide_unary.mir().is_some());
+            assert_eq!(
+                wide_unary.statistics().work - narrow_unary.statistics().work,
+                wide.statistics().work - narrow.statistics().work
+            );
+            assert_eq!(
+                wide_unary.statistics().entries,
+                narrow_unary.statistics().entries
+            );
+            assert_eq!(
+                wide_unary.statistics().max_depth,
+                narrow_unary.statistics().max_depth
+            );
             let narrow_pipe = lower("narrowPipe", default);
             let wide_pipe = lower("widePipe", default);
             for pipe in [&narrow_pipe, &wide_pipe] {
@@ -1198,30 +1215,7 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
                 assert!(pipe.mir().is_none());
             }
             assert_eq!(wide_pipe.statistics().work, narrow_pipe.statistics().work);
-            let exact = AnalysisLimits {
-                max_work: resumes.statistics().work,
-                max_entries: resumes.statistics().entries,
-                max_depth: resumes.statistics().max_depth,
-            };
-            assert!(lower("resumes", exact).mir().is_some());
-            for short in [
-                AnalysisLimits {
-                    max_work: exact.max_work - 1,
-                    ..exact
-                },
-                AnalysisLimits {
-                    max_entries: exact.max_entries - 1,
-                    ..exact
-                },
-                AnalysisLimits {
-                    max_depth: exact.max_depth - 1,
-                    ..exact
-                },
-            ] {
-                let limited = lower("resumes", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
-            }
+            assert_exact_tuple_call_limits(&resumes, |limits| lower("resumes", limits));
         },
     );
 }
@@ -1285,7 +1279,14 @@ fn unary_pipes_reborrow_one_incoming_nested_exclusive_descriptor() {
             function late(parent: &mut [[bool, string], i32]): bool {
                 return parent |> tagged(true, _);
             }
+            function tail(parent: &mut [[bool, string], i32], bit: bool): bool { return bit; }
+            function implicitExtra(parent: &mut [[bool, string], i32]): bool {
+                return parent |> tail(true);
+            }
             function maybe(parent: &mut [[bool, string], i32]): Option<bool> { return Option.Some(true); }
+            function compound(parent: &mut [[bool, string], i32]): Option<bool> {
+                return parent |> maybe;
+            }
             function propagating(parent: &mut [[bool, string], i32]): Option<bool> {
                 let bit = parent |> maybe?;
                 return Option.Some(bit);
@@ -1375,6 +1376,8 @@ fn unary_pipes_reborrow_one_incoming_nested_exclusive_descriptor() {
                 ("alias", b"named |> snapshot".as_slice()),
                 ("explicit", b"(&mut *parent) |> snapshot"),
                 ("late", b"parent |> tagged(true, _)"),
+                ("implicitExtra", b"parent |> tail(true)"),
+                ("compound", b"parent |> maybe"),
                 ("propagating", b"parent |> maybe?"),
             ] {
                 let report = lower(name, default);
@@ -1382,32 +1385,40 @@ fn unary_pipes_reborrow_one_incoming_nested_exclusive_descriptor() {
                 assert!(report.mir().is_none());
                 assert_eq!(report.blocked_at().unwrap().span.bytes(), at, "{name}");
             }
-            let exact = AnalysisLimits {
-                max_work: resumes.statistics().work,
-                max_entries: resumes.statistics().entries,
-                max_depth: resumes.statistics().max_depth,
-            };
-            assert!(lower("resumes", exact).mir().is_some());
-            for short in [
-                AnalysisLimits {
-                    max_work: exact.max_work - 1,
-                    ..exact
-                },
-                AnalysisLimits {
-                    max_entries: exact.max_entries - 1,
-                    ..exact
-                },
-                AnalysisLimits {
-                    max_depth: exact.max_depth - 1,
-                    ..exact
-                },
-            ] {
-                let limited = lower("resumes", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
-            }
+            assert_exact_tuple_call_limits(&resumes, |limits| lower("resumes", limits));
         },
     );
+}
+
+fn assert_exact_tuple_call_limits<'g>(
+    report: &compiler::analysis::ownership::Report<'g>,
+    lower: impl Fn(AnalysisLimits) -> compiler::analysis::ownership::Report<'g>,
+) {
+    let statistics = report.statistics();
+    let exact = AnalysisLimits {
+        max_work: statistics.work,
+        max_entries: statistics.entries,
+        max_depth: statistics.max_depth,
+    };
+    assert!(lower(exact).mir().is_some());
+    for short in [
+        AnalysisLimits {
+            max_work: exact.max_work - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_entries: exact.max_entries - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_depth: exact.max_depth - 1,
+            ..exact
+        },
+    ] {
+        let limited = lower(short);
+        assert_eq!(limited.completion(), Completion::ResourceLimit);
+        assert!(limited.mir().is_none());
+    }
 }
 
 #[test]
