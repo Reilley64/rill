@@ -11,7 +11,8 @@ use crate::analysis::scalars::generics::{
     callables::{CaptureFact, CaptureForm},
 };
 use crate::analysis::scalars::{
-    CallFacts, ErrorConstruction, ExpressionFacts, Propagation, PropagationTarget,
+    CallFacts, ErrorConstruction, ExpressionFacts, Place as TypedPlace, Propagation,
+    PropagationTarget,
 };
 use crate::analysis::typed::{
     ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
@@ -874,6 +875,32 @@ impl<'a, 'g> Build<'a, 'g> {
         self.resolve_place(node, path)
     }
 
+    fn assignment_target(&mut self, left: NodeId, value: NodeId) -> ResultOf<Slot> {
+        let facts = self.value(left)?;
+        let path = facts.path.as_ref().ok_or(Stop::Pending(left))?;
+        if facts.access == Access::Owned
+            && facts.place == TypedPlace::Writable
+            && let [PathProjection::Field(field)] = path.projections.as_slice()
+            && let Some(root) = self.nested_record_root(path)?
+        {
+            let child = self.field(left, root, field)?;
+            self.budget.step(1)?;
+            // Only replace a nonempty child region from a standalone value.
+            if self.slots[child].members == 0 {
+                return Err(Stop::Pending(left));
+            }
+            let Some((source, _)) = self.whole_named_owned_place(value)? else {
+                return Err(Stop::Pending(value));
+            };
+            self.budget.step(1)?;
+            if source.ty != facts.ty {
+                return Err(Stop::Pending(value));
+            }
+            return Ok(child);
+        }
+        self.resolve_place(left, path)
+    }
+
     fn nested_transfer_slot(
         &mut self,
         value: NodeId,
@@ -1143,7 +1170,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     )?;
                     return self.expression(value, Some(incoming), install, depth + 1);
                 }
-                let target = self.place(left)?;
+                let target = self.assignment_target(left, value)?;
                 if self.slots[target].projection.is_some()
                     && self.slots[target].guard_release().is_some()
                 {

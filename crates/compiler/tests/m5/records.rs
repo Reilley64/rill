@@ -687,6 +687,218 @@ fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children
 }
 
 #[test]
+fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
+    use compiler::analysis::ownership::Projection;
+
+    probe_with_typed(
+        "records::restoring_a_nested_record_child_repairs_the_whole_value_and_backedge",
+        r#"
+            type Inner = { first: string; flag: bool; last: string; }
+            type Outer = { child: Inner; sibling: string; }
+            function join(seed: Outer, fresh: Inner, take: bool): Outer {
+                let mut saved = seed;
+                if (take) { let gone = saved.child; }
+                saved.child = (fresh);
+                return saved;
+            }
+            function loopRestore(seed: Outer, again: bool): Outer {
+                let mut saved = seed;
+                while (again) {
+                    let taken = saved.child;
+                    saved.child = taken;
+                    continue;
+                }
+                return saved;
+            }
+            function skipRestore(seed: Outer, again: bool, skip: bool): void {
+                let mut saved = seed;
+                while (again) {
+                    let taken = saved.child;
+                    if (skip) { continue; }
+                    saved.child = taken;
+                }
+            }
+            function movedRoot(seed: Outer, fresh: Inner): void {
+                let mut saved = seed;
+                let gone = saved;
+                saved.child = fresh;
+            }
+            function deep(seed: Outer, fresh: string): void {
+                let mut saved = seed;
+                saved.child.first = fresh;
+            }
+            function construct(seed: Outer, first: string, last: string): void {
+                let mut saved = seed;
+                saved.child = Inner { first: first, flag: false, last: last };
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
+            let lower = |name, limits| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, limits).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            let joined = lower("join", default);
+            let mir = joined.mir().unwrap_or_else(|| {
+                panic!(
+                    "nested child restore: {:?} at {:?}",
+                    joined.completion(),
+                    joined.blocked_at().map(|site| site.span.bytes())
+                )
+            });
+            let (taken, kept) = branch_targets(mir);
+            for (branch, moved) in [(taken, true), (kept, false)] {
+                let ops = linear(mir, branch);
+                let install = ops
+                    .iter()
+                    .position(|op| matches!(op, Operation::Install { .. }))
+                    .unwrap();
+                let [
+                    Operation::Move {
+                        from: fresh,
+                        into: Some(staged),
+                    },
+                    Operation::Cleanup(displaced),
+                    Operation::Install { target, incoming },
+                    Operation::Move {
+                        from: whole,
+                        into: Some(output),
+                    },
+                    Operation::Export(exported),
+                    ..,
+                ] = &ops[install - 2..]
+                else {
+                    panic!("expected staging, displacement, install, then whole export")
+                };
+                assert_eq!(fresh.root.span.bytes(), b"fresh: Inner");
+                assert!(
+                    fresh.projection.is_none()
+                        && incoming.projection.is_none()
+                        && whole.projection.is_none()
+                );
+                assert_eq!(staged.root.node, incoming.root.node);
+                assert_eq!(target.root.span.bytes(), b"saved");
+                assert_eq!(target.root.node, whole.root.node);
+                assert_eq!(&target.field().unwrap().id, field("Outer", "child"));
+                assert_eq!(output.root.node, exported.root.node);
+                let drops = path_drops(mir, branch);
+                assert_eq!(drops.len(), 2, "drop exactly the old child once");
+                if moved {
+                    assert!(
+                        displaced.is_empty(),
+                        "a moved child owes no displacement cleanup"
+                    );
+                    for (drop, name) in drops.iter().zip(["last", "first"]) {
+                        assert!(
+                            matches!(drop, Obligation::Drop(place) if place.root.span.bytes() == b"gone" && place.field().is_some_and(|member| &member.id == field("Inner", name)))
+                        );
+                    }
+                } else {
+                    assert!(
+                        matches!(displaced.as_slice(), [Obligation::Drop(_), Obligation::EndStorage(marker), Obligation::Drop(_), Obligation::EndStorage(header)]
+                        if header.root.node == target.root.node && header.field().is_some_and(|member| &member.id == field("Outer", "child"))
+                            && marker.root.node == target.root.node && matches!(marker.projection, Some(Projection::NestedField { outer, inner }) if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "flag")))
+                    );
+                    for (drop, name) in drops.iter().zip(["last", "first"]) {
+                        assert!(
+                            matches!(drop, Obligation::Drop(place) if place.root.node == target.root.node
+                            && matches!(place.projection, Some(Projection::NestedField { outer, inner }) if &outer.id == field("Outer", "child") && &inner.id == field("Inner", name)))
+                        );
+                    }
+                }
+            }
+
+            let restored = lower("loopRestore", default);
+            let mir = restored
+                .mir()
+                .expect("the child is initialized at every backedge");
+            let (body, exit) = branch_targets(mir);
+            let path = straight_blocks(mir, body);
+            let mut region = path.iter().filter_map(|block| match &block.operation {
+                Operation::Move {
+                    from,
+                    into: Some(dest),
+                } => Some((from, dest)),
+                _ => None,
+            });
+            let (child, taken) = region.next().unwrap();
+            let (source, staged) = region.next().unwrap();
+            assert!(region.next().is_none());
+            assert_eq!(&child.field().unwrap().id, field("Outer", "child"));
+            assert_eq!(taken.root.span.bytes(), b"taken");
+            assert_eq!(taken.root.node, source.root.node);
+            let install = path
+                .iter()
+                .position(|block| matches!(block.operation, Operation::Install { .. }))
+                .unwrap();
+            assert!(
+                matches!(&path[install - 1].operation, Operation::Cleanup(actions) if actions.is_empty())
+            );
+            assert!(
+                matches!(path[install].operation, Operation::Install { target, incoming }
+                if target.root.node == child.root.node && target.field().is_some_and(|member| &member.id == field("Outer", "child")) && incoming.root.node == staged.root.node)
+            );
+            let loop_test = straight_blocks(mir, mir.entry);
+            assert!(std::ptr::eq(
+                *path.last().unwrap(),
+                *loop_test.last().unwrap()
+            ));
+            assert!(!path.iter().any(|block| matches!(&block.operation, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::Drop(_))))));
+            assert!(path_drops(mir, exit).is_empty());
+            assert!(linear(mir, exit).iter().any(|op| matches!(op, Operation::Export(output) if output.root.span.bytes() == b"saved" && output.projection.is_none())));
+
+            let skipped = lower("skipRestore", default);
+            assert_eq!(skipped.completion(), Completion::SourceRejected);
+            assert!(skipped.mir().is_none());
+            let [finding] = skipped.findings() else {
+                panic!("expected one backedge initialization finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"saved.child");
+            assert_eq!(finding.related.node, finding.site.node);
+            for (name, site) in [
+                ("movedRoot", b"saved.child = fresh;".as_slice()),
+                ("deep", b"saved.child.first"),
+                (
+                    "construct",
+                    b"Inner { first: first, flag: false, last: last }",
+                ),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete);
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
+            }
+            let exact = AnalysisLimits {
+                max_work: restored.statistics().work,
+                max_entries: restored.statistics().entries,
+                ..default
+            };
+            assert!(lower("loopRestore", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("loopRestore", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn owned_record_projections() {
     probe(
         "records::owned_record_projections",

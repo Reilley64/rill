@@ -1468,6 +1468,15 @@ pub(super) fn run<'g>(
                     }
                 }
                 Action::Displace { target, .. } if slots[target].needs_boundary_cleanup() => {
+                    // Installing a child can restore a partial move, not rebuild
+                    // the enclosing storage after a whole move.
+                    let owner = slots[target].owner;
+                    if owner != target {
+                        budget.step(1)?;
+                        if !matches!(state[owner], State::Initialized(_)) {
+                            return Err(Stop::Pending(node));
+                        }
+                    }
                     if disposal_origin(&state[target]).is_some() {
                         return Err(Stop::Pending(node));
                     }
