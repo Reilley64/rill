@@ -2089,6 +2089,212 @@ fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
     );
 }
 
+#[test]
+fn single_edge_arguments_do_not_lower_an_unreachable_call_path() {
+    use compiler::analysis::scalars::NodeFactKind;
+
+    probe_with_typed(
+        "propagation::single_edge_arguments_do_not_lower_an_unreachable_call_path",
+        r#"
+            import std::result::Err as makeFailure;
+            function before(value: string): string { return value; }
+            function after(value: string): string { return value; }
+            function consume(first: string, bit: bool, last: string): bool { dispose(last); dispose(first); return bit; }
+            function unreachable(first: string, bit: bool, last: string): bool {
+                dispose(first);
+                dispose(first);
+                dispose(last);
+                return bit;
+            }
+            function late<T>(value: T): T { return value; }
+            function success(first: string, input: Option<bool>.Some, last: string): Option<bool> {
+                let bit = consume(before(first), (input?), after(last));
+                return Option.Some(bit);
+            }
+            function failure(first: string, input: Option<bool>.None, last: string, owner: string): Option<bool> {
+                let bit = unreachable(before(first), input?, late<string>(last));
+                dispose(owner);
+                return Option.Some(bit);
+            }
+            function onlyErr(input: Result<bool, i32>.Err): Result<bool, i32>.Err { return input; }
+            function failurePipe(first: string, input: Result<bool, i32>.Err, last: string): Result<i32, i32> {
+                let _ = unreachable(before(first), (input |> onlyErr?), late<string>(last));
+                return Result.Ok(1i32);
+            }
+            function freshFailure(first: string, code: i32, last: string): Result<i32, i32> {
+                let _ = unreachable(before(first), (code |> makeFailure<bool, i32>?), late<string>(last));
+                return Result.Ok(1i32);
+            }
+            function firstArgument(bit: bool, last: string): bool { dispose(last); dispose(last); return bit; }
+            function emptyPrefix(input: Option<bool>.None, last: string): Option<bool> {
+                let _ = firstArgument(input?, late<string>(last));
+                return Option.Some(true);
+            }
+            function badRhs(message: string): i32 { dispose(message); dispose(message); return 14i32; }
+            function successWrap(input: Result<bool, i32>.Ok, first: string, last: string, message: string): Result<i32, i32> {
+                let _ = consume(first, (input ? badRhs(message)), after(last));
+                return Result.Ok(1i32);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let option = typed.option_role().unwrap();
+            let result = typed.result_role().unwrap();
+            let dead_call = b"unreachable(before(first), input?, late<string>(last))";
+            let node = module
+                .syntax
+                .nodes
+                .iter()
+                .position(|node| node.span.bytes() == dead_call)
+                .unwrap();
+            let facts = typed
+                .bodies()
+                .node(module, node)
+                .unwrap()
+                .expect("typed enclosing call facts");
+            assert!(!facts.flow.normal && facts.flow.returns);
+            let NodeFactKind::Expression(call) = &facts.kind else {
+                panic!("expected call expression facts")
+            };
+            assert_eq!(
+                call.call.as_ref().map(|call| call.callee),
+                Some(&declaration("unreachable").id)
+            );
+            let failed = check("failure");
+            let mir = failed
+                .mir()
+                .unwrap_or_else(|| panic!("failure: {:?}", failed.completion()));
+            assert_eq!(calls_on_path(mir, []), [&declaration("before").id]);
+            let ops = linear(mir, mir.entry);
+            assert_return(
+                &ops,
+                &option.none.id,
+                false,
+                &[b"before(first)", b"owner: string", b"last: string"],
+            );
+            assert!(!ops.iter().any(|op| matches!(
+                op,
+                Operation::TestVariant { .. }
+                    | Operation::CopyOptionPayload { .. }
+                    | Operation::Dispose { .. }
+            )));
+            let route = check("failurePipe");
+            let mir = route
+                .mir()
+                .expect("a known Err pipe forwards without reaching the outer call");
+            assert_eq!(
+                calls_on_path(mir, []),
+                [&declaration("before").id, &declaration("onlyErr").id]
+            );
+            assert_forward(
+                &linear(mir, mir.entry),
+                result,
+                b"input |> onlyErr?",
+                &[b"before(first)", b"last: string"],
+            );
+            let fresh = check("freshFailure");
+            let mir = fresh
+                .mir()
+                .expect("one fresh Err constructor can be the only feasible edge");
+            assert_eq!(calls_on_path(mir, []), [&declaration("before").id]);
+            let ops = linear(mir, mir.entry);
+            assert_forward(
+                &ops,
+                result,
+                b"code |> makeFailure<bool, i32>?",
+                &[b"before(first)", b"last: string"],
+            );
+            assert_eq!(
+                ops.iter()
+                    .filter(|op| matches!(op, Operation::ConstructResultError { .. }))
+                    .count(),
+                1
+            );
+            let empty = check("emptyPrefix");
+            let mir = empty
+                .mir()
+                .expect("failure in the first argument has no staged prefix");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"last: string"],
+            );
+            let success = check("success");
+            let mir = success
+                .mir()
+                .expect("known Some initializes the argument and reaches the call");
+            let ops = linear(mir, mir.entry);
+            let stages: Vec<_> = ops
+                .iter()
+                .copied()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Call(_)
+                            | Operation::CopyOptionPayload { .. }
+                            | Operation::TestVariant { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(stages.as_slice(), [
+                Operation::Call(before), Operation::CopyOptionPayload { operand, into }, Operation::Call(after), Operation::Call(consume),
+            ] if *before == &declaration("before").id && operand.root.span.bytes() == b"input" && into.root.span.bytes() == b"(input?)"
+                && *after == &declaration("after").id && *consume == &declaration("consume").id),
+                "{stages:?}"
+            );
+            assert_return(&ops, &option.some.id, true, &[]);
+            let wrap = check("successWrap");
+            let mir = wrap
+                .mir()
+                .expect("known successful wrap does not lower its RHS");
+            assert_eq!(
+                calls_on_path(mir, []),
+                [&declaration("after").id, &declaration("consume").id]
+            );
+            let ops = linear(mir, mir.entry);
+            assert!(ops.iter().any(|op| matches!(op, Operation::TakeResultSuccess { operand, into: Some(arg) }
+                if operand.root.span.bytes() == b"input" && arg.root.span.bytes() == b"(input ? badRhs(message))")));
+            assert!(
+                !ops.iter()
+                    .any(|op| matches!(op, Operation::WrapResultFailure { .. }))
+            );
+            assert_return(&ops, &result.ok.id, true, &[b"message: string"]);
+            let limits = AnalysisLimits {
+                max_work: failed.statistics().work,
+                max_entries: failed.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("failure", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("failure", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
 fn variant_edges(
     mir: &Mir<'_>,
     mut pc: usize,
