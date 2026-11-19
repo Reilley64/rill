@@ -5126,9 +5126,25 @@ fn owning_option_argument_propagation_cleans_only_reached_stages() {
                 let bit = useAll(stage(before), (value |> make?), gate?);
                 return Option.Some(bit);
             }
+            function freshPipe(before: string, value: string, gate: Option<bool>): Option<bool> {
+                let bit = (Option<string>.Some(stage(value))?) |> useLate(stage(before), gate?, _);
+                return Option.Some(bit);
+            }
             function deeper(before: string, input: Option<string>, flag: bool): Option<bool> {
                 let bit = useAll(stage(before), stage(input?), flag);
                 return Option.Some(bit);
+            }
+            function outerStep(value: string): Option<bool> { dispose(value); return Option.Some(true); }
+            function excludedStep(input: Option<string>): Option<bool> {
+                let bit = (input?) |> outerStep?;
+                return Option.Some(bit);
+            }
+            function skippedStep(gate: bool, value: string, before: string): Option<bool> {
+                dispose(value); dispose(before); return Option.Some(gate);
+            }
+            function excludedSkipped(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
+                let _ = stage(before) |> skippedStep(gate?, input?, _)?;
+                return Option.Some(true);
             }
         "#,
         |_, module, receipt, typed| {
@@ -5252,9 +5268,42 @@ fn owning_option_argument_propagation_cleans_only_reached_stages() {
                     [id("stage"), id("make"), id("useAll")]
                 );
             }
+            let fresh = lower("freshPipe", default);
+            let mir = fresh.mir().expect(
+                "fresh owning input stages before written arguments even with a late placeholder",
+            );
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"gate");
+            let prefix_calls: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .filter_map(|block| {
+                    matches!(block.operation, Operation::Call(_)).then_some(block.site.span.bytes())
+                })
+                .collect();
+            assert_eq!(
+                prefix_calls,
+                [b"stage(value)".as_slice(), b"stage(before)".as_slice()]
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"(Option<string>.Some(stage(value))?)"],
+            );
+            assert_return(&linear(mir, yes), &option.some.id, true, &[]);
+            assert_eq!(calls_on_path(mir, [false]), [id("stage"), id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("stage"), id("useLate")]
+            );
             let deeper = lower("deeper", default);
             assert_eq!(deeper.completion(), Completion::Incomplete);
             assert!(deeper.mir().is_none());
+            for name in ["excludedStep", "excludedSkipped"] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), b"input?");
+            }
             let exact = AnalysisLimits {
                 max_work: paired.statistics().work,
                 max_entries: paired.statistics().entries,
