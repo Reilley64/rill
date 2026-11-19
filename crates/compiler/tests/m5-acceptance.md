@@ -353,7 +353,9 @@ At `46046035b087611deb5bfd0add69e6a6734d839c`, the [#69 contract](https://github
 
 The external backing is recorded separately from suspension of the current local descriptor. `broaderMoved` previously checked on a branch that ended the moved holder's scope before exit. It now returns `Incomplete` without MIR, like the equivalent broader signature with a function-scope holder. Ending access storage does not clear the outward restriction or admit another signature.
 
-All four local gates and whitespace passed at `4604603` (441 compiler tests and 457 workspace tests). The staged M4 replay issued both receipts. Independent Standards and Spec reviews of this slice are pending. No Rill program ran.
+All four local gates and whitespace passed at `4604603` and `5a0334f` (441 compiler tests and 457 workspace tests). The staged M4 replay issued both receipts. Independent Spec review of `4604603` found no discrepancy in the admitted contract. Standards found an uncharged place lookup and stale public MIR wording. The correction at `5a0334f5fd31d1cff5faea25e97d1aec83192730` reuses the checked destination descriptor, charges source resolution, and documents that a retained shared view can restrict exclusive access. Its probes pin both reborrow parents and the staged source when both arguments are named, and pin the unsupported store as the reason for incomplete coverage. `75dfa57b30623e332b1f54e12c8b772bc94d4e1d` adds the Spec review's other contrasts: a second call preserves the old exclusive backing, an exact overwrite releases it, and a reached callee that retains local backing after its access holder ends prevents caller MIR.
+
+Hosted [scaffold checks](https://github.com/Reilley64/rill/actions/runs/44428552804) passed all four profiles at `836df19`. The [native run](https://github.com/Reilley64/rill/actions/runs/44428552788) did not establish execution. No workflow changed. No Rill program ran.
 
 ## Open acceptance obligations
 
