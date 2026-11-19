@@ -3809,6 +3809,11 @@ fn propagating_calls_create_owning_results_only_on_success() {
                 let bit = after(true);
                 return Option.Some(bit);
             }
+            function stoppedNamed(owner: string, input: Option<bool>.None): Option<bool> {
+                let output = stage(owner) |> text(input?, _);
+                dispose(output);
+                return Option.Some(true);
+            }
             function reused(owner: string, input: Option<bool>): Option<bool> {
                 let output = text(input?, stage(owner));
                 dispose(output); dispose(output);
@@ -3859,6 +3864,10 @@ fn propagating_calls_create_owning_results_only_on_success() {
                 false,
                 &[b"owner: string"],
             );
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("text"), id("after")]
+            );
             let result = typed.result_role().unwrap();
             let pipe = lower("pipe", default);
             let piped = pipe
@@ -3872,6 +3881,10 @@ fn propagating_calls_create_owning_results_only_on_success() {
                 &[b"stage(owner)"],
             );
             assert_eq!(calls_on_path(piped, [false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(piped, [true]),
+                [id("stage"), id("text"), id("after")]
+            );
             for (mir, entry, output) in [
                 (mir, yes, b"text(input?, stage(owner))".as_slice()),
                 (
@@ -3912,6 +3925,17 @@ fn propagating_calls_create_owning_results_only_on_success() {
             let scalar = lower("stoppedScalar", default);
             assert!(scalar.mir().is_some());
             assert_eq!(stopped.statistics().entries, scalar.statistics().entries);
+            let stopped_named = lower("stoppedNamed", default);
+            let mir = stopped_named
+                .mir()
+                .expect("an unreachable named output stays uninitialized");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(owner)"],
+            );
             let reused = lower("reused", default);
             assert_eq!(reused.completion(), Completion::SourceRejected);
             assert!(reused.mir().is_none());
@@ -3920,10 +3944,15 @@ fn propagating_calls_create_owning_results_only_on_success() {
             };
             assert_eq!(finding.code(), "R0200");
             assert_eq!(finding.site.span.bytes(), b"dispose(output)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(output)");
             assert!(finding.related.span.start() < finding.site.span.start());
             let unsupported = lower("unsupported", default);
             assert_eq!(unsupported.completion(), Completion::Incomplete);
             assert!(unsupported.mir().is_none());
+            assert_eq!(
+                unsupported.blocked_at().unwrap().span.bytes(),
+                b"compound(input?)"
+            );
             let exact = AnalysisLimits {
                 max_work: pipe.statistics().work,
                 max_entries: pipe.statistics().entries,
