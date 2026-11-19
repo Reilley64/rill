@@ -317,11 +317,6 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
                 let Custom { text } = value;
                 return text;
             }
-            type Carrier = { saved: &bool; };
-            function carried(value: &Carrier): &bool {
-                let Carrier { saved } = value;
-                return saved;
-            }
             type Nested = { inner: [bool, bool]; };
             function nested(value: &Nested): bool {
                 let Nested { inner: [bit, _] } = value;
@@ -486,7 +481,6 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
             }
             for (name, pattern) in [
                 ("custom", "Custom { text }"),
-                ("carried", "Carrier { saved }"),
                 ("nested", "[bit, _]"),
                 ("exclusive", "Packet { flag }"),
                 ("protected", "Protected { bit }"),
@@ -720,6 +714,231 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
 }
 
 #[test]
+fn shared_product_binding_copies_carried_references_not_container_access() {
+    use compiler::analysis::ownership::{Projection, SharedMemberBinding::CopyReference};
+
+    probe(
+        "patterns::shared_product_binding_copies_carried_references_not_container_access",
+        r#"
+            type Carrier = { saved: &bool; other: &bool; bit: bool; tag: string; };
+            function tupleForward(seed: &bool, tag: string): &bool {
+                let pair: [&bool, string] = [seed, tag];
+                let alias = &pair;
+                let [(view), _] = alias;
+                let moved = pair;
+                return view;
+            }
+            function recordForward(seed: &bool, tag: string): &bool {
+                let value = Carrier { saved: seed, other: seed, bit: true, tag: tag };
+                let Carrier { saved: view } = &value;
+                let moved = value;
+                return view;
+            }
+            function throughParameter(value: &Carrier): &bool {
+                let Carrier { saved } = value;
+                return saved;
+            }
+            function siblingBacking(seed: &bool, flag: bool): &bool {
+                let value = Carrier { saved: seed, other: &flag, bit: false, tag: "other" };
+                let Carrier { saved: view } = &value;
+                let moved = value;
+                return view;
+            }
+            function pointsIntoContainer(seed: &bool): &bool {
+                let mut value = Carrier { saved: seed, other: seed, bit: true, tag: "local" };
+                value.saved = &value.bit;
+                let Carrier { saved: view } = &value;
+                return view;
+            }
+            function sourceExpires(seed: &bool, branch: bool): bool {
+                let mut out = seed;
+                if (branch) {
+                    let flag = true;
+                    let pair: [&bool, string] = [&flag, "local"];
+                    let [view, _] = &pair;
+                    out = view;
+                }
+                return *out;
+            }
+            function carry(seed: &bool): [&bool, string] { return [seed, "callee"]; }
+            function rootBacking(flag: bool): &bool {
+                let pair = carry(&flag);
+                let [view, _] = &pair;
+                return view;
+            }
+            function suspended(seed: bool): bool {
+                let mut source = seed;
+                let access = &mut source;
+                let first = &*access;
+                let pair: [&bool, string] = [first, "retained"];
+                let [view, _] = &pair;
+                let _ = *access;
+                return *view;
+            }
+            function projectedStringStillBorrowsOwner(seed: &bool): &string {
+                let pair: [&bool, string] = [seed, "local"];
+                let [view, text] = &pair;
+                let _ = view;
+                return text;
+            }
+            function exclusiveMember(value: &[&mut bool, bool]): bool {
+                let [_, flag] = value;
+                return flag;
+            }
+            function nestedReference(value: &[&&bool, bool]): bool {
+                let [_, flag] = value;
+                return flag;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let check = |name| lower(name, AnalysisLimits::default());
+            for name in ["tupleForward", "recordForward", "throughParameter"] {
+                let report = check(name);
+                let mir = report.mir().unwrap_or_else(|| {
+                    panic!(
+                        "{name}: {:?} at {:?}",
+                        report.completion(),
+                        report
+                            .blocked_at()
+                            .map(|site| std::str::from_utf8(site.span.bytes()).unwrap())
+                    )
+                });
+                let route: Vec<_> = linear(mir, mir.entry)
+                    .into_iter()
+                    .filter(|op| match op {
+                        Operation::BindSharedMember { .. } | Operation::Export(_) => true,
+                        Operation::Move {
+                            into: Some(into), ..
+                        } => into.root.span.bytes() == b"moved",
+                        Operation::Copy { from, .. } => {
+                            matches!(from.root.span.bytes(), b"view" | b"saved")
+                        }
+                        _ => false,
+                    })
+                    .collect();
+                let [
+                    Operation::BindSharedMember {
+                        projection,
+                        into: bound,
+                        binding: CopyReference,
+                        ..
+                    },
+                    remaining @ ..,
+                ] = route.as_slice()
+                else {
+                    panic!("{name}: expected a stored reference copy")
+                };
+                if name == "tupleForward" {
+                    assert!(matches!(projection, Projection::TupleElement(0)));
+                } else {
+                    let saved = module
+                        .declarations
+                        .iter()
+                        .find(|d| {
+                            d.id.kind == loader::DeclarationKind::Field
+                                && d.name.as_deref() == Some("saved")
+                        })
+                        .unwrap();
+                    assert!(matches!(projection, Projection::Field(field) if field.id == saved.id));
+                }
+                let rest = if name == "throughParameter" {
+                    assert!(path_drops(mir, mir.entry).is_empty());
+                    remaining
+                } else {
+                    let [
+                        Operation::Move {
+                            into: Some(owner), ..
+                        },
+                        rest @ ..,
+                    ] = remaining
+                    else {
+                        panic!("{name}: expected a move after binding")
+                    };
+                    assert!(
+                        matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)] if place.root.node == owner.root.node)
+                    );
+                    rest
+                };
+                assert!(
+                    matches!(rest, [Operation::Copy { from, into: Some(result) }, Operation::Export(output)]
+                    if from.root.node == bound.root.node && result.root.node == output.root.node)
+                );
+            }
+            let forward = check("tupleForward");
+            let limits = AnalysisLimits {
+                max_work: forward.statistics().work,
+                max_entries: forward.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("tupleForward", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("tupleForward", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            for (name, code, site, related) in [
+                ("siblingBacking", "R0202", "return view;", "flag: bool"),
+                ("pointsIntoContainer", "R0202", "return view;", "&value.bit"),
+                (
+                    "sourceExpires",
+                    "R0203",
+                    "{\n                    let flag = true;",
+                    "&flag",
+                ),
+                ("rootBacking", "R0202", "return view;", "flag: bool"),
+                ("suspended", "R0201", "*access", "&*access"),
+                (
+                    "projectedStringStillBorrowsOwner",
+                    "R0202",
+                    "return text;",
+                    "pair",
+                ),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                if name == "sourceExpires" {
+                    assert!(
+                        finding.site.span.bytes().starts_with(site.as_bytes()),
+                        "{name}"
+                    );
+                } else {
+                    assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                }
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            for name in ["exclusiveMember", "nestedReference"] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), b"[_, flag]");
+            }
+        },
+    );
+}
+
+#[test]
 fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
     use compiler::analysis::ownership::{
         Projection,
@@ -777,10 +996,6 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
             function nested(value: &[[bool, bool], bool]): bool {
                 let [[bit, _], _] = value;
                 return bit;
-            }
-            function carried(value: &[&bool, bool]): &bool {
-                let [saved, _] = value;
-                return saved;
             }
         "#,
         |_, module, receipt| {
@@ -900,7 +1115,6 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
             for (name, pattern) in [
                 ("exclusive", "[bit, _]"),
                 ("nested", "[[bit, _], _]"),
-                ("carried", "[saved, _]"),
                 ("temporary", "pass(value)"),
             ] {
                 let report = check(name);

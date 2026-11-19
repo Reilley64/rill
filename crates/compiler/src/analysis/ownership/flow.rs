@@ -1187,6 +1187,22 @@ pub(super) fn run<'g>(
                     )?;
                     state[into] = State::Initialized(match binding {
                         SharedMemberBinding::CopyScalar => empty.clone(),
+                        SharedMemberBinding::CopyReference => {
+                            // Borrow marks every local-storage loan already in
+                            // the aggregate as Contents. Only Backing describes
+                            // the new access to the enclosing storage.
+                            budget.step(held.loans.len())?;
+                            budget.reserve(held.loans.len())?;
+                            Held {
+                                loans: Arc::from_iter(
+                                    held.loans
+                                        .iter()
+                                        .copied()
+                                        .filter(|loan| loan.kind != LoanKind::Backing),
+                                ),
+                                ..Held::default()
+                            }
+                        }
                         SharedMemberBinding::SharedView => Held {
                             loans: held.loans.clone(),
                             ..Held::default()

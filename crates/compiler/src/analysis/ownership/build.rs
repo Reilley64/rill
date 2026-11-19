@@ -27,6 +27,11 @@ fn primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { referent, .. } if matches!(referent.as_ref(), TypeTerm::Primitive(_)))
 }
 
+fn shared_pattern_member_type(ty: &TypeTerm<'_>) -> bool {
+    matches!(ty, TypeTerm::Primitive(_))
+        || matches!(ty, TypeTerm::Reference { mutable: false, .. }) && primitive_reference(ty)
+}
+
 fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>)> {
     match &facts.data {
         Some(DataExpression::Projection(field)) => {
@@ -849,7 +854,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         self.budget.step(elements.len())?;
                         if !elements
                             .iter()
-                            .all(|ty| matches!(ty.as_ref(), TypeTerm::Primitive(_)))
+                            .all(|ty| shared_pattern_member_type(ty.as_ref()))
                         {
                             return Err(Stop::Pending(pattern));
                         }
@@ -973,7 +978,7 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(fields.len())?;
             if !fields
                 .iter()
-                .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(_)))
+                .all(|field| shared_pattern_member_type(field.ty.as_ref()))
                 || self.outer_disposer(pattern, referent)?.is_some()
             {
                 return Err(Stop::Pending(pattern));
@@ -1017,7 +1022,11 @@ impl<'a, 'g> Build<'a, 'g> {
                     _ => return Err(Stop::Pending(site)),
                 };
                 let binding = if binder.ty == binder.source_type {
-                    SharedMemberBinding::CopyScalar
+                    if primitive_reference(binder.ty.as_ref()) {
+                        SharedMemberBinding::CopyReference
+                    } else {
+                        SharedMemberBinding::CopyScalar
+                    }
                 } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
                     if *referent == binder.source_type)
                 {

@@ -266,6 +266,9 @@ pub enum Operation<'g> {
 pub enum SharedMemberBinding {
     /// Copy a primitive value with no carried backing.
     CopyScalar,
+    /// Copy a stored shared reference with carried dependencies, not the
+    /// loan used to access the enclosing aggregate.
+    CopyReference,
     /// Retain the original backing for a shared view of the member.
     SharedView,
 }
