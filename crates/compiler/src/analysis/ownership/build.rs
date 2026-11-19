@@ -29,36 +29,18 @@ enum CallPropagation<'a, 'g> {
     },
 }
 
-#[derive(Clone, Copy)]
 struct PropagatingArguments {
-    first: PropagatingArgument,
-    second: Option<PropagatingArgument>,
-}
-
-impl PropagatingArguments {
-    fn terminal_failure(self) -> Option<PropagatingArgument> {
-        if !self.first.can_continue {
-            Some(self.first)
-        } else {
-            self.second.filter(|argument| !argument.can_continue)
-        }
-    }
-
-    fn can_return(self) -> bool {
-        self.first.can_return
-            || self.first.can_continue && self.second.is_some_and(|argument| argument.can_return)
-    }
+    continuing: Vec<PropagatingArgument>,
+    terminal_failure: Option<PropagatingArgument>,
+    can_return: bool,
 }
 
 #[derive(Clone, Copy)]
 struct PropagatingArgument {
     position: usize,
     root: NodeId,
-    can_continue: bool,
     can_return: bool,
 }
-
-type StagedArgumentExits = [Option<(PropagatingArgument, Pc)>; 2];
 
 struct CheckedPropagation<'a, 'g> {
     exit: &'a Propagation<'g>,
@@ -833,8 +815,8 @@ impl<'a, 'g> Build<'a, 'g> {
                             _ => return Err(Stop::Pending(node)),
                         };
                         if fact.flow.pending
-                            || fact.flow.normal != arguments.terminal_failure().is_none()
-                            || fact.flow.returns != arguments.can_return()
+                            || fact.flow.normal != arguments.terminal_failure.is_none()
+                            || fact.flow.returns != arguments.can_return
                         {
                             return Err(Stop::Pending(initializer));
                         }
@@ -1658,7 +1640,9 @@ impl<'a, 'g> Build<'a, 'g> {
         let Some(call) = facts.call.as_deref() else {
             return Ok(None);
         };
-        let mut arguments: Option<PropagatingArguments> = None;
+        let mut arguments = Vec::new();
+        let mut terminal = None;
+        let mut can_return = false;
         for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
             let root = self.ungroup(arg)?;
@@ -1673,27 +1657,23 @@ impl<'a, 'g> Build<'a, 'g> {
                 if !(exit.can_return || exit.can_continue) {
                     return Err(Stop::Pending(node));
                 }
-                let argument = PropagatingArgument {
+                if terminal.is_none() {
+                    can_return |= exit.can_return;
+                    if !exit.can_continue {
+                        terminal = Some(arguments.len());
+                    }
+                }
+                self.budget.reserve(1)?;
+                arguments.push(PropagatingArgument {
                     position,
                     root,
-                    can_continue: exit.can_continue,
                     can_return: exit.can_return,
-                };
-                match &mut arguments {
-                    None => {
-                        arguments = Some(PropagatingArguments {
-                            first: argument,
-                            second: None,
-                        })
-                    }
-                    Some(exits) if exits.second.is_none() => exits.second = Some(argument),
-                    _ => return Err(Stop::Pending(node)),
-                }
+                });
             }
         }
-        let Some(arguments) = arguments else {
+        if arguments.is_empty() {
             return Ok(None);
-        };
+        }
         if call.pipe_input.is_some()
             || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
         {
@@ -1713,8 +1693,10 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         // A known failure skips the suffix, but only a checked complete
         // argument root may contain propagation there.
-        let terminal = arguments.terminal_failure();
-        if let Some(terminal) = terminal {
+        let terminal_failure = if let Some(index) = terminal {
+            self.budget.step(1)?;
+            let terminal = arguments[index];
+            let mut skipped = arguments[index + 1..].iter().peekable();
             for (position, &arg) in call
                 .arguments
                 .iter()
@@ -1722,9 +1704,8 @@ impl<'a, 'g> Build<'a, 'g> {
                 .skip(terminal.position + 1)
             {
                 self.budget.step(1)?;
-                let admitted_root = arguments
-                    .second
-                    .filter(|argument| argument.position == position)
+                let admitted_root = skipped
+                    .next_if(|argument| argument.position == position)
                     .map(|argument| argument.root);
                 if self.contains_unadmitted_propagation(arg, admitted_root, depth + 1)? {
                     return Err(Stop::Pending(node));
@@ -1745,11 +1726,14 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 }
             }
-        }
-        for argument in std::iter::once(arguments.first).chain(arguments.second) {
+            arguments.truncate(index);
+            Some(terminal)
+        } else {
+            None
+        };
+        for argument in &arguments {
             self.budget.step(1)?;
-            if argument.can_return || terminal.is_some_and(|last| last.position < argument.position)
-            {
+            if argument.can_return {
                 continue;
             }
             self.budget.step(1)?;
@@ -1760,7 +1744,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             }
         }
-        Ok(Some(arguments))
+        Ok(Some(PropagatingArguments {
+            continuing: arguments,
+            terminal_failure,
+            can_return,
+        }))
     }
 
     fn propagating_pipe_result(
@@ -2464,26 +2452,34 @@ impl<'a, 'g> Build<'a, 'g> {
         )
     }
 
+    fn lower_propagating_argument(
+        &mut self,
+        argument: PropagatingArgument,
+        into: Option<Slot>,
+        next: Pc,
+        failure_cleanup: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        // The proof already read this root; lowering reads its syntax and facts again.
+        self.budget.step(2)?;
+        self.propagate(argument.root, into, next, failure_cleanup, depth + 1)
+    }
+
     fn stage_propagating_argument(
         &mut self,
-        exits: Option<StagedArgumentExits>,
+        exits: &mut Vec<(PropagatingArgument, Pc)>,
         position: usize,
         slot: Slot,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Option<Pc>> {
-        let Some(exits) = exits else { return Ok(None) };
-        self.budget.step(exits.len())?;
-        let Some((argument, failure_cleanup)) = exits
-            .into_iter()
-            .flatten()
-            .find(|(argument, _)| argument.position == position)
+        self.budget.step(1)?;
+        let Some((argument, failure_cleanup)) =
+            exits.pop_if(|(argument, _)| argument.position == position)
         else {
             return Ok(None);
         };
-        // The proof already read this root; lowering reads its syntax and facts again.
-        self.budget.step(2)?;
-        self.propagate(argument.root, Some(slot), next, failure_cleanup, depth + 1)
+        self.lower_propagating_argument(argument, Some(slot), next, failure_cleanup, depth)
             .map(Some)
     }
 
@@ -2593,10 +2589,10 @@ impl<'a, 'g> Build<'a, 'g> {
             }) => Some((arguments, returning)),
             _ => None,
         };
-        let failure_only = argument_flow.and_then(|(arguments, returning)| {
+        let failure_only = argument_flow.as_ref().and_then(|(arguments, returning)| {
             arguments
-                .terminal_failure()
-                .map(|argument| (argument, returning))
+                .terminal_failure
+                .map(|argument| (argument, *returning))
         });
         let staged = match failure_only {
             Some((argument, _)) => &call.arguments[..argument.position],
@@ -2629,39 +2625,35 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             args.push(slot);
         }
-        let argument_exits = match argument_flow {
-            Some((arguments, returning)) if arguments.first.position < args.len() => {
-                let mut with_cleanup = |argument: Option<PropagatingArgument>| -> ResultOf<_> {
-                    let Some(argument) = argument.filter(|argument| argument.position < args.len())
-                    else {
-                        return Ok(None);
-                    };
-                    // Each feasible failure owns the prefix reached at that argument.
-                    let failure_cleanup = if argument.can_return {
-                        self.cleanup(argument.root, &args[..argument.position], returning)?
-                    } else {
-                        returning
-                    };
-                    Ok(Some((argument, failure_cleanup)))
+        let mut argument_exits = Vec::new();
+        if let Some((arguments, returning)) = argument_flow {
+            self.budget.reserve(arguments.continuing.len())?;
+            argument_exits = Vec::with_capacity(arguments.continuing.len());
+            for argument in arguments.continuing {
+                self.budget.step(1)?;
+                // Each feasible failure owns the prefix reached at that argument.
+                let failure_cleanup = if argument.can_return {
+                    self.cleanup(argument.root, &args[..argument.position], returning)?
+                } else {
+                    returning
                 };
-                Some([
-                    with_cleanup(Some(arguments.first))?,
-                    with_cleanup(arguments.second)?,
-                ])
+                argument_exits.push((argument, failure_cleanup));
             }
-            _ => None,
-        };
+        }
         if let Some((argument, returning)) = failure_only {
             // No success edge exists. Do not lower the suffix or emit a call.
             let failure_cleanup = self.cleanup(argument.root, &args, returning)?;
-            self.budget.step(2)?;
             let mut entry =
-                self.propagate(argument.root, None, next, failure_cleanup, depth + 1)?;
+                self.lower_propagating_argument(argument, None, next, failure_cleanup, depth)?;
             for (position, (&node, slot)) in staged.iter().zip(args).enumerate().rev() {
                 self.budget.step(1)?;
-                entry = if let Some(early) =
-                    self.stage_propagating_argument(argument_exits, position, slot, entry, depth)?
-                {
+                entry = if let Some(early) = self.stage_propagating_argument(
+                    &mut argument_exits,
+                    position,
+                    slot,
+                    entry,
+                    depth,
+                )? {
                     early
                 } else {
                     self.expression(node, Some(slot), entry, depth + 1)?
@@ -2700,8 +2692,9 @@ impl<'a, 'g> Build<'a, 'g> {
             .chain(pipe_argument)
         {
             let slot = self.calls[index].args[i];
-            if let Some(early) =
-                self.stage_propagating_argument(argument_exits, i, slot, next, depth)?
+            if !argument_exits.is_empty()
+                && let Some(early) =
+                    self.stage_propagating_argument(&mut argument_exits, i, slot, next, depth)?
             {
                 next = early;
                 continue;

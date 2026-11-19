@@ -1672,11 +1672,6 @@ fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
                 let bit = bad(first, input?);
                 return Option.Some(bit);
             }
-            function triple(first: bool, second: bool, third: bool): bool { return first; }
-            function unsupportedThree(first: Option<bool>, second: Option<bool>, third: Option<bool>): Option<bool> {
-                let bit = triple(first?, second?, third?);
-                return Option.Some(bit);
-            }
             function borrowed(first: &string, second: bool): bool { return second; }
             function unsupportedBorrow(input: Option<bool>, owner: string): Option<bool> {
                 let bit = borrowed(&owner, input?);
@@ -1805,19 +1800,13 @@ fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
             assert_eq!(finding.site.span.bytes(), b"dispose(first)");
             assert_eq!(finding.related.span.bytes(), b"dispose(first)");
             assert!(finding.related.span.start() < finding.site.span.start());
-            for (name, site) in [
-                ("unsupportedThree", "triple(first?, second?, third?)"),
-                ("unsupportedBorrow", "borrowed(&owner, input?)"),
-            ] {
-                let report = check(name);
-                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert!(report.mir().is_none());
-                assert_eq!(
-                    report.blocked_at().unwrap().span.bytes(),
-                    site.as_bytes(),
-                    "{name}"
-                );
-            }
+            let borrowed = check("unsupportedBorrow");
+            assert_eq!(borrowed.completion(), Completion::Incomplete);
+            assert!(borrowed.mir().is_none());
+            assert_eq!(
+                borrowed.blocked_at().unwrap().span.bytes(),
+                b"borrowed(&owner, input?)"
+            );
             let limits = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,
@@ -2633,11 +2622,6 @@ fn paired_arguments_use_only_their_feasible_edges() {
                 let _ = number(left?, Option<i32>.Some(1i32)?);
                 return Option.Some(true);
             }
-            function triple(a: bool, b: bool, c: bool): bool { return a; }
-            function thirdSkipped(left: Option<bool>.None, right: Option<bool>, extra: Option<bool>): Option<bool> {
-                let _ = triple(left?, right?, extra?);
-                return Option.Some(true);
-            }
         "#,
         |_, module, receipt, typed| {
             let declaration = |name| {
@@ -2758,7 +2742,6 @@ fn paired_arguments_use_only_their_feasible_edges() {
             for (name, site) in [
                 ("deeper", "pair(left?, nested(right?)?)"),
                 ("widerSkipped", "Option<i32>.Some(1i32)?"),
-                ("thirdSkipped", "triple(left?, right?, extra?)"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
@@ -2786,6 +2769,140 @@ fn paired_arguments_use_only_their_feasible_edges() {
                 },
             ] {
                 let limited = lower("secondStops", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn wider_propagating_calls_keep_each_reached_prefix() {
+    probe_with_typed(
+        "propagation::wider_propagating_calls_keep_each_reached_prefix",
+        r#"
+            function stage(value: string): string { return value; }
+            function useAll(x: string, a: bool, y: string, b: bool, z: string, c: bool): bool {
+                dispose(z); dispose(y); dispose(x); return c;
+            }
+            function never(x: string, a: bool, b: bool, y: string, c: bool, d: bool): bool {
+                dispose(x); dispose(x); dispose(y); return a;
+            }
+            function neverNarrow(x: string, a: bool, b: bool, y: string, c: bool): bool {
+                dispose(x); dispose(x); dispose(y); return a;
+            }
+            function three(x: string, first: Option<bool>, y: string, second: Option<bool>, z: string, third: Option<bool>): Option<bool> {
+                let bit = useAll(stage(x), first?, stage(y), second?, stage(z), third?);
+                return Option.Some(bit);
+            }
+            function stop(x: string, first: Option<bool>, second: Option<bool>.Some, y: string, third: Option<bool>.None, fourth: Option<bool>): Option<bool> {
+                let _ = never(stage(x), first?, second?, stage(y), third?, fourth?);
+                return Option.Some(true);
+            }
+            function stopNarrow(x: string, first: Option<bool>, second: Option<bool>.Some, y: string, third: Option<bool>.None, fourth: Option<bool>): Option<bool> {
+                let _ = neverNarrow(stage(x), first?, second?, stage(y), third?);
+                return Option.Some(true);
+            }
+            function reached(x: string, first: Option<bool>, second: Option<bool>, y: string, third: Option<bool>): Option<bool> {
+                let bit = neverNarrow(stage(x), first?, second?, stage(y), third?);
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let check = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let three = check("three", default);
+            let mir = three
+                .mir()
+                .unwrap_or_else(|| panic!("three: {:?}", three.completion()));
+            let (first, no_first) = variant_edges(mir, mir.entry, &option.some.id, b"first");
+            let (second, no_second) = variant_edges(mir, first, &option.some.id, b"second");
+            let (third, no_third) = variant_edges(mir, second, &option.some.id, b"third");
+            assert_return(
+                &linear(mir, no_first),
+                &option.none.id,
+                false,
+                &[b"stage(x)", b"z: string", b"y: string"],
+            );
+            assert_return(
+                &linear(mir, no_second),
+                &option.none.id,
+                false,
+                &[b"stage(y)", b"stage(x)", b"z: string"],
+            );
+            assert_return(
+                &linear(mir, no_third),
+                &option.none.id,
+                false,
+                &[b"stage(z)", b"stage(y)", b"stage(x)"],
+            );
+            assert_return(&linear(mir, third), &option.some.id, true, &[]);
+            assert_eq!(
+                calls_on_path(mir, [true, true, true]),
+                [id("stage"), id("stage"), id("stage"), id("useAll")]
+            );
+            let stop = check("stop", default);
+            let mir = stop.mir().expect(
+                "known third failure skips the fourth argument and the invalid outer callee",
+            );
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"first");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(x)", b"y: string"],
+            );
+            assert_return(
+                &linear(mir, yes),
+                &option.none.id,
+                false,
+                &[b"stage(y)", b"stage(x)"],
+            );
+            assert_eq!(calls_on_path(mir, [true]), [id("stage"), id("stage")]);
+            assert!(mir.blocks.iter().all(|block| !matches!(&block.operation,
+                Operation::TestVariant { operand, .. } if operand.root.span.bytes() == b"fourth")));
+            let narrow = check("stopNarrow", default);
+            assert!(narrow.mir().is_some());
+            assert_eq!(
+                stop.mir().unwrap().blocks.len(),
+                narrow.mir().unwrap().blocks.len()
+            );
+            assert!(stop.statistics().work > narrow.statistics().work);
+            let reached = check("reached", default);
+            assert_eq!(reached.completion(), Completion::SourceRejected);
+            assert!(reached.mir().is_none());
+            let [finding] = reached.findings() else {
+                panic!("expected one reached-callee finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(x)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let exact = AnalysisLimits {
+                max_work: three.statistics().work,
+                max_entries: three.statistics().entries,
+                ..default
+            };
+            assert!(check("three", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = check("three", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
