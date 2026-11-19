@@ -30,8 +30,22 @@ enum CallPropagation<'a, 'g> {
 #[derive(Clone, Copy)]
 struct PropagatingArguments {
     first: PropagatingArgument,
-    // A pair is admitted only when both arguments have both feasible edges.
     second: Option<PropagatingArgument>,
+}
+
+impl PropagatingArguments {
+    fn terminal_failure(self) -> Option<PropagatingArgument> {
+        if !self.first.can_continue {
+            Some(self.first)
+        } else {
+            self.second.filter(|argument| !argument.can_continue)
+        }
+    }
+
+    fn can_return(self) -> bool {
+        self.first.can_return
+            || self.first.can_continue && self.second.is_some_and(|argument| argument.can_return)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -41,6 +55,8 @@ struct PropagatingArgument {
     can_continue: bool,
     can_return: bool,
 }
+
+type StagedArgumentExits = [Option<(PropagatingArgument, Pc)>; 2];
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(p) if p.name() == "string")
@@ -805,8 +821,8 @@ impl<'a, 'g> Build<'a, 'g> {
                             _ => return Err(Stop::Pending(node)),
                         };
                         if fact.flow.pending
-                            || fact.flow.normal != arguments.first.can_continue
-                            || fact.flow.returns != arguments.first.can_return
+                            || fact.flow.normal != arguments.terminal_failure().is_none()
+                            || fact.flow.returns != arguments.can_return()
                         {
                             return Err(Stop::Pending(initializer));
                         }
@@ -1576,14 +1592,19 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
-    fn contains_propagation(&mut self, node: NodeId, depth: usize) -> ResultOf<bool> {
+    fn contains_propagation(
+        &mut self,
+        node: NodeId,
+        admitted_root: Option<NodeId>,
+        depth: usize,
+    ) -> ResultOf<bool> {
         self.depth(depth)?;
-        if self.propagates_directly(node)? {
+        if Some(node) != admitted_root && self.propagates_directly(node)? {
             return Ok(true);
         }
         self.budget.step(1)?;
         for &child in &self.module.syntax.nodes[node].children {
-            if self.contains_propagation(child, depth + 1)? {
+            if self.contains_propagation(child, admitted_root, depth + 1)? {
                 return Ok(true);
             }
         }
@@ -1627,15 +1648,7 @@ impl<'a, 'g> Build<'a, 'g> {
                             second: None,
                         })
                     }
-                    Some(exits)
-                        if exits.second.is_none()
-                            && exits.first.can_continue
-                            && exits.first.can_return
-                            && argument.can_continue
-                            && argument.can_return =>
-                    {
-                        exits.second = Some(argument)
-                    }
+                    Some(exits) if exits.second.is_none() => exits.second = Some(argument),
                     _ => return Err(Stop::Pending(node)),
                 }
             }
@@ -1643,7 +1656,6 @@ impl<'a, 'g> Build<'a, 'g> {
         let Some(arguments) = arguments else {
             return Ok(None);
         };
-        let argument = arguments.first;
         if call.pipe_input.is_some()
             || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
         {
@@ -1661,23 +1673,37 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             }
         }
-        // Skipped expressions are not lowered, but must not hide a second
-        // propagation outside this single-argument route.
-        let skipped = if !argument.can_continue {
-            &call.arguments[argument.position + 1..]
-        } else if !argument.can_return {
+        // A known failure skips the suffix, but only a checked complete
+        // argument root may contain propagation there.
+        let terminal = arguments.terminal_failure();
+        if let Some(terminal) = terminal {
+            for (position, &arg) in call
+                .arguments
+                .iter()
+                .enumerate()
+                .skip(terminal.position + 1)
+            {
+                self.budget.step(1)?;
+                let admitted_root = arguments
+                    .second
+                    .filter(|argument| argument.position == position)
+                    .map(|argument| argument.root);
+                if self.contains_propagation(arg, admitted_root, depth + 1)? {
+                    return Err(Stop::Pending(node));
+                }
+            }
+        }
+        for argument in std::iter::once(arguments.first).chain(arguments.second) {
+            self.budget.step(1)?;
+            if argument.can_return || terminal.is_some_and(|last| last.position < argument.position)
+            {
+                continue;
+            }
             self.budget.step(1)?;
             let syntax = &self.module.syntax.nodes[argument.root];
-            if syntax.kind == NodeKind::Wrap {
-                &syntax.children[1..]
-            } else {
-                &[]
-            }
-        } else {
-            &[]
-        };
-        for &node_in_suffix in skipped {
-            if self.contains_propagation(node_in_suffix, depth + 1)? {
+            if syntax.kind == NodeKind::Wrap
+                && self.contains_propagation(syntax.children[1], None, depth + 1)?
+            {
                 return Err(Stop::Pending(node));
             }
         }
@@ -2366,6 +2392,29 @@ impl<'a, 'g> Build<'a, 'g> {
         )
     }
 
+    fn stage_propagating_argument(
+        &mut self,
+        exits: Option<StagedArgumentExits>,
+        position: usize,
+        slot: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Option<Pc>> {
+        let Some(exits) = exits else { return Ok(None) };
+        self.budget.step(exits.len())?;
+        let Some((argument, failure_cleanup)) = exits
+            .into_iter()
+            .flatten()
+            .find(|(argument, _)| argument.position == position)
+        else {
+            return Ok(None);
+        };
+        // The proof already read this root; lowering reads its syntax and facts again.
+        self.budget.step(2)?;
+        self.propagate(argument.root, Some(slot), next, failure_cleanup, depth + 1)
+            .map(Some)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -2465,13 +2514,18 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
             }
         }
-        let failure_only = match propagation {
+        let argument_flow = match propagation {
             Some(CallPropagation::Arguments {
                 arguments,
                 returning,
-            }) if !arguments.first.can_continue => Some((arguments.first, returning)),
+            }) => Some((arguments, returning)),
             _ => None,
         };
+        let failure_only = argument_flow.and_then(|(arguments, returning)| {
+            arguments
+                .terminal_failure()
+                .map(|argument| (argument, returning))
+        });
         let staged = match failure_only {
             Some((argument, _)) => &call.arguments[..argument.position],
             None => call.arguments.as_slice(),
@@ -2503,15 +2557,43 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             args.push(slot);
         }
+        let argument_exits = match argument_flow {
+            Some((arguments, returning)) if arguments.first.position < args.len() => {
+                let mut with_cleanup = |argument: Option<PropagatingArgument>| -> ResultOf<_> {
+                    let Some(argument) = argument.filter(|argument| argument.position < args.len())
+                    else {
+                        return Ok(None);
+                    };
+                    // Each feasible failure owns the prefix reached at that argument.
+                    let failure_cleanup = if argument.can_return {
+                        self.cleanup(argument.root, &args[..argument.position], returning)?
+                    } else {
+                        returning
+                    };
+                    Ok(Some((argument, failure_cleanup)))
+                };
+                Some([
+                    with_cleanup(Some(arguments.first))?,
+                    with_cleanup(arguments.second)?,
+                ])
+            }
+            _ => None,
+        };
         if let Some((argument, returning)) = failure_only {
             // No success edge exists. Do not lower the suffix or emit a call.
             let failure_cleanup = self.cleanup(argument.root, &args, returning)?;
             self.budget.step(2)?;
             let mut entry =
                 self.propagate(argument.root, None, next, failure_cleanup, depth + 1)?;
-            for (&node, slot) in staged.iter().zip(args).rev() {
+            for (position, (&node, slot)) in staged.iter().zip(args).enumerate().rev() {
                 self.budget.step(1)?;
-                entry = self.expression(node, Some(slot), entry, depth + 1)?;
+                entry = if let Some(early) =
+                    self.stage_propagating_argument(argument_exits, position, slot, entry, depth)?
+                {
+                    early
+                } else {
+                    self.expression(node, Some(slot), entry, depth + 1)?
+                };
             }
             return Ok(entry);
         }
@@ -2526,27 +2608,6 @@ impl<'a, 'g> Build<'a, 'g> {
         let destination = retention
             .map(|(position, contents)| self.call_destination(call, position, &args, &contents))
             .transpose()?;
-        let argument_exits = match propagation {
-            Some(CallPropagation::Arguments {
-                arguments,
-                returning,
-            }) => {
-                let mut with_cleanup = |argument: PropagatingArgument| -> ResultOf<_> {
-                    // Each feasible failure owns the prefix reached at that argument.
-                    let failure_cleanup = if argument.can_return {
-                        self.cleanup(argument.root, &args[..argument.position], returning)?
-                    } else {
-                        returning
-                    };
-                    Ok((argument, failure_cleanup))
-                };
-                Some([
-                    Some(with_cleanup(arguments.first)?),
-                    arguments.second.map(with_cleanup).transpose()?,
-                ])
-            }
-            _ => None,
-        };
         self.calls.push(Call {
             callee: call.callee,
             args,
@@ -2567,24 +2628,11 @@ impl<'a, 'g> Build<'a, 'g> {
             .chain(pipe_argument)
         {
             let slot = self.calls[index].args[i];
-            if let Some(exits) = argument_exits {
-                self.budget.step(exits.len())?;
-                if let Some((argument, failure_cleanup)) = exits
-                    .into_iter()
-                    .flatten()
-                    .find(|(argument, _)| argument.position == i)
-                {
-                    // The proof already read this root; lowering reads its syntax and facts again.
-                    self.budget.step(2)?;
-                    next = self.propagate(
-                        argument.root,
-                        Some(slot),
-                        next,
-                        failure_cleanup,
-                        depth + 1,
-                    )?;
-                    continue;
-                }
+            if let Some(early) =
+                self.stage_propagating_argument(argument_exits, i, slot, next, depth)?
+            {
+                next = early;
+                continue;
             }
             let root = self.ungroup(arg)?;
             let existing_exclusive = matches!(
