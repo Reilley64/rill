@@ -624,6 +624,14 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 owner[1] = "new";
                 return bit;
             }
+            function literalNamed(): bool {
+                let mut owner: [bool, string] = [false, "initial"];
+                let parent = &mut owner;
+                let bit = snapshot(parent);
+                let _ = parent;
+                owner[1] = "new";
+                return bit;
+            }
             function sharedStillExclusive(seed: [bool, string]): bool {
                 let mut owner = seed;
                 let view = projectShared(&mut owner);
@@ -758,12 +766,17 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 if old.root.node == replacement.root.node && old.root.span.bytes() == b"owner"
                     && old.tuple_element() == Some(1) && replacement.tuple_element() == Some(1))
             );
-            let literal = check("literalOwner");
-            assert!(
-                literal.mir().is_some(),
-                "literal owner: {:?}",
-                literal.completion()
-            );
+            for name in ["literalOwner", "literalNamed"] {
+                let literal = check(name);
+                let mir = literal
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", literal.completion()));
+                assert!(
+                    matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(new)]
+                    if old.root.node == new.root.node && old.root.span.bytes() == b"owner"
+                        && old.tuple_element() == Some(1) && new.tuple_element() == Some(1))
+                );
+            }
             let fresh = check("freshResumes");
             let mir = fresh
                 .mir()
@@ -857,11 +870,11 @@ fn tuple_call_invalidation_does_not_reuse_a_stale_boolean_for_result_use() {
 }
 
 #[test]
-fn mutable_tuple_calls_with_result_residences_keep_the_typed_blocker() {
+fn mutable_tuple_calls_outside_primitive_storage_keep_the_typed_blocker() {
     use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 
     probe_report(
-        "tuples::mutable_tuple_calls_with_result_residences_keep_the_typed_blocker",
+        "tuples::mutable_tuple_calls_outside_primitive_storage_keep_the_typed_blocker",
         r#"
             function inspect(owner: &mut [bool, Result<bool, i32>.Ok]): void {}
             function blocked(input: Result<bool, i32>.Ok): void {
@@ -869,18 +882,26 @@ fn mutable_tuple_calls_with_result_residences_keep_the_typed_blocker() {
                 inspect(&mut owner);
                 let _ = owner;
             }
+            function inspectNested(value: &mut [[bool, string], bool]): void {}
+            function nestedBlocked(): void {
+                let mut nested: [[bool, string], bool] = [[true, "initial"], false];
+                inspectNested(&mut nested);
+            }
         "#,
         |_, module, typed| {
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             assert!(typed.receipt().is_none());
             let uses = typed.result_use().unwrap();
-            assert!(
-                uses.pending()
-                    .iter()
-                    .any(|pending| pending.blocker == ResultUseBlocker::Storage
-                        && pending.site.module == &module.key
-                        && pending.site.span.bytes() == b"&mut owner")
-            );
+            for site in [b"&mut owner".as_slice(), b"&mut nested".as_slice()] {
+                assert!(
+                    uses.pending()
+                        .iter()
+                        .any(|pending| pending.blocker == ResultUseBlocker::Storage
+                            && pending.site.module == &module.key
+                            && pending.site.span.bytes() == site),
+                    "{site:?}"
+                );
+            }
         },
     );
 }
