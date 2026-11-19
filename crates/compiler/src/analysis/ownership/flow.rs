@@ -115,6 +115,9 @@ fn liveness(
             }
             Action::ForbiddenBorrowedMove(slot) => use_one(Some(slot), None),
             Action::Borrow { from, into, .. } => use_one(Some(from), Some(into)),
+            Action::BindSharedTupleMember {
+                descriptor, into, ..
+            } => use_one(Some(descriptor), Some(into)),
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
@@ -1165,6 +1168,37 @@ pub(super) fn run<'g>(
                         state[into] = State::Initialized(empty.clone());
                     }
                     Operation::Dereference(local(from))
+                }
+                Action::BindSharedTupleMember {
+                    descriptor,
+                    position,
+                    into,
+                    projected,
+                } => {
+                    let held = initialized(&state[descriptor], node)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        descriptor,
+                        (node, Conflict::Access),
+                        Access::Observe,
+                        budget,
+                    )?;
+                    state[into] = State::Initialized(if projected {
+                        Held {
+                            loans: held.loans.clone(),
+                            ..Held::default()
+                        }
+                    } else {
+                        empty.clone()
+                    });
+                    Operation::BindSharedTupleMember {
+                        descriptor: local(descriptor),
+                        position,
+                        into: local(into),
+                        projected,
+                    }
                 }
                 Action::Call(index) => {
                     let call = &calls[index];

@@ -316,10 +316,6 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
                 { let x = true; let [r, _]: [&bool, string] = [&x, "s"]; out = r; }
                 return false;
             }
-            function borrowed(value: &[bool, bool]): bool {
-                let [x, _] = value;
-                return x;
-            }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -470,10 +466,6 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
                 if place.tuple_element() == Some(1))
             );
 
-            let borrowed = lower("borrowed");
-            assert_eq!(borrowed.completion(), Completion::Incomplete);
-            assert!(borrowed.mir().is_none());
-
             let report = lower("copyPair");
             let mir = report.mir().expect("copyable tuple stays initialized");
             assert!(mir.blocks.iter().any(
@@ -488,6 +480,166 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)]
                 if place.tuple_element() == Some(1))
             );
+        },
+    );
+}
+
+#[test]
+fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
+    probe(
+        "patterns::shared_tuple_binding_copies_scalars_and_borrows_string_members",
+        r#"
+            function view(value: &[bool, string, string]): &string {
+                let ([flag, (text), _]) = value;
+                let _ = flag;
+                return text;
+            }
+            function copyOut(value: [bool, string]): bool {
+                let [flag, _] = &value;
+                let moved = value;
+                return flag;
+            }
+            function escapes(value: [bool, string]): &string {
+                let [_, text] = &value;
+                return text;
+            }
+            function premature(value: [bool, string]): void {
+                let whole = &value;
+                let [_, text] = whole;
+                let moved = value;
+                let _ = text;
+            }
+            function partial(value: [bool, string]): bool {
+                let moved = value[1];
+                let [flag, _] = &value;
+                return flag;
+            }
+            function lastUse(value: [bool, string]): void {
+                let [_, text] = &value;
+                let _ = text;
+                let moved = value;
+            }
+            function expires(seed: &string, flag: bool): &string {
+                let mut out = seed;
+                if (flag) { let pair: [bool, string] = [true, "local"]; let [_, view] = &pair; out = view; }
+                return out;
+            }
+            function exclusive(value: &mut [bool, bool]): bool {
+                let [bit, _] = value;
+                return bit;
+            }
+            function nested(value: &[[bool, bool], bool]): bool {
+                let [[bit, _], _] = value;
+                return bit;
+            }
+            function carried(value: &[&bool, bool]): &bool {
+                let [saved, _] = value;
+                return saved;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let check = |name| lower(name, AnalysisLimits::default());
+            let view = check("view");
+            let mir = view
+                .mir()
+                .unwrap_or_else(|| panic!("view: {:?}", view.completion()));
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. }
+                            | Operation::BindSharedTupleMember { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Copy { from: incoming, into: Some(staged) },
+                Operation::BindSharedTupleMember { descriptor: first, position: 0, into: flag, projected: false },
+                Operation::BindSharedTupleMember { descriptor: second, position: 1, into: text, projected: true },
+                Operation::Copy { from: bit, .. },
+                Operation::Copy { from: view, into: Some(result) },
+                Operation::Export(output),
+            ] if incoming.root.span.bytes() == b"value: &[bool, string, string]"
+                && staged.root.node == first.root.node && staged.root.node == second.root.node
+                && flag.root.span.bytes() == b"flag" && flag.root.node == bit.root.node
+                && text.root.span.bytes() == b"text" && text.root.node == view.root.node
+                && result.root.node == output.root.node));
+            let limits = AnalysisLimits {
+                max_work: view.statistics().work,
+                max_entries: view.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("view", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("view", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            for name in ["copyOut", "lastUse"] {
+                let report = check(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                assert!(
+                    matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(place)]
+                    if place.root.span.bytes() == b"moved" && place.tuple_element() == Some(1))
+                );
+            }
+            for (name, code, site, related) in [
+                ("escapes", "R0202", "return text;", "value: [bool, string]"),
+                ("premature", "R0203", "value", "&value"),
+                ("partial", "R0200", "&value", "value[1]"),
+                (
+                    "expires",
+                    "R0203",
+                    "{ let pair: [bool, string] = [true, \"local\"]; let [_, view] = &pair; out = view; }",
+                    "&pair",
+                ),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected a single finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            for (name, pattern) in [
+                ("exclusive", "[bit, _]"),
+                ("nested", "[[bit, _], _]"),
+                ("carried", "[saved, _]"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    pattern.as_bytes(),
+                    "{name}"
+                );
+            }
         },
     );
 }

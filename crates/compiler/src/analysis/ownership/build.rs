@@ -46,9 +46,10 @@ enum Binding<'a, 'g> {
         ty: &'a Type<'g>,
         site: NodeId,
     },
-    IrrefutableOwnedProduct {
+    IrrefutableProduct {
         shape: NodeId,
         facts: &'a PatternFacts<'g>,
+        shared_tuple: bool,
     },
 }
 
@@ -617,9 +618,11 @@ impl<'a, 'g> Build<'a, 'g> {
                         };
                         self.stage_value(value, into, tail, temporary, depth + 1)
                     }
-                    Binding::IrrefutableOwnedProduct { facts, .. } => {
-                        self.bind_product(node, facts, next, depth + 1)
-                    }
+                    Binding::IrrefutableProduct {
+                        facts,
+                        shared_tuple,
+                        ..
+                    } => self.bind_product(node, facts, shared_tuple, next, depth + 1),
                 }
             }
             NodeKind::ExpressionStatement => self.discard(node, children[0], next, depth + 1),
@@ -813,17 +816,35 @@ impl<'a, 'g> Build<'a, 'g> {
                 else {
                     return Err(Stop::Pending(pattern));
                 };
-                if facts.access != Access::Owned
-                    || !facts.coverage.exhaustive()
-                    || !matches!(
-                        (kind, facts.ty.as_ref()),
-                        (NodeKind::BracketPattern, TypeTerm::Tuple(_))
-                            | (NodeKind::RecordPattern, TypeTerm::Nominal { .. })
-                    )
-                {
+                if facts.access != Access::Owned || !facts.coverage.exhaustive() {
                     return Err(Stop::Pending(pattern));
                 }
-                Ok(Binding::IrrefutableOwnedProduct { shape, facts })
+                let shared_tuple = match (kind, facts.ty.as_ref()) {
+                    (NodeKind::BracketPattern, TypeTerm::Tuple(_))
+                    | (NodeKind::RecordPattern, TypeTerm::Nominal { .. }) => false,
+                    (
+                        NodeKind::BracketPattern,
+                        TypeTerm::Reference {
+                            mutable: false,
+                            referent,
+                        },
+                    ) if let TypeTerm::Tuple(elements) = referent.as_ref() => {
+                        self.budget.step(elements.len())?;
+                        if !elements
+                            .iter()
+                            .all(|ty| matches!(ty.as_ref(), TypeTerm::Primitive(_)))
+                        {
+                            return Err(Stop::Pending(pattern));
+                        }
+                        true
+                    }
+                    _ => return Err(Stop::Pending(pattern)),
+                };
+                Ok(Binding::IrrefutableProduct {
+                    shape,
+                    facts,
+                    shared_tuple,
+                })
             }
             _ => {
                 let Some(NodeFactKind::Binding(binding)) = self.facts.get(&node).map(|f| &f.kind)
@@ -854,7 +875,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 locals.push(local);
                 Ok(())
             }
-            Binding::IrrefutableOwnedProduct { shape, facts } => {
+            Binding::IrrefutableProduct {
+                shape,
+                facts,
+                shared_tuple,
+            } => {
                 let syntax = &self.module.syntax.nodes[shape];
                 let record = syntax.kind == NodeKind::RecordPattern;
                 let first = usize::from(
@@ -885,9 +910,18 @@ impl<'a, 'g> Build<'a, 'g> {
                         return Err(Stop::Pending(name));
                     }
                     let binder = binders.next().ok_or(Stop::Pending(name))?;
-                    let flat = match binder.projections.as_slice() {
-                        [PatternProjection::TupleElement(index)] => !record && *index == position,
-                        [PatternProjection::Field(_)] => record,
+                    let flat = match (shared_tuple, binder.projections.as_slice()) {
+                        (
+                            true,
+                            [
+                                PatternProjection::Dereference,
+                                PatternProjection::TupleElement(index),
+                            ],
+                        )
+                        | (false, [PatternProjection::TupleElement(index)]) => {
+                            !record && *index == position
+                        }
+                        (false, [PatternProjection::Field(_)]) => record,
                         _ => false,
                     };
                     if !flat || binder.declaration.start != syntax.span.start() {
@@ -907,17 +941,22 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         node: NodeId,
         facts: &PatternFacts<'g>,
+        shared_tuple: bool,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        // Evaluate the whole owned initializer once. Bind names from the
-        // temporary, then clean the remaining members at statement exit.
+        // Stage the initializer once. For borrowed patterns this is only
+        // the descriptor; the tuple storage stays with its original owner.
         let source = facts.source.node;
         let scratch = self.slot(source, &facts.ty)?;
         if self.slots[scratch].custom_disposer.is_some() || self.slots[scratch].contains_guard() {
             return Err(Stop::Pending(node));
         }
-        let mut tail = self.cleanup(node, &[scratch], next)?;
+        let mut tail = if shared_tuple {
+            self.emit(node, Action::End(scratch), Edges::Next(next))?
+        } else {
+            self.cleanup(node, &[scratch], next)?
+        };
         for binder in facts.binders.iter().rev() {
             self.budget.step(1)?;
             let into = *self
@@ -925,21 +964,41 @@ impl<'a, 'g> Build<'a, 'g> {
                 .get(binder.declaration)
                 .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
-            let from = match binder.projections.as_slice() {
-                [PatternProjection::TupleElement(position)] => {
-                    self.element(site, scratch, *position)?
+            let action = match (shared_tuple, binder.projections.as_slice()) {
+                (
+                    true,
+                    [
+                        PatternProjection::Dereference,
+                        PatternProjection::TupleElement(position),
+                    ],
+                ) => {
+                    let projected = if binder.ty == binder.source_type {
+                        false
+                    } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                        if *referent == binder.source_type)
+                    {
+                        true
+                    } else {
+                        return Err(Stop::Pending(site));
+                    };
+                    Action::BindSharedTupleMember {
+                        descriptor: scratch,
+                        position: *position,
+                        into,
+                        projected,
+                    }
                 }
-                [PatternProjection::Field(field)] => self.field(site, scratch, field)?,
-                _ => return Err(Stop::Pending(node)),
-            };
-            tail = self.emit(
-                site,
-                Action::Read {
-                    from,
+                (false, [PatternProjection::TupleElement(position)]) => Action::Read {
+                    from: self.element(site, scratch, *position)?,
                     into: Some(into),
                 },
-                Edges::Next(tail),
-            )?;
+                (false, [PatternProjection::Field(field)]) => Action::Read {
+                    from: self.field(site, scratch, field)?,
+                    into: Some(into),
+                },
+                _ => return Err(Stop::Pending(node)),
+            };
+            tail = self.emit(site, action, Edges::Next(tail))?;
         }
         self.expression(source, Some(scratch), tail, depth)
     }

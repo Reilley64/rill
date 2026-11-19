@@ -151,6 +151,15 @@ pub enum Operation<'g> {
         exclusive: bool,
     },
     Dereference(Place<'g>),
+    /// Bind a fixed member through an initialized shared tuple descriptor.
+    /// A projected binding carries the backing of that access; a scalar
+    /// copy does not. Neither operation moves or owns the member.
+    BindSharedTupleMember {
+        descriptor: Place<'g>,
+        position: usize,
+        into: Place<'g>,
+        projected: bool,
+    },
     FormClosure {
         closure: Site<'g>,
         capture: Site<'g>,
@@ -741,6 +750,12 @@ enum Action<'g> {
     Dereference {
         from: Slot,
         into: Option<Slot>,
+    },
+    BindSharedTupleMember {
+        descriptor: Slot,
+        position: usize,
+        into: Slot,
+        projected: bool,
     },
     Call(usize),
     InvokeClosurePair {
