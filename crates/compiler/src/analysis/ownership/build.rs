@@ -40,7 +40,7 @@ enum Binding<'a, 'g> {
         ty: &'a Type<'g>,
         site: NodeId,
     },
-    IrrefutableOwnedTuple {
+    IrrefutableOwnedProduct {
         shape: NodeId,
         facts: &'a PatternFacts<'g>,
     },
@@ -537,8 +537,8 @@ impl<'a, 'g> Build<'a, 'g> {
                         };
                         self.stage_value(value, into, tail, temporary, depth + 1)
                     }
-                    Binding::IrrefutableOwnedTuple { facts, .. } => {
-                        self.bind_tuple(node, facts, next, depth + 1)
+                    Binding::IrrefutableOwnedProduct { facts, .. } => {
+                        self.bind_product(node, facts, next, depth + 1)
                     }
                 }
             }
@@ -719,18 +719,23 @@ impl<'a, 'g> Build<'a, 'g> {
                     site: shape,
                 })
             }
-            NodeKind::BracketPattern => {
+            kind @ (NodeKind::BracketPattern | NodeKind::RecordPattern) => {
+                self.budget.step(1)?;
                 let Some(NodeFactKind::Pattern(facts)) = self.facts.get(&pattern).map(|f| &f.kind)
                 else {
                     return Err(Stop::Pending(pattern));
                 };
                 if facts.access != Access::Owned
                     || !facts.coverage.exhaustive()
-                    || !matches!(facts.ty.as_ref(), TypeTerm::Tuple(_))
+                    || !matches!(
+                        (kind, facts.ty.as_ref()),
+                        (NodeKind::BracketPattern, TypeTerm::Tuple(_))
+                            | (NodeKind::RecordPattern, TypeTerm::Nominal { .. })
+                    )
                 {
                     return Err(Stop::Pending(pattern));
                 }
-                Ok(Binding::IrrefutableOwnedTuple { shape, facts })
+                Ok(Binding::IrrefutableOwnedProduct { shape, facts })
             }
             _ => {
                 let Some(NodeFactKind::Binding(binding)) = self.facts.get(&node).map(|f| &f.kind)
@@ -761,27 +766,46 @@ impl<'a, 'g> Build<'a, 'g> {
                 locals.push(local);
                 Ok(())
             }
-            Binding::IrrefutableOwnedTuple { shape, facts } => {
+            Binding::IrrefutableOwnedProduct { shape, facts } => {
+                let syntax = &self.module.syntax.nodes[shape];
+                let record = syntax.kind == NodeKind::RecordPattern;
+                let first = usize::from(
+                    record
+                        && syntax.children.first().is_some_and(|&child| {
+                            self.module.syntax.nodes[child].kind == NodeKind::PatternPath
+                        }),
+                );
                 let mut binders = facts.binders.iter();
                 self.budget.reserve(binders.len())?;
-                for (position, &child) in
-                    self.module.syntax.nodes[shape].children.iter().enumerate()
-                {
+                for (position, &child) in syntax.children[first..].iter().enumerate() {
                     self.budget.step(1)?;
-                    let child = self.ungroup(child)?;
-                    match self.module.syntax.nodes[child].kind {
-                        NodeKind::Wildcard => {}
-                        NodeKind::NamePattern => {
-                            let binder = binders.next().ok_or(Stop::Pending(child))?;
-                            if binder.projections.as_slice()
-                                != [PatternProjection::TupleElement(position)]
-                            {
-                                return Err(Stop::Pending(child));
-                            }
-                            locals.push(self.local(binder.declaration, child, &binder.ty)?);
-                        }
-                        _ => return Err(Stop::Pending(child)),
+                    let (component, shorthand) = if record {
+                        let field = &self.module.syntax.nodes[child];
+                        let NodeKind::PatternField { shorthand } = field.kind else {
+                            return Err(Stop::Pending(child));
+                        };
+                        (field.children[usize::from(!shorthand)], shorthand)
+                    } else {
+                        (child, false)
+                    };
+                    let name = self.ungroup(component)?;
+                    let syntax = &self.module.syntax.nodes[name];
+                    if syntax.kind == NodeKind::Wildcard {
+                        continue;
                     }
+                    if !shorthand && syntax.kind != NodeKind::NamePattern {
+                        return Err(Stop::Pending(name));
+                    }
+                    let binder = binders.next().ok_or(Stop::Pending(name))?;
+                    let flat = match binder.projections.as_slice() {
+                        [PatternProjection::TupleElement(index)] => !record && *index == position,
+                        [PatternProjection::Field(_)] => record,
+                        _ => false,
+                    };
+                    if !flat || binder.declaration.start != syntax.span.start() {
+                        return Err(Stop::Pending(name));
+                    }
+                    locals.push(self.local(binder.declaration, name, &binder.ty)?);
                 }
                 if binders.next().is_some() {
                     return Err(Stop::Pending(pattern));
@@ -791,7 +815,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
-    fn bind_tuple(
+    fn bind_product(
         &mut self,
         node: NodeId,
         facts: &PatternFacts<'g>,
@@ -799,20 +823,27 @@ impl<'a, 'g> Build<'a, 'g> {
         depth: usize,
     ) -> ResultOf<Pc> {
         // Evaluate the whole owned initializer once. Bind names from the
-        // temporary, then clean its remaining elements at statement exit.
+        // temporary, then clean the remaining members at statement exit.
         let source = facts.source.node;
         let scratch = self.slot(source, &facts.ty)?;
+        if self.slots[scratch].custom_disposer.is_some() {
+            return Err(Stop::Pending(node));
+        }
         let mut tail = self.cleanup(node, &[scratch], next)?;
         for binder in facts.binders.iter().rev() {
-            let [PatternProjection::TupleElement(position)] = binder.projections.as_slice() else {
-                return Err(Stop::Pending(node));
-            };
+            self.budget.step(1)?;
             let into = *self
                 .locals
                 .get(binder.declaration)
                 .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
-            let from = self.element(site, scratch, *position)?;
+            let from = match binder.projections.as_slice() {
+                [PatternProjection::TupleElement(position)] => {
+                    self.element(site, scratch, *position)?
+                }
+                [PatternProjection::Field(field)] => self.field(site, scratch, field)?,
+                _ => return Err(Stop::Pending(node)),
+            };
             tail = self.emit(
                 site,
                 Action::Read {
