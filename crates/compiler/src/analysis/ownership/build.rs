@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
-    CheckedPipeCarrier,
+    CheckedPipeCarrier { primitive_arguments: bool },
 }
 
 #[derive(Clone, Copy)]
@@ -460,9 +460,22 @@ impl<'a, 'g> Build<'a, 'g> {
         if result != expected {
             return Err(Stop::Pending(node));
         }
-        for (formal, &arg) in parameters.iter().zip(&call.arguments) {
+        self.check_exact_call_arguments(node, parameters, &call.arguments, false)
+    }
+
+    fn check_exact_call_arguments(
+        &mut self,
+        node: NodeId,
+        parameters: &[MemberType<'g>],
+        arguments: &[NodeId],
+        allow_scalar_carriers: bool,
+    ) -> ResultOf<()> {
+        for (formal, &arg) in parameters.iter().zip(arguments) {
             self.budget.step(2)?;
-            if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
+            if !(matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
+                || allow_scalar_carriers
+                    && (self.bool_option_role(&formal.ty).is_some()
+                        || self.scalar_result_role(&formal.ty).is_some()))
                 || self.value(arg)?.ty != formal.ty
             {
                 return Err(Stop::Pending(node));
@@ -1655,7 +1668,12 @@ impl<'a, 'g> Build<'a, 'g> {
             && let Some(call) = facts.call.as_deref()
             && let Some(arguments) = self.propagating_arguments(
                 node,
-                PropagatingCallOutput::CheckedPipeCarrier,
+                PropagatingCallOutput::CheckedPipeCarrier {
+                    primitive_arguments: matches!(
+                        option_text,
+                        Some((_, OptionTextSource::PipeStep))
+                    ),
+                },
                 call,
                 return_cleanup,
                 depth,
@@ -1936,7 +1954,12 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
                 self.check_exact_primitive_call(node, call, expected)?;
             }
-            PropagatingCallOutput::CheckedPipeCarrier => {
+            PropagatingCallOutput::CheckedPipeCarrier {
+                primitive_arguments: true,
+            } => {}
+            PropagatingCallOutput::CheckedPipeCarrier {
+                primitive_arguments: false,
+            } => {
                 // The step signature already matched the actual arguments.
                 // Composition is narrower: every argument must be primitive.
                 for &arg in &call.arguments {
@@ -2022,17 +2045,7 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(node));
         }
         let owns_payload = matches!(option, Some((_, OptionPayload::Text(_))));
-        for (formal, &arg) in parameters.iter().zip(&call.arguments) {
-            self.budget.step(2)?;
-            if !(matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
-                || !owns_payload
-                    && (self.bool_option_role(&formal.ty).is_some()
-                        || self.scalar_result_role(&formal.ty).is_some()))
-                || self.value(arg)?.ty != formal.ty
-            {
-                return Err(Stop::Pending(node));
-            }
-        }
+        self.check_exact_call_arguments(node, parameters, &call.arguments, !owns_payload)?;
         Ok(result)
     }
 

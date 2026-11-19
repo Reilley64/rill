@@ -4839,6 +4839,11 @@ fn option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner() 
                 let bit = after(true);
                 return Option.Some(bit);
             }
+            function grouped(owner: string, flag: bool, later: string): Option<bool> {
+                let output = (((((stage(owner)))))) |> make(choose(flag), _)?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
             function absent(owner: string, later: string): Option<bool> {
                 let _ = stage(owner) |> makeNone?;
                 let bit = after(true);
@@ -4859,15 +4864,20 @@ fn option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner() 
                 return Option.Some(true);
             }
             function writtenFailure(owner: string, flag: Option<bool>.None): Option<bool> {
-                let _ = stage(owner) |> make(flag?, _)?;
+                let _ = stage(owner) |> invalid(flag?, _)?;
                 return Option.Some(true);
             }
-            function invalid(owner: string): Option<string>.None {
+            function invalid(flag: bool, owner: string): Option<string>.None {
                 dispose(owner); dispose(owner); return Option<string>.None;
             }
             function reached(owner: string): Option<bool> {
-                let _ = owner |> invalid?;
+                let _ = owner |> invalid(true, _)?;
                 return Option.Some(true);
+            }
+            function written(owner: string, flag: Option<bool>, later: string): Option<bool> {
+                let output = stage(owner) |> make(flag?, _)?;
+                let bit = after(true);
+                return Option.Some(bit);
             }
             function composite(input: Option<bool>, owner: string): Option<string> { return Option<string>.Some(owner); }
             function excluded(input: Option<bool>, owner: string): Option<bool> {
@@ -5003,6 +5013,41 @@ fn option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner() 
                 false,
                 &[b"stage(owner)"],
             );
+            let both = lower("written", default);
+            let mir = both
+                .mir()
+                .expect("written argument and step each have their own failure prefix");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"flag");
+            let (step_yes, step_no) = variant_edges(
+                mir,
+                yes,
+                &option.some.id,
+                b"stage(owner) |> make(flag?, _)?",
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(owner)", b"later: string"],
+            );
+            assert_return(
+                &linear(mir, step_no),
+                &option.none.id,
+                false,
+                &[b"later: string"],
+            );
+            assert_return(
+                &linear(mir, step_yes),
+                &option.some.id,
+                true,
+                &[b"output", b"later: string"],
+            );
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
+            assert_eq!(calls_on_path(mir, [true, false]), [id("stage"), id("make")]);
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("stage"), id("make"), id("after")]
+            );
             let reached = lower("reached", default);
             assert_eq!(reached.completion(), Completion::SourceRejected);
             assert!(reached.mir().is_none());
@@ -5020,6 +5065,16 @@ fn option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner() 
                 excluded.blocked_at().unwrap().span.bytes(),
                 b"input |> composite(owner)?"
             );
+            let grouped = lower("grouped", default);
+            assert!(grouped.mir().is_some());
+            let depth = AnalysisLimits {
+                max_depth: grouped.statistics().max_depth - 1,
+                ..default
+            };
+            assert!(lower("named", depth).mir().is_some());
+            let exhausted = lower("grouped", depth);
+            assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+            assert!(exhausted.mir().is_none());
             let exact = AnalysisLimits {
                 max_work: named.statistics().work,
                 max_entries: named.statistics().entries,
