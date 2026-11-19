@@ -335,6 +335,16 @@ fn retained_pipes_separate_formal_roles_from_staging_order() {
                 &mut out |> reversed(&flag, _);
                 return *out;
             }
+            function copyBeforeBorrow(seed: &bool): bool {
+                let mut out = seed;
+                out |> remember(&mut out, _);
+                return *out;
+            }
+            function copyAfterBorrow(seed: &bool): bool {
+                let mut out = seed;
+                &mut out |> reversed(out, _);
+                return *out;
+            }
             function forwarded(out: &mut &bool, source: &mut bool): void {
                 source |> stash(out, _);
             }
@@ -445,6 +455,36 @@ fn retained_pipes_separate_formal_roles_from_staging_order() {
                 && holder.root.node == input.root.node),
                 "{route:?}"
             );
+            let copied = check("copyBeforeBorrow");
+            let mir = copied
+                .mir()
+                .expect("copying before borrowing does not borrow the descriptor slot");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Copy { from, .. } => from.root.span.bytes() == b"out",
+                    Operation::Borrow { .. } | Operation::CallRetaining { .. } => true,
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Copy { from, into: Some(staged) },
+                Operation::Borrow { source, exclusive: true, .. },
+                Operation::CallRetaining { destination: RetainedPlace::Local(dest), input, .. },
+            ] if from.root.node == source.root.node && from.root.node == dest.root.node
+                && staged.root.node == input.root.node),
+                "{route:?}"
+            );
+            let borrowed = check("copyAfterBorrow");
+            assert_eq!(borrowed.completion(), Completion::SourceRejected);
+            assert!(borrowed.mir().is_none());
+            let [finding] = borrowed.findings() else {
+                panic!("expected exactly one overlapping read")
+            };
+            assert_eq!(finding.code(), "R0201");
+            assert_eq!(finding.site.span.bytes(), b"out");
+            assert_eq!(finding.related.span.bytes(), b"&mut out");
             let forwarded = check("forwarded");
             let mir = forwarded
                 .mir()
