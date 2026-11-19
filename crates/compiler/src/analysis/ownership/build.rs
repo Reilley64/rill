@@ -29,6 +29,7 @@ enum PropagatingCallOutput<'a, 'g> {
 #[derive(Clone, Copy)]
 enum PropagationSite {
     StatementRoot,
+    DirectCallArgument,
     NestedArgument,
 }
 
@@ -66,6 +67,7 @@ struct PropagatingArgument {
     evaluation_position: usize,
     root: NodeId,
     can_return: bool,
+    composed_pipe: bool,
 }
 
 enum OptionPayload<'t, 'g> {
@@ -1647,6 +1649,9 @@ impl<'a, 'g> Build<'a, 'g> {
         depth: usize,
         site: PropagationSite,
     ) -> ResultOf<Pc> {
+        if matches!(site, PropagationSite::DirectCallArgument) {
+            self.depth(depth)?;
+        }
         let facts = self.value(node)?;
         let CheckedPropagation {
             exit,
@@ -1658,8 +1663,10 @@ impl<'a, 'g> Build<'a, 'g> {
             wrapper,
             option_text,
         } = self.checked_propagation(node, facts)?;
-        let pipe_arguments = if matches!(site, PropagationSite::StatementRoot)
-            && piped
+        let pipe_arguments = if matches!(
+            site,
+            PropagationSite::StatementRoot | PropagationSite::DirectCallArgument
+        ) && piped
             && fresh.is_none()
             && let Some(call) = facts.call.as_deref()
             && let Some(arguments) = self.propagating_arguments(
@@ -1907,6 +1914,10 @@ impl<'a, 'g> Build<'a, 'g> {
             None
         };
         let order = || argument_staging_order(&call.arguments, pipe_formal).enumerate();
+        // Only an enclosing direct call can admit one composed pipe layer.
+        // A pipe's own arguments use the noncomposing route.
+        let allows_composed_pipe =
+            pipe_formal.is_none() && matches!(output, PropagatingCallOutput::Value(_));
         let mut roots = Vec::new();
         let mut terminal_root_index = None;
         let mut can_return = false;
@@ -1915,18 +1926,43 @@ impl<'a, 'g> Build<'a, 'g> {
             let root = self.ungroup(arg)?;
             if self.propagates_directly(root)? {
                 self.budget.step(1)?;
-                let exit = match &self.value(root)?.data {
+                let fact = self.facts.get(&root).ok_or(Stop::Pending(root))?;
+                let NodeFactKind::Expression(value) = &fact.kind else {
+                    return Err(Stop::Pending(root));
+                };
+                let exit = match &value.data {
                     Some(DataExpression::Propagation(exit)) => exit.as_ref(),
                     Some(DataExpression::Wrapping(wrap)) => &wrap.branch,
                     Some(DataExpression::ErrorPipe { propagation, .. }) => propagation.as_ref(),
                     _ => return Err(Stop::Pending(root)),
                 };
-                if !(exit.can_return || exit.can_continue) {
+                let composed_pipe = if allows_composed_pipe {
+                    self.budget.step(1)?;
+                    self.module.syntax.nodes[root].kind == NodeKind::Pipe
+                } else {
+                    false
+                };
+                let (continues, returns) = if composed_pipe {
+                    // The last step's variant alone cannot describe a pipe
+                    // that may return while staging its own arguments.
+                    let flow = &fact.flow;
+                    if flow.pending
+                        || flow.diverges
+                        || !flow.breaks.is_empty()
+                        || !flow.continues.is_empty()
+                    {
+                        return Err(Stop::Pending(root));
+                    }
+                    (flow.normal, flow.returns)
+                } else {
+                    (exit.can_continue, exit.can_return)
+                };
+                if !(returns || continues) {
                     return Err(Stop::Pending(node));
                 }
                 if terminal_root_index.is_none() {
-                    can_return |= exit.can_return;
-                    if !exit.can_continue {
+                    can_return |= returns;
+                    if !continues {
                         terminal_root_index = Some(roots.len());
                     }
                 }
@@ -1934,7 +1970,8 @@ impl<'a, 'g> Build<'a, 'g> {
                 roots.push(PropagatingArgument {
                     evaluation_position: position,
                     root,
-                    can_return: exit.can_return,
+                    can_return: returns,
+                    composed_pipe,
                 });
             }
         }
@@ -2764,7 +2801,11 @@ impl<'a, 'g> Build<'a, 'g> {
             next,
             failure_cleanup,
             depth + 1,
-            PropagationSite::NestedArgument,
+            if argument.composed_pipe {
+                PropagationSite::DirectCallArgument
+            } else {
+                PropagationSite::NestedArgument
+            },
         )
     }
 

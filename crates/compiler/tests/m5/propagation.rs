@@ -3471,11 +3471,6 @@ fn composed_pipe_statements_discard_only_the_success_payload() {
                 stage(owner) |> optionStep(nested(input? || other?))?;
                 return Option.Some(true);
             }
-            function round(value: bool): Option<bool> { return Option.Some(value); }
-            function nestedComposition(input: Option<bool>): Option<bool> {
-                let bit = nested((input?) |> round?);
-                return Option.Some(bit);
-            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -3563,11 +3558,9 @@ fn composed_pipe_statements_discard_only_the_success_payload() {
                 false,
                 &[b"later: string", b"owner: string"],
             );
-            for name in ["deeper", "nestedComposition"] {
-                let blocked = lower(name, default);
-                assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");
-                assert!(blocked.mir().is_none());
-            }
+            let blocked = lower("deeper", default);
+            assert_eq!(blocked.completion(), Completion::Incomplete);
+            assert!(blocked.mir().is_none());
             let exact = AnalysisLimits {
                 max_work: results.statistics().work,
                 max_entries: results.statistics().entries,
@@ -5339,7 +5332,6 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
                 return Option.Some(bit);
             }
             function scalar(value: string): Option<bool>.Some { dispose(value); return Option<bool>.Some(true); }
-            function plain(flag: bool): bool { return flag; }
             function consume(before: string, bit: bool, value: string): bool { dispose(value); dispose(before); return bit; }
             function terminal(input: Option<string>.None, before: string, gate: Option<bool>): Option<bool> {
                 let _ = (input?) |> finish(stage(before), gate?, _)?;
@@ -5362,11 +5354,6 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
             function skippedDeeper(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
                 let _ = stage(before) |> invalid(gate?, ((input?) |> returnSome?), _)?;
                 return Option.Some(true);
-            }
-            function scalarUnknown(value: string): Option<bool> { dispose(value); return Option.Some(true); }
-            function deeper(input: Option<string>): Option<bool> {
-                let bit = plain(((input?) |> scalarUnknown?));
-                return Option.Some(bit);
             }
         "#,
         |_, module, receipt, typed| {
@@ -5530,21 +5517,11 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
                 if *callee == id("after") && matches!(actions.as_slice(), [Obligation::Drop(place)] if place.root.node == into.root.node)),
                 "{order:?}"
             );
-            for name in ["deeper", "skippedDeeper"] {
-                let deeper = lower(name, default);
-                assert_eq!(deeper.completion(), Completion::Incomplete, "{name}");
-                assert!(deeper.mir().is_none());
-            }
+            let skipped_deeper = lower("skippedDeeper", default);
+            assert_eq!(skipped_deeper.completion(), Completion::Incomplete);
+            assert!(skipped_deeper.mir().is_none());
             assert_eq!(
-                lower("deeper", default).blocked_at().unwrap().span.bytes(),
-                b"(input?)"
-            );
-            assert_eq!(
-                lower("skippedDeeper", default)
-                    .blocked_at()
-                    .unwrap()
-                    .span
-                    .bytes(),
+                skipped_deeper.blocked_at().unwrap().span.bytes(),
                 b"stage(before) |> invalid(gate?, ((input?) |> returnSome?), _)?"
             );
             let exact = AnalysisLimits {
@@ -5564,6 +5541,180 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
                 },
             ] {
                 let limited = lower("composed", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
+    probe_with_typed(
+        "propagation::one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes",
+        r#"
+            function stage(value: string): string { return value; }
+            function finish(inside: string, bit: bool, value: string): Option<string> {
+                dispose(inside);
+                if (bit) { return Option<string>.Some(value); }
+                return Option<string>.None;
+            }
+            function useAll(before: string, value: string, bit: bool): bool {
+                dispose(value); dispose(before); return bit;
+            }
+            function nested(before: string, input: Option<string>, inside: string, gate: Option<bool>, later: Option<bool>, keep: string): Option<bool> {
+                let bit = useAll(stage(before), ((input?) |> finish(stage(inside), gate?, _)?), later?);
+                return Option.Some(bit);
+            }
+            function terminal(before: string, input: Option<string>.None, inside: string, gate: Option<bool>, later: Option<bool>): Option<bool> {
+                let _ = useAll(stage(before), ((input?) |> finish(stage(inside), gate?, _)?), later?);
+                return Option.Some(true);
+            }
+            function always(value: string): Option<string>.Some { return Option<string>.Some(value); }
+            function alwaysStep(before: string, input: Option<string>): Option<bool> {
+                let bit = useAll(stage(before), ((input?) |> always?), true);
+                return Option.Some(bit);
+            }
+            function bounce(value: string): Option<string> { return Option<string>.Some(value); }
+            function tooDeep(before: string, input: Option<string>): Option<bool> {
+                let bit = useAll(stage(before), ((((input?) |> bounce?) |> bounce?)), true);
+                return Option.Some(bit);
+            }
+            function laterString(before: string, bit: bool, value: string): bool {
+                dispose(value); dispose(before); return bit;
+            }
+            function skipped(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
+                let _ = laterString(stage(before), gate?, ((input?) |> bounce?));
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let nested = lower("nested", default);
+            let mir = nested
+                .mir()
+                .unwrap_or_else(|| panic!("nested pipe argument: {:?}", nested.completion()));
+            let (input_yes, input_no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (gate_yes, gate_no) = variant_edges(mir, input_yes, &option.some.id, b"gate");
+            let (step_yes, step_no) = variant_edges(
+                mir,
+                gate_yes,
+                &option.some.id,
+                b"(input?) |> finish(stage(inside), gate?, _)?",
+            );
+            let (all_yes, later_no) = variant_edges(mir, step_yes, &option.some.id, b"later");
+            assert_return(
+                &linear(mir, input_no),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"keep: string", b"inside: string"],
+            );
+            assert_return(
+                &linear(mir, gate_no),
+                &option.none.id,
+                false,
+                &[
+                    b"stage(inside)",
+                    b"(input?)",
+                    b"stage(before)",
+                    b"keep: string",
+                ],
+            );
+            assert_return(
+                &linear(mir, step_no),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"keep: string"],
+            );
+            assert_return(
+                &linear(mir, later_no),
+                &option.none.id,
+                false,
+                &[
+                    b"((input?) |> finish(stage(inside), gate?, _)?)",
+                    b"stage(before)",
+                    b"keep: string",
+                ],
+            );
+            assert_return(
+                &linear(mir, all_yes),
+                &option.some.id,
+                true,
+                &[b"keep: string"],
+            );
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("stage"), id("stage")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, false]),
+                [id("stage"), id("stage"), id("finish")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true, true, true]),
+                [id("stage"), id("stage"), id("finish"), id("useAll")]
+            );
+            let terminal = lower("terminal", default);
+            let mir = terminal.mir().expect(
+                "known failure inside the argument skips both calls and the later argument",
+            );
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"inside: string"],
+            );
+            let known_step = lower("alwaysStep", default);
+            let mir = known_step
+                .mir()
+                .expect("a success-only step can still return through its argument");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(before)"],
+            );
+            assert_return(&linear(mir, yes), &option.some.id, true, &[]);
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("always"), id("useAll")]
+            );
+            for name in ["tooDeep", "skipped"] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+            }
+            let exact = AnalysisLimits {
+                max_work: nested.statistics().work,
+                max_entries: nested.statistics().entries,
+                ..default
+            };
+            assert!(lower("nested", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("nested", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
