@@ -1066,6 +1066,14 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             function widePair(other: &[bool], parent: &mut [[bool, string, i32], i32]): bool { return true; }
             function narrowPipe(parent: &mut [[bool], i32], other: &[bool]): bool { return parent |> narrowPair(other, _); }
             function widePipe(parent: &mut [[bool, string, i32], i32], other: &[bool]): bool { return parent |> widePair(other, _); }
+            function narrowLeaf(bit: bool, extra: &string, parent: &mut [[bool], i32]): bool { return bit; }
+            function wideLeaf(bit: bool, extra: &string, parent: &mut [[bool, string, i32], i32]): bool { return bit; }
+            function narrowMixed(parent: &mut [[bool], i32], extra: &string): bool { return parent |> narrowLeaf(true, extra, _); }
+            function wideMixed(parent: &mut [[bool, string, i32], i32], extra: &string): bool { return parent |> wideLeaf(true, extra, _); }
+            function narrowTail(parent: &mut [[bool], i32], extra: &[[bool], i32]): bool { return true; }
+            function wideTail(parent: &mut [[bool], i32], extra: &[[bool, string, i32], i32]): bool { return true; }
+            function narrowTrailing(parent: &mut [[bool], i32], extra: &[[bool], i32]): bool { return parent |> narrowTail(extra); }
+            function wideTrailing(parent: &mut [[bool], i32], extra: &[[bool, string, i32], i32]): bool { return parent |> wideTail(extra); }
         "#,
         |_, module, receipt| {
             let id = |name| {
@@ -1205,11 +1213,38 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             );
             let narrow_pipe = lower("narrowPipe", default);
             let wide_pipe = lower("widePipe", default);
-            for pipe in [&narrow_pipe, &wide_pipe] {
+            let narrow_trailing = lower("narrowTrailing", default);
+            let wide_trailing = lower("wideTrailing", default);
+            for (pipe, source) in [
+                (&narrow_pipe, b"parent |> narrowPair(other, _)".as_slice()),
+                (&wide_pipe, b"parent |> widePair(other, _)"),
+                (&narrow_trailing, b"parent |> narrowTail(extra)"),
+                (&wide_trailing, b"parent |> wideTail(extra)"),
+            ] {
                 assert_eq!(pipe.completion(), Completion::Incomplete);
                 assert!(pipe.mir().is_none());
+                assert_eq!(pipe.blocked_at().unwrap().span.bytes(), source);
             }
             assert_eq!(wide_pipe.statistics().work, narrow_pipe.statistics().work);
+            assert_eq!(
+                wide_trailing.statistics().work,
+                narrow_trailing.statistics().work
+            );
+            let narrow_mixed = lower("narrowMixed", default);
+            let wide_mixed = lower("wideMixed", default);
+            assert!(narrow_mixed.mir().is_some() && wide_mixed.mir().is_some());
+            assert_eq!(
+                wide_mixed.statistics().work - narrow_mixed.statistics().work,
+                wide_unary.statistics().work - narrow_unary.statistics().work
+            );
+            assert_eq!(
+                wide_mixed.statistics().entries,
+                narrow_mixed.statistics().entries
+            );
+            assert_eq!(
+                wide_mixed.statistics().max_depth,
+                narrow_mixed.statistics().max_depth
+            );
             assert_exact_tuple_call_limits(&resumes, |limits| lower("resumes", limits));
         },
     );
@@ -1433,6 +1468,21 @@ fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
             function implicit(parent: &mut [[bool, string], i32], fallback: &string): &string {
                 return (parent) |> leading(mark(), fallback);
             }
+            function readBit(parent: &mut [[bool, string], i32]): bool {
+                let [[bit, _], _] = &mut *parent;
+                return bit;
+            }
+            function ordered(parent: &mut [[bool, string], i32], fallback: &string): &string {
+                return select(readBit((parent)), fallback, parent);
+            }
+            function pipeOverlap(parent: &mut [[bool, string], i32], fallback: &string): &string {
+                return parent |> select(readBit((parent)), fallback, _);
+            }
+            function maybe(flag: bool, fallback: &string, parent: &mut [[bool, string], i32]): Option<bool> { return Option.Some(flag); }
+            function propagating(parent: &mut [[bool, string], i32], fallback: &string): Option<bool> {
+                let bit = parent |> maybe(mark(), fallback, _)?;
+                return Option.Some(bit);
+            }
             function releases(parent: &mut [[bool, string], i32]): bool {
                 let first = "first";
                 let bit = parent |> scalar(mark(), &first, _);
@@ -1531,9 +1581,9 @@ fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
                     })
                     .collect();
                 let [
-                    input,
-                    mark,
-                    fallback,
+                    first,
+                    second,
+                    third,
                     Operation::Call(callee),
                     Operation::Export(out),
                 ] = ops.as_slice()
@@ -1541,9 +1591,9 @@ fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
                     panic!("expected one operand of each kind and the final call/export")
                 };
                 let (input, mark, fallback) = if piped {
-                    (input, mark, fallback)
+                    (first, second, third)
                 } else {
-                    (fallback, input, mark)
+                    (third, first, second)
                 };
                 assert!(
                     matches!(input, Operation::Reborrow { parent, holder, exclusive: true }
@@ -1559,6 +1609,19 @@ fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
                 assert_eq!(out.root.span.bytes(), source);
                 assert!(path_drops(mir, mir.entry).is_empty());
             }
+            let ordered = lower("ordered", default);
+            let mir = ordered.mir().expect(
+                "the written scalar call releases its reborrow before the later direct argument",
+            );
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Call(_) | Operation::Reborrow { .. }))
+                .collect();
+            assert!(matches!(ops.as_slice(), [
+                Operation::Reborrow { parent, holder: first, exclusive: true }, Operation::Call(read_bit),
+                Operation::Reborrow { parent: again, holder: second, exclusive: true }, Operation::Call(select),
+            ] if parent.root.node == again.root.node && first.root.span.bytes() == b"(parent)"
+                && second.root.span.bytes() == b"parent" && *read_bit == id("readBit") && *select == id("select")));
             let releases = lower("releases", default);
             let mir = releases
                 .mir()
@@ -1591,6 +1654,7 @@ fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
                     b"parent".as_slice(),
                 ),
                 ("keepsFallback", "R0203", b"dispose(fallback)", b"&fallback"),
+                ("pipeOverlap", "R0201", b"(parent)", b"parent"),
                 (
                     "escapeFallback",
                     "R0202",
@@ -1615,6 +1679,7 @@ fn nested_exclusive_calls_with_leaf_arguments_keep_both_backings() {
                 ("twoLast", b"parent |> nestedLast(other, _)"),
                 ("twoImplicit", b"parent |> nestedFirst(other)"),
                 ("unsupportedMutable", b"parent"),
+                ("propagating", b"parent |> maybe(mark(), fallback, _)?"),
             ] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
