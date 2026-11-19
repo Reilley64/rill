@@ -684,8 +684,8 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 let mut owner = seed;
                 return compoundResult(&mut owner);
             }
-            function explicitSnapshot(seed: [bool, string]): bool {
-                let mut owner = seed;
+            function explicitSnapshot(): bool {
+                let mut owner: [bool, string] = [true, "initial"];
                 let parent = &mut owner;
                 let bit = snapshot(&mut *(parent));
                 let _ = parent;
@@ -728,6 +728,12 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 let bit = snapshot(parent);
                 touch(view);
                 return bit;
+            }
+            function movedDescriptor(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let moved = parent;
+                return snapshot(&mut *parent);
             }
             function escapedDescriptor(seed: [bool, string]): &mut [bool, string] {
                 let mut owner = seed;
@@ -903,6 +909,7 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 ),
                 ("explicitOwner", "R0201", "owner[0]", "&mut owner"),
                 ("parentStillSuspended", "R0201", "parent", "&mut *parent"),
+                ("movedDescriptor", "R0200", "&mut *parent", "parent"),
                 (
                     "escapedDescriptor",
                     "R0202",
