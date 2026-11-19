@@ -1577,7 +1577,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let mut exit_argument = None;
         for (position, (formal, &arg)) in parameters.iter().zip(&call.arguments).enumerate() {
-            self.budget.step(2)?;
+            self.budget.step(3)?;
             if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
                 || self.value(arg)?.ty != formal.ty
             {
@@ -2454,10 +2454,12 @@ impl<'a, 'g> Build<'a, 'g> {
             .chain(pipe_argument)
         {
             let slot = self.calls[index].args[i];
-            if let Some((position, root, returning)) = argument_exit
+            if let Some((position, root, failure_cleanup)) = argument_exit
                 && position == i
             {
-                next = self.propagate(root, Some(slot), next, returning, depth + 1)?;
+                // The proof already read this root; lowering reads its syntax and facts again.
+                self.budget.step(2)?;
+                next = self.propagate(root, Some(slot), next, failure_cleanup, depth + 1)?;
                 continue;
             }
             let root = self.ungroup(arg)?;

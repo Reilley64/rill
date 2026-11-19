@@ -1710,6 +1710,21 @@ fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
                 ]
             );
             assert_eq!(calls_on_path(mir, [false]), [&declaration("before").id]);
+            let prefix: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| match op {
+                    Operation::Move { from, .. } => from.root.span.bytes() == b"second: string",
+                    Operation::Call(_) | Operation::TestVariant { .. } => true,
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(prefix.as_slice(), [
+                Operation::Call(before), Operation::Move { into: Some(second), .. }, Operation::TestVariant { .. },
+            ] if *before == &declaration("before").id && second.root.span.bytes() == b"second"),
+                "{prefix:?}"
+            );
             let ok = linear(mir, yes);
             let none = linear(mir, no);
             assert_return(
