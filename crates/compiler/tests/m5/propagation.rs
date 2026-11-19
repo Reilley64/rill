@@ -5353,8 +5353,19 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
                 (input?) |> scalar?;
                 return Option.Some(after(true));
             }
+            function written(before: string, bit: bool, input: Option<string>, later: string): Option<bool> {
+                stage(before) |> finish(bit, input?)?;
+                let next = after(true);
+                return Option.Some(next);
+            }
+            function returnSome(value: string): Option<string>.Some { return Option<string>.Some(value); }
+            function skippedDeeper(before: string, gate: Option<bool>.None, input: Option<string>): Option<bool> {
+                let _ = stage(before) |> invalid(gate?, ((input?) |> returnSome?), _)?;
+                return Option.Some(true);
+            }
+            function scalarUnknown(value: string): Option<bool> { dispose(value); return Option.Some(true); }
             function deeper(input: Option<string>): Option<bool> {
-                let bit = plain(((input?) |> scalar?));
+                let bit = plain(((input?) |> scalarUnknown?));
                 return Option.Some(bit);
             }
         "#,
@@ -5485,9 +5496,57 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
             assert_eq!(calls_on_path(mir, [true]), [id("scalar"), id("after")]);
             assert_return(&linear(mir, no), &option.none.id, false, &[]);
             assert_return(&linear(mir, yes), &option.some.id, true, &[]);
-            let deeper = lower("deeper", default);
-            assert_eq!(deeper.completion(), Completion::Incomplete);
-            assert!(deeper.mir().is_none());
+            let written = lower("written", default);
+            let mir = written
+                .mir()
+                .expect("a written owning argument and statement result stage independently");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let source = b"stage(before) |> finish(bit, input?)?";
+            let (step_yes, step_no) = variant_edges(mir, yes, &option.some.id, source);
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(before)", b"later: string"],
+            );
+            assert_return(
+                &linear(mir, step_no),
+                &option.none.id,
+                false,
+                &[b"later: string"],
+            );
+            assert!(linear(mir, step_no).iter().any(|op| matches!(op, Operation::EndEmptyOption(carrier) if carrier.root.span.bytes() == source)));
+            assert!(
+                matches!(path_drops(mir, step_yes).as_slice(), [Obligation::Drop(output), Obligation::Drop(later)]
+                if output.root.span.bytes() == source && later.root.span.bytes() == b"later: string")
+            );
+            let order: Vec<_> = linear(mir, step_yes).into_iter().filter(|op| match op {
+                Operation::TakeOptionPayload { .. } | Operation::Call(_) => true,
+                Operation::Cleanup(actions) => actions.iter().any(|action| matches!(action, Obligation::Drop(place) if place.root.span.bytes() == source)),
+                _ => false,
+            }).collect();
+            assert!(
+                matches!(order.as_slice(), [Operation::TakeOptionPayload { into, .. }, Operation::Cleanup(actions), Operation::Call(callee)]
+                if *callee == id("after") && matches!(actions.as_slice(), [Obligation::Drop(place)] if place.root.node == into.root.node)),
+                "{order:?}"
+            );
+            for name in ["deeper", "skippedDeeper"] {
+                let deeper = lower(name, default);
+                assert_eq!(deeper.completion(), Completion::Incomplete, "{name}");
+                assert!(deeper.mir().is_none());
+            }
+            assert_eq!(
+                lower("deeper", default).blocked_at().unwrap().span.bytes(),
+                b"(input?)"
+            );
+            assert_eq!(
+                lower("skippedDeeper", default)
+                    .blocked_at()
+                    .unwrap()
+                    .span
+                    .bytes(),
+                b"stage(before) |> invalid(gate?, ((input?) |> returnSome?), _)?"
+            );
             let exact = AnalysisLimits {
                 max_work: composed.statistics().work,
                 max_entries: composed.statistics().entries,
