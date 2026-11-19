@@ -638,6 +638,20 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
             function relay(first: &bool, out: &mut &bool, second: &bool): void {
                 keep(first, out, second);
             }
+            function atEnd(first: &bool, second: &bool, slot: &mut &bool): void { *slot = second; }
+            function viaAlias(seed: &bool, first: bool, second: bool): bool {
+                let mut out = seed;
+                { let access = &mut out; atEnd(&first, &second, access); }
+                return *out;
+            }
+            function sharedView(seed: &bool): bool {
+                let mut flag = true;
+                let access = &mut flag;
+                let mut out = seed;
+                keep(seed, &mut out, &*access);
+                let early = *access;
+                return *out;
+            }
             function localEscape(first: &bool, out: &mut &bool): void {
                 let second = true;
                 relay(first, out, &second);
@@ -707,6 +721,40 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
                 Operation::CallRetainingPair { callee, destination: RetainedPlace::ThroughParameter(dest), inputs: [first, second] }
                 if *callee == &declaration("keep").id && dest.root.span.bytes() == b"out: &mut &bool"
                     && first.root.span.bytes() == b"first" && second.root.span.bytes() == b"second")));
+            let alias = check("viaAlias");
+            let mir = alias
+                .mir()
+                .expect("the destination in the last formal resolves to its exact local target");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::CallRetainingPair { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Reborrow { parent, exclusive: true, .. },
+                Operation::CallRetainingPair { callee, destination: RetainedPlace::ThroughAlias { descriptor, target }, inputs: [first, second] },
+                Operation::Dereference(read),
+            ] if *callee == &declaration("atEnd").id && parent.root.node == descriptor.root.node
+                && descriptor.root.span.bytes() == b"access" && target.root.span.bytes() == b"out" && read.root.node == target.root.node
+                && first.root.span.bytes() == b"&first" && second.root.span.bytes() == b"&second"),
+                "{route:?}"
+            );
+            let shared = check("sharedView");
+            assert_eq!(shared.completion(), Completion::SourceRejected);
+            assert!(shared.mir().is_none());
+            let [finding] = shared.findings() else {
+                panic!("expected one exclusive-parent finding")
+            };
+            assert_eq!(finding.code(), "R0201");
+            assert_eq!(finding.site.span.bytes(), b"*access");
+            assert_eq!(finding.related.span.bytes(), b"&*access");
             let overwritten = check("overwrite");
             let mir = overwritten
                 .mir()

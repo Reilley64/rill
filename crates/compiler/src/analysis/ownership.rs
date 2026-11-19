@@ -616,7 +616,7 @@ fn lower<'g>(
 }
 
 // A scalar retention call has one destination and one or two compatible
-// sources. Only a single source may carry an exclusive restriction.
+// sources. Only the single-source signature admits an exclusive source formal.
 fn retained_bool_call_types<'a, 'g>(
     shape: &'a DeclarationShape<'g>,
     destination: usize,
