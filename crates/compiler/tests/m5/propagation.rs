@@ -5587,6 +5587,35 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
                 let _ = laterString(stage(before), gate?, ((input?) |> bounce?));
                 return Option.Some(true);
             }
+            function siblings(left: Option<string>, right: Option<string>): Option<bool> {
+                let bit = useAll(((left?) |> always?), ((right?) |> always?), true);
+                return Option.Some(bit);
+            }
+            function twoPlain(left: string, right: string): Option<bool> {
+                let bit = useAll((left |> always?), (right |> always?), true);
+                return Option.Some(bit);
+            }
+            function invalidInner(inside: string, bit: bool, value: string): Option<string>.None {
+                dispose(inside); dispose(inside); dispose(value); return Option<string>.None;
+            }
+            function invalidOuter(before: string, value: string, bit: bool): bool {
+                dispose(before); dispose(before); dispose(value); return bit;
+            }
+            function terminalWritten(before: string, input: Option<string>.Some, inside: string, gate: Option<bool>.None): Option<bool> {
+                let _ = invalidOuter(stage(before), ((input?) |> invalidInner(stage(inside), gate?, _)?), true);
+                return Option.Some(true);
+            }
+            function invalidReached(before: string, input: Option<string>.Some, inside: string, gate: Option<bool>.Some): Option<bool> {
+                let _ = invalidOuter(stage(before), ((input?) |> invalidInner(stage(inside), gate?, _)?), true);
+                return Option.Some(true);
+            }
+            function stop(): never { return stop(); }
+            function round(bit: bool): Option<bool> { return Option.Some(bit); }
+            function both(first: bool, second: bool): bool { return second; }
+            function skippedPlain(gate: Option<bool>.None, bit: bool): Option<bool> {
+                let _ = both(gate?, ((if (bit) true else stop()) |> round?));
+                return Option.Some(true);
+            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -5693,11 +5722,60 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
                 calls_on_path(mir, [true]),
                 [id("stage"), id("always"), id("useAll")]
             );
-            for name in ["tooDeep", "skipped"] {
+            let plain = lower("twoPlain", default);
+            let mir = plain
+                .mir()
+                .expect("plain propagating pipes are not counted as compositions");
+            assert_eq!(
+                calls_on_path(mir, []),
+                [id("always"), id("always"), id("useAll")]
+            );
+            assert_return(&linear(mir, mir.entry), &option.some.id, true, &[]);
+            let terminal_written = lower("terminalWritten", default);
+            let mir = terminal_written
+                .mir()
+                .expect("known written failure skips both invalid callees");
+            assert_eq!(calls_on_path(mir, []), [id("stage"), id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(inside)", b"(input?)", b"stage(before)"],
+            );
+            let invalid = lower("invalidReached", default);
+            assert_eq!(invalid.completion(), Completion::SourceRejected);
+            assert!(invalid.mir().is_none());
+            let [finding] = invalid.findings() else {
+                panic!("expected a reached inner-step finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(inside)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(inside)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let skipped_plain = lower("skippedPlain", default);
+            let skipped_plain_mir = skipped_plain
+                .mir()
+                .unwrap_or_else(|| panic!("skippedPlain: {:?}", skipped_plain.completion()));
+            assert!(calls_on_path(skipped_plain_mir, []).is_empty());
+            assert_return(
+                &linear(skipped_plain_mir, skipped_plain_mir.entry),
+                &option.none.id,
+                false,
+                &[],
+            );
+            for name in ["tooDeep", "skipped", "siblings"] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
             }
+            assert_eq!(
+                lower("siblings", default)
+                    .blocked_at()
+                    .unwrap()
+                    .span
+                    .bytes(),
+                b"(right?) |> always?"
+            );
             let exact = AnalysisLimits {
                 max_work: nested.statistics().work,
                 max_entries: nested.statistics().entries,

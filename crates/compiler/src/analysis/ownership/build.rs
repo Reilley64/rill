@@ -1921,12 +1921,13 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut roots = Vec::new();
         let mut terminal_root_index = None;
         let mut can_return = false;
+        let mut has_composed_pipe = false;
         for (position, (_, arg)) in order() {
             self.budget.step(1)?;
             let root = self.ungroup(arg)?;
             if self.propagates_directly(root)? {
                 self.budget.step(1)?;
-                let fact = self.facts.get(&root).ok_or(Stop::Pending(root))?;
+                let fact = self.facts.get(&root).copied().ok_or(Stop::Pending(root))?;
                 let NodeFactKind::Expression(value) = &fact.kind else {
                     return Err(Stop::Pending(root));
                 };
@@ -1936,13 +1937,27 @@ impl<'a, 'g> Build<'a, 'g> {
                     Some(DataExpression::ErrorPipe { propagation, .. }) => propagation.as_ref(),
                     _ => return Err(Stop::Pending(root)),
                 };
-                let composed_pipe = if allows_composed_pipe {
+                let mut composed_pipe = false;
+                if allows_composed_pipe && terminal_root_index.is_none() {
                     self.budget.step(1)?;
-                    self.module.syntax.nodes[root].kind == NodeKind::Pipe
-                } else {
-                    false
-                };
+                    if self.module.syntax.nodes[root].kind == NodeKind::Pipe
+                        && let Some(pipe) = value.call.as_deref()
+                    {
+                        for &inner in &pipe.arguments {
+                            self.budget.step(1)?;
+                            let inner = self.ungroup(inner)?;
+                            if self.propagates_directly(inner)? {
+                                composed_pipe = true;
+                                break;
+                            }
+                        }
+                    }
+                }
                 let (continues, returns) = if composed_pipe {
+                    if has_composed_pipe {
+                        return Err(Stop::Pending(root));
+                    }
+                    has_composed_pipe = true;
                     // The last step's variant alone cannot describe a pipe
                     // that may return while staging its own arguments.
                     let flow = &fact.flow;
