@@ -1311,8 +1311,8 @@ fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
             }
             function mutableExtra(value: &[bool, string], extra: &mut bool): bool { return false; }
             function unsupportedMutable(value: &[bool, string], extra: &mut bool): bool { return mutableExtra(value, extra); }
-            function secondTuple(value: &[bool, string], other: &[bool, bool]): bool { return false; }
-            function unsupportedSecond(value: &[bool, string], other: &[bool, bool]): bool { return secondTuple(value, other); }
+            function secondTuple(value: &[bool, string], other: [bool, bool]): bool { return false; }
+            function unsupportedSecond(value: &[bool, string], other: [bool, bool]): bool { return secondTuple(value, other); }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -1447,6 +1447,237 @@ fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
                     "{name}"
                 );
             }
+        },
+    );
+}
+
+#[test]
+fn direct_calls_with_two_tuple_descriptors_keep_both_restrictions() {
+    probe(
+        "tuples::direct_calls_with_two_tuple_descriptors_keep_both_restrictions",
+        r#"
+            function choose(first: &[bool, string], second: &[bool, string], flag: bool): &string {
+                let [_, left] = first;
+                let [_, right] = second;
+                if (flag) { return left; }
+                return right;
+            }
+            function view(first: &mut [bool, string], second: &mut [bool, string]): &string {
+                let [_, text] = &mut *first;
+                return &*text;
+            }
+            function snapshot(first: &mut [bool, string], second: &mut [bool, string]): bool {
+                let [bit, _] = &mut *first;
+                return bit;
+            }
+            function sharedSame(seed: [bool, string]): void {
+                let mut owner = seed;
+                let text = choose(&owner, &owner, true);
+                let _ = text;
+                owner[1] = "new";
+            }
+            function distinct(left: [bool, string]): bool {
+                let mut first = left;
+                let mut second: [bool, string] = [true, "initial"];
+                let bit = snapshot(&mut first, &mut second);
+                first[1] = "staged";
+                second[1] = "staged";
+                let text = view(&mut first, &mut second);
+                let _ = text;
+                first[1] = "new";
+                second[1] = "new";
+                return bit;
+            }
+            function mixedShape(first: &[[bool, string], bool], second: &[bool, string]): &string {
+                let [[_, text], _] = first;
+                return text;
+            }
+            function nestedAndFlat(first: &[[bool, string], bool], second: &[bool, string]): &string {
+                return mixedShape(first, second);
+            }
+            function keepsFirst(left: [bool, string], right: [bool, string]): void {
+                let mut first = left;
+                let second = right;
+                let text = choose(&first, &second, false);
+                first[1] = "blocked";
+                let _ = text;
+            }
+            function keepsSecond(left: [bool, string], right: [bool, string]): void {
+                let mut first = left;
+                let mut second = right;
+                let text = choose(&first, &second, true);
+                second[1] = "blocked";
+                let _ = text;
+            }
+            function secondStillExclusive(left: [bool, string], right: [bool, string]): bool {
+                let mut first = left;
+                let mut second = right;
+                let text = view(&mut first, &mut second);
+                let bit = second[0];
+                let _ = text;
+                return bit;
+            }
+            function freshConflict(seed: [bool, string]): void {
+                let mut owner = seed;
+                let _ = view(&mut owner, &mut (owner));
+            }
+            function parentConflict(seed: [bool, string]): void {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let _ = view(parent, (parent));
+            }
+            function mixedConflict(first: &mut [bool, string], second: &[bool, string]): &string {
+                let [_, text] = second;
+                return text;
+            }
+            function sharedAfterExclusive(seed: [bool, string]): void {
+                let mut owner = seed;
+                let _ = mixedConflict(&mut owner, &owner);
+            }
+            function unsupportedLeaf(value: &[bool, string], other: &[&bool, string]): bool { return true; }
+            function unsupportedSecond(value: &[bool, string], other: &[&bool, string]): bool { return unsupportedLeaf(value, other); }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let shared = check("sharedSame");
+            let mir = shared
+                .mir()
+                .unwrap_or_else(|| panic!("sharedSame: {:?}", shared.completion()));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(first), Obligation::Drop(last)]
+                if first.root.node == last.root.node && first.root.span.bytes() == b"owner"
+                    && first.tuple_element() == Some(1) && last.tuple_element() == Some(1))
+            );
+            let distinct = check("distinct");
+            let mir = distinct
+                .mir()
+                .expect("both disjoint owners are usable after their last loan use");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Borrow { .. }
+                    | Operation::Call(_)
+                    | Operation::Drop(_)
+                    | Operation::Install { .. } => true,
+                    Operation::Copy { from, .. } => from.root.span.bytes() == b"text",
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source: first, exclusive: true, .. },
+                Operation::Borrow { source: second, exclusive: true, .. }, Operation::Call(snapshot),
+                Operation::Drop(old_first), Operation::Install { target: staged_first, .. },
+                Operation::Drop(old_second), Operation::Install { target: staged_second, .. },
+                Operation::Borrow { source: first_again, exclusive: true, .. },
+                Operation::Borrow { source: second_again, exclusive: true, .. }, Operation::Call(view),
+                Operation::Copy { from: text, .. },
+                Operation::Drop(first_staged), Operation::Install { target: replaced_first, .. },
+                Operation::Drop(second_staged), Operation::Install { target: replaced_second, .. },
+            ] if first.root.span.bytes() == b"first" && second.root.span.bytes() == b"second"
+                && first.projection.is_none() && second.projection.is_none()
+                && first_again.root.node == first.root.node && second_again.root.node == second.root.node
+                && [old_first, staged_first, first_staged, replaced_first].iter().all(|p| p.root.node == first.root.node && p.tuple_element() == Some(1))
+                && [old_second, staged_second, second_staged, replaced_second].iter().all(|p| p.root.node == second.root.node && p.tuple_element() == Some(1))
+                && text.root.span.bytes() == b"text" && **snapshot == declaration("snapshot").id && **view == declaration("view").id),
+                "{route:?}"
+            );
+            let drops: Vec<_> = path_drops(mir, mir.entry)
+                .into_iter()
+                .map(|cleanup| match cleanup {
+                    Obligation::Drop(place) => (place.root.span.bytes(), place.tuple_element()),
+                    other => panic!("unexpected cleanup: {other:?}"),
+                })
+                .collect();
+            assert_eq!(
+                drops,
+                [
+                    (b"first".as_slice(), Some(1)),
+                    (b"second".as_slice(), Some(1)),
+                    (b"first".as_slice(), Some(1)),
+                    (b"second".as_slice(), Some(1)),
+                    (b"second".as_slice(), Some(1)),
+                    (b"first".as_slice(), Some(1))
+                ]
+            );
+            let limits = AnalysisLimits {
+                max_work: distinct.statistics().work,
+                max_entries: distinct.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("distinct", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("distinct", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            let mixed = check("nestedAndFlat");
+            let mir = mixed
+                .mir()
+                .expect("two admitted shared shapes can be passed together");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. } | Operation::Call(_) | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Copy { from: first, into: Some(first_arg) }, Operation::Copy { from: second, into: Some(second_arg) },
+                Operation::Call(callee), Operation::Export(output),
+            ] if first.root.span.bytes() == b"first: &[[bool, string], bool]" && second.root.span.bytes() == b"second: &[bool, string]"
+                && first_arg.root.span.bytes() == b"first" && second_arg.root.span.bytes() == b"second"
+                && **callee == declaration("mixedShape").id && output.root.span.bytes() == b"mixedShape(first, second)"),
+                "{route:?}"
+            );
+            for (name, code, site, related) in [
+                ("keepsFirst", "R0203", "first[1] = \"blocked\";", "&first"),
+                (
+                    "keepsSecond",
+                    "R0203",
+                    "second[1] = \"blocked\";",
+                    "&second",
+                ),
+                ("secondStillExclusive", "R0201", "second[0]", "&mut second"),
+                ("freshConflict", "R0201", "&mut (owner)", "&mut owner"),
+                ("parentConflict", "R0201", "(parent)", "parent"),
+                ("sharedAfterExclusive", "R0201", "&owner", "&mut owner"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            let unsupported = check("unsupportedSecond");
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert!(unsupported.mir().is_none());
+            assert_eq!(unsupported.blocked_at().unwrap().span.bytes(), b"value");
         },
     );
 }

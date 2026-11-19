@@ -276,36 +276,16 @@ impl<'a, 'g> Build<'a, 'g> {
     fn admits_direct_tuple_borrow_call(
         &mut self,
         call: &crate::analysis::scalars::CallFacts<'g>,
-        position: usize,
-        argument: &Type<'g>,
         result: &Type<'g>,
     ) -> ResultOf<bool> {
-        // This tuple and the other leaf inputs have no retained destination.
-        // The existing leaf-result contract keeps all possible input backing.
+        // None of these inputs can receive a retained reference. Check
+        // the whole signature once before admitting any tuple argument.
         if call.pipe_input.is_some()
             || !(matches!(result.as_ref(), TypeTerm::Primitive(_)) || primitive_reference(result))
         {
             return Ok(false);
         }
-        let TypeTerm::Reference { mutable, referent } = argument.as_ref() else {
-            return Ok(false);
-        };
-        let TypeTerm::Tuple(elements) = referent.as_ref() else {
-            return Ok(false);
-        };
-        self.budget.step(elements.len())?;
-        let mut width = elements.len();
-        for element in elements {
-            match element.as_ref() {
-                TypeTerm::Primitive(_) => {}
-                TypeTerm::Tuple(inner) if !mutable && self.primitive_tuple_elements(inner)? => {
-                    width = width.checked_add(inner.len()).ok_or(Stop::Limit)?;
-                }
-                _ => return Ok(false),
-            }
-        }
-        // Equality can visit the outer tuple and all admitted inner leaves.
-        self.budget.step(width.checked_add(2).ok_or(Stop::Limit)?)?;
+        self.budget.step(2)?;
         let Some(function) = self
             .typed
             .inventory()
@@ -322,26 +302,38 @@ impl<'a, 'g> Build<'a, 'g> {
         else {
             return Ok(false);
         };
-        if parameters.len() != call.arguments.len()
-            || output != result
-            || !parameters
-                .get(position)
-                .is_some_and(|formal| formal.ty == *argument)
-        {
+        if parameters.len() != call.arguments.len() || output != result {
             return Ok(false);
         }
-        self.budget.step(parameters.len())?;
-        for (index, (formal, &actual)) in parameters.iter().zip(&call.arguments).enumerate() {
-            if index == position {
-                continue;
-            }
-            if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
-                && !shared_primitive_reference(formal.ty.as_ref())
+        for (formal, &node) in parameters.iter().zip(&call.arguments) {
+            self.budget.step(3)?;
+            let actual = &self.value(node)?.ty;
+            if !matches!(actual.as_ref(), TypeTerm::Primitive(_))
+                && !shared_primitive_reference(actual)
             {
-                return Ok(false);
+                let TypeTerm::Reference { mutable, referent } = actual.as_ref() else {
+                    return Ok(false);
+                };
+                let TypeTerm::Tuple(elements) = referent.as_ref() else {
+                    return Ok(false);
+                };
+                self.budget.step(elements.len())?;
+                let mut width = elements.len();
+                for element in elements {
+                    match element.as_ref() {
+                        TypeTerm::Primitive(_) => {}
+                        TypeTerm::Tuple(inner)
+                            if !mutable && self.primitive_tuple_elements(inner)? =>
+                        {
+                            width = width.checked_add(inner.len()).ok_or(Stop::Limit)?;
+                        }
+                        _ => return Ok(false),
+                    }
+                }
+                // Charge the proved tuple shape before comparing types.
+                self.budget.step(width.checked_add(2).ok_or(Stop::Limit)?)?;
             }
-            self.budget.step(2)?;
-            if self.value(actual)?.ty != formal.ty {
+            if *actual != formal.ty {
                 return Ok(false);
             }
         }
@@ -2133,6 +2125,7 @@ impl<'a, 'g> Build<'a, 'g> {
         self.budget.reserve(1 + call.arguments.len())?;
         let mut args = Vec::with_capacity(call.arguments.len());
         let mut destination = None;
+        let mut tuple_borrows_admitted = false;
         for (position, arg) in call.argument_evaluation_order().enumerate() {
             self.budget.step(1)?;
             let ty = self.value(arg)?.ty.clone();
@@ -2140,10 +2133,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 if destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
-            } else if !self.direct_call_type(&ty)
-                && !self.admits_direct_tuple_borrow_call(call, position, &ty, &facts.ty)?
-            {
-                return Err(Stop::Pending(arg));
+            } else if !self.direct_call_type(&ty) && !tuple_borrows_admitted {
+                if !self.admits_direct_tuple_borrow_call(call, &facts.ty)? {
+                    return Err(Stop::Pending(arg));
+                }
+                tuple_borrows_admitted = true;
             }
             let slot = self.slot(arg, &ty)?;
             if self.slots[slot].contains_guard() {
