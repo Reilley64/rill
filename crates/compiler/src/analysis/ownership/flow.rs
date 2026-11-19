@@ -121,7 +121,9 @@ fn liveness(
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
-            Action::Dispose(slot) | Action::Export(slot) => use_one(Some(slot), Some(slot)),
+            Action::Dispose(slot) | Action::Export(slot) | Action::EndEmptyOption(slot) => {
+                use_one(Some(slot), Some(slot))
+            }
             Action::Displace { target, incoming } | Action::Install { target, incoming } => {
                 use_one(Some(incoming), Some(target))
             }
@@ -142,7 +144,8 @@ fn liveness(
                 incoming,
             } => ([Some(descriptor), Some(incoming)], None),
             Action::TestVariant { operand, .. } => use_one(Some(operand), None),
-            Action::CopyOptionPayload { operand, into } => use_one(Some(operand), Some(into)),
+            Action::CopyOptionPayload { operand, into }
+            | Action::TakeOptionPayload { operand, into } => use_one(Some(operand), Some(into)),
             Action::ConstructVariant { payload, into, .. } => use_one(payload, Some(into)),
             Action::ConstructResultError { payload, into, .. } => {
                 use_one(Some(payload), Some(into))
@@ -943,6 +946,20 @@ pub(super) fn run<'g>(
                         operand: local(operand),
                         into: local(into),
                     }
+                }
+                Action::TakeOptionPayload { operand, into } => {
+                    initialized(&state[operand], node)?;
+                    state[operand] = State::Vacant;
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::TakeOptionPayload {
+                        operand: local(operand),
+                        into: local(into),
+                    }
+                }
+                Action::EndEmptyOption(operand) => {
+                    initialized(&state[operand], node)?;
+                    state[operand] = State::Vacant;
+                    Operation::EndEmptyOption(local(operand))
                 }
                 Action::ConstructVariant {
                     variant,

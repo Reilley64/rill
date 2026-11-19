@@ -76,6 +76,7 @@ struct CheckedPropagation<'a, 'g> {
     source: NodeId,
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
+    option_text: Option<&'a Type<'g>>,
 }
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
@@ -215,10 +216,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 (true, StorageCleanup::ReleaseGuard(release))
             }
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
-                if let Some(role) = self.bool_option_role(ty) =>
+                if let Some((role, payload)) = self.admitted_option(ty) =>
             {
                 self.prove_no_variant_disposer(node, ty, [role.some, role.none])?;
-                (false, StorageCleanup::End)
+                if owns_text(payload) {
+                    // Propagation consumes the carrier. Cleanup of a live
+                    // carrier would need variant-aware disposal.
+                    (true, StorageCleanup::Unlowered)
+                } else {
+                    (false, StorageCleanup::End)
+                }
             }
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
                 if let Some((role, variant)) = self.scalar_result_role(ty) =>
@@ -438,6 +445,11 @@ impl<'a, 'g> Build<'a, 'g> {
     }
 
     fn bool_option_role(&self, ty: &TypeTerm<'g>) -> Option<OptionRole<'g>> {
+        let (role, payload) = self.admitted_option(ty)?;
+        (!owns_text(payload)).then_some(role)
+    }
+
+    fn admitted_option<'t>(&self, ty: &'t TypeTerm<'g>) -> Option<(OptionRole<'g>, &'t Type<'g>)> {
         let role = *self.typed.option_role()?;
         let parent = match ty {
             TypeTerm::Variant {
@@ -457,8 +469,8 @@ impl<'a, 'g> Build<'a, 'g> {
             return None;
         };
         (*declaration == &role.declaration.id
-            && matches!(payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
-        .then_some(role)
+            && matches!(payload.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "string")))
+        .then_some((role, payload))
     }
 
     fn scalar_result_role(
@@ -1443,6 +1455,7 @@ impl<'a, 'g> Build<'a, 'g> {
         &mut self,
         node: NodeId,
         facts: &'a ExpressionFacts<'g>,
+        site: PropagationSite,
     ) -> ResultOf<CheckedPropagation<'a, 'g>> {
         let syntax = &self.module.syntax.nodes[node];
         let (id, result) = self.return_contract;
@@ -1476,7 +1489,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             (source, &operand.ty)
         };
-        let wrapper = if let Some(error) = &exit.error {
+        let (wrapper, option_text) = if let Some(error) = &exit.error {
             let (role, _) = self
                 .scalar_result_role(operand)
                 .ok_or(Stop::Pending(node))?;
@@ -1488,9 +1501,9 @@ impl<'a, 'g> Build<'a, 'g> {
             {
                 return Err(Stop::Pending(node));
             }
-            Some(error.wrapper)
+            (Some(error.wrapper), None)
         } else {
-            let role = self.bool_option_role(operand).ok_or(Stop::Pending(node))?;
+            let (role, payload) = self.admitted_option(operand).ok_or(Stop::Pending(node))?;
             if wrap.is_some()
                 || self.bool_option_role(result).is_none()
                 || exit.success != &role.some.id
@@ -1498,7 +1511,24 @@ impl<'a, 'g> Build<'a, 'g> {
             {
                 return Err(Stop::Pending(node));
             }
-            None
+            let text = owns_text(payload).then_some(payload);
+            if text.is_some() {
+                if syntax.kind != NodeKind::Propagate
+                    || !matches!(site, PropagationSite::StatementRoot)
+                {
+                    return Err(Stop::Pending(node));
+                }
+                self.budget.step(1)?;
+                if !self
+                    .value(source)?
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| path.projections.is_empty())
+                {
+                    return Err(Stop::Pending(node));
+                }
+            }
+            (None, text)
         };
         Ok(CheckedPropagation {
             exit,
@@ -1508,6 +1538,7 @@ impl<'a, 'g> Build<'a, 'g> {
             source,
             operand,
             wrapper,
+            option_text,
         })
     }
 
@@ -1529,7 +1560,8 @@ impl<'a, 'g> Build<'a, 'g> {
             source,
             operand,
             wrapper,
-        } = self.checked_propagation(node, facts)?;
+            option_text,
+        } = self.checked_propagation(node, facts, site)?;
         let pipe_arguments = if matches!(site, PropagationSite::StatementRoot)
             && piped
             && fresh.is_none()
@@ -1603,7 +1635,24 @@ impl<'a, 'g> Build<'a, 'g> {
                 .transpose()?;
             (success, failure)
         } else {
-            let success = if exit.can_continue {
+            let success = if !exit.can_continue {
+                None
+            } else if let Some(ty) = option_text {
+                let (into, next) = if let Some(into) = into {
+                    (into, next)
+                } else {
+                    let payload = self.slot(node, ty)?;
+                    (payload, self.cleanup(node, &[payload], next)?)
+                };
+                Some(self.emit(
+                    node,
+                    Action::TakeOptionPayload {
+                        operand: scratch,
+                        into,
+                    },
+                    Edges::Next(next),
+                )?)
+            } else {
                 let end = self.emit(node, Action::End(scratch), Edges::Next(next))?;
                 Some(if let Some(into) = into {
                     self.emit(
@@ -1617,8 +1666,6 @@ impl<'a, 'g> Build<'a, 'g> {
                 } else {
                     end
                 })
-            } else {
-                None
             };
             let failure = if let Some((output, export)) = return_slot {
                 let empty = self.emit(
@@ -1630,7 +1677,12 @@ impl<'a, 'g> Build<'a, 'g> {
                     },
                     Edges::Next(export),
                 )?;
-                Some(self.emit(node, Action::End(scratch), Edges::Next(empty))?)
+                let end = if option_text.is_some() {
+                    Action::EndEmptyOption(scratch)
+                } else {
+                    Action::End(scratch)
+                };
+                Some(self.emit(node, end, Edges::Next(empty))?)
             } else {
                 None
             };
@@ -1826,7 +1878,8 @@ impl<'a, 'g> Build<'a, 'g> {
                     // allocating slots or lowering any skipped expression.
                     self.budget.step(2)?;
                     let facts = self.value(root)?;
-                    let checked = self.checked_propagation(root, facts)?;
+                    let checked =
+                        self.checked_propagation(root, facts, PropagationSite::NestedArgument)?;
                     if let Some(wrap) = checked.wrap
                         && checked.exit.can_return
                     {

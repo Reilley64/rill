@@ -206,6 +206,13 @@ pub enum Operation<'g> {
         operand: Place<'g>,
         into: Place<'g>,
     },
+    /// Consume a proved Some carrier and move its owning payload into a slot.
+    TakeOptionPayload {
+        operand: Place<'g>,
+        into: Place<'g>,
+    },
+    /// Consume a proved None carrier without dropping a payload.
+    EndEmptyOption(Place<'g>),
     ConstructVariant {
         variant: &'g DeclarationId,
         payload: Option<Place<'g>>,
@@ -804,6 +811,11 @@ enum Action<'g> {
         operand: Slot,
         into: Slot,
     },
+    TakeOptionPayload {
+        operand: Slot,
+        into: Slot,
+    },
+    EndEmptyOption(Slot),
     ConstructVariant {
         variant: &'g DeclarationId,
         payload: Option<Slot>,
