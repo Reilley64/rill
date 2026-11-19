@@ -1577,17 +1577,19 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let mut exit_argument = None;
         for (position, (formal, &arg)) in parameters.iter().zip(&call.arguments).enumerate() {
-            self.budget.step(3)?;
+            self.budget.step(2)?;
             if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
                 || self.value(arg)?.ty != formal.ty
             {
                 return Err(Stop::Pending(node));
             }
             let root = self.ungroup(arg)?;
-            if self.module.syntax.nodes[root].kind == NodeKind::Propagate {
+            if self.propagates_directly(root)? {
                 self.budget.step(1)?;
-                let Some(DataExpression::Propagation(exit)) = &self.value(root)?.data else {
-                    return Err(Stop::Pending(root));
+                let exit = match &self.value(root)?.data {
+                    Some(DataExpression::Propagation(exit)) => exit.as_ref(),
+                    Some(DataExpression::Wrapping(wrap)) => &wrap.branch,
+                    _ => return Err(Stop::Pending(root)),
                 };
                 if !exit.can_return
                     || !exit.can_continue

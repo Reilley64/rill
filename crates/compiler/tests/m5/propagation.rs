@@ -1842,6 +1842,215 @@ fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
     );
 }
 
+#[test]
+fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
+    probe_with_typed(
+        "propagation::wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup",
+        r#"
+            function firstStage(value: string): string { return value; }
+            function lastStage(value: string): string { return value; }
+            function consume(first: string, bit: bool, last: string): bool { dispose(last); dispose(first); return bit; }
+            function error(message: string): i32 { dispose(message); return 17i32; }
+            function wrapping(input: Result<bool, i32>, first: string, last: string, message: string, owner: string): Result<i32, i32> {
+                let _ = consume(firstStage(first), (input ? error(message)), lastStage(last));
+                return Result.Ok(7i32);
+            }
+            function option(input: Option<bool>, taken: string): Option<bool> { dispose(taken); return input; }
+            function piped(input: Option<bool>, first: string, last: string, taken: string, owner: string): Option<bool> {
+                let bit = consume(first, (taken |> option(input, _)?), lastStage(last));
+                return Option.Some(bit);
+            }
+            function bad(message: string): i32 { dispose(message); dispose(message); return 17i32; }
+            function rejected(input: Result<bool, i32>, first: string, last: string, message: string): Result<i32, i32> {
+                let _ = consume(first, input ? bad(message), last);
+                return Result.Ok(7i32);
+            }
+            function moved(input: Result<bool, i32>, first: string, last: string): Result<i32, i32> {
+                let _ = consume(first, input ? error(first), last);
+                return Result.Ok(7i32);
+            }
+            function outerPipe(input: Option<bool>, first: string, last: string): Option<bool> {
+                let bit = first |> consume(input?, last);
+                return Option.Some(bit);
+            }
+            function pair(first: bool, second: bool): bool { return first; }
+            function pass(input: Option<bool>): Option<bool> { return input; }
+            function unsupported(first: Option<bool>, second: Option<bool>): Option<bool> {
+                let bit = pair(first?, (second |> pass?));
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let result = typed.result_role().unwrap();
+            let option = typed.option_role().unwrap();
+            let report = check("wrapping");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("wrapping: {:?}", report.completion()));
+            let (yes, no) = variant_edges(mir, mir.entry, &result.ok.id, b"input");
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [
+                    &declaration("firstStage").id,
+                    &declaration("lastStage").id,
+                    &declaration("consume").id
+                ]
+            );
+            assert_eq!(
+                calls_on_path(mir, [false]),
+                [&declaration("firstStage").id, &declaration("error").id]
+            );
+            let ok = linear(mir, yes);
+            let err = linear(mir, no);
+            assert_return(
+                &ok,
+                &result.ok.id,
+                true,
+                &[b"owner: string", b"message: string"],
+            );
+            assert!(ok.iter().any(
+                |op| matches!(op, Operation::TakeResultSuccess { into: Some(slot), .. }
+                if slot.root.span.bytes() == b"(input ? error(message))")
+            ));
+            assert_export(
+                &err,
+                &[b"firstStage(first)", b"owner: string", b"last: string"],
+                |op, out| {
+                    matches!(op, Operation::WrapResultFailure { operand, payload, into, variant, wrapper, origin, .. }
+                    if operand.root.span.bytes() == b"input" && payload.root.span.bytes() == b"error(message)"
+                    && into.root.node == out.root.node && *variant == &result.err.id && *wrapper == &result.wrapper.id && origin.bytes() == b"?"
+                    && origin.snapshot() == operand.root.span.snapshot() && origin.start() == operand.root.span.end() + 1)
+                },
+            );
+            assert!(!err.iter().any(|op| matches!(
+                op,
+                Operation::TakeResultSuccess { .. }
+                    | Operation::ForwardResultFailure { .. }
+                    | Operation::ConstructResultError { .. }
+            )));
+            let report = check("piped");
+            let mir = report
+                .mir()
+                .expect("the inner pipe result is staged before its branch");
+            let (yes, no) = variant_edges(
+                mir,
+                mir.entry,
+                &option.some.id,
+                b"taken |> option(input, _)?",
+            );
+            let prefix: Vec<_> = straight_blocks(mir, mir.entry)
+                .iter()
+                .map(|block| &block.operation)
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Call(_)
+                            | Operation::TestVariant { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(prefix.as_slice(), [
+                Operation::Move { from: first, into: Some(staged) },
+                Operation::Move { from: taken, into: Some(step_arg) },
+                Operation::Copy { from: input, into: Some(input_arg) },
+                Operation::Call(callee), Operation::TestVariant { .. },
+            ] if first.root.span.bytes() == b"first: string" && staged.root.span.bytes() == b"first"
+                && taken.root.span.bytes() == b"taken: string" && step_arg.root.span.bytes() == b"taken"
+                && input.root.span.bytes() == b"input: Option<bool>" && input_arg.root.span.bytes() == b"input"
+                && *callee == &declaration("option").id),
+                "{prefix:?}"
+            );
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [
+                    &declaration("option").id,
+                    &declaration("lastStage").id,
+                    &declaration("consume").id
+                ]
+            );
+            assert_eq!(calls_on_path(mir, [false]), [&declaration("option").id]);
+            assert_return(
+                &linear(mir, yes),
+                &option.some.id,
+                true,
+                &[b"owner: string"],
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"first", b"owner: string", b"last: string"],
+            );
+            let bad = check("rejected");
+            assert_eq!(bad.completion(), Completion::SourceRejected);
+            assert!(bad.mir().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected one reached RHS finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(message)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(message)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let moved = check("moved");
+            assert_eq!(moved.completion(), Completion::SourceRejected);
+            assert!(moved.mir().is_none());
+            let [finding] = moved.findings() else {
+                panic!("expected one moved argument finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"first");
+            assert_eq!(finding.related.span.bytes(), b"first");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            for (name, site) in [
+                ("unsupported", "pair(first?, (second |> pass?))"),
+                ("outerPipe", "first |> consume(input?, last)"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+                assert!(report.mir().is_none());
+            }
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("piped", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("piped", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
 fn variant_edges(
     mir: &Mir<'_>,
     mut pc: usize,
