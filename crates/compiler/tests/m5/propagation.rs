@@ -1860,6 +1860,11 @@ fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
                 let bit = consume(first, (taken |> option(input, _)?), lastStage(last));
                 return Option.Some(bit);
             }
+            function relay(input: Result<bool, i32>): Result<bool, i32> { return input; }
+            function pipedResult(input: Result<bool, i32>, first: string, last: string): Result<i32, i32> {
+                let _ = consume(first, (input |> relay?), last);
+                return Result.Ok(7i32);
+            }
             function bad(message: string): i32 { dispose(message); dispose(message); return 17i32; }
             function rejected(input: Result<bool, i32>, first: string, last: string, message: string): Result<i32, i32> {
                 let _ = consume(first, input ? bad(message), last);
@@ -1918,10 +1923,18 @@ fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
                 true,
                 &[b"owner: string", b"message: string"],
             );
-            assert!(ok.iter().any(
-                |op| matches!(op, Operation::TakeResultSuccess { into: Some(slot), .. }
-                if slot.root.span.bytes() == b"(input ? error(message))")
-            ));
+            let resume: Vec<_> = ok
+                .iter()
+                .copied()
+                .filter(|op| matches!(op, Operation::TakeResultSuccess { .. } | Operation::Call(_)))
+                .collect();
+            assert!(
+                matches!(resume.as_slice(), [
+                Operation::TakeResultSuccess { operand, into: Some(slot) }, Operation::Call(last), Operation::Call(consume),
+            ] if operand.root.span.bytes() == b"input" && slot.root.span.bytes() == b"(input ? error(message))"
+                && *last == &declaration("lastStage").id && *consume == &declaration("consume").id),
+                "{resume:?}"
+            );
             assert_export(
                 &err,
                 &[b"firstStage(first)", b"owner: string", b"last: string"],
@@ -1982,18 +1995,43 @@ fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
                 ]
             );
             assert_eq!(calls_on_path(mir, [false]), [&declaration("option").id]);
-            assert_return(
-                &linear(mir, yes),
-                &option.some.id,
-                true,
-                &[b"owner: string"],
+            let ok = linear(mir, yes);
+            let resume: Vec<_> = ok
+                .iter()
+                .copied()
+                .filter(|op| matches!(op, Operation::CopyOptionPayload { .. } | Operation::Call(_)))
+                .collect();
+            assert!(
+                matches!(resume.as_slice(), [
+                Operation::CopyOptionPayload { operand, into }, Operation::Call(last), Operation::Call(consume),
+            ] if operand.root.span.bytes() == b"taken |> option(input, _)?" && into.root.span.bytes() == b"(taken |> option(input, _)?)"
+                && *last == &declaration("lastStage").id && *consume == &declaration("consume").id),
+                "{resume:?}"
             );
+            assert_return(&ok, &option.some.id, true, &[b"owner: string"]);
             assert_return(
                 &linear(mir, no),
                 &option.none.id,
                 false,
                 &[b"first", b"owner: string", b"last: string"],
             );
+            let piped_result = check("pipedResult");
+            let mir = piped_result
+                .mir()
+                .expect("an inner scalar Result pipe preserves the failed wrapper");
+            let (yes, no) = variant_edges(mir, mir.entry, &result.ok.id, b"input |> relay?");
+            assert_eq!(calls_on_path(mir, [false]), [&declaration("relay").id]);
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [&declaration("relay").id, &declaration("consume").id]
+            );
+            assert_forward(
+                &linear(mir, no),
+                result,
+                b"input |> relay?",
+                &[b"first", b"last: string"],
+            );
+            assert_return(&linear(mir, yes), &result.ok.id, true, &[]);
             let bad = check("rejected");
             assert_eq!(bad.completion(), Completion::SourceRejected);
             assert!(bad.mir().is_none());
