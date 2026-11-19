@@ -188,6 +188,202 @@ fn option_postfix_returns_through_initialized_cleanup() {
 }
 
 #[test]
+fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
+    probe_with_typed(
+        "propagation::fresh_scalar_error_keeps_constructor_origin_through_postfix",
+        r#"
+            import std::result::Err as fail;
+            function payload(message: string): i32 { dispose(message); return 7i32; }
+            function direct(message: string, owner: string): Result<bool, i32> {
+                return (fail(payload(message)));
+            }
+            function early(message: string, owner: string): Result<i32, i32> {
+                let _ = fail<bool, i32>(payload(message))?;
+                dispose(owner);
+                return Result.Ok(9i32);
+            }
+            function moved(message: string): Result<bool, i32> {
+                dispose(message);
+                return fail(payload(message));
+            }
+            function discarded(): Result<bool, i32> {
+                let _ = fail<bool, i32>(7i32);
+                return Result.Ok(true);
+            }
+            function otherPayload(): Result<bool, string> { return fail("error"); }
+        "#,
+        |_, module, receipt, typed| {
+            use compiler::analysis::scalars::{NodeFactKind, data::DataExpression};
+
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let role = typed.result_role().expect("canonical Result");
+            for (name, written_call) in [
+                ("direct", b"fail(payload(message))".as_slice()),
+                ("early", b"fail<bool, i32>(payload(message))".as_slice()),
+            ] {
+                let report = lower(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let mut tested = None;
+                let ops = if name == "early" {
+                    let mut prefix = Vec::new();
+                    let mut pc = mir.entry;
+                    for _ in 0..mir.blocks.len() {
+                        let block = &mir.blocks[pc];
+                        prefix.push(&block.operation);
+                        match (&block.operation, block.terminator) {
+                            (
+                                Operation::TestVariant { operand, success },
+                                Terminator::Branch { yes, no },
+                            ) => {
+                                assert_eq!(*success, &role.ok.id);
+                                tested = Some(operand);
+                                let success = linear(mir, yes);
+                                assert!(success.iter().any(|op| matches!(op,
+                                    Operation::TakeResultSuccess { operand: source, into: None } if source.root.node == operand.root.node)));
+                                assert_return(&success, &role.ok.id, true, &[]);
+                                prefix.extend(linear(mir, no));
+                                break;
+                            }
+                            (_, Terminator::Goto(next)) => pc = next,
+                            _ => panic!("expected a Result variant test"),
+                        }
+                    }
+                    assert!(tested.is_some());
+                    prefix
+                } else {
+                    linear(mir, mir.entry)
+                };
+                let route: Vec<_> = ops
+                    .iter()
+                    .copied()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Call(_)
+                                | Operation::ConstructResultError { .. }
+                                | Operation::ForwardResultFailure { .. }
+                                | Operation::Export(_)
+                        )
+                    })
+                    .collect();
+                let [
+                    Operation::Call(callee),
+                    Operation::ConstructResultError {
+                        constructor,
+                        variant,
+                        wrapper,
+                        payload,
+                        into,
+                    },
+                    exit @ ..,
+                ] = route.as_slice()
+                else {
+                    panic!("{name}: expected a single payload call before constructing the error");
+                };
+                assert_eq!(*callee, &declaration("payload").id);
+                assert_eq!(*constructor, &role.constructor.unwrap().id);
+                assert_eq!(*variant, &role.err.id);
+                assert_eq!(*wrapper, &role.wrapper.id);
+                let call = mir
+                    .blocks
+                    .iter()
+                    .find(|b| matches!(b.operation, Operation::Call(_)))
+                    .unwrap();
+                assert_eq!(payload.root.node, call.site.node);
+                assert_eq!(call.site.span.bytes(), b"payload(message)");
+                let construct = mir
+                    .blocks
+                    .iter()
+                    .find(|b| matches!(b.operation, Operation::ConstructResultError { .. }))
+                    .unwrap();
+                assert_eq!(construct.site.span.bytes(), written_call);
+                let typed_site = typed
+                    .bodies()
+                    .node(module, construct.site.node)
+                    .unwrap()
+                    .unwrap();
+                let NodeFactKind::Expression(value) = &typed_site.kind else {
+                    panic!("expected expression facts for the constructor");
+                };
+                let Some(DataExpression::ErrorConstruction(error)) = &value.data else {
+                    panic!("expected canonical constructor facts");
+                };
+                assert_eq!(error.origin.snapshot(), construct.site.span.snapshot());
+                assert_eq!(error.origin.start(), construct.site.span.start());
+                assert_eq!(error.value, payload.root.node);
+                assert!(error.retained.is_none());
+                if let Some(tested) = tested {
+                    assert_eq!(tested.root.node, into.root.node);
+                    assert!(matches!(exit, [
+                        Operation::ForwardResultFailure { operand, .. }, Operation::Export(_)
+                    ] if operand.root.node == into.root.node));
+                    assert_forward(&ops, role, written_call, &[b"owner: string"]);
+                } else {
+                    assert!(
+                        matches!(exit, [Operation::Export(output)] if output.root.node == into.root.node)
+                    );
+                    assert_export(&ops, &[b"owner: string"], |op, output| {
+                        matches!(op,
+                        Operation::ConstructResultError { into, .. } if into.root.node == output.root.node)
+                    });
+                }
+                assert!(!ops.iter().any(|op| matches!(
+                    op,
+                    Operation::Dispose { .. }
+                        | Operation::ConstructVariant { .. }
+                        | Operation::TakeResultSuccess { .. }
+                )));
+                let limits = AnalysisLimits {
+                    max_work: report.statistics().work,
+                    max_entries: report.statistics().entries,
+                    ..AnalysisLimits::default()
+                };
+                assert_eq!(check(name, limits).completion(), Completion::Checked);
+                for short in [
+                    AnalysisLimits {
+                        max_work: limits.max_work - 1,
+                        ..limits
+                    },
+                    AnalysisLimits {
+                        max_entries: limits.max_entries - 1,
+                        ..limits
+                    },
+                ] {
+                    let limited = check(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none());
+                }
+            }
+            let moved = lower("moved");
+            assert_eq!(moved.completion(), Completion::SourceRejected);
+            assert!(moved.mir().is_none());
+            let [finding] = moved.findings() else {
+                panic!("expected one moved payload input")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"message");
+            assert_eq!(finding.related.span.bytes(), b"dispose(message)");
+            for name in ["discarded", "otherPayload"] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+            }
+        },
+    );
+}
+
+#[test]
 fn result_postfix_forwards_existing_failure_before_cleanup() {
     probe_with_typed(
         "propagation::result_postfix_forwards_existing_failure_before_cleanup",

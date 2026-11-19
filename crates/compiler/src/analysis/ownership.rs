@@ -177,6 +177,15 @@ pub enum Operation<'g> {
         payload: Option<Place<'g>>,
         into: Place<'g>,
     },
+    /// Consume the payload into a fresh, cause-free error wrapper. Its
+    /// origin is the start of this block's original constructor call site.
+    ConstructResultError {
+        constructor: &'g DeclarationId,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        payload: Place<'g>,
+        into: Place<'g>,
+    },
     /// Consume a proved Ok operand after transferring or discarding its payload.
     TakeResultSuccess {
         operand: Place<'g>,
@@ -668,6 +677,13 @@ enum Action<'g> {
     ConstructVariant {
         variant: &'g DeclarationId,
         payload: Option<Slot>,
+        into: Slot,
+    },
+    ConstructResultError {
+        constructor: &'g DeclarationId,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        payload: Slot,
         into: Slot,
     },
     TakeResultSuccess {

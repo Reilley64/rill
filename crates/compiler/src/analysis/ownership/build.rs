@@ -7,8 +7,8 @@ use crate::analysis::scalars::data::{
     PlacePath,
 };
 use crate::analysis::scalars::generics::callables::CaptureForm;
-use crate::analysis::scalars::{ExpressionFacts, PropagationTarget};
-use crate::analysis::typed::{OptionRole, ResultRole};
+use crate::analysis::scalars::{ErrorConstruction, ExpressionFacts, PropagationTarget};
+use crate::analysis::typed::{ErrorOperation, OptionRole, ResultRole};
 use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
@@ -994,6 +994,59 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
+    fn construct_scalar_error(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        data: &ErrorConstruction<'g>,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let (role, None) = self
+            .scalar_result_role(&data.result)
+            .ok_or(Stop::Pending(node))?
+        else {
+            return Err(Stop::Pending(node));
+        };
+        let syntax = &self.module.syntax.nodes[node];
+        let providers = role.providers.ok_or(Stop::Pending(node))?;
+        if syntax.kind != NodeKind::Call
+            || data.operation != ErrorOperation::Construct
+            || data.retained.is_some()
+            || facts.ty != data.result
+            || data.failure != &role.err.id
+            || data.wrapper != &role.wrapper.id
+            || data.origin.snapshot() != syntax.span.snapshot()
+            || data.origin.start() != syntax.span.start()
+            || data.origin.end() != syntax.span.start()
+            || !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+            || !facts.call.as_ref().is_some_and(|call| {
+                call.callee == &providers.constructor.id
+                    && call.arguments.as_slice() == [data.value]
+            })
+        {
+            return Err(Stop::Pending(node));
+        }
+        self.budget.step(1)?;
+        if self.value(data.value)?.ty != data.payload {
+            return Err(Stop::Pending(node));
+        }
+        let payload = self.slot(data.value, &data.payload)?;
+        let construct = self.emit(
+            node,
+            Action::ConstructResultError {
+                constructor: &providers.constructor.id,
+                variant: data.failure,
+                wrapper: data.wrapper,
+                payload,
+                into,
+            },
+            Edges::Next(next),
+        )?;
+        self.expression(data.value, Some(payload), construct, depth)
+    }
+
     fn discard(
         &mut self,
         statement: NodeId,
@@ -1065,6 +1118,16 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return self.construct_variant(
                 node,
+                data,
+                into.ok_or(Stop::Pending(node))?,
+                next,
+                depth + 1,
+            );
+        }
+        if let Some(DataExpression::ErrorConstruction(data)) = &facts.data {
+            return self.construct_scalar_error(
+                node,
+                facts,
                 data,
                 into.ok_or(Stop::Pending(node))?,
                 next,

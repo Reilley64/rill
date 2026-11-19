@@ -133,6 +133,9 @@ fn liveness(
             Action::TestVariant { operand, .. } => use_one(Some(operand), None),
             Action::CopyOptionPayload { operand, into } => use_one(Some(operand), Some(into)),
             Action::ConstructVariant { payload, into, .. } => use_one(payload, Some(into)),
+            Action::ConstructResultError { payload, into, .. } => {
+                use_one(Some(payload), Some(into))
+            }
             Action::TakeResultSuccess { operand, into } => use_one(Some(operand), into),
             Action::ForwardResultFailure { operand, into, .. } => {
                 use_one(Some(operand), Some(into))
@@ -794,6 +797,23 @@ pub(super) fn run<'g>(
                     Operation::ConstructVariant {
                         variant,
                         payload: payload.map(local),
+                        into: local(into),
+                    }
+                }
+                Action::ConstructResultError {
+                    constructor,
+                    variant,
+                    wrapper,
+                    payload,
+                    into,
+                } => {
+                    initialized(&state[payload], node)?;
+                    state[into] = std::mem::replace(&mut state[payload], State::Vacant);
+                    Operation::ConstructResultError {
+                        constructor,
+                        variant,
+                        wrapper,
+                        payload: local(payload),
                         into: local(into),
                     }
                 }
