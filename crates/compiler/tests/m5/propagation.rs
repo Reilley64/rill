@@ -3091,6 +3091,13 @@ fn propagating_pipe_input_runs_before_written_arguments() {
                 let bit = (input?) |> numbers(Option<i32>.Some(1i32)?, _);
                 return Option.Some(bit);
             }
+            function optional(owner: string, incoming: bool): Option<bool> {
+                dispose(owner); return Option.Some(incoming);
+            }
+            function unsupportedCombined(input: Option<bool>, owner: string): Option<bool> {
+                let bit = (input?) |> optional(owner, _)?;
+                return Option.Some(bit);
+            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -3110,6 +3117,16 @@ fn propagating_pipe_input_runs_before_written_arguments() {
                 .unwrap_or_else(|| panic!("pipe input: {:?}", report.completion()));
             let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"relay(input)");
             let (both, second_no) = variant_edges(mir, yes, &option.some.id, b"second");
+            let staged: Vec<_> = straight_blocks(mir, yes)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| matches!(op, Operation::CopyOptionPayload { .. } | Operation::Call(_)))
+                .collect();
+            assert!(
+                matches!(staged.as_slice(), [Operation::CopyOptionPayload { operand, into }, Operation::Call(callee)]
+                if operand.root.span.bytes() == b"relay(input)" && into.root.span.bytes() == b"(relay(input)?)" && *callee == id("stage")),
+                "{staged:?}"
+            );
             assert_return(
                 &linear(mir, no),
                 &option.none.id,
@@ -3175,6 +3192,9 @@ fn propagating_pipe_input_runs_before_written_arguments() {
                 unsupported.blocked_at().unwrap().span.bytes(),
                 b"Option<i32>.Some(1i32)?"
             );
+            let combined = lower("unsupportedCombined", default);
+            assert_eq!(combined.completion(), Completion::Incomplete);
+            assert!(combined.mir().is_none());
             let exact = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,
