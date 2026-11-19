@@ -6038,9 +6038,16 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
                 let bit = ((input?) |> present?) |> useAll(stage(between), later?, _);
                 return Option.Some(bit);
             }
+            function invalid(value: string, bit: bool, prefix: string): bool {
+                dispose(prefix); dispose(prefix); dispose(value); return bit;
+            }
             function terminal(outer: string, input: Option<string>.None, inside: string, gate: Option<bool>, tail: string): Option<bool> {
-                let _ = stage(outer) |> useAll(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _);
+                let _ = stage(outer) |> invalid(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _);
                 return Option.Some(true);
+            }
+            function reached(outer: string, input: Option<string>.Some, inside: string, gate: Option<bool>.Some, tail: string): Option<bool> {
+                let bit = stage(outer) |> invalid(((input?) |> finish(stage(inside), gate?, _)?), last(tail), _);
+                return Option.Some(bit);
             }
             function outerStep(value: string, bit: bool, prefix: string): Option<bool> {
                 dispose(value); dispose(prefix); return Option.Some(bit);
@@ -6048,6 +6055,14 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
             function excluded(outer: string, input: Option<string>): Option<bool> {
                 let bit = outer |> outerStep(((input?) |> unknown?), true, _)?;
                 return Option.Some(bit);
+            }
+            function siblings(input: Option<string>, written: Option<string>, inside: string, gate: Option<bool>): Option<bool> {
+                let bit = ((input?) |> present?) |> useAll(((written?) |> finish(stage(inside), gate?, _)?), true, _);
+                return Option.Some(bit);
+            }
+            function skippedSibling(input: Option<string>.None, written: Option<string>): Option<bool> {
+                let _ = ((input?) |> present?) |> useAll(((written?) |> present?), true, _);
+                return Option.Some(true);
             }
         "#,
         |_, module, receipt, typed| {
@@ -6177,10 +6192,69 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
                 false,
                 &[b"stage(outer)", b"tail: string", b"inside: string"],
             );
+            let reached = lower("reached", default);
+            assert_eq!(reached.completion(), Completion::SourceRejected);
+            assert!(reached.mir().is_none());
+            let [finding] = reached.findings() else {
+                panic!("expected one reached outer-step finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(prefix)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(prefix)");
+            assert!(finding.related.span.start() < finding.site.span.start());
             let excluded = lower("excluded", default);
             assert_eq!(excluded.completion(), Completion::Incomplete);
             assert!(excluded.mir().is_none());
             assert_eq!(excluded.blocked_at().unwrap().span.bytes(), b"(input?)");
+            let siblings = lower("siblings", default);
+            let mir = siblings
+                .mir()
+                .expect("composition of the input preserves the prefix for a written composition");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (written_yes, written_no) = variant_edges(mir, yes, &option.some.id, b"written");
+            let (gate_yes, gate_no) = variant_edges(mir, written_yes, &option.some.id, b"gate");
+            let (step_yes, step_no) = variant_edges(
+                mir,
+                gate_yes,
+                &option.some.id,
+                b"(written?) |> finish(stage(inside), gate?, _)?",
+            );
+            let input_stage = b"((input?) |> present?)";
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert!(
+                matches!(path_drops(mir, no).as_slice(), [Obligation::Drop(inside), Obligation::DropOptionPayload { operand, some }]
+                if inside.root.span.bytes() == b"inside: string" && operand.root.span.bytes() == b"written: Option<string>" && *some == &option.some.id)
+            );
+            assert_return(
+                &linear(mir, written_no),
+                &option.none.id,
+                false,
+                &[input_stage, b"inside: string"],
+            );
+            assert_return(
+                &linear(mir, gate_no),
+                &option.none.id,
+                false,
+                &[b"stage(inside)", b"(written?)", input_stage],
+            );
+            assert_return(
+                &linear(mir, step_no),
+                &option.none.id,
+                false,
+                &[input_stage],
+            );
+            assert_return(&linear(mir, step_yes), &option.some.id, true, &[]);
+            assert_eq!(
+                calls_on_path(mir, [true, true, true, true]),
+                [id("present"), id("stage"), id("finish"), id("useAll")]
+            );
+            let skipped = lower("skippedSibling", default);
+            assert_eq!(skipped.completion(), Completion::Incomplete);
+            assert!(skipped.mir().is_none());
+            assert_eq!(
+                skipped.blocked_at().unwrap().span.bytes(),
+                b"((input?) |> present?) |> useAll(((written?) |> present?), true, _)"
+            );
             let exact = AnalysisLimits {
                 max_work: written.statistics().work,
                 max_entries: written.statistics().entries,
