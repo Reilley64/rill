@@ -496,6 +496,12 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                 let _ = flag;
                 return text;
             }
+            function ignores(value: &[bool, string]): void { let [_, _] = value; }
+            function pass(value: [bool, string]): [bool, string] { return value; }
+            function temporary(value: [bool, string]): &string {
+                let [_, text] = &pass(value);
+                return text;
+            }
             function copyOut(value: [bool, string]): bool {
                 let [flag, _] = &value;
                 let moved = value;
@@ -554,7 +560,13 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                 .mir()
                 .unwrap_or_else(|| panic!("view: {:?}", view.completion()));
             assert!(path_drops(mir, mir.entry).is_empty());
-            let route: Vec<_> = linear(mir, mir.entry)
+            let view_ops = linear(mir, mir.entry);
+            assert!(
+                !view_ops
+                    .iter()
+                    .any(|op| matches!(op, Operation::Move { .. } | Operation::Dispose { .. }))
+            );
+            let route: Vec<_> = view_ops
                 .into_iter()
                 .filter(|op| {
                     matches!(
@@ -597,6 +609,25 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
+            let ignored = check("ignores");
+            let mir = ignored.mir().expect("wildcards observe no member");
+            let significant: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. }
+                            | Operation::Move { .. }
+                            | Operation::Dispose { .. }
+                            | Operation::BindSharedTupleMember { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(significant.as_slice(), [Operation::Copy { from, into: Some(_) }]
+                if from.root.span.bytes() == b"value: &[bool, string]")
+            );
+            assert!(path_drops(mir, mir.entry).is_empty());
             for name in ["copyOut", "lastUse"] {
                 let report = check(name);
                 let mir = report
@@ -632,6 +663,7 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                 ("exclusive", "[bit, _]"),
                 ("nested", "[[bit, _], _]"),
                 ("carried", "[saved, _]"),
+                ("temporary", "pass(value)"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
