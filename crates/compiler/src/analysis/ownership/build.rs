@@ -273,16 +273,14 @@ impl<'a, 'g> Build<'a, 'g> {
             .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_))))
     }
 
-    fn admits_direct_tuple_borrow_call(
+    fn admits_direct_tuple_or_leaf_call(
         &mut self,
         call: &crate::analysis::scalars::CallFacts<'g>,
         result: &Type<'g>,
     ) -> ResultOf<bool> {
-        // None of these inputs can receive a retained reference. Check
-        // the whole signature once before admitting any tuple argument.
-        if call.pipe_input.is_some()
-            || !(matches!(result.as_ref(), TypeTerm::Primitive(_)) || primitive_reference(result))
-        {
+        // Check the whole signature once. None of these arguments can
+        // receive a retained reference, including in a reordered pipe.
+        if !(matches!(result.as_ref(), TypeTerm::Primitive(_)) || primitive_reference(result)) {
             return Ok(false);
         }
         self.budget.step(2)?;
@@ -1825,6 +1823,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 return self.closure(node, into.ok_or(Stop::Pending(node))?, next, depth + 1);
             }
             NodeKind::Call => return self.call(node, into, next, depth + 1),
+            NodeKind::Pipe
+                if self.module.syntax.nodes[syntax.children[1]].kind
+                    == (NodeKind::PipeStep { propagate: false })
+                    && facts
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.pipe_input.is_some()) =>
+            {
+                return self.call(node, into, next, depth + 1);
+            }
             _ => return Err(Stop::Pending(node)),
         };
         self.emit(node, action, Edges::Next(next))
@@ -2066,6 +2074,9 @@ impl<'a, 'g> Build<'a, 'g> {
             return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next);
         };
         if Some(call.callee) == self.dispose {
+            if call.pipe_input.is_some() {
+                return Err(Stop::Pending(node));
+            }
             let [arg] = call.arguments.as_slice() else {
                 return Err(Stop::Pending(node));
             };
@@ -2104,6 +2115,10 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return Err(Stop::Pending(node));
         }
+        let mut tuple_or_leaf_call_admitted = call.pipe_input.is_some();
+        if tuple_or_leaf_call_admitted && !self.admits_direct_tuple_or_leaf_call(call, &facts.ty)? {
+            return Err(Stop::Pending(node));
+        }
         let mut retains_result = primitive_reference(&facts.ty);
         if matches!(
             facts.ty.as_ref(),
@@ -2125,19 +2140,22 @@ impl<'a, 'g> Build<'a, 'g> {
         self.budget.reserve(1 + call.arguments.len())?;
         let mut args = Vec::with_capacity(call.arguments.len());
         let mut destination = None;
-        let mut tuple_borrows_admitted = false;
-        for (position, arg) in call.argument_evaluation_order().enumerate() {
+        let mut pipe_argument = None;
+        for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
+            if Some(arg) == call.pipe_input {
+                pipe_argument = Some((position, arg));
+            }
             let ty = self.value(arg)?.ty.clone();
             if retained_bool_contents_type(&ty).is_some() {
                 if destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
-            } else if !self.direct_call_type(&ty) && !tuple_borrows_admitted {
-                if !self.admits_direct_tuple_borrow_call(call, &facts.ty)? {
+            } else if !self.direct_call_type(&ty) && !tuple_or_leaf_call_admitted {
+                if !self.admits_direct_tuple_or_leaf_call(call, &facts.ty)? {
                     return Err(Stop::Pending(arg));
                 }
-                tuple_borrows_admitted = true;
+                tuple_or_leaf_call_admitted = true;
             }
             let slot = self.slot(arg, &ty)?;
             if self.slots[slot].contains_guard() {
@@ -2157,7 +2175,17 @@ impl<'a, 'g> Build<'a, 'g> {
             destination,
         });
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;
-        for (i, &arg) in call.arguments.iter().enumerate().rev() {
+        // Slots follow parameter order. Build edges backwards so the
+        // pipe input runs once, ahead of all written arguments.
+        for (i, arg) in call
+            .arguments
+            .iter()
+            .copied()
+            .enumerate()
+            .rev()
+            .filter(|&(_, arg)| Some(arg) != call.pipe_input)
+            .chain(pipe_argument)
+        {
             let slot = self.calls[index].args[i];
             let root = self.ungroup(arg)?;
             let existing_exclusive = matches!(

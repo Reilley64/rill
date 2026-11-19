@@ -1043,7 +1043,6 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             function unsupportedOuterReference(value: &[&bool, [bool, bool]]): bool { return outerReference(value); }
             function innerReference(value: &[[&bool, string], bool]): bool { return false; }
             function unsupportedInnerReference(value: &[[&bool, string], bool]): bool { return innerReference(value); }
-            function unsupportedPipe(value: &[[bool, string], bool]): &string { return value |> nestedView; }
             function narrow(value: &[[bool, bool], bool]): bool { return true; }
             function wide(value: &[[bool, bool, bool, bool], bool]): bool { return true; }
             function callNarrow(value: &[[bool, bool], bool]): bool { return narrow(value); }
@@ -1210,19 +1209,13 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
                 "unsupportedResult",
                 "unsupportedOuterReference",
                 "unsupportedInnerReference",
-                "unsupportedPipe",
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
-                let site = if name == "unsupportedPipe" {
-                    "value |> nestedView"
-                } else {
-                    "value"
-                };
                 assert_eq!(
                     report.blocked_at().unwrap().span.bytes(),
-                    site.as_bytes(),
+                    b"value",
                     "{name}"
                 );
             }
@@ -1306,9 +1299,6 @@ fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
                 return &local;
             }
             function reachedBad(value: &[bool, string], fallback: &string): &string { return bad(value, fallback); }
-            function unsupportedPipe(value: &[bool, string], fallback: &string, flag: bool): &string {
-                return flag |> choose(value, fallback);
-            }
             function mutableExtra(value: &[bool, string], extra: &mut bool): bool { return false; }
             function unsupportedMutable(value: &[bool, string], extra: &mut bool): bool { return mutableExtra(value, extra); }
             function secondTuple(value: &[bool, string], other: [bool, bool]): bool { return false; }
@@ -1433,17 +1423,13 @@ fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
                 assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
-            for (name, site) in [
-                ("unsupportedMutable", "value"),
-                ("unsupportedSecond", "value"),
-                ("unsupportedPipe", "flag |> choose(value, fallback)"),
-            ] {
+            for name in ["unsupportedMutable", "unsupportedSecond"] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
                 assert_eq!(
                     report.blocked_at().unwrap().span.bytes(),
-                    site.as_bytes(),
+                    b"value",
                     "{name}"
                 );
             }
@@ -1729,6 +1715,203 @@ fn direct_calls_with_two_tuple_descriptors_keep_both_restrictions() {
             assert_eq!(unsupported.completion(), Completion::Incomplete);
             assert!(unsupported.mir().is_none());
             assert_eq!(unsupported.blocked_at().unwrap().span.bytes(), b"value");
+        },
+    );
+}
+
+#[test]
+fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
+    probe(
+        "tuples::direct_pipes_evaluate_the_input_before_its_earlier_parameters",
+        r#"
+            function view(first: &[bool, string]): &string {
+                let [_, text] = first;
+                return text;
+            }
+            function pick(first: &[bool, string], second: &mut [bool, string], flag: bool): &string {
+                return view(first);
+            }
+            function snapshot(first: &mut [bool, string], second: &mut [bool, string]): bool {
+                let [bit, _] = &mut *first;
+                return bit;
+            }
+            function bare(first: &[bool, string]): &string { return first |> view; }
+            function forward(first: &[bool, string], second: &mut [bool, string], flag: bool): &string {
+                return second |> pick(first, _, flag);
+            }
+            function conflict(seed: [bool, string]): void {
+                let mut owner = seed;
+                let _ = &mut owner |> pick(&owner, _, true);
+            }
+            function resumes(left: [bool, string], right: [bool, string]): bool {
+                let mut first = left;
+                let mut second = right;
+                let bit = &mut second |> snapshot(&mut first, _);
+                first[1] = "new";
+                second[1] = "new";
+                return bit;
+            }
+            function keepsInput(left: [bool, string], right: [bool, string]): void {
+                let first = left;
+                let mut second = right;
+                let text = &mut second |> pick(&first, _, true);
+                second[1] = "blocked";
+                let _ = text;
+            }
+            function escapes(first: &[bool, string], seed: [bool, string]): &string {
+                let mut second = seed;
+                return &mut second |> pick(first, _, true);
+            }
+            function bad(first: &[bool, string]): &string {
+                let local = "local";
+                return &local;
+            }
+            function reachedBad(first: &[bool, string]): &string { return first |> bad; }
+            function option(input: bool): Option<bool> { return Option<bool>.Some(input); }
+            function propagating(input: bool): Option<bool> {
+                let bit = input |> option?;
+                return Option<bool>.Some(bit);
+            }
+            function store(destination: &mut &bool, source: &bool): void { *destination = source; }
+            function retained(destination: &mut &bool, source: &bool): void { source |> store(destination, _); }
+            function owned(first: &[bool, string], second: [bool, string]): bool { return false; }
+            function ownedArgument(first: &[bool, string], second: [bool, string]): bool { return second |> owned(first, _); }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let forward = check("forward");
+            let mir = forward
+                .mir()
+                .unwrap_or_else(|| panic!("forward: {:?}", forward.completion()));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Call(_)
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Reborrow { parent, holder, exclusive: true },
+                Operation::Copy { from: first, into: Some(arg) },
+                Operation::Copy { from: flag, into: Some(flag_arg) }, Operation::Call(callee), Operation::Export(output),
+            ] if parent.root.span.bytes() == b"second: &mut [bool, string]" && holder.root.span.bytes() == b"second"
+                && first.root.span.bytes() == b"first: &[bool, string]" && arg.root.span.bytes() == b"first"
+                && flag.root.span.bytes() == b"flag: bool" && flag_arg.root.span.bytes() == b"flag"
+                && **callee == declaration("pick").id && output.root.span.bytes() == b"second |> pick(first, _, flag)"),
+                "{route:?}"
+            );
+            let limits = AnalysisLimits {
+                max_work: forward.statistics().work,
+                max_entries: forward.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("forward", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("forward", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            let bare = check("bare");
+            let mir = bare.mir().expect("a bare step stages its single argument");
+            let calls: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Call(_)))
+                .collect();
+            assert!(
+                matches!(calls.as_slice(), [Operation::Call(callee)] if **callee == declaration("view").id)
+            );
+            let resumes = check("resumes");
+            let mir = resumes
+                .mir()
+                .expect("the scalar result releases both stages");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. }
+                            | Operation::Call(_)
+                            | Operation::Drop(_)
+                            | Operation::Install { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source: second, exclusive: true, .. },
+                Operation::Borrow { source: first, exclusive: true, .. }, Operation::Call(snapshot),
+                Operation::Drop(old_first), Operation::Install { target: new_first, .. },
+                Operation::Drop(old_second), Operation::Install { target: new_second, .. },
+            ] if first.root.span.bytes() == b"first" && second.root.span.bytes() == b"second"
+                && [old_first, new_first].iter().all(|p| p.root.node == first.root.node && p.tuple_element() == Some(1))
+                && [old_second, new_second].iter().all(|p| p.root.node == second.root.node && p.tuple_element() == Some(1))
+                && **snapshot == declaration("snapshot").id),
+                "{route:?}"
+            );
+            for (name, code, site, related) in [
+                ("conflict", "R0201", "&owner", "&mut owner"),
+                (
+                    "keepsInput",
+                    "R0203",
+                    "second[1] = \"blocked\";",
+                    "&mut second",
+                ),
+                (
+                    "escapes",
+                    "R0202",
+                    "return &mut second |> pick(first, _, true);",
+                    "second",
+                ),
+                ("reachedBad", "R0202", "return &local;", "local"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            for (name, site) in [
+                ("retained", "source |> store(destination, _)"),
+                ("ownedArgument", "second |> owned(first, _)"),
+                ("propagating", "input |> option?"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
         },
     );
 }
