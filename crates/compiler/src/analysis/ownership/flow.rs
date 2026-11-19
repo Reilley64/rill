@@ -408,6 +408,7 @@ fn cleanup_of<'g>(
     match local.cleanup {
         StorageCleanup::Unlowered => Err(Stop::Pending(node)),
         StorageCleanup::Drop => Ok(Cleanup::Drop(place)),
+        StorageCleanup::ReleaseGuard(release) => Ok(release.cleanup(place)),
         StorageCleanup::End if let Some(field) = held.capture_drop => Ok(Cleanup::DropCapture {
             closure: place.root,
             field: site_at(module, field),
@@ -429,8 +430,10 @@ fn cleanup_operation<'g>(
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
         Cleanup::EndStorage(_) => Operation::None,
-        Cleanup::InvokeDisposer { .. } | Cleanup::DeferDisposerFields { .. } => {
-            unreachable!("local storage cleanup cannot transfer disposer obligations")
+        Cleanup::InvokeDisposer { .. }
+        | Cleanup::DeferDisposerFields { .. }
+        | Cleanup::ReleaseGuard { .. } => {
+            unreachable!("these obligations use a cleanup boundary")
         }
     })
 }
@@ -1148,6 +1151,9 @@ pub(super) fn run<'g>(
                             operand: local(slot),
                             implementation,
                         }])
+                    } else if let Some(release) = slots[slot].guard_release() {
+                        budget.reserve(1)?;
+                        Operation::Cleanup(vec![release.cleanup(local(slot))])
                     } else {
                         Operation::Dispose {
                             callee: dispose.ok_or(Stop::Pending(node))?,

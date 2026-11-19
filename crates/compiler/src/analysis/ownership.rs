@@ -268,6 +268,12 @@ pub enum Cleanup<'g> {
         operand: Place<'g>,
         implementation: &'g DeclarationId,
     },
+    /// Consume the checked LockGuard<i32> through its protected release.
+    ReleaseGuard {
+        operand: Place<'g>,
+        implementation: &'g DeclarationId,
+        entry: &'g DeclarationId,
+    },
     /// Transfer the initialized remainder to the active disposer's epilogue.
     DeferDisposerFields {
         from: Place<'g>,
@@ -620,14 +626,31 @@ struct Local<'g> {
     reference_member: bool,
     custom_disposer: Option<&'g DeclarationId>,
     moves: bool,
-    cleanup: StorageCleanup,
+    cleanup: StorageCleanup<'g>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum StorageCleanup {
+struct GuardRelease<'g> {
+    implementation: &'g DeclarationId,
+    entry: &'g DeclarationId,
+}
+
+impl<'g> GuardRelease<'g> {
+    fn cleanup(self, operand: Place<'g>) -> Cleanup<'g> {
+        Cleanup::ReleaseGuard {
+            operand,
+            implementation: self.implementation,
+            entry: self.entry,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StorageCleanup<'g> {
     End,
     Drop,
     Unlowered,
+    ReleaseGuard(GuardRelease<'g>),
 }
 
 impl<'g> Local<'g> {
@@ -636,7 +659,14 @@ impl<'g> Local<'g> {
     }
 
     fn needs_boundary_cleanup(self) -> bool {
-        self.members > 0 || self.custom_disposer.is_some()
+        self.members > 0 || self.custom_disposer.is_some() || self.guard_release().is_some()
+    }
+
+    fn guard_release(self) -> Option<GuardRelease<'g>> {
+        match self.cleanup {
+            StorageCleanup::ReleaseGuard(release) => Some(release),
+            _ => None,
+        }
     }
 
     fn carried_loan_root(self, slot: Slot) -> Slot {

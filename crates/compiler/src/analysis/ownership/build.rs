@@ -8,7 +8,10 @@ use crate::analysis::scalars::data::{
 };
 use crate::analysis::scalars::generics::{GoalState, callables::CaptureForm};
 use crate::analysis::scalars::{ErrorConstruction, ExpressionFacts, PropagationTarget};
-use crate::analysis::typed::{ErrorOperation, OptionRole, ResultRole};
+use crate::analysis::typed::{
+    ErrorOperation, NativeOwnershipAction, NativeRepresentationKind, OptionRole, OwnershipCoverage,
+    OwnershipRule, ResultRole,
+};
 use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
@@ -82,6 +85,9 @@ impl<'a, 'g> Build<'a, 'g> {
             TypeTerm::Primitive(_) => (false, StorageCleanup::End),
             TypeTerm::Reference { mutable, .. } => (*mutable, StorageCleanup::End),
             TypeTerm::Callable { .. } => (true, StorageCleanup::End),
+            TypeTerm::Nominal { .. } if let Some(release) = self.guard_release(ty)? => {
+                (true, StorageCleanup::ReleaseGuard(release))
+            }
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
                 if let Some(role) = self.bool_option_role(ty) =>
             {
@@ -139,6 +145,47 @@ impl<'a, 'g> Build<'a, 'g> {
             cleanup,
         });
         Ok(slot)
+    }
+
+    fn guard_release(&mut self, ty: &TypeTerm<'g>) -> ResultOf<Option<GuardRelease<'g>>> {
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = ty
+        else {
+            return Ok(None);
+        };
+        let [argument] = arguments.as_slice() else {
+            return Ok(None);
+        };
+        if !matches!(argument.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32") {
+            return Ok(None);
+        }
+        let scopes = self.typed.ownership_protection();
+        self.budget.step(scopes.len())?;
+        let Some(provider) = scopes.iter().find_map(|scope| {
+            (&scope.owner.id == *declaration
+                && Some(scope.family) == self.dispose
+                && scope.rule == OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
+                && scope.coverage == OwnershipCoverage::Clear)
+                .then(|| scope.provider.as_ref())
+                .flatten()
+        }) else {
+            return Ok(None);
+        };
+        let representations = self.typed.native_representations();
+        self.budget.step(representations.len())?;
+        Ok(representations
+            .iter()
+            .any(|representation| {
+                &representation.owner.id == *declaration
+                    && representation.kind == NativeRepresentationKind::GuardPayloadAndSource
+                    && std::ptr::eq(representation.artifact, provider.artifact)
+            })
+            .then_some(GuardRelease {
+                implementation: &provider.implementation.id,
+                entry: &provider.entry.id,
+            }))
     }
 
     fn direct_call_type(&self, ty: &TypeTerm<'g>) -> bool {
@@ -590,6 +637,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 if let Some(&value) = children.first() {
                     let ty = self.value(value)?.ty.clone();
                     let output = self.slot(value, &ty)?;
+                    if self.slots[output].guard_release().is_some() {
+                        return Err(Stop::Pending(value));
+                    }
                     let export = self.emit(node, Action::Export(output), Edges::Next(returning))?;
                     let projected = self.ungroup(value)?;
                     let temporary = self.temporary_projection(projected, true)?;
@@ -1289,14 +1339,21 @@ impl<'a, 'g> Build<'a, 'g> {
                         self.value(parent)?.ty.as_ref(),
                         TypeTerm::Reference { mutable: true, .. }
                     );
+                    let parent = self.place(parent)?;
+                    if self.slots[parent].guard_release().is_some() {
+                        return Err(Stop::Pending(node));
+                    }
                     Action::Reborrow {
-                        parent: self.place(parent)?,
+                        parent,
                         into,
                         exclusive,
                         suspends,
                     }
                 } else {
                     let from = self.place(operand)?;
+                    if self.slots[from].guard_release().is_some() {
+                        return Err(Stop::Pending(node));
+                    }
                     // Initialization is per position. It does not establish a
                     // loan-overlap rule for separately borrowed tuple elements.
                     if matches!(
@@ -1313,11 +1370,13 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 }
             }
-            NodeKind::Prefix("*") if matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() != "string") => {
-                Action::Dereference {
-                    from: self.place(syntax.children[0])?,
-                    into,
+            NodeKind::Prefix("*") if matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() != "string") =>
+            {
+                let from = self.place(syntax.children[0])?;
+                if self.slots[from].guard_release().is_some() {
+                    return Err(Stop::Pending(node));
                 }
+                Action::Dereference { from, into }
             }
             NodeKind::Prefix("*") => {
                 let Some(path) = &facts.path else {
@@ -1521,7 +1580,19 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             };
             let operand = self.place(*arg)?;
-            if !matches!(self.value(*arg)?.ty.as_ref(), TypeTerm::Primitive(_))
+            if let Some(release) = self.slots[operand].guard_release() {
+                let Some(DataExpression::NativeOwnership(native)) = &facts.data else {
+                    return Err(Stop::Pending(node));
+                };
+                if native.action != NativeOwnershipAction::GuardRelease
+                    || native.implementation != release.implementation
+                    || native.entry != release.entry
+                    || !matches!(native.substitution.as_slice(), [binding]
+                        if matches!(binding.argument.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+                {
+                    return Err(Stop::Pending(node));
+                }
+            } else if !matches!(self.value(*arg)?.ty.as_ref(), TypeTerm::Primitive(_))
                 && !matches!((self.slots[operand].custom_disposer, &call.selection),
                     (Some(expected), Some(selection))
                         if selection.implementation == expected && selection.substitution.is_empty())
@@ -1539,6 +1610,7 @@ impl<'a, 'g> Build<'a, 'g> {
             || call.callee.module.origin != Origin::Application
             || !call.substitution.is_empty()
             || !self.direct_call_type(&facts.ty)
+            || into.is_some_and(|slot| self.slots[slot].guard_release().is_some())
         {
             return Err(Stop::Pending(node));
         }
@@ -1573,7 +1645,11 @@ impl<'a, 'g> Build<'a, 'g> {
             } else if !self.direct_call_type(&ty) {
                 return Err(Stop::Pending(arg));
             }
-            args.push(self.slot(arg, &ty)?);
+            let slot = self.slot(arg, &ty)?;
+            if self.slots[slot].guard_release().is_some() {
+                return Err(Stop::Pending(arg));
+            }
+            args.push(slot);
         }
         let index = self.calls.len();
         let destination = destination

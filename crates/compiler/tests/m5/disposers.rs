@@ -1,6 +1,183 @@
 use super::*;
 
 #[test]
+fn protected_guard_cleanup_follows_the_initialized_owner() {
+    probe_with_typed(
+        "disposers::protected_guard_cleanup_follows_the_initialized_owner",
+        r#"
+            import std::mutex::LockGuard as Ticket;
+            function paths(lock: Ticket<i32>, owner: string, explicit: bool): void {
+                let held = lock;
+                if (explicit) { dispose((held)); return; }
+            }
+            function replace(first: LockGuard<i32>, second: LockGuard<i32>): void {
+                let mut held = first;
+                held = second;
+            }
+            function rejects(lock: LockGuard<i32>): void {
+                let held = lock;
+                dispose(held);
+                dispose(held);
+            }
+            function borrowed(lock: LockGuard<i32>): void { let view = &lock; }
+            function passes(lock: LockGuard<i32>): LockGuard<i32> { return lock; }
+            function other(lock: LockGuard<bool>): void { }
+        "#,
+        |_, module, receipt, typed| {
+            use compiler::analysis::scalars::{NodeFactKind, data::DataExpression};
+            use compiler::analysis::typed::{
+                NativeOwnershipAction, OwnershipCoverage, OwnershipRule,
+            };
+
+            let check = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let lower = |name| check(name, AnalysisLimits::default());
+            let scope = typed
+                .ownership_protection()
+                .iter()
+                .find(|scope| {
+                    scope.rule == OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
+                        && scope.coverage == OwnershipCoverage::Clear
+                })
+                .unwrap();
+            let provider = scope.provider.as_ref().unwrap();
+            let report = lower("paths");
+            let mir = report.mir().expect("received guard has normal cleanup");
+            let (yes, no) = branch_targets(mir);
+            let transfers: Vec<_> = mir
+                .blocks
+                .iter()
+                .filter_map(|block| match &block.operation {
+                    Operation::Move {
+                        from,
+                        into: Some(to),
+                    } => Some((from, to)),
+                    _ => None,
+                })
+                .collect();
+            let [(input, held)] = transfers.as_slice() else {
+                panic!("expected one transfer of the guard")
+            };
+            assert_eq!(input.root.span.bytes(), b"lock: Ticket<i32>");
+            assert_eq!(held.root.span.bytes(), b"held");
+            for edge in [yes, no] {
+                assert!(matches!(path_drops(mir, edge).as_slice(), [
+                    Obligation::ReleaseGuard { operand, implementation, entry },
+                    Obligation::Drop(owner),
+                ] if operand.root.node == held.root.node && *implementation == &provider.implementation.id
+                    && *entry == &provider.entry.id && owner.root.span.bytes() == b"owner: string"));
+            }
+            let releases: Vec<_> = mir.blocks.iter().filter(|block| matches!(&block.operation,
+                Operation::Cleanup(cleanup) if cleanup.iter().any(|action| matches!(action, Obligation::ReleaseGuard { .. }))
+            )).collect();
+            assert_eq!(releases.len(), 2);
+            let explicit = releases
+                .into_iter()
+                .find(|b| b.site.span.bytes() == b"dispose((held))")
+                .unwrap();
+            let fact = typed
+                .bodies()
+                .node(module, explicit.site.node)
+                .unwrap()
+                .unwrap();
+            let NodeFactKind::Expression(facts) = &fact.kind else {
+                panic!("expected typed call")
+            };
+            let Some(DataExpression::NativeOwnership(native)) = &facts.data else {
+                panic!("expected protected release fact")
+            };
+            assert_eq!(native.action, NativeOwnershipAction::GuardRelease);
+            assert_eq!(native.implementation, &provider.implementation.id);
+            assert_eq!(native.entry, &provider.entry.id);
+
+            let replace = lower("replace");
+            let mir = replace
+                .mir()
+                .expect("replacement releases the old initialized owner");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Move { .. } | Operation::Install { .. } => true,
+                    Operation::Cleanup(cleanups) => cleanups
+                        .iter()
+                        .any(|action| matches!(action, Obligation::ReleaseGuard { .. })),
+                    _ => false,
+                })
+                .collect();
+            let [
+                Operation::Move {
+                    from: first,
+                    into: Some(held),
+                },
+                Operation::Move {
+                    from: second,
+                    into: Some(staged),
+                },
+                Operation::Cleanup(displaced),
+                Operation::Install { target, incoming },
+                Operation::Cleanup(final_cleanup),
+            ] = route.as_slice()
+            else {
+                panic!("expected staging, release, install, and one final release")
+            };
+            assert_eq!(first.root.span.bytes(), b"first: LockGuard<i32>");
+            assert_eq!(second.root.span.bytes(), b"second: LockGuard<i32>");
+            assert_eq!(target.root.node, held.root.node);
+            assert_eq!(staged.root.node, incoming.root.node);
+            for actions in [displaced, final_cleanup] {
+                assert!(
+                    matches!(actions.as_slice(), [Obligation::ReleaseGuard { operand, implementation, entry }]
+                    if operand.root.node == held.root.node && *implementation == &provider.implementation.id
+                        && *entry == &provider.entry.id)
+                );
+            }
+
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(check("paths", limits).completion(), Completion::Checked);
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = check("paths", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            let rejected = lower("rejects");
+            assert_eq!(rejected.completion(), Completion::SourceRejected);
+            assert!(rejected.mir().is_none());
+            let [finding] = rejected.findings() else {
+                panic!("expected one moved-guard finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(held)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(held)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            for name in ["borrowed", "passes", "other"] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn active_disposer_cleans_only_remaining_fields() {
     probe_with_typed(
         "disposers::active_disposer_cleans_only_remaining_fields",
