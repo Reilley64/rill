@@ -1173,7 +1173,7 @@ pub(super) fn run<'g>(
                     descriptor,
                     position,
                     into,
-                    projected,
+                    binding,
                 } => {
                     let held = initialized(&state[descriptor], node)?;
                     conflict(
@@ -1185,19 +1185,18 @@ pub(super) fn run<'g>(
                         Access::Observe,
                         budget,
                     )?;
-                    state[into] = State::Initialized(if projected {
-                        Held {
+                    state[into] = State::Initialized(match binding {
+                        SharedTupleBinding::CopyScalar => empty.clone(),
+                        SharedTupleBinding::SharedView => Held {
                             loans: held.loans.clone(),
                             ..Held::default()
-                        }
-                    } else {
-                        empty.clone()
+                        },
                     });
                     Operation::BindSharedTupleMember {
                         descriptor: local(descriptor),
                         position,
                         into: local(into),
-                        projected,
+                        binding,
                     }
                 }
                 Action::Call(index) => {

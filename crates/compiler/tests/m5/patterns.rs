@@ -486,6 +486,8 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
 
 #[test]
 fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
+    use compiler::analysis::ownership::SharedTupleBinding::{CopyScalar, SharedView};
+
     probe(
         "patterns::shared_tuple_binding_copies_scalars_and_borrows_string_members",
         r#"
@@ -565,8 +567,8 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                 .collect();
             assert!(matches!(route.as_slice(), [
                 Operation::Copy { from: incoming, into: Some(staged) },
-                Operation::BindSharedTupleMember { descriptor: first, position: 0, into: flag, projected: false },
-                Operation::BindSharedTupleMember { descriptor: second, position: 1, into: text, projected: true },
+                Operation::BindSharedTupleMember { descriptor: first, position: 0, into: flag, binding: CopyScalar },
+                Operation::BindSharedTupleMember { descriptor: second, position: 1, into: text, binding: SharedView },
                 Operation::Copy { from: bit, .. },
                 Operation::Copy { from: view, into: Some(result) },
                 Operation::Export(output),

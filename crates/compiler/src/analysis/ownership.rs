@@ -152,13 +152,12 @@ pub enum Operation<'g> {
     },
     Dereference(Place<'g>),
     /// Bind a fixed member through an initialized shared tuple descriptor.
-    /// A projected binding carries the backing of that access; a scalar
-    /// copy does not. Neither operation moves or owns the member.
+    /// Neither binding mode moves the member out of the tuple.
     BindSharedTupleMember {
         descriptor: Place<'g>,
         position: usize,
         into: Place<'g>,
-        projected: bool,
+        binding: SharedTupleBinding,
     },
     FormClosure {
         closure: Site<'g>,
@@ -261,6 +260,14 @@ pub enum Operation<'g> {
         field: Site<'g>,
     },
     Cleanup(Vec<Cleanup<'g>>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SharedTupleBinding {
+    /// Copy a primitive value with no carried backing.
+    CopyScalar,
+    /// Retain the original backing for a shared view of the member.
+    SharedView,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -755,7 +762,7 @@ enum Action<'g> {
         descriptor: Slot,
         position: usize,
         into: Slot,
-        projected: bool,
+        binding: SharedTupleBinding,
     },
     Call(usize),
     InvokeClosurePair {

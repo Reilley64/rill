@@ -39,6 +39,25 @@ fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>
     }
 }
 
+fn product_member<'g>(
+    shared_tuple: bool,
+    route: &[PatternProjection<'g>],
+) -> Option<PatternProjection<'g>> {
+    match (shared_tuple, route) {
+        (
+            true,
+            [
+                PatternProjection::Dereference,
+                member @ PatternProjection::TupleElement(_),
+            ],
+        )
+        | (false, [member @ (PatternProjection::TupleElement(_) | PatternProjection::Field(_))]) => {
+            Some(*member)
+        }
+        _ => None,
+    }
+}
+
 enum Binding<'a, 'g> {
     Discard,
     Name {
@@ -910,18 +929,11 @@ impl<'a, 'g> Build<'a, 'g> {
                         return Err(Stop::Pending(name));
                     }
                     let binder = binders.next().ok_or(Stop::Pending(name))?;
-                    let flat = match (shared_tuple, binder.projections.as_slice()) {
-                        (
-                            true,
-                            [
-                                PatternProjection::Dereference,
-                                PatternProjection::TupleElement(index),
-                            ],
-                        )
-                        | (false, [PatternProjection::TupleElement(index)]) => {
-                            !record && *index == position
+                    let flat = match product_member(shared_tuple, &binder.projections) {
+                        Some(PatternProjection::TupleElement(index)) => {
+                            !record && index == position
                         }
-                        (false, [PatternProjection::Field(_)]) => record,
+                        Some(PatternProjection::Field(_)) => record,
                         _ => false,
                     };
                     if !flat || binder.declaration.start != syntax.span.start() {
@@ -964,35 +976,29 @@ impl<'a, 'g> Build<'a, 'g> {
                 .get(binder.declaration)
                 .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
-            let action = match (shared_tuple, binder.projections.as_slice()) {
-                (
-                    true,
-                    [
-                        PatternProjection::Dereference,
-                        PatternProjection::TupleElement(position),
-                    ],
-                ) => {
-                    let projected = if binder.ty == binder.source_type {
-                        false
+            let action = match product_member(shared_tuple, &binder.projections) {
+                Some(PatternProjection::TupleElement(position)) if shared_tuple => {
+                    let binding = if binder.ty == binder.source_type {
+                        SharedTupleBinding::CopyScalar
                     } else if matches!(binder.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
                         if *referent == binder.source_type)
                     {
-                        true
+                        SharedTupleBinding::SharedView
                     } else {
                         return Err(Stop::Pending(site));
                     };
                     Action::BindSharedTupleMember {
                         descriptor: scratch,
-                        position: *position,
+                        position,
                         into,
-                        projected,
+                        binding,
                     }
                 }
-                (false, [PatternProjection::TupleElement(position)]) => Action::Read {
-                    from: self.element(site, scratch, *position)?,
+                Some(PatternProjection::TupleElement(position)) => Action::Read {
+                    from: self.element(site, scratch, position)?,
                     into: Some(into),
                 },
-                (false, [PatternProjection::Field(field)]) => Action::Read {
+                Some(PatternProjection::Field(field)) => Action::Read {
                     from: self.field(site, scratch, field)?,
                     into: Some(into),
                 },
