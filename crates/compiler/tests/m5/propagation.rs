@@ -1644,6 +1644,189 @@ fn result_expression_statements_still_require_acknowledgement() {
     );
 }
 
+#[test]
+fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
+    probe_with_typed(
+        "propagation::an_early_call_argument_exit_cleans_only_the_staged_prefix",
+        r#"
+            function before(taken: string): string { return taken; }
+            function after(taken: string): string { return taken; }
+            function consume(first: string, second: string, bit: bool, last: string): bool {
+                dispose(last);
+                dispose(second);
+                dispose(first);
+                return bit;
+            }
+            function option(input: Option<bool>, first: string, second: string, later: string, owner: string): Option<bool> {
+                let remaining = owner;
+                let bit = consume(before(first), second, input?, after(later));
+                dispose(remaining);
+                return Option.Some(bit);
+            }
+            function result(input: Result<bool, i32>, first: string, second: string, later: string): Result<i32, i32> {
+                let _ = consume(first, second, (input?), later);
+                return Result.Ok(1i32);
+            }
+            function bad(first: string, bit: bool): bool { dispose(first); dispose(first); return bit; }
+            function reachedBad(input: Option<bool>, first: string): Option<bool> {
+                let bit = bad(first, input?);
+                return Option.Some(bit);
+            }
+            function pair(first: bool, second: bool): bool { return first; }
+            function unsupportedTwo(first: Option<bool>, second: Option<bool>): Option<bool> {
+                let bit = pair(first?, second?);
+                return Option.Some(bit);
+            }
+            function borrowed(first: &string, second: bool): bool { return second; }
+            function unsupportedBorrow(input: Option<bool>, owner: string): Option<bool> {
+                let bit = borrowed(&owner, input?);
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let option = typed.option_role().unwrap();
+            let result = typed.result_role().unwrap();
+            let report = check("option");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("option: {:?}", report.completion()));
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [
+                    &declaration("before").id,
+                    &declaration("after").id,
+                    &declaration("consume").id
+                ]
+            );
+            assert_eq!(calls_on_path(mir, [false]), [&declaration("before").id]);
+            let ok = linear(mir, yes);
+            let none = linear(mir, no);
+            assert_return(
+                &none,
+                &option.none.id,
+                false,
+                &[b"second", b"before(first)", b"remaining", b"later: string"],
+            );
+            assert_return(&ok, &option.some.id, true, &[]);
+            let route: Vec<_> = ok
+                .iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CopyOptionPayload { .. }
+                            | Operation::Call(_)
+                            | Operation::Dispose { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::CopyOptionPayload { operand, into }, Operation::Call(after), Operation::Call(consume), Operation::Dispose { operand: remaining, .. },
+            ] if operand.root.span.bytes() == b"input" && into.root.span.bytes() == b"input?" && remaining.root.span.bytes() == b"remaining"
+                && *after == &declaration("after").id && *consume == &declaration("consume").id),
+                "{route:?}"
+            );
+            let batches: Vec<_> = none
+                .iter()
+                .filter_map(|op| match op {
+                    Operation::Cleanup(actions) => Some(
+                        actions
+                            .iter()
+                            .filter_map(|action| match action {
+                                Obligation::Drop(place) => Some(place.root.span.bytes()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                })
+                .filter(|drops| !drops.is_empty())
+                .collect();
+            assert_eq!(
+                batches,
+                [
+                    vec![b"second".as_slice(), b"before(first)"],
+                    vec![b"remaining".as_slice()],
+                    vec![b"later: string".as_slice()]
+                ]
+            );
+            let result_report = check("result");
+            let mir = result_report
+                .mir()
+                .expect("a scalar Result argument forwards the same failure");
+            let (yes, no) = variant_edges(mir, mir.entry, &result.ok.id, b"input");
+            assert_eq!(calls_on_path(mir, [true]), [&declaration("consume").id]);
+            assert!(calls_on_path(mir, [false]).is_empty());
+            let ok = linear(mir, yes);
+            assert!(ok.iter().any(
+                |op| matches!(op, Operation::TakeResultSuccess { into: Some(place), .. }
+                if place.root.span.bytes() == b"(input?)")
+            ));
+            assert_return(&ok, &result.ok.id, true, &[]);
+            assert_forward(
+                &linear(mir, no),
+                result,
+                b"input",
+                &[b"second", b"first", b"later: string"],
+            );
+            let bad = check("reachedBad");
+            assert_eq!(bad.completion(), Completion::SourceRejected);
+            assert!(bad.mir().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected one reached-callee finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(first)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(first)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            for (name, site) in [
+                ("unsupportedTwo", "pair(first?, second?)"),
+                ("unsupportedBorrow", "borrowed(&owner, input?)"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("option", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("option", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
 fn variant_edges(
     mir: &Mir<'_>,
     mut pc: usize,

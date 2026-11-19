@@ -19,6 +19,15 @@ use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
+enum CallPropagation<'a, 'g> {
+    PipeCarrier(&'a Type<'g>),
+    Argument {
+        position: usize,
+        root: NodeId,
+        returning: Pc,
+    },
+}
+
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(p) if p.name() == "string")
 }
@@ -342,6 +351,31 @@ impl<'a, 'g> Build<'a, 'g> {
         call.callee.kind == DeclarationKind::Function
             && call.callee.module.origin == Origin::Application
             && call.substitution.is_empty()
+    }
+
+    fn direct_application_signature(
+        &mut self,
+        node: NodeId,
+        call: &crate::analysis::scalars::CallFacts<'g>,
+    ) -> ResultOf<(&'a [MemberType<'g>], &'a Type<'g>)> {
+        if !Self::direct_application_call(call) {
+            return Err(Stop::Pending(node));
+        }
+        self.budget.step(1)?;
+        let signature = self
+            .typed
+            .inventory()
+            .type_facts()
+            .declarations
+            .get(call.callee)
+            .ok_or(Stop::Pending(node))?;
+        let DeclarationShape::Function { parameters, result } = &signature.shape else {
+            return Err(Stop::Pending(node));
+        };
+        if parameters.len() != call.arguments.len() {
+            return Err(Stop::Pending(node));
+        }
+        Ok((parameters, result))
     }
 
     fn direct_call_type(&self, ty: &TypeTerm<'g>) -> bool {
@@ -742,6 +776,36 @@ impl<'a, 'g> Build<'a, 'g> {
                         _ => return Err(Stop::Pending(node)),
                     };
                     return self.propagate(initializer, into, next, exits.returning, depth + 1);
+                }
+                self.budget.step(1)?;
+                if self.module.syntax.nodes[initializer].kind == NodeKind::Call {
+                    self.budget.step(1)?;
+                    if let Some(fact) = self.facts.get(&initializer)
+                        && fact.flow.returns
+                        && let NodeFactKind::Expression(facts) = &fact.kind
+                    {
+                        let into = match binding {
+                            Binding::Discard => None,
+                            Binding::Name { declaration, .. } => Some(self.locals[declaration]),
+                            _ => return Err(Stop::Pending(node)),
+                        };
+                        if !fact.flow.normal || fact.flow.pending {
+                            return Err(Stop::Pending(initializer));
+                        }
+                        let (position, root) = self.propagating_argument(initializer, facts)?;
+                        return self.call(
+                            initializer,
+                            facts,
+                            into,
+                            next,
+                            depth + 1,
+                            Some(CallPropagation::Argument {
+                                position,
+                                root,
+                                returning: exits.returning,
+                            }),
+                        );
+                    }
                 }
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
@@ -1483,10 +1547,57 @@ impl<'a, 'g> Build<'a, 'g> {
         if let Some(construction) = fresh {
             self.construct_scalar_error(node, facts, construction, scratch, split, depth)
         } else if piped {
-            self.call(node, facts, Some(scratch), split, depth, Some(operand))
+            self.call(
+                node,
+                facts,
+                Some(scratch),
+                split,
+                depth,
+                Some(CallPropagation::PipeCarrier(operand)),
+            )
         } else {
             self.expression(source, Some(scratch), split, depth)
         }
+    }
+
+    fn propagating_argument(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+    ) -> ResultOf<(usize, NodeId)> {
+        let call = facts.call.as_deref().ok_or(Stop::Pending(node))?;
+        if call.pipe_input.is_some()
+            || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
+        {
+            return Err(Stop::Pending(node));
+        }
+        let (parameters, result) = self.direct_application_signature(node, call)?;
+        if *result != facts.ty {
+            return Err(Stop::Pending(node));
+        }
+        let mut exit_argument = None;
+        for (position, (formal, &arg)) in parameters.iter().zip(&call.arguments).enumerate() {
+            self.budget.step(2)?;
+            if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
+                || self.value(arg)?.ty != formal.ty
+            {
+                return Err(Stop::Pending(node));
+            }
+            let root = self.ungroup(arg)?;
+            if self.module.syntax.nodes[root].kind == NodeKind::Propagate {
+                self.budget.step(1)?;
+                let Some(DataExpression::Propagation(exit)) = &self.value(root)?.data else {
+                    return Err(Stop::Pending(root));
+                };
+                if !exit.can_return
+                    || !exit.can_continue
+                    || exit_argument.replace((position, root)).is_some()
+                {
+                    return Err(Stop::Pending(node));
+                }
+            }
+        }
+        exit_argument.ok_or(Stop::Pending(node))
     }
 
     fn propagating_pipe_result(
@@ -1495,26 +1606,13 @@ impl<'a, 'g> Build<'a, 'g> {
         facts: &ExpressionFacts<'g>,
     ) -> ResultOf<&'a Type<'g>> {
         let call = facts.call.as_deref().ok_or(Stop::Pending(node))?;
-        if call.pipe_input.is_none() || !Self::direct_application_call(call) {
+        if call.pipe_input.is_none() {
             return Err(Stop::Pending(node));
         }
         // The pipe node's expression type describes the success payload.
         // The declared result is the carrier to stage before branching.
-        self.budget.step(1)?;
-        let signature = self
-            .typed
-            .inventory()
-            .type_facts()
-            .declarations
-            .get(call.callee)
-            .ok_or(Stop::Pending(node))?;
-        let DeclarationShape::Function { parameters, result } = &signature.shape else {
-            return Err(Stop::Pending(node));
-        };
-        if parameters.len() != call.arguments.len()
-            || !(self.bool_option_role(result).is_some()
-                || self.scalar_result_role(result).is_some())
-        {
+        let (parameters, result) = self.direct_application_signature(node, call)?;
+        if !(self.bool_option_role(result).is_some() || self.scalar_result_role(result).is_some()) {
             return Err(Stop::Pending(node));
         }
         for (formal, &arg) in parameters.iter().zip(&call.arguments) {
@@ -2191,7 +2289,7 @@ impl<'a, 'g> Build<'a, 'g> {
         into: Option<Slot>,
         next: Pc,
         depth: usize,
-        proved_propagation_carrier: Option<&Type<'g>>,
+        propagation: Option<CallPropagation<'_, 'g>>,
     ) -> ResultOf<Pc> {
         let Some(call) = facts.call.as_deref() else {
             return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next);
@@ -2230,7 +2328,10 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             return self.emit(node, Action::Dispose(operand), Edges::Next(next));
         }
-        let result = proved_propagation_carrier.unwrap_or(&facts.ty);
+        let result = match propagation {
+            Some(CallPropagation::PipeCarrier(carrier)) => carrier,
+            _ => &facts.ty,
+        };
         if !Self::direct_application_call(call)
             || !self.direct_call_type(result)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())
@@ -2239,7 +2340,7 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         let piped = call.pipe_input.is_some();
         // A propagating pipe already passed its exact carrier signature check.
-        let ordinary_pipe = piped && proved_propagation_carrier.is_none();
+        let ordinary_pipe = piped && propagation.is_none();
         let mut tuple_or_leaf_admitted =
             ordinary_pipe && self.admits_direct_tuple_or_leaf_call(call, result)?;
         let mut pipe_retention = None;
@@ -2317,6 +2418,22 @@ impl<'a, 'g> Build<'a, 'g> {
         let destination = retention
             .map(|(position, contents)| self.call_destination(call, position, &args, &contents))
             .transpose()?;
+        let argument_exit = match propagation {
+            Some(CallPropagation::Argument {
+                position,
+                root,
+                returning,
+            }) => {
+                // A failing argument leaves only the already-staged prefix
+                // initialized. Retire it before lexical return cleanup.
+                Some((
+                    position,
+                    root,
+                    self.cleanup(root, &args[..position], returning)?,
+                ))
+            }
+            _ => None,
+        };
         self.calls.push(Call {
             callee: call.callee,
             args,
@@ -2337,6 +2454,12 @@ impl<'a, 'g> Build<'a, 'g> {
             .chain(pipe_argument)
         {
             let slot = self.calls[index].args[i];
+            if let Some((position, root, returning)) = argument_exit
+                && position == i
+            {
+                next = self.propagate(root, Some(slot), next, returning, depth + 1)?;
+                continue;
+            }
             let root = self.ungroup(arg)?;
             let existing_exclusive = matches!(
                 self.value(arg)?.ty.as_ref(),
