@@ -1672,9 +1672,9 @@ fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
                 let bit = bad(first, input?);
                 return Option.Some(bit);
             }
-            function pair(first: bool, second: bool): bool { return first; }
-            function unsupportedTwo(first: Option<bool>, second: Option<bool>): Option<bool> {
-                let bit = pair(first?, second?);
+            function triple(first: bool, second: bool, third: bool): bool { return first; }
+            function unsupportedThree(first: Option<bool>, second: Option<bool>, third: Option<bool>): Option<bool> {
+                let bit = triple(first?, second?, third?);
                 return Option.Some(bit);
             }
             function borrowed(first: &string, second: bool): bool { return second; }
@@ -1806,7 +1806,7 @@ fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
             assert_eq!(finding.related.span.bytes(), b"dispose(first)");
             assert!(finding.related.span.start() < finding.site.span.start());
             for (name, site) in [
-                ("unsupportedTwo", "pair(first?, second?)"),
+                ("unsupportedThree", "triple(first?, second?, third?)"),
                 ("unsupportedBorrow", "borrowed(&owner, input?)"),
             ] {
                 let report = check(name);
@@ -1880,7 +1880,7 @@ fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
             }
             function pair(first: bool, second: bool): bool { return first; }
             function pass(input: Option<bool>): Option<bool> { return input; }
-            function unsupported(first: Option<bool>, second: Option<bool>): Option<bool> {
+            function unsupported(first: Option<bool>.Some, second: Option<bool>): Option<bool> {
                 let bit = pair(first?, (second |> pass?));
                 return Option.Some(bit);
             }
@@ -2376,6 +2376,193 @@ fn single_edge_arguments_do_not_lower_an_unreachable_call_path() {
                 },
             ] {
                 let limited = lower("failure", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn two_propagating_arguments_clean_their_own_staged_prefixes() {
+    probe_with_typed(
+        "propagation::two_propagating_arguments_clean_their_own_staged_prefixes",
+        r#"
+            import std::result::Err as fail;
+            function before(value: string): string { return value; }
+            function between(value: string): string { return value; }
+            function after(value: string): string { return value; }
+            function consume(first: string, a: bool, middle: string, b: bool, last: string): bool {
+                dispose(last); dispose(middle); dispose(first); return b;
+            }
+            function step(input: Option<bool>, taken: string): Option<bool> { dispose(taken); return input; }
+            function options(first: string, left: Option<bool>, middle: string, right: Option<bool>, taken: string, last: string, owner: string): Option<bool> {
+                let bit = consume(before(first), left?, between(middle), (taken |> step(right, _)?), after(last));
+                return Option.Some(bit);
+            }
+            function produce(flag: bool): Result<bool, i32> {
+                if (flag) { return Result.Ok(true); }
+                return fail<bool, i32>(17i32);
+            }
+            function error(message: string): i32 { dispose(message); return 19i32; }
+            function results(first: string, input: Result<bool, i32>, middle: string, flag: bool, last: string, message: string, owner: string): Result<i32, i32> {
+                let _ = consume(first, input?, middle, (produce(flag) ? error(message)), last);
+                return Result.Ok(7i32);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let option = typed.option_role().unwrap();
+            let result = typed.result_role().unwrap();
+            let report = check("options");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("options: {:?}", report.completion()));
+            let (left_ok, left_none) = variant_edges(mir, mir.entry, &option.some.id, b"left");
+            let (right_ok, right_none) =
+                variant_edges(mir, left_ok, &option.some.id, b"taken |> step(right, _)?");
+            assert_eq!(calls_on_path(mir, [false]), [&declaration("before").id]);
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [
+                    &declaration("before").id,
+                    &declaration("between").id,
+                    &declaration("step").id
+                ]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [
+                    &declaration("before").id,
+                    &declaration("between").id,
+                    &declaration("step").id,
+                    &declaration("after").id,
+                    &declaration("consume").id
+                ]
+            );
+            assert_return(
+                &linear(mir, left_none),
+                &option.none.id,
+                false,
+                &[
+                    b"before(first)",
+                    b"owner: string",
+                    b"last: string",
+                    b"taken: string",
+                    b"middle: string",
+                ],
+            );
+            assert_return(
+                &linear(mir, right_none),
+                &option.none.id,
+                false,
+                &[
+                    b"between(middle)",
+                    b"before(first)",
+                    b"owner: string",
+                    b"last: string",
+                ],
+            );
+            let early: Vec<_> = straight_blocks(mir, left_ok)
+                .into_iter()
+                .map(|b| &b.operation)
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CopyOptionPayload { .. }
+                            | Operation::Call(_)
+                            | Operation::TestVariant { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(early.as_slice(), [Operation::CopyOptionPayload { operand, into }, Operation::Call(between), Operation::Call(step), Operation::TestVariant { .. }]
+                if operand.root.span.bytes() == b"left" && into.root.span.bytes() == b"left?" && *between == &declaration("between").id && *step == &declaration("step").id),
+                "{early:?}"
+            );
+            let success = linear(mir, right_ok);
+            let late: Vec<_> = success
+                .iter()
+                .copied()
+                .filter(|op| matches!(op, Operation::CopyOptionPayload { .. } | Operation::Call(_)))
+                .collect();
+            assert!(
+                matches!(late.as_slice(), [Operation::CopyOptionPayload { operand, into }, Operation::Call(after), Operation::Call(consume)]
+                if operand.root.span.bytes() == b"taken |> step(right, _)?" && into.root.span.bytes() == b"(taken |> step(right, _)?)"
+                    && *after == &declaration("after").id && *consume == &declaration("consume").id),
+                "{late:?}"
+            );
+            assert_return(&success, &option.some.id, true, &[b"owner: string"]);
+            let results = check("results");
+            let mir = results
+                .mir()
+                .expect("the second Result can wrap only on the first Result's success path");
+            let (left_ok, left_err) = variant_edges(mir, mir.entry, &result.ok.id, b"input");
+            let (right_ok, right_err) =
+                variant_edges(mir, left_ok, &result.ok.id, b"produce(flag)");
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [&declaration("produce").id, &declaration("error").id]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [&declaration("produce").id, &declaration("consume").id]
+            );
+            assert_forward(
+                &linear(mir, left_err),
+                result,
+                b"input",
+                &[
+                    b"first",
+                    b"owner: string",
+                    b"message: string",
+                    b"last: string",
+                    b"middle: string",
+                ],
+            );
+            let failure = linear(mir, right_err);
+            assert_export(
+                &failure,
+                &[b"middle", b"first", b"owner: string", b"last: string"],
+                |op, out| {
+                    matches!(op,
+                Operation::WrapResultFailure { operand, payload, into, origin, .. } if operand.root.span.bytes() == b"produce(flag)"
+                    && payload.root.span.bytes() == b"error(message)" && into.root.node == out.root.node && origin.bytes() == b"?")
+                },
+            );
+            assert_return(
+                &linear(mir, right_ok),
+                &result.ok.id,
+                true,
+                &[b"owner: string", b"message: string"],
+            );
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("options", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("options", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }

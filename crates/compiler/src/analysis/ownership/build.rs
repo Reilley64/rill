@@ -21,10 +21,16 @@ use std::sync::Arc;
 
 enum CallPropagation<'a, 'g> {
     PipeCarrier(&'a Type<'g>),
-    Argument {
-        argument: PropagatingArgument,
+    Arguments {
+        arguments: PropagatingArguments,
         returning: Pc,
     },
+}
+
+#[derive(Clone, Copy)]
+struct PropagatingArguments {
+    first: PropagatingArgument,
+    second: Option<PropagatingArgument>,
 }
 
 #[derive(Clone, Copy)]
@@ -789,8 +795,8 @@ impl<'a, 'g> Build<'a, 'g> {
                     self.budget.step(1)?;
                     if let Some(fact) = self.facts.get(&initializer).copied()
                         && let NodeFactKind::Expression(facts) = &fact.kind
-                        && let Some(argument) =
-                            self.propagating_argument(initializer, facts, depth + 1)?
+                        && let Some(arguments) =
+                            self.propagating_arguments(initializer, facts, depth + 1)?
                     {
                         let into = match binding {
                             Binding::Discard => None,
@@ -798,8 +804,8 @@ impl<'a, 'g> Build<'a, 'g> {
                             _ => return Err(Stop::Pending(node)),
                         };
                         if fact.flow.pending
-                            || fact.flow.normal != argument.can_continue
-                            || fact.flow.returns != argument.can_return
+                            || fact.flow.normal != arguments.first.can_continue
+                            || fact.flow.returns != arguments.first.can_return
                         {
                             return Err(Stop::Pending(initializer));
                         }
@@ -809,8 +815,8 @@ impl<'a, 'g> Build<'a, 'g> {
                             into,
                             next,
                             depth + 1,
-                            Some(CallPropagation::Argument {
-                                argument,
+                            Some(CallPropagation::Arguments {
+                                arguments,
                                 returning: exits.returning,
                             }),
                         );
@@ -1583,16 +1589,16 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(false)
     }
 
-    fn propagating_argument(
+    fn propagating_arguments(
         &mut self,
         node: NodeId,
         facts: &ExpressionFacts<'g>,
         depth: usize,
-    ) -> ResultOf<Option<PropagatingArgument>> {
+    ) -> ResultOf<Option<PropagatingArguments>> {
         let Some(call) = facts.call.as_deref() else {
             return Ok(None);
         };
-        let mut argument = None;
+        let mut arguments: Option<PropagatingArguments> = None;
         for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
             let root = self.ungroup(arg)?;
@@ -1604,20 +1610,39 @@ impl<'a, 'g> Build<'a, 'g> {
                     Some(DataExpression::ErrorPipe { propagation, .. }) => propagation.as_ref(),
                     _ => return Err(Stop::Pending(root)),
                 };
-                if !(exit.can_return || exit.can_continue) || argument.is_some() {
+                if !(exit.can_return || exit.can_continue) {
                     return Err(Stop::Pending(node));
                 }
-                argument = Some(PropagatingArgument {
+                let argument = PropagatingArgument {
                     position,
                     root,
                     can_continue: exit.can_continue,
                     can_return: exit.can_return,
-                });
+                };
+                match &mut arguments {
+                    None => {
+                        arguments = Some(PropagatingArguments {
+                            first: argument,
+                            second: None,
+                        })
+                    }
+                    Some(exits)
+                        if exits.second.is_none()
+                            && exits.first.can_continue
+                            && exits.first.can_return
+                            && argument.can_continue
+                            && argument.can_return =>
+                    {
+                        exits.second = Some(argument)
+                    }
+                    _ => return Err(Stop::Pending(node)),
+                }
             }
         }
-        let Some(argument) = argument else {
+        let Some(arguments) = arguments else {
             return Ok(None);
         };
+        let argument = arguments.first;
         if call.pipe_input.is_some()
             || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
         {
@@ -1655,7 +1680,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             }
         }
-        Ok(Some(argument))
+        Ok(Some(arguments))
     }
 
     fn propagating_pipe_result(
@@ -2440,10 +2465,10 @@ impl<'a, 'g> Build<'a, 'g> {
             }
         }
         let failure_only = match propagation {
-            Some(CallPropagation::Argument {
-                argument,
+            Some(CallPropagation::Arguments {
+                arguments,
                 returning,
-            }) if !argument.can_continue => Some((argument, returning)),
+            }) if !arguments.first.can_continue => Some((arguments.first, returning)),
             _ => None,
         };
         let staged = match failure_only {
@@ -2500,18 +2525,24 @@ impl<'a, 'g> Build<'a, 'g> {
         let destination = retention
             .map(|(position, contents)| self.call_destination(call, position, &args, &contents))
             .transpose()?;
-        let argument_exit = match propagation {
-            Some(CallPropagation::Argument {
-                argument,
+        let argument_exits = match propagation {
+            Some(CallPropagation::Arguments {
+                arguments,
                 returning,
             }) => {
-                // On a feasible failure the prefix still belongs to the caller.
-                let failure_cleanup = if argument.can_return {
-                    self.cleanup(argument.root, &args[..argument.position], returning)?
-                } else {
-                    returning
+                let mut with_cleanup = |argument: PropagatingArgument| -> ResultOf<_> {
+                    // Each feasible failure owns the prefix reached at that argument.
+                    let failure_cleanup = if argument.can_return {
+                        self.cleanup(argument.root, &args[..argument.position], returning)?
+                    } else {
+                        returning
+                    };
+                    Ok((argument, failure_cleanup))
                 };
-                Some((argument, failure_cleanup))
+                Some([
+                    Some(with_cleanup(arguments.first)?),
+                    arguments.second.map(with_cleanup).transpose()?,
+                ])
             }
             _ => None,
         };
@@ -2535,14 +2566,24 @@ impl<'a, 'g> Build<'a, 'g> {
             .chain(pipe_argument)
         {
             let slot = self.calls[index].args[i];
-            if let Some((argument, failure_cleanup)) = argument_exit
-                && argument.position == i
-            {
-                // The proof already read this root; lowering reads its syntax and facts again.
-                self.budget.step(2)?;
-                next =
-                    self.propagate(argument.root, Some(slot), next, failure_cleanup, depth + 1)?;
-                continue;
+            if let Some(exits) = argument_exits {
+                self.budget.step(exits.len())?;
+                if let Some((argument, failure_cleanup)) = exits
+                    .into_iter()
+                    .flatten()
+                    .find(|(argument, _)| argument.position == i)
+                {
+                    // The proof already read this root; lowering reads its syntax and facts again.
+                    self.budget.step(2)?;
+                    next = self.propagate(
+                        argument.root,
+                        Some(slot),
+                        next,
+                        failure_cleanup,
+                        depth + 1,
+                    )?;
+                    continue;
+                }
             }
             let root = self.ungroup(arg)?;
             let existing_exclusive = matches!(
