@@ -188,6 +188,174 @@ fn option_postfix_returns_through_initialized_cleanup() {
 }
 
 #[test]
+fn option_pipe_propagates_the_staged_call_output_once() {
+    probe_with_typed(
+        "propagation::option_pipe_propagates_the_staged_call_output_once",
+        r#"
+            function pass(value: Option<bool>, taken: string): Option<bool> { dispose(taken); return value; }
+            function paths(input: Option<bool>, taken: string, owner: string): Option<bool> {
+                let bit = taken |> pass(input, _)?;
+                dispose(owner);
+                return Option.Some(bit);
+            }
+            function absent(taken: string): Option<bool>.None { dispose(taken); return Option<bool>.None; }
+            function failure(taken: string, owner: string): Option<bool> {
+                let _ = taken |> absent?;
+                dispose(owner);
+                return Option.Some(true);
+            }
+            function present(taken: string): Option<bool>.Some { dispose(taken); return Option.Some(true); }
+            function success(taken: string, owner: string): Option<bool> {
+                let ((bit)) = (taken |> present?);
+                dispose(owner);
+                return Option.Some(bit);
+            }
+            function moved(input: Option<bool>, taken: string): Option<bool> {
+                let _ = taken |> pass(input, _)?;
+                dispose(taken);
+                return Option.Some(true);
+            }
+            function bad(taken: string): Option<bool>.None {
+                dispose(taken);
+                dispose(taken);
+                return Option<bool>.None;
+            }
+            function reachedBad(taken: string): Option<bool> {
+                let _ = taken |> bad?;
+                return Option.Some(true);
+            }
+            function passText(value: string): Option<string> { return Option.Some(value); }
+            function unsupported(input: string): Option<bool> {
+                let _ = input |> passText?;
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let role = typed.option_role().unwrap();
+            let report = check("paths");
+            let mir = report
+                .mir()
+                .unwrap_or_else(|| panic!("paths: {:?}", report.completion()));
+            let route: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Call(_)
+                            | Operation::TestVariant { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Move { from: owner, into: Some(owner_stage) },
+                Operation::Copy { from: input, into: Some(input_stage) },
+                Operation::Call(pass), Operation::TestVariant { operand, success },
+            ] if owner.root.span.bytes() == b"taken: string" && owner_stage.root.span.bytes() == b"taken"
+                && input.root.span.bytes() == b"input: Option<bool>" && input_stage.root.span.bytes() == b"input"
+                && *pass == &declaration("pass").id && *success == &role.some.id
+                && operand.root.span.bytes() == b"taken |> pass(input, _)?"),
+                "{route:?}"
+            );
+            let (some, none) = branch_targets(mir);
+            let success = linear(mir, some);
+            let failure = linear(mir, none);
+            for branch in [true, false] {
+                assert_eq!(calls_on_path(mir, [branch]), [&declaration("pass").id]);
+            }
+            assert!(success.iter().any(|op| matches!(op, Operation::CopyOptionPayload { operand, into }
+                if operand.root.span.bytes() == b"taken |> pass(input, _)?" && into.root.span.bytes() == b"bit")));
+            assert!(
+                success
+                    .iter()
+                    .any(|op| matches!(op, Operation::Dispose { operand, .. }
+                if operand.root.span.bytes() == b"owner: string"))
+            );
+            assert_return(&success, &role.some.id, true, &[]);
+            assert_return(&failure, &role.none.id, false, &[b"owner: string"]);
+            assert!(!failure.iter().any(|op| matches!(
+                op,
+                Operation::CopyOptionPayload { .. } | Operation::Dispose { .. }
+            )));
+            for (name, callee, variant, has_payload, drops) in [
+                (
+                    "failure",
+                    "absent",
+                    &role.none.id,
+                    false,
+                    &[b"owner: string".as_slice()][..],
+                ),
+                ("success", "present", &role.some.id, true, &[][..]),
+            ] {
+                let report = check(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                assert_eq!(calls_on_path(mir, []), [&declaration(callee).id]);
+                let ops = linear(mir, mir.entry);
+                assert_return(&ops, variant, has_payload, drops);
+                assert_eq!(
+                    ops.iter()
+                        .any(|op| matches!(op, Operation::CopyOptionPayload { .. })),
+                    has_payload
+                );
+            }
+            for (name, related) in [("moved", "taken"), ("reachedBad", "dispose(taken)")] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one moved-source diagnostic")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), b"dispose(taken)");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes());
+            }
+            let unsupported = check("unsupported");
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert_eq!(
+                unsupported.blocked_at().unwrap().span.bytes(),
+                b"input |> passText?"
+            );
+            assert!(unsupported.mir().is_none());
+            let limits = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("paths", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("paths", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
     probe_with_typed(
         "propagation::scalar_infix_wraps_only_failure_and_preserves_the_cause",

@@ -729,10 +729,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 let value = *children.last().unwrap();
                 let binding = self.binding(node)?;
                 let initializer = self.ungroup(value)?;
-                if matches!(
-                    self.module.syntax.nodes[initializer].kind,
-                    NodeKind::Propagate | NodeKind::Wrap
-                ) {
+                let syntax = &self.module.syntax.nodes[initializer];
+                let propagates = match syntax.kind {
+                    NodeKind::Propagate | NodeKind::Wrap => true,
+                    NodeKind::Pipe => {
+                        self.module.syntax.nodes[syntax.children[1]].kind
+                            == (NodeKind::PipeStep { propagate: true })
+                    }
+                    _ => false,
+                };
+                if propagates {
                     let into = match binding {
                         Binding::Discard => None,
                         Binding::Name { declaration, .. } => Some(self.locals[declaration]),
@@ -1310,22 +1316,31 @@ impl<'a, 'g> Build<'a, 'g> {
         return_cleanup: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        let source = self.module.syntax.nodes[node].children[0];
-        let operand = self.value(source)?;
+        let syntax = &self.module.syntax.nodes[node];
+        let facts = self.value(node)?;
         let (id, result) = self.return_contract;
-        let (exit, wrap) = match &self.value(node)?.data {
+        let (exit, wrap) = match &facts.data {
             Some(DataExpression::Propagation(exit)) => (exit.as_ref(), None),
             Some(DataExpression::Wrapping(wrap)) => (&wrap.branch, Some(&wrap.construction)),
             _ => return Err(Stop::Pending(node)),
         };
-        if operand.access != Access::Owned
-            || !matches!(exit.target, PropagationTarget::Callable(target) if target == id)
-        {
+        if !matches!(exit.target, PropagationTarget::Callable(target) if target == id) {
             return Err(Stop::Pending(node));
         }
+        let piped = syntax.kind == NodeKind::Pipe;
+        let (source, operand) = if piped {
+            (node, self.propagating_pipe_result(node, facts)?)
+        } else {
+            let source = syntax.children[0];
+            let operand = self.value(source)?;
+            if operand.access != Access::Owned {
+                return Err(Stop::Pending(node));
+            }
+            (source, &operand.ty)
+        };
         let wrapper = if let Some(error) = &exit.error {
             let (role, _) = self
-                .scalar_result_role(&operand.ty)
+                .scalar_result_role(operand)
                 .ok_or(Stop::Pending(node))?;
             if !matches!(self.scalar_result_role(result), Some((_, None)))
                 || exit.success != &role.ok.id
@@ -1337,9 +1352,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             Some(error.wrapper)
         } else {
-            let role = self
-                .bool_option_role(&operand.ty)
-                .ok_or(Stop::Pending(node))?;
+            let role = self.bool_option_role(operand).ok_or(Stop::Pending(node))?;
             if wrap.is_some()
                 || self.bool_option_role(result).is_none()
                 || exit.success != &role.some.id
@@ -1349,7 +1362,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             None
         };
-        let scratch = self.slot(source, &operand.ty)?;
+        let scratch = self.slot(source, operand)?;
         let return_slot = if exit.can_return {
             let output = self.slot(node, result)?;
             let returning = self.check_retained(node, return_cleanup)?;
@@ -1437,7 +1450,52 @@ impl<'a, 'g> Build<'a, 'g> {
             (Some(edge), None) | (None, Some(edge)) => edge,
             (None, None) => return Err(Stop::Pending(node)),
         };
-        self.expression(source, Some(scratch), split, depth)
+        if piped {
+            self.call(node, Some(scratch), split, depth, Some(operand))
+        } else {
+            self.expression(source, Some(scratch), split, depth)
+        }
+    }
+
+    fn propagating_pipe_result(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+    ) -> ResultOf<&'a Type<'g>> {
+        let call = facts.call.as_deref().ok_or(Stop::Pending(node))?;
+        if call.pipe_input.is_none()
+            || call.callee.kind != DeclarationKind::Function
+            || call.callee.module.origin != Origin::Application
+            || !call.substitution.is_empty()
+        {
+            return Err(Stop::Pending(node));
+        }
+        // The pipe node's expression type describes the success payload.
+        // The declared result is the carrier to stage before branching.
+        self.budget.step(1)?;
+        let signature = self
+            .typed
+            .inventory()
+            .type_facts()
+            .declarations
+            .get(call.callee)
+            .ok_or(Stop::Pending(node))?;
+        let DeclarationShape::Function { parameters, result } = &signature.shape else {
+            return Err(Stop::Pending(node));
+        };
+        if parameters.len() != call.arguments.len() || self.bool_option_role(result).is_none() {
+            return Err(Stop::Pending(node));
+        }
+        for (formal, &arg) in parameters.iter().zip(&call.arguments) {
+            self.budget.step(2)?;
+            if !(matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
+                || self.bool_option_role(&formal.ty).is_some())
+                || self.value(arg)?.ty != formal.ty
+            {
+                return Err(Stop::Pending(node));
+            }
+        }
+        Ok(result)
     }
 
     fn wrap_result_failure(
@@ -1822,7 +1880,7 @@ impl<'a, 'g> Build<'a, 'g> {
             NodeKind::Arrow => {
                 return self.closure(node, into.ok_or(Stop::Pending(node))?, next, depth + 1);
             }
-            NodeKind::Call => return self.call(node, into, next, depth + 1),
+            NodeKind::Call => return self.call(node, into, next, depth + 1, None),
             NodeKind::Pipe
                 if self.module.syntax.nodes[syntax.children[1]].kind
                     == (NodeKind::PipeStep { propagate: false })
@@ -1831,7 +1889,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         .as_ref()
                         .is_some_and(|call| call.pipe_input.is_some()) =>
             {
-                return self.call(node, into, next, depth + 1);
+                return self.call(node, into, next, depth + 1, None);
             }
             _ => return Err(Stop::Pending(node)),
         };
@@ -2085,7 +2143,14 @@ impl<'a, 'g> Build<'a, 'g> {
         )
     }
 
-    fn call(&mut self, node: NodeId, into: Option<Slot>, next: Pc, depth: usize) -> ResultOf<Pc> {
+    fn call(
+        &mut self,
+        node: NodeId,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+        step_result: Option<&Type<'g>>,
+    ) -> ResultOf<Pc> {
         let facts = self.value(node)?;
         let Some(call) = facts.call.as_deref() else {
             return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next);
@@ -2124,22 +2189,24 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             return self.emit(node, Action::Dispose(operand), Edges::Next(next));
         }
+        let result = step_result.unwrap_or(&facts.ty);
         if call.callee.kind != DeclarationKind::Function
             || call.callee.module.origin != Origin::Application
             || !call.substitution.is_empty()
-            || !self.direct_call_type(&facts.ty)
+            || !self.direct_call_type(result)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())
         {
             return Err(Stop::Pending(node));
         }
         let piped = call.pipe_input.is_some();
+        let ordinary_pipe = piped && step_result.is_none();
         let mut tuple_or_leaf_admitted =
-            piped && self.admits_direct_tuple_or_leaf_call(call, &facts.ty)?;
+            ordinary_pipe && self.admits_direct_tuple_or_leaf_call(call, result)?;
         let mut pipe_retention = None;
-        if piped && !tuple_or_leaf_admitted {
+        if ordinary_pipe && !tuple_or_leaf_admitted {
             // Prove the exact retaining signature before building slots.
             if !matches!(call.arguments.len(), 2 | 3)
-                || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
+                || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
             {
                 return Err(Stop::Pending(node));
             }
@@ -2155,9 +2222,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             }
         }
-        let mut retains_result = primitive_reference(&facts.ty);
+        let mut retains_result = primitive_reference(result);
         if matches!(
-            facts.ty.as_ref(),
+            result.as_ref(),
             TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
         ) {
             // A flat tuple can hold the conservative input union at its
@@ -2166,7 +2233,7 @@ impl<'a, 'g> Build<'a, 'g> {
             for member in self.slots[output].storage(output).skip(1) {
                 self.budget.step(1)?;
                 if self.slots[member].reference_member {
-                    if !matches!(facts.ty.as_ref(), TypeTerm::Tuple(_)) {
+                    if !matches!(result.as_ref(), TypeTerm::Tuple(_)) {
                         return Err(Stop::Pending(node));
                     }
                     retains_result = true;
@@ -2188,7 +2255,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     return Err(Stop::Pending(arg));
                 }
             } else if !self.direct_call_type(&ty) && !tuple_or_leaf_admitted {
-                if !self.admits_direct_tuple_or_leaf_call(call, &facts.ty)? {
+                if !self.admits_direct_tuple_or_leaf_call(call, result)? {
                     return Err(Stop::Pending(arg));
                 }
                 tuple_or_leaf_admitted = true;

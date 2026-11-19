@@ -1767,11 +1767,6 @@ fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
                 return &local;
             }
             function reachedBad(first: &[bool, string]): &string { return first |> bad; }
-            function option(input: bool): Option<bool> { return Option<bool>.Some(input); }
-            function propagating(input: bool): Option<bool> {
-                let bit = input |> option?;
-                return Option<bool>.Some(bit);
-            }
             function store(destination: &mut &bool, source: &bool, flag: bool): void { *destination = source; }
             function retained(destination: &mut &bool, source: &bool): void { source |> store(destination, _, true); }
             function owned(first: &[bool, string], second: [bool, string]): bool { return false; }
@@ -1904,7 +1899,6 @@ fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
                 ("retained", "source |> store(destination, _, true)"),
                 ("ownedArgument", "second |> owned(first, _)"),
                 ("nestedArgument", "[[true, false], true] |> ownedNested"),
-                ("propagating", "input |> option?"),
             ] {
                 let report = check(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
