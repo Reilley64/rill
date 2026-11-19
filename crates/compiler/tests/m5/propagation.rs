@@ -7102,7 +7102,7 @@ fn assert_forward(
     });
 }
 
-fn assert_return(
+pub(super) fn assert_return(
     ops: &[&Operation<'_>],
     expected: &loader::DeclarationId,
     has_payload: bool,

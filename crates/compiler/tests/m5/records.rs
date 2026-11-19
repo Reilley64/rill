@@ -1,6 +1,44 @@
 use super::*;
 
 #[test]
+fn nested_owned_records_reach_the_m5_storage_boundary() {
+    probe(
+        "records::nested_owned_records_reach_the_m5_storage_boundary",
+        r#"
+            type Inner = { text: string; }
+            type Outer = { child: Inner; sibling: string; }
+            function cleanup(value: Outer): void {}
+            function branch(flag: bool, value: Outer): string {
+                if (flag) { let taken = value.child; }
+                return value.sibling;
+            }
+            function backedge(flag: bool, value: Outer): void {
+                while (flag) { let taken = value.child; continue; }
+            }
+        "#,
+        |_, module, receipt| {
+            for name in ["cleanup", "branch", "backedge"] {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap();
+                let report =
+                    lower_body(receipt, module, &declaration.id, AnalysisLimits::default())
+                        .unwrap();
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    b"value: Outer",
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn owned_record_projections() {
     probe(
         "records::owned_record_projections",

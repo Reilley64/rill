@@ -412,6 +412,143 @@ fn ownership_from_installed_source() {
     );
 }
 
+#[test]
+fn installed_multi_module_borrow_join_and_early_exit() {
+    probe_report_with_modules(
+        "installed_multi_module_borrow_join_and_early_exit",
+        r#"
+            import borrow_api::{relay};
+            function observe(view: &string): void {}
+            function accepted(flag: bool, gate: Option<bool>, left: string, right: string): Option<bool> {
+                let mut view = relay(&left);
+                if (flag) { view = relay(&right); }
+                let bit = gate?;
+                observe(view);
+                return Option.Some(bit);
+            }
+            function rejected(flag: bool, gate: Option<bool>, left: string, right: string): Option<bool> {
+                let mut view = relay(&left);
+                if (flag) { view = relay(&right); }
+                let bit = gate?;
+                dispose(right);
+                observe(view);
+                return Option.Some(bit);
+            }
+        "#,
+        &[(
+            "borrow_api.rill",
+            "export function relay(value: &string): &string { return value; }",
+        )],
+        |_, module, typed| {
+            let receipt = typed.receipt().unwrap_or_else(|| {
+                panic!(
+                    "multi-module M4 handoff: {:?}, core {:?}, body obligations {:?}",
+                    typed.completion(),
+                    typed.core_blockers(),
+                    typed
+                        .bodies()
+                        .obligations()
+                        .iter()
+                        .map(|o| (o.reason, o.site.span.bytes().escape_ascii().to_string()))
+                        .collect::<Vec<_>>()
+                )
+            });
+            let relay = &typed
+                .inventory()
+                .type_facts()
+                .declarations()
+                .map(|facts| facts.declaration)
+                .find(|decl| {
+                    decl.id.module.origin == Origin::Application
+                        && decl.id.module.path == "borrow_api.rill"
+                        && decl.name.as_deref() == Some("relay")
+                })
+                .unwrap()
+                .id;
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower =
+                |name| lower_body(&receipt, module, id(name), AnalysisLimits::default()).unwrap();
+            let accepted = lower("accepted");
+            let mir = accepted.mir().unwrap_or_else(|| {
+                panic!(
+                    "multi-module accepted: {:?} at {:?}",
+                    accepted.completion(),
+                    accepted.blocked_at().map(|site| (
+                        &site.module.path,
+                        site.span.bytes().escape_ascii().to_string()
+                    ))
+                )
+            });
+            let before = straight_blocks(mir, mir.entry);
+            let (yes, no) = branch_targets(mir);
+            assert!(
+                matches!(before.iter().filter_map(|block| match &block.operation {
+                Operation::Borrow { .. } | Operation::Call(_) => Some(&block.operation),
+                _ => None,
+            }).collect::<Vec<_>>().as_slice(), [Operation::Borrow { source, exclusive: false, .. }, Operation::Call(callee)]
+                if source.root.span.bytes() == b"left: string" && *callee == relay)
+            );
+            let through_yes = straight_blocks(mir, yes);
+            let through_no = straight_blocks(mir, no);
+            assert!(
+                matches!(through_yes.iter().filter_map(|block| match &block.operation {
+                Operation::Borrow { .. } | Operation::Call(_) | Operation::Install { .. } => Some(&block.operation),
+                _ => None,
+            }).collect::<Vec<_>>().as_slice(), [Operation::Borrow { source, exclusive: false, .. }, Operation::Call(callee), Operation::Install { target, .. }]
+                if source.root.span.bytes() == b"right: string" && *callee == relay && target.root.span.bytes() == b"view")
+            );
+            assert!(!through_no.iter().any(|block| matches!(
+                block.operation,
+                Operation::Call(_) | Operation::Install { .. }
+            )));
+            let option = typed.option_role().unwrap();
+            for arm in [through_yes, through_no] {
+                let join = arm.last().unwrap();
+                let (Operation::TestVariant { operand, success }, Terminator::Branch { yes, no }) =
+                    (&join.operation, join.terminator)
+                else {
+                    panic!("expected the propagation split after each incoming path")
+                };
+                assert_eq!(operand.root.span.bytes(), b"gate");
+                assert_eq!(*success, &option.some.id);
+                let failure = linear(mir, no);
+                let success = linear(mir, yes);
+                let drops: &[&[u8]] = &[b"right: string", b"left: string"];
+                propagation::assert_return(&failure, &option.none.id, false, drops);
+                propagation::assert_return(&success, &option.some.id, true, drops);
+                assert!(!failure.iter().any(|op| matches!(op, Operation::Call(_))));
+                assert_eq!(
+                    success
+                        .iter()
+                        .filter_map(|op| if let Operation::Call(callee) = op {
+                            Some(*callee)
+                        } else {
+                            None
+                        })
+                        .collect::<Vec<_>>(),
+                    [id("observe")]
+                );
+            }
+            let rejected = lower("rejected");
+            assert_eq!(rejected.completion(), Completion::SourceRejected);
+            assert!(rejected.mir().is_none());
+            let [finding] = rejected.findings() else {
+                panic!("expected one joined dependency finding")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"dispose(right)");
+            assert_eq!(finding.related.span.bytes(), b"&right");
+        },
+    );
+}
+
 fn probe(
     test: &str,
     source: &str,
@@ -464,6 +601,15 @@ fn probe_with_typed(
 fn probe_report(
     test: &str,
     source: &str,
+    verify: impl for<'g> FnMut(&InstalledRequest, &'g loader::Module, &TypedReport<'g>),
+) {
+    probe_report_with_modules(test, source, &[], verify);
+}
+
+fn probe_report_with_modules(
+    test: &str,
+    source: &str,
+    modules: &[(&str, &str)],
     mut verify: impl for<'g> FnMut(&InstalledRequest, &'g loader::Module, &TypedReport<'g>),
 ) {
     const IMPORTS: &str = r#"
@@ -480,6 +626,9 @@ fn probe_report(
     "#;
     installed(test, |request| {
         fs::write(&request.entry, format!("{IMPORTS}\n{source}")).unwrap();
+        for (file, source) in modules {
+            fs::write(request.entry.with_file_name(file), source).unwrap();
+        }
         for test_mode in [false, true] {
             let request = InstalledRequest {
                 test_mode,
@@ -490,7 +639,7 @@ fn probe_report(
             let module = graph
                 .modules()
                 .iter()
-                .find(|m| m.key.origin == Origin::Application)
+                .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
                 .unwrap();
 
             verify(&request, module, &typed);
