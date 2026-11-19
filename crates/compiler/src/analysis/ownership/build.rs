@@ -1640,8 +1640,8 @@ impl<'a, 'g> Build<'a, 'g> {
         let Some(call) = facts.call.as_deref() else {
             return Ok(None);
         };
-        let mut arguments = Vec::new();
-        let mut terminal = None;
+        let mut roots = Vec::new();
+        let mut terminal_root_index = None;
         let mut can_return = false;
         for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
@@ -1657,21 +1657,21 @@ impl<'a, 'g> Build<'a, 'g> {
                 if !(exit.can_return || exit.can_continue) {
                     return Err(Stop::Pending(node));
                 }
-                if terminal.is_none() {
+                if terminal_root_index.is_none() {
                     can_return |= exit.can_return;
                     if !exit.can_continue {
-                        terminal = Some(arguments.len());
+                        terminal_root_index = Some(roots.len());
                     }
                 }
                 self.budget.reserve(1)?;
-                arguments.push(PropagatingArgument {
+                roots.push(PropagatingArgument {
                     position,
                     root,
                     can_return: exit.can_return,
                 });
             }
         }
-        if arguments.is_empty() {
+        if roots.is_empty() {
             return Ok(None);
         }
         if call.pipe_input.is_some()
@@ -1693,10 +1693,10 @@ impl<'a, 'g> Build<'a, 'g> {
         }
         // A known failure skips the suffix, but only a checked complete
         // argument root may contain propagation there.
-        let terminal_failure = if let Some(index) = terminal {
+        let terminal_failure = if let Some(index) = terminal_root_index {
             self.budget.step(1)?;
-            let terminal = arguments[index];
-            let mut skipped = arguments[index + 1..].iter().peekable();
+            let terminal = roots[index];
+            let mut skipped = roots[index + 1..].iter().peekable();
             for (position, &arg) in call
                 .arguments
                 .iter()
@@ -1726,12 +1726,12 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 }
             }
-            arguments.truncate(index);
+            roots.truncate(index);
             Some(terminal)
         } else {
             None
         };
-        for argument in &arguments {
+        for argument in &roots {
             self.budget.step(1)?;
             if argument.can_return {
                 continue;
@@ -1745,7 +1745,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }
         }
         Ok(Some(PropagatingArguments {
-            continuing: arguments,
+            continuing: roots,
             terminal_failure,
             can_return,
         }))
@@ -2473,6 +2473,9 @@ impl<'a, 'g> Build<'a, 'g> {
         next: Pc,
         depth: usize,
     ) -> ResultOf<Option<Pc>> {
+        if exits.is_empty() {
+            return Ok(None);
+        }
         self.budget.step(1)?;
         let Some((argument, failure_cleanup)) =
             exits.pop_if(|(argument, _)| argument.position == position)
@@ -2692,9 +2695,8 @@ impl<'a, 'g> Build<'a, 'g> {
             .chain(pipe_argument)
         {
             let slot = self.calls[index].args[i];
-            if !argument_exits.is_empty()
-                && let Some(early) =
-                    self.stage_propagating_argument(&mut argument_exits, i, slot, next, depth)?
+            if let Some(early) =
+                self.stage_propagating_argument(&mut argument_exits, i, slot, next, depth)?
             {
                 next = early;
                 continue;

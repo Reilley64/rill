@@ -2807,6 +2807,11 @@ fn wider_propagating_calls_keep_each_reached_prefix() {
                 let bit = neverNarrow(stage(x), first?, second?, stage(y), third?);
                 return Option.Some(bit);
             }
+            function mixed(a: bool, b: bool, c: bool, d: bool, e: i32): bool { return a; }
+            function skippedWide(first: Option<bool>, stop: Option<bool>.None, skipped: Option<bool>): Option<bool> {
+                let _ = mixed(first?, stop?, skipped?, true, Option<i32>.Some(1i32)?);
+                return Option.Some(true);
+            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -2877,6 +2882,13 @@ fn wider_propagating_calls_keep_each_reached_prefix() {
                 narrow.mir().unwrap().blocks.len()
             );
             assert!(stop.statistics().work > narrow.statistics().work);
+            let skipped = check("skippedWide", default);
+            assert_eq!(skipped.completion(), Completion::Incomplete);
+            assert!(skipped.mir().is_none());
+            assert_eq!(
+                skipped.blocked_at().unwrap().span.bytes(),
+                b"Option<i32>.Some(1i32)?"
+            );
             let reached = check("reached", default);
             assert_eq!(reached.completion(), Completion::SourceRejected);
             assert!(reached.mir().is_none());
