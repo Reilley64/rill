@@ -495,6 +495,7 @@ fn lower<'g>(
     }
     build.budget.reserve(parameters.len())?;
     let mut params = Vec::with_capacity(parameters.len());
+    let mut owns_guard = false;
     for parameter in parameters {
         if matches!(parameter.ty.as_ref(), TypeTerm::Callable { .. }) {
             return Err(Stop::Pending(parameter.declaration.node));
@@ -505,6 +506,7 @@ fn lower<'g>(
             &parameter.ty,
         )?;
         params.push(slot);
+        owns_guard |= build.slots[slot].guard_release().is_some();
         if let Some(ty) = retained_bool_contents_type(&parameter.ty) {
             let contents = build.slot(parameter.declaration.node, ty)?;
             build.budget.reserve(1)?;
@@ -515,6 +517,18 @@ fn lower<'g>(
         {
             build.budget.reserve(1)?;
             build.incoming_exclusive_bools.push(slot);
+        }
+    }
+    if owns_guard {
+        // The scoped release contract does not establish mixed borrowed
+        // guard routes. Leave the existing reference-only bodies unchanged.
+        build.budget.step(parameters.len())?;
+        for parameter in parameters {
+            if let TypeTerm::Reference { referent, .. } = parameter.ty.as_ref()
+                && build.guard_provider(referent)?.is_some()
+            {
+                return Err(Stop::Pending(parameter.declaration.node));
+            }
         }
     }
     let active = if start_disposer {

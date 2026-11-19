@@ -19,15 +19,30 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
                 dispose(held);
                 held = second;
             }
+            function selfReplace(lock: LockGuard<i32>): void {
+                let mut held = lock;
+                held = held;
+            }
+            function loopExit(lock: LockGuard<i32>, enter: bool): void {
+                while (enter) { let held = lock; break; }
+            }
             function rejects(lock: LockGuard<i32>): void {
                 let held = lock;
                 dispose(held);
                 dispose(held);
             }
             function borrowed(lock: LockGuard<i32>): void { let view = &lock; }
+            function borrowedRelay(owned: LockGuard<i32>, view: &LockGuard<i32>): &LockGuard<i32> {
+                return view;
+            }
+            function borrowedRelayOther(owned: LockGuard<i32>, view: &LockGuard<bool>): &LockGuard<bool> {
+                return view;
+            }
+            function borrowedOnly(view: &LockGuard<i32>): &LockGuard<i32> { return view; }
             function passes(lock: LockGuard<i32>): LockGuard<i32> { return lock; }
             function takes(lock: LockGuard<i32>): void { }
             function callArgument(lock: LockGuard<i32>): void { takes(lock); }
+            function skippedCall(lock: LockGuard<i32>): void { if (false) { takes(lock); } }
             function callOutput(lock: LockGuard<i32>): void { let held = passes(lock); }
             function other(lock: LockGuard<bool>): void { }
         "#,
@@ -172,6 +187,41 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
                 ] if operand.root.node == held.root.node && *implementation == &provider.implementation.id
                     && *entry == &provider.entry.id))));
 
+            let self_replace = lower("selfReplace");
+            let mir = self_replace
+                .mir()
+                .expect("self-replacement stages ownership without dropping it");
+            assert!(matches!(path_drops(mir, mir.entry).as_slice(), [
+                Obligation::ReleaseGuard { operand, implementation, entry }
+            ] if operand.root.span.bytes() == b"held" && *implementation == &provider.implementation.id
+                && *entry == &provider.entry.id));
+            let loop_exit = lower("loopExit");
+            let mir = loop_exit
+                .mir()
+                .expect("loop exit cleans its initialized path owner");
+            let (yes, no) = branch_targets(mir);
+            for (edge, owner) in [
+                (yes, b"held".as_slice()),
+                (no, b"lock: LockGuard<i32>".as_slice()),
+            ] {
+                assert!(matches!(path_drops(mir, edge).as_slice(), [
+                    Obligation::ReleaseGuard { operand, implementation, entry }
+                ] if operand.root.span.bytes() == owner && *implementation == &provider.implementation.id
+                    && *entry == &provider.entry.id));
+            }
+            let skipped = lower("skippedCall");
+            let mir = skipped
+                .mir()
+                .expect("the typed but unsupported call is infeasible");
+            assert!(
+                !linear(mir, mir.entry)
+                    .iter()
+                    .any(|op| matches!(op, Operation::Call(_)))
+            );
+            assert!(matches!(path_drops(mir, mir.entry).as_slice(), [
+                Obligation::ReleaseGuard { operand, .. }
+            ] if operand.root.span.bytes() == b"lock: LockGuard<i32>"));
+
             let limits = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,
@@ -202,8 +252,15 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
             assert_eq!(finding.site.span.bytes(), b"dispose(held)");
             assert_eq!(finding.related.span.bytes(), b"dispose(held)");
             assert!(finding.related.span.start() < finding.site.span.start());
+            let borrowed = lower("borrowedOnly");
+            let mir = borrowed
+                .mir()
+                .expect("ordinary incoming references remain forwardable");
+            assert!(path_drops(mir, mir.entry).is_empty());
             for (name, expected) in [
                 ("borrowed", "&lock"),
+                ("borrowedRelay", "view: &LockGuard<i32>"),
+                ("borrowedRelayOther", "view: &LockGuard<bool>"),
                 ("passes", "lock"),
                 ("callArgument", "lock"),
                 ("callOutput", "passes(lock)"),

@@ -9,8 +9,8 @@ use crate::analysis::scalars::data::{
 use crate::analysis::scalars::generics::{GoalState, callables::CaptureForm};
 use crate::analysis::scalars::{ErrorConstruction, ExpressionFacts, PropagationTarget};
 use crate::analysis::typed::{
-    ErrorOperation, NativeOwnershipAction, NativeRepresentationKind, OptionRole, OwnershipCoverage,
-    OwnershipRule, ResultRole,
+    ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
+    OptionRole, OwnershipCoverage, OwnershipRule, ResultRole,
 };
 use crate::loader::Origin;
 use crate::parser::NodeKind;
@@ -161,16 +161,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if !matches!(argument.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32") {
             return Ok(None);
         }
-        let scopes = self.typed.ownership_protection();
-        self.budget.step(scopes.len())?;
-        let Some(provider) = scopes.iter().find_map(|scope| {
-            (&scope.owner.id == *declaration
-                && Some(scope.family) == self.dispose
-                && scope.rule == OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
-                && scope.coverage == OwnershipCoverage::Clear)
-                .then_some(scope.provider.as_ref())
-                .flatten()
-        }) else {
+        let Some(provider) = self.guard_provider(ty)? else {
             return Ok(None);
         };
         let representations = self.typed.native_representations();
@@ -186,6 +177,25 @@ impl<'a, 'g> Build<'a, 'g> {
                 implementation: &provider.implementation.id,
                 entry: &provider.entry.id,
             }))
+    }
+
+    pub(super) fn guard_provider(
+        &mut self,
+        ty: &TypeTerm<'g>,
+    ) -> ResultOf<Option<&'a NativeOwnershipProvider<'g>>> {
+        let TypeTerm::Nominal { declaration, .. } = ty else {
+            return Ok(None);
+        };
+        let scopes = self.typed.ownership_protection();
+        self.budget.step(scopes.len())?;
+        Ok(scopes.iter().find_map(|scope| {
+            (&scope.owner.id == *declaration
+                && Some(scope.family) == self.dispose
+                && scope.rule == OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
+                && scope.coverage == OwnershipCoverage::Clear)
+                .then_some(scope.provider.as_ref())
+                .flatten()
+        }))
     }
 
     fn direct_call_type(&self, ty: &TypeTerm<'g>) -> bool {
