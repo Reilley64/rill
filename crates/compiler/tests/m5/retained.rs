@@ -1377,6 +1377,107 @@ fn exact_alias_reads_and_writes_keep_value_and_access_separate() {
 }
 
 #[test]
+fn moved_incoming_write_checks_the_original_caller_contents() {
+    probe(
+        "retained::moved_incoming_write_checks_the_original_caller_contents",
+        r#"
+            function overwrite(slot: &mut &bool, seed: &bool): &bool {
+                let access = slot;
+                {
+                    let flag = true;
+                    *access = &flag;
+                    *access = seed;
+                }
+                return *access;
+            }
+            function escapes(slot: &mut &bool): void {
+                let flag = true;
+                { let access = slot; *access = &flag; }
+            }
+            function expires(slot: &mut &bool, seed: &bool): void {
+                let access = slot;
+                { let flag = true; *access = &flag; }
+                *access = seed;
+            }
+            function originalMoved(slot: &mut &bool, seed: &bool): void {
+                let access = slot;
+                *slot = seed;
+                *access = seed;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            let report = lower("overwrite");
+            let mir = report
+                .mir()
+                .expect("the overwrite retires the caller contents' local backing");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Borrow { .. }
+                            | Operation::Copy { .. }
+                            | Operation::InstallThrough { .. }
+                            | Operation::CopyThrough { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Move { from: original, into: Some(access) },
+                Operation::Borrow { source: flag, holder, exclusive: false },
+                Operation::InstallThrough { descriptor: first, incoming: borrowed },
+                Operation::Copy { from: seed, into: Some(staged) },
+                Operation::InstallThrough { descriptor: second, incoming },
+                Operation::CopyThrough { descriptor: read, into: Some(copied) },
+                Operation::Export(exported),
+            ] if original.root.span.bytes() == b"slot: &mut &bool" && access.root.span.bytes() == b"access"
+                && flag.root.span.bytes() == b"flag" && seed.root.span.bytes() == b"seed: &bool"
+                && [first, second, read].iter().all(|place| place.root.node == access.root.node)
+                && borrowed.root.node == holder.root.node && incoming.root.node == staged.root.node
+                && copied.root.node == exported.root.node));
+            for (name, code, site, related) in [
+                ("escapes", "R0202", "*access = &flag;", "&flag"),
+                (
+                    "expires",
+                    "R0203",
+                    "{ let flag = true; *access = &flag; }",
+                    "&flag",
+                ),
+                ("originalMoved", "R0200", "*slot = seed;", "slot"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(
+                    std::str::from_utf8(finding.site.span.bytes()),
+                    Ok(site),
+                    "{name} primary"
+                );
+                assert_eq!(
+                    std::str::from_utf8(finding.related.span.bytes()),
+                    Ok(related),
+                    "{name} related"
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
     use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 
@@ -1386,9 +1487,14 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
             function captured(slot: &mut &bool, input: &bool): mut () => void {
                 return () => { *slot = input; };
             }
-            function writeMoved(slot: &mut &bool, input: &bool): void {
+            function captureMoved(slot: &mut &bool, input: &bool): mut () => void {
                 let access = slot;
-                *access = input;
+                return () => { *access = input; };
+            }
+            function forward(slot: &mut &bool): &mut &bool { return slot; }
+            function callProduced(slot: &mut &bool, input: &bool): void {
+                let access = forward(slot);
+                *access = (input);
             }
             function unknown(slot: &mut Result<bool, i32>, incoming: Result<bool, i32>): void {
                 *slot = incoming;
@@ -1402,6 +1508,7 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
             for store in [
                 b"*slot = input;".as_slice(),
                 b"*access = input;",
+                b"*access = (input);",
                 b"*slot = incoming;",
             ] {
                 assert!(

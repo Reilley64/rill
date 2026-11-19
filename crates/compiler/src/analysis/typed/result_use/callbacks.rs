@@ -87,12 +87,14 @@ impl<'a, 'g> Check<'a, 'g> {
         let previous = std::mem::replace(&mut self.current_parameters, parameters);
         let mut states = self.singleton(Residence::default())?;
         for parameter in parameters {
-            states = self.seed(
-                states,
-                Root::Local(&parameter.declaration.id),
-                parameter.declaration.node,
-                &parameter.ty,
-            )?;
+            let id = &parameter.declaration.id;
+            let root = Root::Local(id);
+            states = self.seed(states, root, parameter.declaration.node, &parameter.ty)?;
+            if retained_bool_contents_type(&parameter.ty).is_some() {
+                for state in &mut states {
+                    state.store(root, &[], Content::CallerBoolAccess(id), self.budget)?;
+                }
+            }
         }
         if states.is_empty() {
             self.dead_statement(body, Residence::default(), depth + 1)?;

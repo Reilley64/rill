@@ -30,6 +30,13 @@ impl<'a, 'g> Check<'a, 'g> {
             if let Some(alias) = state.alias(from, &component, self.budget)? {
                 state.store(root, &[], Content::Alias(alias), self.budget)?;
             } else {
+                // Track the external origin, not another ownership permission.
+                if component.is_empty()
+                    && retained_bool_contents_type(&value.ty).is_some()
+                    && let Some(parameter) = state.caller_bool_access(from, self.budget)?
+                {
+                    state.store(root, &[], Content::CallerBoolAccess(parameter), self.budget)?;
+                }
                 for alias in state.aliases_under(from, &component, self.budget)? {
                     state.store(root, &[], Content::PossibleAlias(alias), self.budget)?;
                 }

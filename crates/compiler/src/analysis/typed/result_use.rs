@@ -615,19 +615,11 @@ impl<'a, 'g> Check<'a, 'g> {
                 let target = self.expression_facts(left)?;
                 let path = target.and_then(|expression| expression.path.as_ref());
                 let checked = self.facts(node)?.is_some();
-                let mut caller_bool_descriptor = false;
-                if checked
-                    && syntax.kind == NodeKind::Assignment("=")
-                    && let Some(path) = path
-                    && path.root.kind == DeclarationKind::Parameter
-                    && path.projections.as_slice() == [PathProjection::Dereference]
-                {
-                    self.budget.step(self.current_parameters.len())?;
-                    caller_bool_descriptor = self.current_parameters.iter().any(|parameter| {
-                        &parameter.declaration.id == path.root
-                            && retained_bool_contents_type(&parameter.ty).is_some()
-                    });
-                }
+                let plain_dereference = path.filter(|path| {
+                    checked
+                        && syntax.kind == NodeKind::Assignment("=")
+                        && path.projections.as_slice() == [PathProjection::Dereference]
+                });
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
                     let incoming = state.take(Root::Temporary(right), &[], self.budget)?;
@@ -644,8 +636,9 @@ impl<'a, 'g> Check<'a, 'g> {
                             ResultDiscardKind::Replacement,
                         )?;
                         state.install(incoming, *root, path, self.budget)?;
-                    } else if caller_bool_descriptor
+                    } else if let Some(path) = plain_dereference
                         && matches!(&storage, PlaceStorage::Indirect(locations) if locations.is_empty())
+                        && self.caller_bool_storage(state, path.root)?
                     {
                         // No local address or Result occurrence can reside in this
                         // scalar descriptor. The ownership pass checks its backing.
@@ -1066,6 +1059,28 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         Ok(normal)
+    }
+
+    fn caller_bool_storage(
+        &mut self,
+        state: &Residence<'g>,
+        root: &'g DeclarationId,
+    ) -> Work<bool> {
+        let origin = match root.kind {
+            DeclarationKind::Parameter => Some(root),
+            DeclarationKind::Binding => state.caller_bool_access(Root::Local(root), self.budget)?,
+            _ => None,
+        };
+        let Some(origin) = origin else {
+            return Ok(false);
+        };
+        // Only the current named body may use this handoff; a captured
+        // descriptor does not turn into one of the closure's own parameters.
+        self.budget.step(self.current_parameters.len())?;
+        Ok(self.current_parameters.iter().any(|parameter| {
+            &parameter.declaration.id == origin
+                && retained_bool_contents_type(&parameter.ty).is_some()
+        }))
     }
 
     fn component(
