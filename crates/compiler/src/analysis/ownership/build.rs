@@ -355,14 +355,27 @@ impl<'a, 'g> Build<'a, 'g> {
             .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_))))
     }
 
-    fn primitive_tuple_width(&mut self, elements: &[Type<'g>]) -> ResultOf<Option<(usize, bool)>> {
+    fn primitive_tuple_width(
+        &mut self,
+        elements: &[Type<'g>],
+        allows_nesting: impl FnOnce(&mut Self) -> ResultOf<bool>,
+    ) -> ResultOf<Option<(usize, bool)>> {
+        let mut allows_nesting = Some(allows_nesting);
         let mut width = elements.len();
         let mut nested = false;
         self.budget.step(width)?;
         for element in elements {
             match element.as_ref() {
                 TypeTerm::Primitive(_) => {}
-                TypeTerm::Tuple(inner) if self.primitive_tuple_elements(inner)? => {
+                TypeTerm::Tuple(inner) => {
+                    if let Some(check) = allows_nesting.take()
+                        && !check(self)?
+                    {
+                        return Ok(None);
+                    }
+                    if !self.primitive_tuple_elements(inner)? {
+                        return Ok(None);
+                    }
                     nested = true;
                     width = width.checked_add(inner.len()).ok_or(Stop::Limit)?;
                 }
@@ -414,26 +427,20 @@ impl<'a, 'g> Build<'a, 'g> {
                 let TypeTerm::Tuple(elements) = referent.as_ref() else {
                     return Ok(false);
                 };
-                let Some((width, nested)) = self.primitive_tuple_width(elements)? else {
+                let Some((width, _)) = self.primitive_tuple_width(elements, |this| {
+                    // Check the exclusive call boundary before scanning inner leaves.
+                    Ok(!mutable
+                        || call.pipe_input.is_none()
+                            && call.arguments.len() == 1
+                            && this
+                                .whole_named_owned_place(node)?
+                                .is_some_and(|(_, path)| {
+                                    path.root.kind == DeclarationKind::Parameter
+                                }))
+                })?
+                else {
                     return Ok(false);
                 };
-                if nested && *mutable {
-                    // A nested exclusive descriptor is admitted only as the
-                    // sole named incoming argument of a direct call.
-                    if call.pipe_input.is_some() || call.arguments.len() != 1 {
-                        return Ok(false);
-                    }
-                    let root = self.ungroup(node)?;
-                    self.budget.step(2)?;
-                    let input = self.value(root)?;
-                    if self.module.syntax.nodes[root].kind != NodeKind::ValueReference
-                        || input.access != Access::Owned
-                        || !matches!(&input.path, Some(path) if path.root.kind == DeclarationKind::Parameter
-                            && path.projections.is_empty())
-                    {
-                        return Ok(false);
-                    }
-                }
                 // Charge the proved tuple shape before comparing types.
                 self.budget.step(width.checked_add(2).ok_or(Stop::Limit)?)?;
             }
@@ -1265,22 +1272,39 @@ impl<'a, 'g> Build<'a, 'g> {
         result: &Type<'g>,
         width: usize,
     ) -> ResultOf<Option<&'a PlacePath<'g>>> {
-        let name = self.ungroup(self.module.syntax.nodes[operand].children[0])?;
+        let Some((input, path)) =
+            self.whole_named_owned_place(self.module.syntax.nodes[operand].children[0])?
+        else {
+            return Ok(None);
+        };
+        // Compare only after the caller has proved and metered the tuple shape.
+        self.budget.step(width)?;
+        Ok((*result == input.ty).then_some(path))
+    }
+
+    fn whole_named_owned_place(
+        &mut self,
+        node: NodeId,
+    ) -> ResultOf<Option<(&'a ExpressionFacts<'g>, &'a PlacePath<'g>)>> {
+        let name = self.ungroup(node)?;
+        self.budget.step(1)?;
         if self.module.syntax.nodes[name].kind != NodeKind::ValueReference {
             return Ok(None);
         }
-        // Compare only after the caller has proved and metered the tuple shape.
-        self.budget.step(1 + width)?;
+        self.budget.step(1)?;
         let input = self.value(name)?;
-        if input.access != Access::Owned || *result != input.ty {
-            return Ok(None);
-        }
-        Ok(input.path.as_ref().filter(|path| {
-            matches!(
-                path.root.kind,
-                DeclarationKind::Binding | DeclarationKind::Parameter
-            ) && path.projections.is_empty()
-        }))
+        Ok(input
+            .path
+            .as_ref()
+            .filter(|path| {
+                input.access == Access::Owned
+                    && matches!(
+                        path.root.kind,
+                        DeclarationKind::Binding | DeclarationKind::Parameter
+                    )
+                    && path.projections.is_empty()
+            })
+            .map(|path| (input, path)))
     }
 
     fn check_exclusive_pattern_source(
@@ -1298,7 +1322,7 @@ impl<'a, 'g> Build<'a, 'g> {
         self.budget.step(facts.binders.len())?;
         let nested_reborrow = if self.module.syntax.nodes[operand].kind == NodeKind::Prefix("*") {
             let (width, nested) = self
-                .primitive_tuple_width(elements)?
+                .primitive_tuple_width(elements, |_| Ok(true))?
                 .ok_or(Stop::Pending(pattern))?;
             let path = self
                 .named_exclusive_tuple_parent(operand, &facts.ty, width)?

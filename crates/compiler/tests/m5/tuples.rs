@@ -1008,6 +1008,18 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
                 useShared(copied);
                 return bit;
             }
+            function observeBlocked(parent: &mut [[bool, string], [bool, i32]]): void {
+                let view = readOnly(parent);
+                let copied = view;
+                let observer = &(parent);
+                useShared(copied);
+            }
+            function observeAfter(parent: &mut [[bool, string], [bool, i32]]): void {
+                let view = readOnly(parent);
+                let copied = view;
+                useShared(copied);
+                let observer = &(parent);
+            }
             function exclusiveBlocked(parent: &mut [[bool, string], [bool, i32]]): void {
                 let view = project(parent);
                 let movedView = view;
@@ -1055,6 +1067,8 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             function wideStep(parent: &mut [[bool, string, i32], i32]): bool { return true; }
             function narrow(parent: &mut [[bool], i32]): bool { return narrowStep(parent); }
             function wide(parent: &mut [[bool, string, i32], i32]): bool { return wideStep(parent); }
+            function narrowPipe(parent: &mut [[bool], i32]): bool { return parent |> narrowStep; }
+            function widePipe(parent: &mut [[bool, string, i32], i32]): bool { return parent |> wideStep; }
         "#,
         |_, module, receipt| {
             let id = |name| {
@@ -1084,6 +1098,7 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             assert!(
                 matches!(route.as_slice(), [Operation::Reborrow { parent, holder, exclusive: true }, Operation::Call(callee), Operation::Export(result)]
                 if parent.root.span.bytes() == b"parent: &mut [[bool, string], [bool, i32]]" && holder.root.span.bytes() == b"(parent)" && *callee == id("project")
+                    && parent.projection.is_none() && holder.projection.is_none() && result.projection.is_none()
                     && result.root.span.bytes() == b"project((parent))")
             );
             let resumes = lower("resumes", default);
@@ -1112,8 +1127,26 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
                 Operation::Copy { from: bit, into: Some(staged) }, Operation::Export(output),
             ] if parent.root.node == second.root.node && parent.root.node == third.root.node && parent.root.node == original.root.node
                 && first.root.span.bytes() == b"parent" && shared.root.span.bytes() == b"(parent)" && last.root.span.bytes() == b"parent"
+                && [parent, second, third, first, shared, last].iter().all(|place| place.projection.is_none())
                 && *first_call == id("snapshot") && *second_call == id("readOnly") && *use_call == id("useShared") && *last_call == id("snapshot")
                 && view.root.span.bytes() == b"view" && bit.root.span.bytes() == b"bit" && staged.root.node == output.root.node && moved.root.span.bytes() == b"moved"));
+            let observe = lower("observeAfter", default);
+            let mir = observe
+                .mir()
+                .expect("read-only access resumes after the copied view's last use");
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::Borrow { .. } | Operation::Call(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(ops.as_slice(), [
+                Operation::Reborrow { parent, exclusive: true, .. }, Operation::Call(project), Operation::Call(read),
+                Operation::Borrow { source, exclusive: false, .. },
+            ] if parent.root.node == source.root.node && source.projection.is_none() && *project == id("readOnly") && *read == id("useShared")));
             for (name, code, at, cause) in [
                 (
                     "sharedBlocked",
@@ -1121,6 +1154,7 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
                     b"(parent)".as_slice(),
                     b"parent".as_slice(),
                 ),
+                ("observeBlocked", "R0201", b"&(parent)", b"parent"),
                 ("exclusiveBlocked", "R0203", b"parent", b"parent"),
                 ("movedParent", "R0200", b"(parent)", b"parent"),
                 ("reachedBad", "R0202", b"return &mut owner;", b"owner"),
@@ -1134,6 +1168,10 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
                 assert_eq!(finding.code(), code, "{name}");
                 assert_eq!(finding.site.span.bytes(), at, "{name}");
                 assert_eq!(finding.related.span.bytes(), cause, "{name}");
+                assert!(
+                    finding.related.span.start() < finding.site.span.start(),
+                    "{name}: cause precedes the conflicting use"
+                );
             }
             for (name, at) in [
                 ("explicit", b"&mut *parent".as_slice()),
@@ -1155,6 +1193,13 @@ fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
             assert!(wide.statistics().work >= narrow.statistics().work + 4);
             assert_eq!(wide.statistics().entries, narrow.statistics().entries);
             assert_eq!(wide.statistics().max_depth, narrow.statistics().max_depth);
+            let narrow_pipe = lower("narrowPipe", default);
+            let wide_pipe = lower("widePipe", default);
+            for pipe in [&narrow_pipe, &wide_pipe] {
+                assert_eq!(pipe.completion(), Completion::Incomplete);
+                assert!(pipe.mir().is_none());
+            }
+            assert_eq!(wide_pipe.statistics().work, narrow_pipe.statistics().work);
             let exact = AnalysisLimits {
                 max_work: resumes.statistics().work,
                 max_entries: resumes.statistics().entries,
