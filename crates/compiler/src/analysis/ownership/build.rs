@@ -68,6 +68,11 @@ struct PropagatingArgument {
     can_return: bool,
 }
 
+enum OptionPayload<'t, 'g> {
+    Bool,
+    Text(&'t Type<'g>),
+}
+
 struct CheckedPropagation<'a, 'g> {
     exit: &'a Propagation<'g>,
     wrap: Option<&'a ErrorConstruction<'g>>,
@@ -219,12 +224,14 @@ impl<'a, 'g> Build<'a, 'g> {
                 if let Some((role, payload)) = self.admitted_option(ty) =>
             {
                 self.prove_no_variant_disposer(node, ty, [role.some, role.none])?;
-                if owns_text(payload) {
-                    // Propagation consumes the carrier. Cleanup of a live
-                    // carrier would need variant-aware disposal.
-                    (true, StorageCleanup::Unlowered)
-                } else {
-                    (false, StorageCleanup::End)
+                match payload {
+                    OptionPayload::Bool => (false, StorageCleanup::End),
+                    OptionPayload::Text(_) if matches!(ty.as_ref(), TypeTerm::Variant { declaration, .. } if *declaration == &role.none.id) => {
+                        (false, StorageCleanup::End)
+                    }
+                    // Cleanup of a carrier that can hold text would need
+                    // variant-aware disposal.
+                    OptionPayload::Text(_) => (true, StorageCleanup::Unlowered),
                 }
             }
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
@@ -446,10 +453,13 @@ impl<'a, 'g> Build<'a, 'g> {
 
     fn bool_option_role(&self, ty: &TypeTerm<'g>) -> Option<OptionRole<'g>> {
         let (role, payload) = self.admitted_option(ty)?;
-        (!owns_text(payload)).then_some(role)
+        matches!(payload, OptionPayload::Bool).then_some(role)
     }
 
-    fn admitted_option<'t>(&self, ty: &'t TypeTerm<'g>) -> Option<(OptionRole<'g>, &'t Type<'g>)> {
+    fn admitted_option<'t>(
+        &self,
+        ty: &'t TypeTerm<'g>,
+    ) -> Option<(OptionRole<'g>, OptionPayload<'t, 'g>)> {
         let role = *self.typed.option_role()?;
         let parent = match ty {
             TypeTerm::Variant {
@@ -468,9 +478,18 @@ impl<'a, 'g> Build<'a, 'g> {
         let [payload] = arguments.as_slice() else {
             return None;
         };
-        (*declaration == &role.declaration.id
-            && matches!(payload.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "string")))
-        .then_some((role, payload))
+        if *declaration != &role.declaration.id {
+            return None;
+        }
+        let TypeTerm::Primitive(primitive) = payload.as_ref() else {
+            return None;
+        };
+        let payload = match primitive.name() {
+            "bool" => OptionPayload::Bool,
+            "string" => OptionPayload::Text(payload),
+            _ => return None,
+        };
+        Some((role, payload))
     }
 
     fn scalar_result_role(
@@ -1477,17 +1496,17 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(node));
         }
         let piped = syntax.kind == NodeKind::Pipe;
-        let (source, operand) = if let Some(construction) = fresh {
-            (node, &construction.result)
+        let (source, operand, source_facts) = if let Some(construction) = fresh {
+            (node, &construction.result, None)
         } else if piped {
-            (node, self.propagating_pipe_result(node, facts)?)
+            (node, self.propagating_pipe_result(node, facts)?, None)
         } else {
             let source = syntax.children[0];
             let operand = self.value(source)?;
             if operand.access != Access::Owned {
                 return Err(Stop::Pending(node));
             }
-            (source, &operand.ty)
+            (source, &operand.ty, Some(operand))
         };
         let (wrapper, option_text) = if let Some(error) = &exit.error {
             let (role, _) = self
@@ -1511,23 +1530,24 @@ impl<'a, 'g> Build<'a, 'g> {
             {
                 return Err(Stop::Pending(node));
             }
-            let text = owns_text(payload).then_some(payload);
-            if text.is_some() {
-                if syntax.kind != NodeKind::Propagate
-                    || !matches!(site, PropagationSite::StatementRoot)
-                {
-                    return Err(Stop::Pending(node));
+            let text = match payload {
+                OptionPayload::Bool => None,
+                OptionPayload::Text(ty) => {
+                    if syntax.kind != NodeKind::Propagate
+                        || !matches!(site, PropagationSite::StatementRoot)
+                    {
+                        return Err(Stop::Pending(node));
+                    }
+                    self.budget.step(1)?;
+                    if !source_facts
+                        .and_then(|value| value.path.as_ref())
+                        .is_some_and(|path| path.projections.is_empty())
+                    {
+                        return Err(Stop::Pending(node));
+                    }
+                    Some(ty)
                 }
-                self.budget.step(1)?;
-                if !self
-                    .value(source)?
-                    .path
-                    .as_ref()
-                    .is_some_and(|path| path.projections.is_empty())
-                {
-                    return Err(Stop::Pending(node));
-                }
-            }
+            };
             (None, text)
         };
         Ok(CheckedPropagation {
@@ -1706,6 +1726,18 @@ impl<'a, 'g> Build<'a, 'g> {
             self.call_with_propagating_arguments(node, call, Some(scratch), split, depth, arguments)
         } else if piped {
             self.call(node, facts, Some(scratch), split, depth, Some(operand))
+        } else if option_text.is_some() {
+            self.depth(depth)?;
+            self.budget.step(2)?;
+            let from = self.place(source)?;
+            self.emit(
+                source,
+                Action::Move {
+                    from,
+                    into: Some(scratch),
+                },
+                Edges::Next(split),
+            )
         } else {
             self.expression(source, Some(scratch), split, depth)
         }
@@ -2287,6 +2319,12 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 } else {
                     let operand_facts = self.value(operand)?;
+                    if matches!(
+                        self.admitted_option(&operand_facts.ty),
+                        Some((_, OptionPayload::Text(_)))
+                    ) {
+                        return Err(Stop::Pending(node));
+                    }
                     let path = operand_facts.path.as_ref().ok_or(Stop::Pending(operand))?;
                     let from = self.resolve_place(operand, path)?;
                     if self.slots[from].contains_guard()

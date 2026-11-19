@@ -110,7 +110,9 @@ fn liveness(
         let (used, killed) = match instruction.action {
             Action::None | Action::Cleanup(_) | Action::CheckRetained => use_one(None, None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
-            Action::Read { from, into } | Action::Dereference { from, into } => {
+            Action::Read { from, into }
+            | Action::Move { from, into }
+            | Action::Dereference { from, into } => {
                 use_one(Some(slots[from].carried_loan_root(from)), into)
             }
             Action::ForbiddenBorrowedMove(slot) => use_one(Some(slot), None),
@@ -866,9 +868,9 @@ pub(super) fn run<'g>(
                     state[slot] = State::Initialized(empty.clone());
                     Operation::Initialize(local(slot))
                 }
-                Action::Read { from, into } => {
+                Action::Read { from, into } | Action::Move { from, into } => {
                     require_initialized(&slots, &state, from, node, budget)?;
-                    let moves = slots[from].moves;
+                    let moves = matches!(action, Action::Move { .. }) || slots[from].moves;
                     if moves {
                         forbid_custom_partial(&slots, &state, from, node)?;
                     }

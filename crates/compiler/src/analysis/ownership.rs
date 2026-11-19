@@ -775,6 +775,10 @@ enum Action<'g> {
         from: Slot,
         into: Option<Slot>,
     },
+    Move {
+        from: Slot,
+        into: Option<Slot>,
+    },
     ForbiddenBorrowedMove(Slot),
     Borrow {
         from: Slot,

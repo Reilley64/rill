@@ -4018,6 +4018,26 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
                 let bit = useText(input?);
                 return Option.Some(bit);
             }
+            function relay(value: Option<string>): Option<string> { return value; }
+            function piped(input: Option<string>): Option<bool> {
+                let _ = input |> relay?;
+                return Option.Some(true);
+            }
+            function copyNone(input: Option<string>.None): Option<string>.None {
+                let held = input;
+                return input;
+            }
+            function borrowCarrier(input: Option<string>): Option<bool> {
+                let _ = &input;
+                let _ = input?;
+                return Option.Some(true);
+            }
+            function laterExit(input: Option<string>.Some, flag: Option<bool>): Option<bool> {
+                let output = input?;
+                let bit = flag?;
+                dispose(output);
+                return Option.Some(bit);
+            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -4069,6 +4089,10 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
                 &[b"other: string"],
             );
             let success = linear(mir, yes);
+            assert!(
+                matches!(path_drops(mir, yes).as_slice(), [Obligation::Drop(payload), Obligation::Drop(other)]
+                if payload.root.span.bytes() == b"input?" && other.root.span.bytes() == b"other: string")
+            );
             let [drop] = success.iter().enumerate().filter_map(|(index, op)| matches!(op, Operation::Cleanup(actions)
                 if matches!(actions.as_slice(), [Obligation::Drop(place)] if place.root.span.bytes() == b"input?")).then_some(index)).collect::<Vec<_>>()[..]
             else { panic!("the discarded owning payload must drop exactly once") };
@@ -4095,16 +4119,61 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
                 .mir()
                 .expect("known Some with an owning payload has no variant test");
             assert_eq!(calls_on_path(mir, []), [id("after")]);
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(payload)] if payload.root.span.bytes() == b"input?")
+            );
+            let present_ops = linear(mir, mir.entry);
+            let relevant: Vec<_> = present_ops
+                .iter()
+                .copied()
+                .filter(|op| match op {
+                    Operation::TakeOptionPayload { .. } | Operation::Call(_) => true,
+                    Operation::Cleanup(actions) => actions
+                        .iter()
+                        .any(|action| matches!(action, Obligation::Drop(_))),
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(relevant.as_slice(), [Operation::TakeOptionPayload { into, .. }, Operation::Cleanup(actions), Operation::Call(callee)]
+                if *callee == id("after") && matches!(actions.as_slice(), [Obligation::Drop(place)] if place.root.node == into.root.node)),
+                "{relevant:?}"
+            );
             let absent = lower("absent", default);
             let mir = absent.mir().expect("known None does not create a payload");
             assert!(calls_on_path(mir, []).is_empty());
             let none = linear(mir, mir.entry);
+            assert!(none.iter().any(|op| matches!(op, Operation::Move { from, into: Some(into) }
+                if from.root.span.bytes() == b"input: Option<string>.None" && into.root.span.bytes() == b"input")));
             assert!(none.iter().any(|op| matches!(op, Operation::EndEmptyOption(operand) if operand.root.span.bytes() == b"input")));
             assert!(none.iter().all(|op| !matches!(
                 op,
                 Operation::TakeOptionPayload { .. } | Operation::TestVariant { .. }
             )));
             assert_return(&none, &option.none.id, false, &[b"other: string"]);
+            let copied = lower("copyNone", default);
+            let mir = copied
+                .mir()
+                .unwrap_or_else(|| panic!("copyNone: {:?}", copied.completion()));
+            let ops = linear(mir, mir.entry);
+            assert_eq!(
+                ops.iter()
+                    .filter(|op| matches!(op, Operation::Copy { from, .. }
+                if from.root.span.bytes() == b"input: Option<string>.None"))
+                    .count(),
+                2
+            );
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let borrowed = lower("borrowCarrier", default);
+            assert_eq!(borrowed.completion(), Completion::Incomplete);
+            assert!(borrowed.mir().is_none());
+            assert_eq!(borrowed.blocked_at().unwrap().span.bytes(), b"&input");
+            let later = lower("laterExit", default);
+            let mir = later
+                .mir()
+                .expect("a later early exit drops the initialized string once");
+            let (_, no) = variant_edges(mir, mir.entry, &option.some.id, b"flag");
+            assert_return(&linear(mir, no), &option.none.id, false, &[b"output"]);
             let reused = lower("reused", default);
             assert_eq!(reused.completion(), Completion::SourceRejected);
             assert!(reused.mir().is_none());
@@ -4115,19 +4184,27 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
             assert_eq!(finding.site.span.bytes(), b"input");
             assert_eq!(finding.related.span.bytes(), b"input");
             assert!(finding.related.span.start() < finding.site.span.start());
-            for name in ["live", "embedded"] {
+            let live = lower("live", default);
+            assert_eq!(live.completion(), Completion::Incomplete);
+            assert!(live.mir().is_none());
+            let function = module
+                .declarations
+                .iter()
+                .find(|d| &d.id == id("live"))
+                .unwrap();
+            assert_eq!(
+                live.blocked_at().unwrap().node,
+                module.syntax.nodes[function.node].children[1]
+            );
+            for (name, site) in [
+                ("embedded", b"input?".as_slice()),
+                ("piped", b"input |> relay?".as_slice()),
+            ] {
                 let report = lower(name, default);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
             }
-            assert_eq!(
-                lower("embedded", default)
-                    .blocked_at()
-                    .unwrap()
-                    .span
-                    .bytes(),
-                b"input?"
-            );
             let exact = AnalysisLimits {
                 max_work: discarded.statistics().work,
                 max_entries: discarded.statistics().entries,
