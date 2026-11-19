@@ -683,21 +683,213 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
 }
 
 #[test]
-fn repeated_invocation_and_borrowed_pair_still_need_typed_evidence() {
+fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
+    probe_with_typed(
+        "captures::borrowed_pair_invocation_transfers_backing_not_receiver_storage",
+        r#"
+            function external(view: &string, owner: string): &string {
+                let job: once () => [&string, string] = () => [view, owner];
+                let [saved, _] = job();
+                return saved;
+            }
+            function local(text: string, owner: string): &string {
+                let job: once () => [&string, string] = () => [&text, owner];
+                let [saved, _] = job();
+                return saved;
+            }
+            function live(text: string, owner: string): void {
+                let job: once () => [&string, string] = () => [&text, owner];
+                let [saved, _] = job();
+                dispose(text);
+                let _ = saved;
+            }
+            function dead(text: string, owner: string): void {
+                let job: once () => [&string, string] = () => [&text, owner];
+                let [saved, _] = job();
+                let _ = saved;
+                dispose(text);
+            }
+            function two(first: string, second: string): void {
+                let job: once () => [&string, &string] = () => [&first, &second];
+                let [saved, _] = job();
+                dispose(second);
+                let _ = saved;
+            }
+        "#,
+        |_, module, receipt, _| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let external = lower("external");
+            let mir = external
+                .mir()
+                .expect("the caller backing can survive receiver consumption");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. }
+                            | Operation::Move { .. }
+                            | Operation::FormClosurePair { .. }
+                            | Operation::InvokeClosurePair { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            let [
+                Operation::Copy {
+                    from: view,
+                    into: Some(staged_view),
+                },
+                Operation::Move {
+                    from: owner,
+                    into: Some(staged_owner),
+                },
+                Operation::FormClosurePair {
+                    closure, captures, ..
+                },
+                Operation::InvokeClosurePair {
+                    receiver,
+                    origin,
+                    into,
+                },
+                Operation::Copy {
+                    from: field,
+                    into: Some(saved),
+                },
+                Operation::Copy {
+                    from,
+                    into: Some(output),
+                },
+                Operation::Export(exported),
+            ] = route.as_slice()
+            else {
+                panic!("expected the carried reference to reach the return slot")
+            };
+            assert_eq!(view.root.span.bytes(), b"view: &string");
+            assert_eq!(owner.root.span.bytes(), b"owner: string");
+            assert_eq!(closure.node, receiver.root.node);
+            assert_eq!(origin.span.bytes(), b"() => [view, owner]");
+            assert_eq!(captures[0].node, staged_view.root.node);
+            assert_eq!(captures[1].node, staged_owner.root.node);
+            assert_eq!(field.root.node, into.root.node);
+            assert_eq!(field.tuple_element(), Some(0));
+            assert_eq!(saved.root.span.bytes(), b"saved");
+            assert_eq!(saved.root.node, from.root.node);
+            assert_eq!(output.root.node, exported.root.node);
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(remaining)]
+                if remaining.root.node == into.root.node && remaining.tuple_element() == Some(1))
+            );
+            let dead = lower("dead");
+            let mir = dead
+                .mir()
+                .expect("releasing a source after the result's last use is valid");
+            let ops = linear(mir, mir.entry);
+            let route: Vec<_> = ops
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Borrow { .. }
+                    | Operation::FormClosurePair { .. }
+                    | Operation::InvokeClosurePair { .. }
+                    | Operation::Dispose { .. } => true,
+                    Operation::Cleanup(actions) => {
+                        actions.iter().any(|a| matches!(a, Obligation::Drop(_)))
+                    }
+                    _ => false,
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Borrow { source, holder, exclusive: false },
+                Operation::FormClosurePair { closure, captures, .. },
+                Operation::InvokeClosurePair { receiver, into, .. },
+                Operation::Cleanup(drops), Operation::Dispose { operand, .. },
+            ] if source.root.span.bytes() == b"text: string" && source.root.node == operand.root.node
+                && holder.root.node == captures[0].node && receiver.root.node == closure.node
+                && drops.iter().filter(|action| matches!(action, Obligation::Drop(..))).count() == 1
+                && drops.iter().any(|a| matches!(a, Obligation::Drop(place)
+                    if place.root.node == into.root.node && place.tuple_element() == Some(1)))));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(remaining)]
+                if remaining.tuple_element() == Some(1))
+            );
+
+            for (name, code, at, source) in [
+                ("local", "R0202", "return saved;", "text: string"),
+                ("live", "R0203", "dispose(text)", "&text"),
+                ("two", "R0203", "dispose(second)", "&second"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one ownership finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(
+                    std::str::from_utf8(finding.site.span.bytes()),
+                    Ok(at),
+                    "{name}"
+                );
+                assert_eq!(
+                    std::str::from_utf8(finding.related.span.bytes()),
+                    Ok(source),
+                    "{name}"
+                );
+            }
+            let limits = AnalysisLimits {
+                max_work: external.statistics().work,
+                max_entries: external.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(check("external", limits).completion(), Completion::Checked);
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let report = check("external", short);
+                assert_eq!(report.completion(), Completion::ResourceLimit);
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn broader_invocations_still_need_typed_evidence() {
     use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 
     probe_report(
-        "captures::repeated_invocation_and_borrowed_pair_still_need_typed_evidence",
+        "captures::broader_invocations_still_need_typed_evidence",
         r#"
             function again(left: string, right: string): [string, string] {
                 let job: once () => [string, string] = () => [left, right];
                 let _ = job();
                 return job();
             }
-            function loan(text: string, owner: string): &string {
-                let borrowed: once () => [&string, string] = () => [&text, owner];
-                let [view, _] = borrowed();
-                return view;
+            type Box = { item: Result<bool, i32>; }
+            function unknown(view: &Box, owner: string): void {
+                let opaque: once () => [&Box, string] = () => [view, owner];
+                let _ = opaque();
+            }
+            function echo(view: &string): &string { return view; }
+            function computed(view: &string, owner: string): void {
+                let work: once () => [&string, string] = () => [echo(view), owner];
+                let _ = work();
             }
         "#,
         |_, module, typed| {
@@ -705,7 +897,7 @@ fn repeated_invocation_and_borrowed_pair_still_need_typed_evidence() {
             assert!(typed.core_blockers().is_empty());
             assert!(typed.receipt().is_none());
             let pending = typed.result_use().unwrap().pending();
-            for written in [b"return job();".as_slice(), b"= borrowed();"] {
+            for written in [b"return job();".as_slice(), b"= opaque();", b"= work();"] {
                 let at = module
                     .snapshot
                     .bytes()

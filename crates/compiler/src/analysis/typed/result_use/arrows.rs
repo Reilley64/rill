@@ -26,6 +26,7 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         let root = Root::Temporary(node);
         state.store(root, &[], Content::Callable(node), self.budget)?;
+        let direct_pair = self.primitive_capture_pair(node, arrow)?;
         let mut acquired = BTreeSet::new();
         for capture in &arrow.captures {
             self.budget.step(1)?;
@@ -35,6 +36,20 @@ impl<'a, 'g> Check<'a, 'g> {
                 continue;
             }
             let storage = self.place_storage(&state, Some(&capture.path))?;
+            if direct_pair
+                && matches!(
+                    capture.form,
+                    CaptureForm::ExplicitBorrow { mutable: false }
+                        | CaptureForm::CarriedReference { mutable: false }
+                )
+                && matches!(storage, PlaceStorage::Exact((Root::Local(id), ref component))
+                    if id == capture.path.root && component.is_empty())
+            {
+                // This body only returns the shared primitive descriptors.
+                // No Result residence moves or becomes observable through them.
+                // The original capture facts still carry their loans to M5.
+                continue;
+            }
             if capture.form == CaptureForm::Value
                 && capture.demand == Some(InvocationMode::Once)
                 && capture.path.projections.is_empty()
@@ -81,6 +96,59 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         self.singleton(state)
+    }
+
+    fn primitive_capture_pair(&mut self, node: NodeId, arrow: &ArrowFacts<'g>) -> Work<bool> {
+        let [first, second] = arrow.captures.as_slice() else {
+            return Ok(false);
+        };
+        if !arrow.parameters.is_empty() || arrow.mode.is_none() {
+            return Ok(false);
+        }
+        self.budget.step(1)?;
+        let body = self.module.syntax.nodes[node].children[1];
+        let Some(DataExpression::Tuple { elements }) = self
+            .expression_facts(body)?
+            .and_then(|value| value.data.as_ref())
+        else {
+            return Ok(false);
+        };
+        if elements.as_slice() != [first.site.node, second.site.node]
+            && elements.as_slice() != [second.site.node, first.site.node]
+        {
+            return Ok(false);
+        }
+        for capture in [first, second] {
+            self.budget.step(1)?;
+            let kind = self.module.syntax.nodes[capture.site.node].kind;
+            if !capture.reachable
+                || capture.through.is_some()
+                || !capture.path.projections.is_empty()
+                || !match (capture.form, kind, capture.ty.as_ref()) {
+                    (CaptureForm::Value, NodeKind::ValueReference, TypeTerm::Primitive(_)) => true,
+                    (
+                        CaptureForm::ExplicitBorrow { mutable: false },
+                        NodeKind::Prefix("&"),
+                        TypeTerm::Reference {
+                            mutable: false,
+                            referent,
+                        },
+                    )
+                    | (
+                        CaptureForm::CarriedReference { mutable: false },
+                        NodeKind::ValueReference,
+                        TypeTerm::Reference {
+                            mutable: false,
+                            referent,
+                        },
+                    ) => matches!(referent.as_ref(), TypeTerm::Primitive(_)),
+                    _ => false,
+                }
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub(super) fn arrow_body(
