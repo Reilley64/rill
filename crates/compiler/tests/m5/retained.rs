@@ -1442,6 +1442,35 @@ fn retained_shared_view_preserves_incoming_exclusive_access() {
                 let mut flag = true;
                 stash(slot, &mut flag);
             }
+            function keepsOld(seed: &bool): bool {
+                let mut flag = true;
+                let access = &mut flag;
+                let mut out = seed;
+                stash(&mut out, access);
+                remember(&mut out, seed);
+                let early = *access;
+                return *out;
+            }
+            function replacesOld(seed: &bool): bool {
+                let mut flag = true;
+                let access = &mut flag;
+                let mut out = seed;
+                stash(&mut out, access);
+                remember(&mut out, seed);
+                out = seed;
+                let after = *access;
+                return *out;
+            }
+            function bad(slot: &mut &bool, src: &mut bool): void {
+                let mut local = true;
+                { let holder = &mut local; *slot = &*holder; }
+            }
+            function reachesBad(seed: &bool): bool {
+                let mut flag = true;
+                let mut out = seed;
+                bad(&mut out, &mut flag);
+                return *out;
+            }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -1561,8 +1590,34 @@ fn retained_shared_view_preserves_incoming_exclusive_access() {
                 assert_eq!(report.completion(), Completion::ResourceLimit);
                 assert!(report.mir().is_none());
             }
+            let replaces = lower("replacesOld");
+            let mir = replaces
+                .mir()
+                .expect("only an exact overwrite kills old retained backing");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CallRetaining { .. }
+                            | Operation::Install { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::CallRetaining { callee: first, destination: RetainedPlace::Local(old), .. },
+                Operation::CallRetaining { callee: second, destination: RetainedPlace::Local(still_old), .. },
+                Operation::Install { target: replacement, .. },
+                Operation::Dereference(resumed),
+                Operation::Dereference(new),
+            ] if *first == &declaration("stash").id && *second == &declaration("remember").id
+                && old.root.span.bytes() == b"out" && resumed.root.span.bytes() == b"access"
+                && [still_old, replacement, new].iter().all(|place| place.root.node == old.root.node)));
             for (name, code, cause) in [
                 ("suspended", "R0201", b"access".as_slice()),
+                ("keepsOld", "R0201", b"access".as_slice()),
+                ("reachesBad", "R0202", b"&mut local".as_slice()),
                 ("blockedOwner", "R0201", b"&mut flag".as_slice()),
                 ("expires", "R0203", b"&mut flag".as_slice()),
                 ("localEscape", "R0202", b"&mut flag".as_slice()),
