@@ -581,6 +581,220 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
     );
 }
 
+#[test]
+fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
+    probe(
+        "tuples::direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results",
+        r#"
+            function project(parent: &mut [bool, string]): &mut string {
+                let [_, view] = &mut *parent;
+                return view;
+            }
+            function snapshot(parent: &mut [bool, string]): bool {
+                let [bit, _] = &mut *parent;
+                return bit;
+            }
+            function projectShared(parent: &mut [bool, string]): &string {
+                let [_, view] = &mut *parent;
+                return &*view;
+            }
+            function touch(view: &mut string): void {}
+            function resumes(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let bit = snapshot(parent);
+                let view = project(parent);
+                touch(view);
+                let _ = parent;
+                owner[1] = "new";
+                return bit;
+            }
+            function freshResumes(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let view = project(&mut owner);
+                touch(view);
+                owner[1] = "new";
+                return owner[0];
+            }
+            function sharedStillExclusive(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let view = projectShared(&mut owner);
+                let bit = owner[0];
+                let _ = view;
+                return bit;
+            }
+            function liveFresh(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let view = project(&mut owner);
+                let bit = owner[0];
+                touch(view);
+                return bit;
+            }
+            function suspended(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let view = project(parent);
+                let bit = snapshot((parent));
+                touch(view);
+                return bit;
+            }
+            function escapes(seed: [bool, string]): &mut string {
+                let mut owner = seed;
+                return project(&mut owner);
+            }
+            function expires(seed: [bool, string], fallback: &mut string, branch: bool): void {
+                let mut out = fallback;
+                if (branch) { let mut owner = seed; out = project(&mut owner); }
+                touch(out);
+            }
+            function bad(parent: &mut [bool, string]): &mut string {
+                let mut local: [bool, string] = [false, "local"];
+                let [_, escaped] = &mut local;
+                return escaped;
+            }
+            function reachedBad(seed: [bool, string]): void {
+                let mut owner = seed;
+                let _ = bad(&mut owner);
+            }
+            function containsReference(parent: &mut [&bool, string]): bool { return true; }
+            function unsupportedContents(seed: [&bool, string]): bool {
+                let mut owner = seed;
+                return containsReference(&mut owner);
+            }
+            function shared(parent: &[bool, string]): bool { return true; }
+            function unsupportedShared(seed: [bool, string]): bool { return shared(&seed); }
+            function compoundResult(parent: &mut [bool, string]): [bool, bool] { return [true, false]; }
+            function unsupportedResult(seed: [bool, string]): [bool, bool] {
+                let mut owner = seed;
+                return compoundResult(&mut owner);
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let check = |name| lower(name, AnalysisLimits::default());
+            let resumes = check("resumes");
+            let mir = resumes
+                .mir()
+                .unwrap_or_else(|| panic!("resumes: {:?}", resumes.completion()));
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            fn accesses<'a, 'g>(mir: &'a Mir<'g>) -> Vec<&'a Operation<'g>> {
+                linear(mir, mir.entry)
+                    .into_iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Borrow { .. }
+                                | Operation::Reborrow { .. }
+                                | Operation::Call(_)
+                                | Operation::Install { .. }
+                        )
+                    })
+                    .collect()
+            }
+            assert!(matches!(accesses(mir).as_slice(), [
+                Operation::Borrow { source, holder: parent, exclusive: true },
+                Operation::Reborrow { parent: scalar, exclusive: true, .. },
+                Operation::Call(snapshot),
+                Operation::Reborrow { parent: reference, exclusive: true, .. },
+                Operation::Call(project),
+                Operation::Reborrow { parent: view, exclusive: true, .. },
+                Operation::Call(touch),
+                Operation::Install { target, .. },
+            ] if source.projection.is_none() && target.tuple_element() == Some(1)
+                && source.root.node == target.root.node && parent.root.node == scalar.root.node && parent.root.node == reference.root.node
+                && parent.root.span.bytes() == b"parent" && view.root.span.bytes() == b"view"
+                && **snapshot == declaration("snapshot").id && **project == declaration("project").id && **touch == declaration("touch").id));
+            let limits = AnalysisLimits {
+                max_work: resumes.statistics().work,
+                max_entries: resumes.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("resumes", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("resumes", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(replacement)]
+                if old.root.node == replacement.root.node && old.root.span.bytes() == b"owner"
+                    && old.tuple_element() == Some(1) && replacement.tuple_element() == Some(1))
+            );
+            let fresh = check("freshResumes");
+            let mir = fresh
+                .mir()
+                .expect("the fresh call's loan ends after the returned view is dead");
+            assert!(matches!(accesses(mir).as_slice(), [
+                Operation::Borrow { source, exclusive: true, .. },
+                Operation::Call(project),
+                Operation::Reborrow { parent: view, exclusive: true, .. },
+                Operation::Call(touch),
+                Operation::Install { target, .. },
+            ] if source.projection.is_none() && source.root.node == target.root.node && target.tuple_element() == Some(1)
+                && view.root.span.bytes() == b"view" && **project == declaration("project").id && **touch == declaration("touch").id));
+            for (name, code, at, cause) in [
+                ("liveFresh", "R0201", "owner[0]", "&mut owner"),
+                ("sharedStillExclusive", "R0201", "owner[0]", "&mut owner"),
+                ("suspended", "R0201", "(parent)", "parent"),
+                ("escapes", "R0202", "return project(&mut owner);", "owner"),
+                (
+                    "expires",
+                    "R0203",
+                    "{ let mut owner = seed; out = project(&mut owner); }",
+                    "&mut owner",
+                ),
+                ("reachedBad", "R0202", "return escaped;", "local"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), at.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), cause.as_bytes(), "{name}");
+            }
+            for (name, site) in [
+                ("unsupportedContents", "&mut owner"),
+                ("unsupportedShared", "&seed"),
+                ("unsupportedResult", "&mut owner"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
 fn dropped_elements(mir: &Mir<'_>, start: usize) -> Vec<usize> {
     path_drops(mir, start)
         .into_iter()

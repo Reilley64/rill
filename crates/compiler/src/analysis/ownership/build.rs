@@ -259,6 +259,53 @@ impl<'a, 'g> Build<'a, 'g> {
         }))
     }
 
+    fn direct_tuple_borrow_argument(
+        &mut self,
+        call: &crate::analysis::scalars::CallFacts<'g>,
+        argument: &Type<'g>,
+        result: &Type<'g>,
+    ) -> ResultOf<bool> {
+        // A single exclusive flat primitive tuple has no stored reference
+        // destination. Reuse the existing leaf-result dependency contract.
+        if call.arguments.len() != 1
+            || call.pipe_input.is_some()
+            || !(matches!(result.as_ref(), TypeTerm::Primitive(_)) || primitive_reference(result))
+        {
+            return Ok(false);
+        }
+        let TypeTerm::Reference {
+            mutable: true,
+            referent,
+        } = argument.as_ref()
+        else {
+            return Ok(false);
+        };
+        let TypeTerm::Tuple(elements) = referent.as_ref() else {
+            return Ok(false);
+        };
+        self.budget.step(elements.len())?;
+        if !elements
+            .iter()
+            .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
+        {
+            return Ok(false);
+        }
+        self.budget.step(2 + elements.len())?;
+        let Some(function) = self
+            .typed
+            .inventory()
+            .type_facts()
+            .declarations
+            .get(call.callee)
+        else {
+            return Ok(false);
+        };
+        Ok(
+            matches!(&function.shape, DeclarationShape::Function { parameters, result: output }
+            if matches!(parameters.as_slice(), [formal] if formal.ty == *argument) && output == result),
+        )
+    }
+
     fn direct_call_type(&self, ty: &TypeTerm<'g>) -> bool {
         matches!(
             ty,
@@ -1991,7 +2038,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 if destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
-            } else if !self.direct_call_type(&ty) {
+            } else if !self.direct_call_type(&ty)
+                && !self.direct_tuple_borrow_argument(call, &ty, &facts.ty)?
+            {
                 return Err(Stop::Pending(arg));
             }
             let slot = self.slot(arg, &ty)?;

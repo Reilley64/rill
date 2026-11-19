@@ -1035,11 +1035,6 @@ fn explicit_exclusive_tuple_pattern_reborrow_suspends_the_named_parent() {
                 let moved = parent;
                 touch(view);
             }
-            function caller(seed: [bool, string]): void {
-                let mut owner = seed;
-                let view = incoming(&mut owner);
-                touch(view);
-            }
             function indirect(parent: &mut &mut [bool, string]): bool {
                 let [bit, _] = &mut **parent;
                 return bit;
@@ -1169,16 +1164,10 @@ fn explicit_exclusive_tuple_pattern_reborrow_suspends_the_named_parent() {
                 assert_eq!(finding.site.span.bytes(), at.as_bytes(), "{name}");
                 assert_eq!(finding.related.span.bytes(), cause.as_bytes(), "{name}");
             }
-            for (name, site) in [("indirect", "[bit, _]"), ("caller", "&mut owner")] {
-                let report = check(name);
-                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert!(report.mir().is_none());
-                assert_eq!(
-                    report.blocked_at().unwrap().span.bytes(),
-                    site.as_bytes(),
-                    "{name}"
-                );
-            }
+            let indirect = check("indirect");
+            assert_eq!(indirect.completion(), Completion::Incomplete);
+            assert!(indirect.mir().is_none());
+            assert_eq!(indirect.blocked_at().unwrap().span.bytes(), b"[bit, _]");
         },
     );
 }
