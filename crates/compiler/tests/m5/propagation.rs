@@ -3227,6 +3227,24 @@ fn propagating_pipe_step_runs_only_after_all_arguments_continue() {
                 let _ = stage(owner) |> empty(input?)?;
                 return Option.Some(true);
             }
+            function present(owner: string, extra: string, bit: bool): Option<bool>.Some {
+                dispose(extra); dispose(owner); return Option.Some(bit);
+            }
+            function stopWritten(owner: string, extra: string, input: Option<bool>.None): Option<bool> {
+                let _ = stage(owner) |> present(stage(extra), input?)?;
+                return Option.Some(true);
+            }
+            function stepPresent(owner: string, extra: string, input: Option<bool>): Option<bool> {
+                let bit = stage(owner) |> present(stage(extra), input?)?;
+                return Option.Some(bit);
+            }
+            function plain(owner: string, extra: string, bit: bool): bool {
+                dispose(extra); dispose(owner); return bit;
+            }
+            function stopPlain(owner: string, extra: string, input: Option<bool>.None): Option<bool> {
+                let _ = stage(owner) |> plain(stage(extra), input?);
+                return Option.Some(true);
+            }
             function bad(first: Option<bool>, owner: string, second: Option<bool>): Option<bool> {
                 let _ = (first?) |> invalid(stage(owner), second?, _)?;
                 return Option.Some(true);
@@ -3237,8 +3255,12 @@ fn propagating_pipe_step_runs_only_after_all_arguments_continue() {
                 return Result.Ok(bit);
             }
             function nested(bit: bool): bool { return bit; }
-            function deeper(owner: string, input: Option<bool>): Option<bool> {
-                let _ = stage(owner) |> empty(nested(input?))?;
+            function deeper(owner: string, input: Option<bool>, other: Option<bool>): Option<bool> {
+                let _ = stage(owner) |> finish(input?, nested(other?))?;
+                return Option.Some(true);
+            }
+            function bare(owner: string, input: Option<bool>): Option<bool> {
+                stage(owner) |> empty(input?)?;
                 return Option.Some(true);
             }
         "#,
@@ -3319,6 +3341,39 @@ fn propagating_pipe_step_runs_only_after_all_arguments_continue() {
             assert_return(&linear(mir, yes), &option.none.id, false, &[]);
             assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
             assert_eq!(calls_on_path(mir, [true]), [id("stage"), id("empty")]);
+            let stop_written = lower("stopWritten", default);
+            let mir = stop_written
+                .mir()
+                .expect("known written failure drops both stages without calling the step");
+            assert_eq!(calls_on_path(mir, []), [id("stage"), id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(extra)", b"stage(owner)"],
+            );
+            let plain = lower("stopPlain", default);
+            assert!(plain.mir().is_some());
+            assert_eq!(
+                stop_written.statistics().entries,
+                plain.statistics().entries
+            );
+            let step_present = lower("stepPresent", default);
+            let mir = step_present
+                .mir()
+                .expect("known successful step needs no additional variant test");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(extra)", b"stage(owner)"],
+            );
+            assert_return(&linear(mir, yes), &option.some.id, true, &[]);
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("stage"), id("present")]
+            );
             let bad = lower("bad", default);
             assert_eq!(bad.completion(), Completion::SourceRejected);
             assert!(bad.mir().is_none());
@@ -3344,9 +3399,11 @@ fn propagating_pipe_step_runs_only_after_all_arguments_continue() {
                 calls_on_path(mir, [true, false]),
                 [id("stage"), id("finishResult")]
             );
-            let deeper = lower("deeper", default);
-            assert_eq!(deeper.completion(), Completion::Incomplete);
-            assert!(deeper.mir().is_none());
+            for name in ["deeper", "bare"] {
+                let blocked = lower(name, default);
+                assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");
+                assert!(blocked.mir().is_none());
+            }
             let exact = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,

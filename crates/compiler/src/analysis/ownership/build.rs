@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
-    PipeCarrier(&'a Type<'g>),
+    CheckedPipeCarrier,
 }
 
 #[derive(Clone, Copy)]
@@ -1553,7 +1553,7 @@ impl<'a, 'g> Build<'a, 'g> {
             && let Some(call) = facts.call.as_deref()
             && let Some(arguments) = self.propagating_arguments(
                 node,
-                PropagatingCallOutput::PipeCarrier(operand),
+                PropagatingCallOutput::CheckedPipeCarrier,
                 call,
                 return_cleanup,
                 depth,
@@ -1751,23 +1751,34 @@ impl<'a, 'g> Build<'a, 'g> {
         if roots.is_empty() {
             return Ok(None);
         }
-        let expected = match output {
-            PropagatingCallOutput::Value(ty) if matches!(ty.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32")) => {
-                ty
+        match output {
+            PropagatingCallOutput::Value(expected) => {
+                if !matches!(expected.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
+                {
+                    return Err(Stop::Pending(node));
+                }
+                let (parameters, result) = self.direct_application_signature(node, call)?;
+                if result != expected {
+                    return Err(Stop::Pending(node));
+                }
+                for (formal, &arg) in parameters.iter().zip(&call.arguments) {
+                    self.budget.step(2)?;
+                    if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
+                        || self.value(arg)?.ty != formal.ty
+                    {
+                        return Err(Stop::Pending(node));
+                    }
+                }
             }
-            PropagatingCallOutput::PipeCarrier(ty) => ty,
-            PropagatingCallOutput::Value(_) => return Err(Stop::Pending(node)),
-        };
-        let (parameters, result) = self.direct_application_signature(node, call)?;
-        if result != expected {
-            return Err(Stop::Pending(node));
-        }
-        for (formal, &arg) in parameters.iter().zip(&call.arguments) {
-            self.budget.step(2)?;
-            if !matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
-                || self.value(arg)?.ty != formal.ty
-            {
-                return Err(Stop::Pending(node));
+            PropagatingCallOutput::CheckedPipeCarrier => {
+                // The step signature already matched the actual arguments.
+                // Composition is narrower: every argument must be primitive.
+                for &arg in &call.arguments {
+                    self.budget.step(1)?;
+                    if !matches!(self.value(arg)?.ty.as_ref(), TypeTerm::Primitive(_)) {
+                        return Err(Stop::Pending(node));
+                    }
+                }
             }
         }
         // A known failure skips the suffix, but only a checked complete
