@@ -3630,6 +3630,12 @@ fn scalar_call_statements_preserve_propagating_argument_exits() {
                 (input?) |> identity;
                 return Option.Some(true);
             }
+            function consumePair(owner: string, written: bool, input: bool): bool { dispose(owner); return input; }
+            function pairedPipe(first: Option<bool>, owner: string, second: Option<bool>, later: string): Option<bool> {
+                (first?) |> consumePair(stage(owner), second?, _);
+                let bit = after(later);
+                return Option.Some(bit);
+            }
             function deeper(input: Option<bool>): Option<bool> {
                 identity(identity(input?));
                 return Option.Some(true);
@@ -3668,6 +3674,16 @@ fn scalar_call_statements_preserve_propagating_argument_exits() {
             let mir = pipe
                 .mir()
                 .expect("pipe input stages before failure of a written argument");
+            let staging: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| matches!(op, Operation::Call(_) | Operation::TestVariant { .. }))
+                .collect();
+            assert!(
+                matches!(staging.as_slice(), [Operation::Call(callee), Operation::TestVariant { operand, .. }]
+                if *callee == id("stage") && operand.root.span.bytes() == b"input"),
+                "{staging:?}"
+            );
             let result = typed.result_role().unwrap();
             let (yes, no) = variant_edges(mir, mir.entry, &result.ok.id, b"input");
             assert_forward(
@@ -3711,6 +3727,31 @@ fn scalar_call_statements_preserve_propagating_argument_exits() {
             assert_eq!(calls_on_path(mir, [true]), [id("identity")]);
             assert_return(&linear(mir, no), &option.none.id, false, &[]);
             assert_return(&linear(mir, yes), &option.some.id, true, &[]);
+            let paired = lower("pairedPipe", default);
+            let mir = paired
+                .mir()
+                .expect("both propagating arguments share the statement continuation");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"first");
+            let (both, second_no) = variant_edges(mir, yes, &option.some.id, b"second");
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"later: string", b"owner: string"],
+            );
+            assert_return(
+                &linear(mir, second_no),
+                &option.none.id,
+                false,
+                &[b"stage(owner)", b"later: string"],
+            );
+            assert_return(&linear(mir, both), &option.some.id, true, &[]);
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(calls_on_path(mir, [true, false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("stage"), id("consumePair"), id("after")]
+            );
             for name in ["owning", "deeper"] {
                 let blocked = lower(name, default);
                 assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");

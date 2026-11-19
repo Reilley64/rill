@@ -828,7 +828,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     );
                 }
                 if let Some((call, arguments)) =
-                    self.scalar_call_with_propagation(initializer, exits.returning, depth + 1)?
+                    self.check_scalar_call_propagation(initializer, exits.returning, depth + 1)?
                 {
                     let into = match binding {
                         Binding::Discard => None,
@@ -874,7 +874,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         PropagationSite::StatementRoot,
                     )
                 } else if let Some((call, arguments)) =
-                    self.scalar_call_with_propagation(expression, exits.returning, depth + 1)?
+                    self.check_scalar_call_propagation(expression, exits.returning, depth + 1)?
                 {
                     self.call_with_propagating_arguments(
                         expression,
@@ -1685,7 +1685,7 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(false)
     }
 
-    fn scalar_call_with_propagation(
+    fn check_scalar_call_propagation(
         &mut self,
         node: NodeId,
         returning: Pc,
