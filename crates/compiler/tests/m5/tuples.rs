@@ -972,6 +972,218 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
 }
 
 #[test]
+fn direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction() {
+    probe(
+        "tuples::direct_nested_exclusive_tuple_calls_keep_the_incoming_restriction",
+        r#"
+            function project(parent: &mut [[bool, string], [bool, i32]]): &mut string {
+                let [[_, view], _] = &mut *parent;
+                return view;
+            }
+            function readOnly(parent: &mut [[bool, string], [bool, i32]]): &string {
+                let [[_, view], _] = &mut *parent;
+                return &*view;
+            }
+            function snapshot(parent: &mut [[bool, string], [bool, i32]]): bool {
+                let [_, [bit, _]] = &mut *parent;
+                return bit;
+            }
+            function useShared(view: &string): void {}
+            function useExclusive(view: &mut string): void {}
+            function returns(parent: &mut [[bool, string], [bool, i32]]): &mut string {
+                return project((parent));
+            }
+            function resumes(parent: &mut [[bool, string], [bool, i32]]): bool {
+                let first = snapshot(parent);
+                let view = readOnly((parent));
+                useShared(view);
+                let bit = snapshot(parent);
+                let moved = parent;
+                return bit;
+            }
+            function sharedBlocked(parent: &mut [[bool, string], [bool, i32]]): bool {
+                let view = readOnly(parent);
+                let copied = view;
+                let bit = snapshot((parent));
+                useShared(copied);
+                return bit;
+            }
+            function exclusiveBlocked(parent: &mut [[bool, string], [bool, i32]]): void {
+                let view = project(parent);
+                let movedView = view;
+                let moved = parent;
+                useExclusive(movedView);
+            }
+            function movedParent(parent: &mut [[bool, string], [bool, i32]]): bool {
+                let moved = parent;
+                return snapshot((parent));
+            }
+            function bad(parent: &mut [[bool, string], [bool, i32]]): &mut string {
+                let mut owner = "local";
+                return &mut owner;
+            }
+            function reachedBad(parent: &mut [[bool, string], [bool, i32]]): &mut string {
+                return bad(parent);
+            }
+            function explicit(parent: &mut [[bool, string], [bool, i32]]): bool {
+                return snapshot(&mut *parent);
+            }
+            function alias(parent: &mut [[bool, string], [bool, i32]]): bool {
+                let named = parent;
+                return snapshot(named);
+            }
+            function piped(parent: &mut [[bool, string], [bool, i32]]): bool {
+                return parent |> snapshot;
+            }
+            function extraArgument(parent: &mut [[bool, string], [bool, i32]], flag: bool): bool { return flag; }
+            function extra(parent: &mut [[bool, string], [bool, i32]]): bool {
+                return extraArgument(parent, true);
+            }
+            function tupleResult(parent: &mut [[bool, string], [bool, i32]]): [bool, bool] { return [true, false]; }
+            function compound(parent: &mut [[bool, string], [bool, i32]]): [bool, bool] {
+                return tupleResult(parent);
+            }
+            function inputWithReference(parent: &mut [[bool, &string], i32]): bool { return true; }
+            function referenceLeaf(parent: &mut [[bool, &string], i32]): bool {
+                return inputWithReference(parent);
+            }
+            function thirdLevel(parent: &mut [[[bool, string]], i32]): bool { return true; }
+            function deeper(parent: &mut [[[bool, string]], i32]): bool {
+                return thirdLevel(parent);
+            }
+            function narrowStep(parent: &mut [[bool], i32]): bool { return true; }
+            function wideStep(parent: &mut [[bool, string, i32], i32]): bool { return true; }
+            function narrow(parent: &mut [[bool], i32]): bool { return narrowStep(parent); }
+            function wide(parent: &mut [[bool, string, i32], i32]): bool { return wideStep(parent); }
+        "#,
+        |_, module, receipt| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let returns = lower("returns", default);
+            let mir = returns
+                .mir()
+                .unwrap_or_else(|| panic!("nested exclusive call: {:?}", returns.completion()));
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::Call(_) | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::Reborrow { parent, holder, exclusive: true }, Operation::Call(callee), Operation::Export(result)]
+                if parent.root.span.bytes() == b"parent: &mut [[bool, string], [bool, i32]]" && holder.root.span.bytes() == b"(parent)" && *callee == id("project")
+                    && result.root.span.bytes() == b"project((parent))")
+            );
+            let resumes = lower("resumes", default);
+            let mir = resumes
+                .mir()
+                .expect("scalar result and last use release the staged parent");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::Call(_)
+                            | Operation::Move { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Reborrow { parent, holder: first, exclusive: true }, Operation::Call(first_call),
+                Operation::Reborrow { parent: second, holder: shared, exclusive: true }, Operation::Call(second_call),
+                Operation::Copy { from: view, .. }, Operation::Call(use_call),
+                Operation::Reborrow { parent: third, holder: last, exclusive: true }, Operation::Call(last_call),
+                Operation::Move { from: original, into: Some(moved) },
+                Operation::Copy { from: bit, into: Some(staged) }, Operation::Export(output),
+            ] if parent.root.node == second.root.node && parent.root.node == third.root.node && parent.root.node == original.root.node
+                && first.root.span.bytes() == b"parent" && shared.root.span.bytes() == b"(parent)" && last.root.span.bytes() == b"parent"
+                && *first_call == id("snapshot") && *second_call == id("readOnly") && *use_call == id("useShared") && *last_call == id("snapshot")
+                && view.root.span.bytes() == b"view" && bit.root.span.bytes() == b"bit" && staged.root.node == output.root.node && moved.root.span.bytes() == b"moved"));
+            for (name, code, at, cause) in [
+                (
+                    "sharedBlocked",
+                    "R0201",
+                    b"(parent)".as_slice(),
+                    b"parent".as_slice(),
+                ),
+                ("exclusiveBlocked", "R0203", b"parent", b"parent"),
+                ("movedParent", "R0200", b"(parent)", b"parent"),
+                ("reachedBad", "R0202", b"return &mut owner;", b"owner"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), at, "{name}");
+                assert_eq!(finding.related.span.bytes(), cause, "{name}");
+            }
+            for (name, at) in [
+                ("explicit", b"&mut *parent".as_slice()),
+                ("alias", b"named"),
+                ("piped", b"parent |> snapshot"),
+                ("extra", b"parent"),
+                ("compound", b"parent"),
+                ("referenceLeaf", b"parent"),
+                ("deeper", b"parent"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), at, "{name}");
+            }
+            let narrow = lower("narrow", default);
+            let wide = lower("wide", default);
+            assert!(wide.mir().is_some() && narrow.mir().is_some());
+            assert!(wide.statistics().work >= narrow.statistics().work + 4);
+            assert_eq!(wide.statistics().entries, narrow.statistics().entries);
+            assert_eq!(wide.statistics().max_depth, narrow.statistics().max_depth);
+            let exact = AnalysisLimits {
+                max_work: resumes.statistics().work,
+                max_entries: resumes.statistics().entries,
+                max_depth: resumes.statistics().max_depth,
+            };
+            assert!(lower("resumes", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("resumes", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn direct_shared_tuple_calls_keep_only_the_result_backing() {
     probe(
         "tuples::direct_shared_tuple_calls_keep_only_the_result_backing",
@@ -1029,8 +1241,6 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             function unsupportedDeep(value: &[[[bool, string], bool], bool]): bool { return deeper(value); }
             function carried(value: &[&bool, string]): bool { return false; }
             function unsupportedCarried(value: &[&bool, string]): bool { return carried(value); }
-            function exclusive(value: &mut [[bool, string], bool]): bool { return false; }
-            function unsupportedExclusive(value: &mut [[bool, string], bool]): bool { return exclusive(value); }
             function compoundResult(value: &[[bool, string], bool]): [bool, bool] { return [false, true]; }
             function unsupportedResult(value: &[[bool, string], bool]): [bool, bool] { return compoundResult(value); }
             function outerReference(value: &[&bool, [bool, bool]]): bool { return false; }
@@ -1199,7 +1409,6 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             for name in [
                 "unsupportedDeep",
                 "unsupportedCarried",
-                "unsupportedExclusive",
                 "unsupportedResult",
                 "unsupportedOuterReference",
                 "unsupportedInnerReference",

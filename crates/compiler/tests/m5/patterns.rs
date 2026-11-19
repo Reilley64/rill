@@ -1528,9 +1528,6 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
                 let moved = parent;
                 return bit;
             }
-            function caller(parent: &mut [bool, [i32, string]]): &mut string {
-                return incoming(parent);
-            }
             function allWildcards(parent: &mut [[bool, string], i32]): void {
                 let [[_, _], _] = (&mut *(parent));
                 let moved = parent;
@@ -1712,7 +1709,6 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
             }
             for (name, site) in [
                 ("bare", b"[[_, view], _]".as_slice()),
-                ("caller", b"parent"),
                 ("expressionOnly", b"*parent"),
                 ("localHolder", b"[[_, view], _]"),
                 ("referenceLeaf", b"[[bit, _], _]"),

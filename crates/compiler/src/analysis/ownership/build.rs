@@ -355,6 +355,23 @@ impl<'a, 'g> Build<'a, 'g> {
             .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_))))
     }
 
+    fn primitive_tuple_width(&mut self, elements: &[Type<'g>]) -> ResultOf<Option<(usize, bool)>> {
+        let mut width = elements.len();
+        let mut nested = false;
+        self.budget.step(width)?;
+        for element in elements {
+            match element.as_ref() {
+                TypeTerm::Primitive(_) => {}
+                TypeTerm::Tuple(inner) if self.primitive_tuple_elements(inner)? => {
+                    nested = true;
+                    width = width.checked_add(inner.len()).ok_or(Stop::Limit)?;
+                }
+                _ => return Ok(None),
+            }
+        }
+        Ok(Some((width, nested)))
+    }
+
     fn admits_direct_tuple_or_leaf_call(
         &mut self,
         call: &crate::analysis::scalars::CallFacts<'g>,
@@ -397,17 +414,24 @@ impl<'a, 'g> Build<'a, 'g> {
                 let TypeTerm::Tuple(elements) = referent.as_ref() else {
                     return Ok(false);
                 };
-                self.budget.step(elements.len())?;
-                let mut width = elements.len();
-                for element in elements {
-                    match element.as_ref() {
-                        TypeTerm::Primitive(_) => {}
-                        TypeTerm::Tuple(inner)
-                            if !mutable && self.primitive_tuple_elements(inner)? =>
-                        {
-                            width = width.checked_add(inner.len()).ok_or(Stop::Limit)?;
-                        }
-                        _ => return Ok(false),
+                let Some((width, nested)) = self.primitive_tuple_width(elements)? else {
+                    return Ok(false);
+                };
+                if nested && *mutable {
+                    // A nested exclusive descriptor is admitted only as the
+                    // sole named incoming argument of a direct call.
+                    if call.pipe_input.is_some() || call.arguments.len() != 1 {
+                        return Ok(false);
+                    }
+                    let root = self.ungroup(node)?;
+                    self.budget.step(2)?;
+                    let input = self.value(root)?;
+                    if self.module.syntax.nodes[root].kind != NodeKind::ValueReference
+                        || input.access != Access::Owned
+                        || !matches!(&input.path, Some(path) if path.root.kind == DeclarationKind::Parameter
+                            && path.projections.is_empty())
+                    {
+                        return Ok(false);
                     }
                 }
                 // Charge the proved tuple shape before comparing types.
@@ -1273,28 +1297,16 @@ impl<'a, 'g> Build<'a, 'g> {
         let operand = self.ungroup(syntax.children[0])?;
         self.budget.step(facts.binders.len())?;
         let nested_reborrow = if self.module.syntax.nodes[operand].kind == NodeKind::Prefix("*") {
-            if self.primitive_tuple_elements(elements)? {
-                self.named_exclusive_tuple_parent(operand, &facts.ty, elements.len())?
-                    .ok_or(Stop::Pending(pattern))?;
-                None
-            } else {
-                let mut width = elements.len();
-                self.budget.step(width)?;
-                for element in elements {
-                    match element.as_ref() {
-                        TypeTerm::Primitive(_) => {}
-                        TypeTerm::Tuple(inner) if self.primitive_tuple_elements(inner)? => {
-                            width = width.checked_add(inner.len()).ok_or(Stop::Limit)?;
-                        }
-                        _ => return Err(Stop::Pending(pattern)),
-                    }
-                }
-                Some(
-                    self.named_exclusive_tuple_parent(operand, &facts.ty, width)?
-                        .filter(|path| path.root.kind == DeclarationKind::Parameter)
-                        .ok_or(Stop::Pending(pattern))?,
-                )
+            let (width, nested) = self
+                .primitive_tuple_width(elements)?
+                .ok_or(Stop::Pending(pattern))?;
+            let path = self
+                .named_exclusive_tuple_parent(operand, &facts.ty, width)?
+                .ok_or(Stop::Pending(pattern))?;
+            if nested && path.root.kind != DeclarationKind::Parameter {
+                return Err(Stop::Pending(pattern));
             }
+            nested.then_some(path)
         } else {
             self.budget.step(1)?;
             let input = self.value(operand)?;
