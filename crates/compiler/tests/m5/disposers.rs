@@ -14,6 +14,11 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
                 let mut held = first;
                 held = second;
             }
+            function replaceMoved(first: LockGuard<i32>, second: LockGuard<i32>): void {
+                let mut held = first;
+                dispose(held);
+                held = second;
+            }
             function rejects(lock: LockGuard<i32>): void {
                 let held = lock;
                 dispose(held);
@@ -21,6 +26,9 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
             }
             function borrowed(lock: LockGuard<i32>): void { let view = &lock; }
             function passes(lock: LockGuard<i32>): LockGuard<i32> { return lock; }
+            function takes(lock: LockGuard<i32>): void { }
+            function callArgument(lock: LockGuard<i32>): void { takes(lock); }
+            function callOutput(lock: LockGuard<i32>): void { let held = passes(lock); }
             function other(lock: LockGuard<bool>): void { }
         "#,
         |_, module, receipt, typed| {
@@ -138,6 +146,32 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
                 );
             }
 
+            let moved = lower("replaceMoved");
+            let mir = moved
+                .mir()
+                .expect("installing in a moved slot needs no displacement release");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Move { .. } | Operation::Install { .. } => true,
+                    Operation::Cleanup(cleanups) => cleanups
+                        .iter()
+                        .any(|action| matches!(action, Obligation::ReleaseGuard { .. })),
+                    _ => false,
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Move { into: Some(held), .. },
+                Operation::Cleanup(first),
+                Operation::Move { into: Some(staged), .. },
+                Operation::Install { target, incoming },
+                Operation::Cleanup(second),
+            ] if target.root.node == held.root.node && incoming.root.node == staged.root.node
+                && [first, second].iter().all(|actions| matches!(actions.as_slice(), [
+                    Obligation::ReleaseGuard { operand, implementation, entry }
+                ] if operand.root.node == held.root.node && *implementation == &provider.implementation.id
+                    && *entry == &provider.entry.id))));
+
             let limits = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,
@@ -168,10 +202,21 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
             assert_eq!(finding.site.span.bytes(), b"dispose(held)");
             assert_eq!(finding.related.span.bytes(), b"dispose(held)");
             assert!(finding.related.span.start() < finding.site.span.start());
-            for name in ["borrowed", "passes", "other"] {
+            for (name, expected) in [
+                ("borrowed", "&lock"),
+                ("passes", "lock"),
+                ("callArgument", "lock"),
+                ("callOutput", "passes(lock)"),
+                ("other", "lock: LockGuard<bool>"),
+            ] {
                 let report = lower(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
+                assert_eq!(
+                    std::str::from_utf8(report.blocked_at().unwrap().span.bytes()),
+                    Ok(expected),
+                    "{name}"
+                );
             }
         },
     );
