@@ -1266,9 +1266,17 @@ pub(super) fn run<'g>(
                             },
                         };
                         initialized(&state[access], node)?;
-                        initialized(&state[destination.input], node)?;
                         let mut loans = BTreeSet::new();
-                        for slot in [contents, destination.input] {
+                        include_loans(
+                            &mut loans,
+                            &state,
+                            slots[contents].storage(contents),
+                            budget,
+                        )?;
+                        for slot in
+                            std::iter::once(destination.input).chain(destination.second_input)
+                        {
+                            initialized(&state[slot], node)?;
                             include_loans(&mut loans, &state, slots[slot].storage(slot), budget)?;
                         }
                         // The access argument is temporary. It cannot become a
@@ -1283,7 +1291,7 @@ pub(super) fn run<'g>(
                             .then_some(node),
                             ..Held::default()
                         };
-                        Some((target, contents, destination.input, held))
+                        Some((target, contents, destination, held))
                     } else {
                         None
                     };
@@ -1306,12 +1314,20 @@ pub(super) fn run<'g>(
                             ..Held::default()
                         });
                     }
-                    if let Some((destination, contents, input, held)) = contents {
+                    if let Some((destination, contents, retention, held)) = contents {
                         state[contents] = State::Initialized(held);
-                        Operation::CallRetaining {
-                            callee: call.callee,
-                            destination,
-                            input: local(input),
+                        if let Some(second) = retention.second_input {
+                            Operation::CallRetainingPair {
+                                callee: call.callee,
+                                destination,
+                                inputs: [local(retention.input), local(second)],
+                            }
+                        } else {
+                            Operation::CallRetaining {
+                                callee: call.callee,
+                                destination,
+                                input: local(retention.input),
+                            }
                         }
                     } else {
                         Operation::Call(call.callee)

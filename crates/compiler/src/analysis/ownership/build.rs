@@ -1957,8 +1957,8 @@ impl<'a, 'g> Build<'a, 'g> {
         position: usize,
         args: &[Slot],
     ) -> ResultOf<CallDestination> {
-        // This contract is determined by the declaration, not by inspecting
-        // its body for a narrower effect. Only one possible input is admitted.
+        // The declaration determines the possible inputs. Do not use the
+        // callee body to narrow them.
         self.budget.step(1)?;
         let signature = self
             .typed
@@ -1967,16 +1967,23 @@ impl<'a, 'g> Build<'a, 'g> {
             .declarations
             .get(call.callee)
             .ok_or(Stop::Pending(node))?;
-        let (contents, formal) =
+        self.budget.step(call.arguments.len().min(3))?;
+        let (contents, formals) =
             retained_bool_call_types(&signature.shape, position).ok_or(Stop::Pending(node))?;
-        if call.arguments.len() != 2 {
+        if formals.len() != call.arguments.len() {
             return Err(Stop::Pending(node));
         }
-        let input = 1 - position;
-        self.budget.step(1)?;
-        if self.value(call.arguments[input])?.ty != *formal {
-            return Err(Stop::Pending(node));
+        let mut sources = (0..formals.len()).filter(|&i| i != position);
+        let input = sources.next().unwrap();
+        let second_input = sources.next();
+        for index in std::iter::once(input).chain(second_input) {
+            self.budget.step(1)?;
+            if self.value(call.arguments[index])?.ty != formals[index].ty {
+                return Err(Stop::Pending(node));
+            }
         }
+        let input = args[input];
+        let second_input = second_input.map(|i| args[i]);
         let argument = self.ungroup(call.arguments[position])?;
         let syntax = &self.module.syntax.nodes[argument];
         if syntax.kind == NodeKind::ValueReference {
@@ -2004,7 +2011,8 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             return Ok(CallDestination {
                 storage,
-                input: args[input],
+                input,
+                second_input,
             });
         }
         if syntax.kind != NodeKind::Prefix("&mut") {
@@ -2028,7 +2036,8 @@ impl<'a, 'g> Build<'a, 'g> {
         let place = self.resolve_place(target, path)?;
         Ok(CallDestination {
             storage: CallStorage::Local(place),
-            input: args[input],
+            input,
+            second_input,
         })
     }
 
@@ -2221,7 +2230,8 @@ impl<'a, 'g> Build<'a, 'g> {
                             CallStorage::ThroughParameter { descriptor, .. }
                             | CallStorage::ThroughAlias { descriptor, .. },
                         input,
-                    }) if input != slot => descriptor,
+                        second_input,
+                    }) if input != slot && second_input != Some(slot) => descriptor,
                     _ => {
                         self.budget.step(1)?;
                         self.place(root)?

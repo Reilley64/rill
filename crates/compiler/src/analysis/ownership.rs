@@ -190,6 +190,13 @@ pub enum Operation<'g> {
         destination: RetainedPlace<'g>,
         input: Place<'g>,
     },
+    /// A direct call can retain either of two compatible shared inputs.
+    /// Input stages are listed in parameter order, omitting the destination.
+    CallRetainingPair {
+        callee: &'g DeclarationId,
+        destination: RetainedPlace<'g>,
+        inputs: [Place<'g>; 2],
+    },
     /// Select the success variant of a staged propagation or wrapping operand.
     TestVariant {
         operand: Place<'g>,
@@ -413,9 +420,9 @@ fn checked_graph<'g>(
         for block in &mir.blocks {
             budget.step(1)?;
             let call = match block.operation {
-                Operation::Call(callee) | Operation::CallRetaining { callee, .. } => {
-                    Some((callee, false))
-                }
+                Operation::Call(callee)
+                | Operation::CallRetaining { callee, .. }
+                | Operation::CallRetainingPair { callee, .. } => Some((callee, false)),
                 _ => None,
             };
             let cleanup = match &block.operation {
@@ -503,11 +510,15 @@ fn lower<'g>(
         return Err(Stop::Pending(entry_site));
     };
     budget.step(2)?;
-    let retains_exclusive_bool = [0, 1].into_iter().any(|destination| {
-        retained_bool_call_types(&header.shape, destination).is_some_and(|(_, input)| {
-            matches!(input.as_ref(), TypeTerm::Reference { mutable: true, .. })
-        })
-    });
+    let retains_exclusive_bool = parameters.len() == 2
+        && [0, 1].into_iter().any(|destination| {
+            retained_bool_call_types(&header.shape, destination).is_some_and(|(_, parameters)| {
+                matches!(
+                    parameters[1 - destination].ty.as_ref(),
+                    TypeTerm::Reference { mutable: true, .. }
+                )
+            })
+        });
     let mut build = Build {
         typed,
         module,
@@ -604,39 +615,35 @@ fn lower<'g>(
     flow::run(build, entry, &params, active)
 }
 
-// The only admitted scalar retention contract has one destination and
-// one compatible source. A shared view of an exclusive source retains the
-// same Bool backing and its exclusive restriction.
+// A scalar retention call has one destination and one or two compatible
+// sources. Only a single source may carry an exclusive restriction.
 fn retained_bool_call_types<'a, 'g>(
     shape: &'a DeclarationShape<'g>,
     destination: usize,
-) -> Option<(&'a Type<'g>, &'a Type<'g>)> {
+) -> Option<(&'a Type<'g>, &'a [super::MemberType<'g>])> {
     let DeclarationShape::Function { parameters, result } = shape else {
         return None;
     };
-    let [first, second] = parameters.as_slice() else {
-        return None;
-    };
-    if !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void") {
+    if !matches!(parameters.len(), 2 | 3)
+        || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
+    {
         return None;
     }
-    let (out, input) = match destination {
-        0 => (first, second),
-        1 => (second, first),
-        _ => return None,
-    };
-    let contents = retained_bool_contents_type(&out.ty)?;
-    match (contents.as_ref(), input.ty.as_ref()) {
-        (
-            TypeTerm::Reference {
-                referent: stored, ..
-            },
-            TypeTerm::Reference {
-                referent: source, ..
-            },
-        ) if stored == source => Some((contents, &input.ty)),
-        _ => None,
+    let contents = retained_bool_contents_type(&parameters.get(destination)?.ty)?;
+    for (index, formal) in parameters.iter().enumerate() {
+        if index == destination || formal.ty == *contents {
+            continue;
+        }
+        if parameters.len() != 2
+            || !matches!((contents.as_ref(), formal.ty.as_ref()), (
+            TypeTerm::Reference { referent: stored, .. },
+            TypeTerm::Reference { mutable: true, referent: source },
+        ) if stored == source)
+        {
+            return None;
+        }
     }
+    Some((contents, parameters))
 }
 
 fn site_at(module: &Module, node: NodeId) -> Site<'_> {
@@ -906,6 +913,7 @@ struct Call<'g> {
 struct CallDestination {
     storage: CallStorage,
     input: Slot,
+    second_input: Option<Slot>,
 }
 
 #[derive(Clone, Copy)]
