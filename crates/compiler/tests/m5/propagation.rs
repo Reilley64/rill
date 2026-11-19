@@ -3259,10 +3259,6 @@ fn propagating_pipe_step_runs_only_after_all_arguments_continue() {
                 let _ = stage(owner) |> finish(input?, nested(other?))?;
                 return Option.Some(true);
             }
-            function bare(owner: string, input: Option<bool>): Option<bool> {
-                stage(owner) |> empty(input?)?;
-                return Option.Some(true);
-            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -3399,11 +3395,9 @@ fn propagating_pipe_step_runs_only_after_all_arguments_continue() {
                 calls_on_path(mir, [true, false]),
                 [id("stage"), id("finishResult")]
             );
-            for name in ["deeper", "bare"] {
-                let blocked = lower(name, default);
-                assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");
-                assert!(blocked.mir().is_none());
-            }
+            let deeper = lower("deeper", default);
+            assert_eq!(deeper.completion(), Completion::Incomplete);
+            assert!(deeper.mir().is_none());
             let exact = AnalysisLimits {
                 max_work: report.statistics().work,
                 max_entries: report.statistics().entries,
@@ -3423,6 +3417,136 @@ fn propagating_pipe_step_runs_only_after_all_arguments_continue() {
                 let limited = lower("pipe", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn composed_pipe_statements_discard_only_the_success_payload() {
+    probe_with_typed(
+        "propagation::composed_pipe_statements_discard_only_the_success_payload",
+        r#"
+            function stage(owner: string): string { return owner; }
+            function continueWith(owner: string): bool { dispose(owner); return true; }
+            function optionStep(owner: string, bit: bool): Option<bool> { dispose(owner); return Option.Some(bit); }
+            function resultStep(owner: string, bit: bool): Result<i32, i32> { dispose(owner); return Result.Ok(1i32); }
+            function options(owner: string, input: Option<bool>, later: string): Option<bool> {
+                (stage(owner) |> optionStep(input?)?);
+                let bit = continueWith(later);
+                return Option.Some(bit);
+            }
+            function results(input: Result<bool, i32>, owner: string, later: string): Result<bool, i32> {
+                ((input?) |> resultStep(stage(owner), _)?);
+                let bit = continueWith(later);
+                return Result.Ok(bit);
+            }
+            function knownEmpty(input: Option<bool>.None, owner: string, later: string): Option<bool> {
+                (input?) |> optionStep(stage(owner), _)?;
+                let bit = continueWith(later);
+                return Option.Some(bit);
+            }
+            function nested(bit: bool): bool { return bit; }
+            function deeper(owner: string, input: Option<bool>, other: Option<bool>): Option<bool> {
+                stage(owner) |> optionStep(nested(input? || other?))?;
+                return Option.Some(true);
+            }
+            function round(value: bool): Option<bool> { return Option.Some(value); }
+            function nestedComposition(input: Option<bool>): Option<bool> {
+                let bit = nested((input?) |> round?);
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let options = lower("options", default);
+            let mir = options
+                .mir()
+                .unwrap_or_else(|| panic!("options: {:?}", options.completion()));
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (step_yes, step_no) = variant_edges(
+                mir,
+                yes,
+                &option.some.id,
+                b"stage(owner) |> optionStep(input?)?",
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"stage(owner)", b"later: string"],
+            );
+            assert_return(
+                &linear(mir, step_no),
+                &option.none.id,
+                false,
+                &[b"later: string"],
+            );
+            let end = linear(mir, step_yes);
+            assert_return(&end, &option.some.id, true, &[]);
+            assert!(
+                end.iter()
+                    .all(|op| !matches!(op, Operation::CopyOptionPayload { .. }))
+            );
+            assert_eq!(calls_on_path(mir, [false]), [id("stage")]);
+            assert_eq!(
+                calls_on_path(mir, [true, false]),
+                [id("stage"), id("optionStep")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("stage"), id("optionStep"), id("continueWith")]
+            );
+            let result = typed.result_role().unwrap();
+            let results = lower("results", default);
+            let mir = results
+                .mir()
+                .expect("the result step's success payload is discarded, not its Err");
+            let (yes, no) = variant_edges(mir, mir.entry, &result.ok.id, b"input");
+            let source = b"(input?) |> resultStep(stage(owner), _)?";
+            let (step_yes, step_no) = variant_edges(mir, yes, &result.ok.id, source);
+            assert_forward(
+                &linear(mir, no),
+                result,
+                b"input",
+                &[b"later: string", b"owner: string"],
+            );
+            assert_forward(&linear(mir, step_no), result, source, &[b"later: string"]);
+            let end = linear(mir, step_yes);
+            assert!(end.iter().any(
+                |op| matches!(op, Operation::TakeResultSuccess { operand, into: None }
+                if operand.root.span.bytes() == source)
+            ));
+            assert_eq!(
+                calls_on_path(mir, [true, true]),
+                [id("stage"), id("resultStep"), id("continueWith")]
+            );
+            assert_return(&end, &result.ok.id, true, &[]);
+            let known_empty = lower("knownEmpty", default);
+            let mir = known_empty
+                .mir()
+                .expect("known empty input skips the outer step and the next statement");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"later: string", b"owner: string"],
+            );
+            for name in ["deeper", "nestedComposition"] {
+                let blocked = lower(name, default);
+                assert_eq!(blocked.completion(), Completion::Incomplete, "{name}");
+                assert!(blocked.mir().is_none());
             }
         },
     );

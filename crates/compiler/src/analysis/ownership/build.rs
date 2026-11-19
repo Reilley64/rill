@@ -28,8 +28,8 @@ enum PropagatingCallOutput<'a, 'g> {
 
 #[derive(Clone, Copy)]
 enum PropagationSite {
-    Initializer,
-    Other,
+    StatementRoot,
+    NestedArgument,
 }
 
 struct PropagatingArguments {
@@ -824,7 +824,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         next,
                         exits.returning,
                         depth + 1,
-                        PropagationSite::Initializer,
+                        PropagationSite::StatementRoot,
                     );
                 }
                 self.budget.step(1)?;
@@ -892,7 +892,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         next,
                         exits.returning,
                         depth + 1,
-                        PropagationSite::Other,
+                        PropagationSite::StatementRoot,
                     )
                 } else {
                     self.discard(node, value, next, depth + 1)
@@ -1547,7 +1547,7 @@ impl<'a, 'g> Build<'a, 'g> {
             operand,
             wrapper,
         } = self.checked_propagation(node, facts)?;
-        let pipe_arguments = if matches!(site, PropagationSite::Initializer)
+        let pipe_arguments = if matches!(site, PropagationSite::StatementRoot)
             && piped
             && fresh.is_none()
             && let Some(call) = facts.call.as_deref()
@@ -2555,7 +2555,7 @@ impl<'a, 'g> Build<'a, 'g> {
             next,
             failure_cleanup,
             depth + 1,
-            PropagationSite::Other,
+            PropagationSite::NestedArgument,
         )
     }
 
