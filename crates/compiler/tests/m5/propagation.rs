@@ -77,7 +77,7 @@ fn option_postfix_returns_through_initialized_cleanup() {
                 for success in [true, false] {
                     assert_eq!(calls_on_path(mir, [flag, success]), [&pass.id]);
                 }
-                let (some, none) = variant_edges(mir, start, &role.some.id);
+                let (some, none) = variant_edges(mir, start, &role.some.id, b"pass(input)");
                 let failure = linear(mir, none);
                 assert_return(&failure, &role.none.id, false, expected);
                 assert!(!failure.iter().any(|op| matches!(
@@ -1007,7 +1007,7 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
                 for success in [true, false] {
                     assert_eq!(calls_on_path(mir, [flag, success]), [&pass.id]);
                 }
-                let (ok, err) = variant_edges(mir, start, &role.ok.id);
+                let (ok, err) = variant_edges(mir, start, &role.ok.id, b"pass(input)");
                 let failure = linear(mir, err);
                 assert_forward(&failure, role, b"pass(input)", expected);
                 assert!(!failure.iter().any(|op| matches!(
@@ -1491,6 +1491,11 @@ fn propagation_statements_discard_only_the_feasible_success_payload() {
                 input ? rhs(message);
                 return Result.Ok(true);
             }
+            function knownFailure(input: Result<i32, i32>.Err, owner: string): Result<bool, i32> {
+                input?;
+                dispose(owner);
+                return Result.Ok(true);
+            }
             function embedded(input: Option<bool>): Option<bool> { return Option.Some(input?); }
         "#,
         |_, module, receipt, typed| {
@@ -1510,7 +1515,7 @@ fn propagation_statements_discard_only_the_feasible_success_payload() {
             let mir = report
                 .mir()
                 .unwrap_or_else(|| panic!("option: {:?}", report.completion()));
-            let (yes, no) = branch_targets(mir);
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
             let success = linear(mir, yes);
             let failure = linear(mir, no);
             assert_return(&success, &option.some.id, true, &[]);
@@ -1528,13 +1533,19 @@ fn propagation_statements_discard_only_the_feasible_success_payload() {
                 let mir = report
                     .mir()
                     .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
-                let (yes, no) = branch_targets(mir);
+                let (yes, no) = variant_edges(mir, mir.entry, &result.ok.id, source);
                 let success = linear(mir, yes);
                 let failure = linear(mir, no);
-                assert!(success.iter().any(
-                    |op| matches!(op, Operation::TakeResultSuccess { operand, into: None }
-                    if operand.root.span.bytes() == source)
-                ));
+                let transfers: Vec<_> = success
+                    .iter()
+                    .copied()
+                    .filter(|op| matches!(op, Operation::TakeResultSuccess { .. }))
+                    .collect();
+                assert!(
+                    matches!(transfers.as_slice(), [Operation::TakeResultSuccess { operand, into: None }]
+                    if operand.root.span.bytes() == source),
+                    "{transfers:?}"
+                );
                 assert_return(&success, &result.ok.id, true, &[]);
                 assert_forward(&failure, result, source, &[b"owner: string"]);
                 for branch in [true, false] {
@@ -1550,7 +1561,7 @@ fn propagation_statements_discard_only_the_feasible_success_payload() {
             let mir = wrap
                 .mir()
                 .expect("infix statement retains the complete failed wrapper");
-            let (yes, no) = branch_targets(mir);
+            let (yes, no) = variant_edges(mir, mir.entry, &result.ok.id, b"input");
             let ok = linear(mir, yes);
             let err = linear(mir, no);
             assert!(calls_on_path(mir, [true]).is_empty());
@@ -1569,6 +1580,18 @@ fn propagation_statements_discard_only_the_feasible_success_payload() {
                 matches!(op, Operation::WrapResultFailure { into, .. }
                 if into.root.node == out.root.node)
             });
+            let known = check("knownFailure");
+            let mir = known
+                .mir()
+                .expect("a known Err selects only the early exit");
+            let err = linear(mir, mir.entry);
+            assert_forward(&err, result, b"input", &[b"owner: string"]);
+            assert!(!err.iter().any(|op| matches!(
+                op,
+                Operation::TestVariant { .. }
+                    | Operation::Dispose { .. }
+                    | Operation::TakeResultSuccess { .. }
+            )));
             let embedded = check("embedded");
             assert_eq!(embedded.completion(), Completion::Incomplete);
             assert!(embedded.mir().is_none());
@@ -1598,7 +1621,7 @@ fn propagation_statements_discard_only_the_feasible_success_payload() {
 
 #[test]
 fn result_expression_statements_still_require_acknowledgement() {
-    use compiler::analysis::typed::TypedCompletion;
+    use compiler::analysis::typed::{ResultDiscardKind, TypedCompletion};
 
     probe_report(
         "propagation::result_expression_statements_still_require_acknowledgement",
@@ -1614,17 +1637,24 @@ fn result_expression_statements_still_require_acknowledgement() {
                 panic!("expected one unacknowledged Result")
             };
             assert_eq!(discard.code(), "R0103");
+            assert_eq!(discard.kind, ResultDiscardKind::Expression);
+            assert_eq!(discard.discard.span.bytes(), b"input;");
             assert_eq!(discard.origin.span.bytes(), b"input: Result<bool, i32>.Ok");
         },
     );
 }
 
-fn variant_edges(mir: &Mir<'_>, mut pc: usize, expected: &loader::DeclarationId) -> (usize, usize) {
+fn variant_edges(
+    mir: &Mir<'_>,
+    mut pc: usize,
+    expected: &loader::DeclarationId,
+    source: &[u8],
+) -> (usize, usize) {
     for _ in 0..mir.blocks.len() {
         let block = &mir.blocks[pc];
         match (&block.operation, block.terminator) {
             (Operation::TestVariant { operand, success }, Terminator::Branch { yes, no }) => {
-                assert_eq!(operand.root.span.bytes(), b"pass(input)");
+                assert_eq!(operand.root.span.bytes(), source);
                 assert_eq!(*success, expected);
                 return (yes, no);
             }
