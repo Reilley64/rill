@@ -33,6 +33,6 @@ Start with the [runtime-validation summary](0030-runtime-validation.md). The ear
 - SQL has [standard interface/error research](0040-standard-sql-and-unique-errors.md) and [SQLite provider research](0043-sqlite-native-provider.md).
 - Conversions have [Rust coherence/evidence research](0041-q19-rust-conversion-evidence.md).
 - RFC conventions have [language-process research](0026-language-rfc-formats.md).
-- LSP has the [OpenIDEA capability inventory](openidea-language-server-capabilities.md).
+- The [language server tooling contract](../lsp-contracts.md) links the protocol specification.
 
 Check each report's date, pinned revisions and executed-versus-planned evidence before reusing a claim. Standalone/native/model execution is not Rill compiler execution.

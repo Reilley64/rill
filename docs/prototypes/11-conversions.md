@@ -2,7 +2,7 @@
 
 Read the source examples in [`prototypes/11-conversions.rill`](../../prototypes/11-conversions.rill).
 
-[ADR 0017](../adr/0017-user-implementable-conversions.md) records the confirmed decision. The [companion source](../../prototypes/11-conversions.rill) contains 14 intended-valid expectations. Neither these expectations nor the independent cases below have been executed by a Rill compiler. The [diagnostic case notes](21-diagnostics.md) and [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md) describe #24's diagnostic work. [Rust research](../research/0041-q19-rust-conversion-evidence.md) is comparative evidence, not a Rill implementation proof.
+[ADR 0017](../adr/0017-user-implementable-conversions.md) records the confirmed decision. The [companion source](../../prototypes/11-conversions.rill) contains 14 intended-valid expectations. Neither these expectations nor the independent cases below have been executed by a Rill compiler. The [diagnostic case notes](21-diagnostics.md) and [ADR 0016](../adr/0016-structured-diagnostics.md) describe #24's diagnostic work. [Rust research](../research/0041-q19-rust-conversion-evidence.md) is comparative evidence, not a Rill implementation proof.
 
 ## Intended-valid coverage
 

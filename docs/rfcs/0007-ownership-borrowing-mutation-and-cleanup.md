@@ -136,6 +136,28 @@ A positive classification chooses the binder's static value type only. It perfor
 
 No classification proves initialized storage, exclusive access, valid partial moves, safe guard commitment or cleanup. Those operations remain outside M4.4.
 
+#### Post-M6 explicit copying
+
+The owner requested this change in [#78](https://github.com/Reilley64/rill/issues/78). M5 and M6 use the copy rules above. Apply the rules below only after M6.
+
+Remove implicit copying for all types, including scalars, read-only references and aggregates. An owning binding, argument, return or capture moves an existing value. The source place stays unavailable until it is initialized again. To duplicate an existing value, call canonical `copy(&value)` and prove its copy requirement.
+
+Built-in scalar arithmetic and comparison read their operands without moving them. A read does not create a first-class reference value. Write `&value` to obtain a reference value. Reads must still obey exclusive access restrictions. Ordinary function arguments follow their declared ownership contracts.
+
+Post-M6 example, not checked:
+
+```rill
+let n = 7i32;
+let twice = n + n;
+let second = copy(&n);
+let moved = n;
+// let invalid = n + 1i32; // Rejected: n was moved.
+```
+
+An owning pattern transfers a value. A borrowed pattern cannot silently copy a field into an owned binding. Copying a read-only reference explicitly must preserve its dependencies. Exclusive references and protected non-copyable resources remain non-copyable.
+
+Before implementation, specify the affected pattern, generic, capture and standard-library procedures. Check how source, MIR and diagnostics distinguish a read, a borrow, a move and an explicit copy. Migrate live examples separately from historical evidence.
+
 ### Borrow acquisition, overlap and reborrowing
 
 Read-only `&T` permits observation without ownership. Exclusive `&mut T` permits mutation without ownership. For overlapping storage, permit multiple read-only loans or one exclusive loan.
@@ -392,7 +414,7 @@ Do not substitute a borrow or an expected invocation mode for missing evidence. 
 | [Draft RFC 0005](0005-types-records-enums-and-inference.md) | Nominal layouts, patterns, generic fields and variant relationships. | Its precision policies are confirmed. Full layout/pattern judgments remain incomplete. |
 | [Draft RFC 0006](0006-numbers-strings-and-primitive-operations.md) | Logical text/byte places, static literals and core conversion ownership contracts. | Precision policies and strict entry points are confirmed. Broader matrix and ScalarError remain draft details. |
 | Concurrency and runtime | Scheduling, transfer/sharing derivation, child/native state machines, protected registry and private ABI. | No complete RFC assigned. This document states retention obligations, not an implementation. |
-| Draft RFCs [0008](0008-errors-propagation-and-caused-by-wrapping.md) and [0010](0010-diagnostics-and-reporting.md), with trusted admission incomplete. | Cause ownership, exact errors, dependency traces, incomplete analysis and opaque property admission. | Both remain Draft. Complete cause/evidence, source/driver and trusted metadata judgments remain incomplete. [#28](https://github.com/Reilley64/rill/issues/28) and [#42](https://github.com/Reilley64/rill/issues/42) retain formal/production and editor gates. |
+| Draft RFCs [0008](0008-errors-propagation-and-caused-by-wrapping.md) and [0010](0010-diagnostics-and-reporting.md), with trusted admission incomplete. | Cause ownership, exact errors, dependency traces, incomplete analysis and opaque property admission. | Both remain Draft. Complete cause/evidence, source/driver and trusted metadata judgments remain incomplete. [#28](https://github.com/Reilley64/rill/issues/28) retains formal and production gates. |
 
 ## Valid/invalid examples and diagnostics
 

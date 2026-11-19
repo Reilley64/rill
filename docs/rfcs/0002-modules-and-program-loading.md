@@ -464,7 +464,7 @@ Build and stage the production executable, source files and provider artifacts i
 | [Draft RFC 0005](0005-types-records-enums-and-inference.md) | Nominal declaration identity, public-interface exposure and finite layout checking. | Proposed, not accepted. Concrete type-syntax policies are confirmed. Formal layout checking remains incomplete. |
 | [Draft RFC 0004](0004-functions-overloads-and-generic-requirements.md) | Canonical patterns, family evidence, duplicates, placement and call ranking. | Proposed. Its full text is not accepted. This RFC owns loading and visibility, not ranking. |
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md), with runtime integration still missing. | Protected operations, remaining-field cleanup and opaque-value metadata. | Proposed, not accepted. Complete registry/runtime checking remains incomplete. Private fields do not validate required actions. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with full LSP still missing. | Shared contexts, snapshots, path failures, safe edits and client behavior. | Reporting is proposed, not accepted. Complete source/snapshot and driver rules remain incomplete. Actual LSP delivery remains #42. |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md) | Shared contexts, snapshots, path failures and evidence for edits. | Reporting is proposed, not accepted. Complete source, snapshot and driver rules remain incomplete. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -547,11 +547,11 @@ A reading order can place this document before RFC 0001. Document identity does 
 
 The standard facade follows the compatible selected toolchain. This does not create an application package manifest or arbitrary native-provider registration. Native-provider admission remains separate from ordinary source exports.
 
-### Editor contexts
+### Analysis contexts
 
-An editor uses the selected entry, target and options to identify an analysis context. A workspace folder is not the application root by itself. Search results cannot add implementations to that context's loaded graph. Contexts remain separate even when they share files.
+Use the selected entry, target and options to identify an analysis context. Contexts remain separate even when they share files. Searching source outside the loaded graph does not change the implementation set.
 
-Organize-imports must preserve loaded modules, public bindings, implementations and expectations. Removing a textually unused import can change that graph. Navigation and rename must preserve canonical aliases, namespaces and private access. Actual client behavior remains unvalidated under #42.
+A semantics-preserving source transformation preserves loaded modules, public bindings, implementations and expectations. Removing a textually unused import can change that graph.
 
 ### Source reconciliation
 
@@ -564,7 +564,7 @@ Repository inputs use [`f33dcf4cf3f815824eeb897135775d7884f65c1a`](https://githu
 | [#19 confirmation](https://github.com/Reilley64/rill/issues/19#issuecomment-6870013901), ADR 0012 | Replace historical public-union rules with enum visibility. Do not restore private enum variants or general unions. |
 | [#23 confirmation](https://github.com/Reilley64/rill/issues/23#issuecomment-6872129850), catalogue sections 1 and 2 | Preserve fixed prelude identities, protected actions and remaining-field cleanup. Their complete checking rules remain companion work. |
 | [#41 confirmation](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), ADR 0017 | Use `implement` for family bodies. Keep conversion-specific keys and endpoint permission separate from ordinary rules. |
-| [#24 confirmation](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), diagnostic registry and LSP contracts | Use assigned path/privacy code meanings. Preserve context separation and graph-aware edits. No resolver or client behavior is claimed. |
+| [#24 confirmation](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), diagnostic registry | Use assigned path and privacy code meanings. Preserve context separation and graph-aware edits. No resolver execution is claimed by the source decision. |
 | [Accepted RFC 0001 snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) | Reuse expectation behavior. Propose its missing module rules without changing its accepted semantics or ID. |
 | ADR 0026 and standard-library ownership note | Use a toolchain-selected source origin and explicit future `std.rill` facade. Do not invent package lookup or claim the scaffold supplies it. |
 | Module prototype and [consolidation record](../prototypes/consolidation.md) | Use current `07-modules/` paths. Preserve all source and fixture bytes. Historical `10-modules/` references identify earlier paths. |
@@ -640,7 +640,7 @@ The table below preserves pre-M3 evidence at the stated drafting revisions. The 
 - Test shadowed canonical operations and protected nested-payload specializations. Confirm ordinary unprotected defaults remain replaceable.
 - Test entry startup and test discovery through RFC 0001. Count repeated module paths once. Include loaded standard expectations.
 - Compare canonical ordering across hosts and root relocation. Exclude locale, import order and absolute path effects.
-- Test separate editor contexts and graph-preserving import edits. Do not treat source navigation as private access or client acceptance.
+- Test distinct analysis contexts and preserve graph membership when removing redundant imports.
 
 ## Open/deferred questions
 
@@ -654,11 +654,11 @@ The [proposed M3 procedure](#proposed-m3-resolution-procedure) supplies candidat
 
 Draft RFCs [0004](0004-functions-overloads-and-generic-requirements.md) and [0005](0005-types-records-enums-and-inference.md) propose function and type companions. Their full texts remain Draft. [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) proposes ownership and cleanup.
 
-[Draft RFC 0010](0010-diagnostics-and-reporting.md) proposes diagnostics/reporting. Concurrency/runtime and full LSP companions remain missing. Their exact sections and review revisions are needed. This draft does not supply complete overload ranking or protected-action checking through a supporting link.
+[Draft RFC 0010](0010-diagnostics-and-reporting.md) proposes diagnostics/reporting. Concurrency and runtime companions remain missing. Their exact sections and review revisions are needed. This draft does not supply complete overload ranking or protected-action checking through a supporting link.
 
 ### Implementation/validation gates
 
-M3 supplies scoped resolution and real filesystem tests on the recorded local macOS AArch64 host. The [hosted record](../../crates/compiler/tests/m3-acceptance.md#hosted-publication-evidence) adds passing resolver tests on four Linux/macOS runner profiles. Native/runtime acceptance still fails as unavailable. The typed checker, persistent source cache, runtime and complete client workflows remain unimplemented. Structural text checks cannot replace those gates. #28 retains formalization; #42 retains actual LSP delivery.
+M3 supplies scoped resolution and real filesystem tests on the recorded local macOS AArch64 host. The [hosted record](../../crates/compiler/tests/m3-acceptance.md#hosted-publication-evidence) adds passing resolver tests on four Linux/macOS runner profiles. Native/runtime acceptance still fails as unavailable. The M3 checks do not establish the typed checker, persistent source cache or runtime. Structural text checks cannot replace those gates. #28 retains formalization.
 
 ### Future/out-of-scope work
 

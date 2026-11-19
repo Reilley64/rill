@@ -5,7 +5,7 @@
 | ID | 0010 |
 | Status | Draft |
 | Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [#24 diagnostic decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md), [report contract](../diagnostic-contracts.md) and [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The proposed annex snapshots appear [below](#proposed-normative-annexes). |
+| Source inputs | [#24 diagnostic decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), [ADR 0016](../adr/0016-structured-diagnostics.md), [report contract](../diagnostic-contracts.md) and [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The proposed annex snapshots appear [below](#proposed-normative-annexes). |
 | RFC dependencies | [RFC 0001's accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211), SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`, owns expectations. Draft RFCs [0002](0002-modules-and-program-loading.md) through [0009](0009-user-implementable-conversions.md) propose analysis/typing/ownership/error rules. Their full texts are not accepted. Required [companions](#required-companion-rules) remain incomplete or missing. |
 | Replaces / superseded by | None. This draft does not amend RFC 0001 or accept another draft. |
 | Decision | Not yet decided |
@@ -21,7 +21,7 @@ RFC 0001's accepted snapshot owns expectation execution, capture restrictions an
 
 The owner confirmed occurrence grouping/order, summary accounting and safe report-file opening. The [policy record](https://github.com/Reilley64/rill/issues/28#issuecomment-6928487474) identifies their exact approval scope. Full driver state transitions, source mapping and emitter integration still need work. This document remains Draft, not implemented reporting or a safety proof.
 
-Runtime error rendering remains with RFC 0008. Complete LSP/client behavior needs a separate proposal and the unchanged [#42 delivery gate](https://github.com/Reilley64/rill/issues/42). It is a v0 tooling requirement, not optional future scope.
+Runtime error rendering remains with RFC 0008. Editor protocols are outside this RFC.
 
 ## Motivation
 
@@ -87,7 +87,7 @@ This RFC proposes including these exact snapshots in its normative review bounda
 
 The links identify maintained files; the digests identify the proposed annex bytes. Later edits do not silently update this review boundary. Acceptance would need to identify the RFC revision and these annex snapshots explicitly.
 
-The existing report contract, ADRs, fixtures and LSP matrix remain supporting inputs. This RFC does not include them wholesale as normative annexes. The annexes themselves remain unaccepted with this Draft.
+The existing report contract, ADRs and fixtures remain supporting inputs. This RFC does not include them wholesale as normative annexes. The annexes themselves remain unaccepted with this Draft.
 
 Annex A checks record shapes, not cross-record or semantic truth. The rules below supply additional sequence, range, scope and accounting requirements. Matching a JSON Schema alone cannot establish successful analysis or correct observations.
 
@@ -103,7 +103,7 @@ Primary can be null when no truthful source location exists. Configuration, dest
 
 Notes, related locations and help belong to a primary diagnostic. They are not additional independent source errors. A toolFailure record is not an ordinary diagnostic mislabeled as a source mistake.
 
-The common model is not a serialized AST, HIR/MIR graph or LSP object. Adapters preserve its meaning while using their own coordinate and presentation conventions. They must not recover structured facts by parsing message text.
+The common model is not a serialized AST, HIR/MIR graph or transport message. Adapters preserve its meaning while using their own coordinate and presentation conventions. They must not recover structured facts by parsing message text.
 
 ### Analysis and source identities
 
@@ -115,7 +115,7 @@ Source evidence must refer to the snapshot actually checked or executed. Formatt
 
 Loaded app/std origins and canonical identities follow RFC 0002. Human path rendering must distinguish otherwise identical origin-relative names. Source identity does not use inode/content equality merely because files share storage.
 
-JSONL context contains id and snapshotId, with entryUri, target and compilerOptions when established. Null context is honest missing context, not an invitation to invent entry/configuration facts. Full editor context selection and stale-response handling remain LSP companion work.
+JSONL context contains id and snapshotId, with entryUri, target and compilerOptions when established. Null context is honest missing context, not an invitation to invent entry/configuration facts.
 
 ### Source ranges and coordinate projection
 
@@ -123,7 +123,7 @@ Locations use original-source UTF-8 byte offsets, with exclusive ends. Require `
 
 Human positions use one-based source lines and Unicode-scalar columns. A tab is one source scalar, not its terminal display width. Combining scalars and astral scalars retain their actual source positions.
 
-Terminal alignment separately expands tabs and accounts for display widths. LSP positions are zero-based in the negotiated encoding. The selected OpenIDEA baseline uses UTF-16, so an astral scalar contributes two code units there.
+Terminal alignment separately expands tabs and accounts for display widths.
 
 Preserve mappings through physical CRLF and literal decoding/normalization. A decoded literal offset is not the original token's source offset. Do not split encoded scalars. Do not use floating-point numbers for large byte offsets.
 
@@ -137,7 +137,7 @@ Machine locations use canonical encoded URIs. Human display text does not replac
 
 #### Original-byte coordinate procedure
 
-The owner [confirmed this file-level mapping policy](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) with the lexical/source contract. It includes invalid-source positions. It does not change runtime SourceLocation, accepted expectation identity or #42's full client requirements.
+The owner [confirmed this file-level mapping policy](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) with the lexical/source contract. It includes invalid-source positions. It does not change runtime SourceLocation or accepted expectation identity.
 
 Build physical lines from the saved raw bytes, not normalized literal content. Recognize CRLF as one ending, then lone CR or LF as one ending. Lone-CR handling is confirmed by the lexical decision; CRLF preservation follows the earlier source decision.
 
@@ -152,23 +152,20 @@ A valid prefix supplies these coordinates:
 ```text
 human line = zero-based line index + 1
 human column = Unicode scalar count in prefix + 1
-LSP line = zero-based line index
-LSP character, UTF-8 = encoded prefix byte length
-LSP character, UTF-16 = prefix UTF-16 code-unit count
-LSP character, UTF-32 = prefix Unicode scalar count
+UTF-8 prefix length = encoded prefix byte length
+UTF-16 prefix length = prefix UTF-16 code-unit count
+UTF-32 prefix length = prefix Unicode scalar count
 ```
 
 Tabs contribute one scalar, one UTF-8 byte and one UTF-16 unit. Astral scalars contribute one scalar, their actual UTF-8 bytes and two UTF-16 units. Combining scalars remain separate columns; terminal display alignment is a different calculation.
 
-A BOM present in saved source contributes its scalar/code-unit position. An editor that omits it has different document bytes. The LSP companion must reconcile those snapshots explicitly, not silently subtract columns.
+A BOM in a snapshot contributes to its scalar and code-unit counts. Omitting it changes the snapshot bytes.
 
 This procedure can project a later valid line after invalid UTF-8 on an earlier line. It cannot guess scalar counts after invalid bytes within the same line. Line boundaries remain identifiable from their ASCII bytes.
 
 Project span endpoints independently. Include the decoded start/end pair only when both projections exist in the requested coordinate system. Otherwise retain the original byte range and omit both decoded fields.
 
-Reject out-of-bounds/reversed byte ranges rather than clamp them. Protocol numeric limits can make an otherwise mathematical LSP position unrepresentable. Report that limit without wrapping or substituting a nearby range.
-
-The LSP companion must carry unrepresentable-location failures without a fabricated Diagnostic.range. This section does not choose its complete fallback/notification behavior. Human adapters can show byte ranges and safely escaped source without guessed columns.
+Reject out-of-bounds or reversed byte ranges rather than clamp them. Report an unrepresentable location without wrapping or substituting a nearby range. Human adapters can show byte ranges and safely escaped source without guessed columns.
 
 The illustrative Y1 source contains these bytes:
 
@@ -177,7 +174,7 @@ source scalars: A, TAB, é, U+1F642, CR, LF, B
 hex bytes:     41 09 C3 A9 F0 9F 99 82 0D 0A 42
 ```
 
-| Case | Offset or condition | Human line/column | LSP UTF-16 line/character |
+| Case | Offset or condition | Human line/column | Zero-based line / UTF-16 prefix units |
 | --- | --- | --- | --- |
 | Y1a | Byte 2, after tab | 1 / 3 | 0 / 2 |
 | Y1b | Byte 4, before astral scalar | 1 / 4 | 0 / 3 |
@@ -209,7 +206,7 @@ Intent is mechanical, behaviorChoice or scaffold. Applicability is verified, req
 
 Do not suggest unsupported lifetimes or forbidden copies. Do not suggest an inaccessible constructor. Do not suggest moving a value that still carries the invalid borrow. Do not mark incomplete/generated scaffold text as a finished implementation. An explicit conversion or error adaptation can require user choice and additional evidence.
 
-Application must revalidate source/dependency preconditions. Reporting an edit does not apply it or promise client atomicity. Full refactor workflows, commands and client recovery remain with the LSP companion and #42.
+Application must revalidate source and dependency preconditions. Reporting an edit does not apply it or promise atomicity.
 
 <a id="proposed-occurrence-grouping-and-deterministic-limits"></a>
 
@@ -383,7 +380,7 @@ A false result continues after normal cleanup under RFC 0001. Adapter/output fai
 | Draft RFCs [0003](0003-expressions-bindings-and-control-flow.md), [0004](0004-functions-overloads-and-generic-requirements.md) and [0005](0005-types-records-enums-and-inference.md). | Actual grammar, flow, generic/type facts and failure provenance. | Their precision policies are confirmed. Full checking procedures remain incomplete. Reporting cannot invent missing facts. |
 | Draft RFCs [0006](0006-numbers-strings-and-primitive-operations.md) and [0007](0007-ownership-borrowing-mutation-and-cleanup.md). | Literal/source maps, scalar preview data, moves, dependencies and cleanup. | Their policy approvals do not prove safe capture or full ownership. Complete judgments remain incomplete. |
 | Draft RFCs [0008](0008-errors-propagation-and-caused-by-wrapping.md) and [0009](0009-user-implementable-conversions.md). | Error/cause and pair/evidence distinctions. | Their precision policies are confirmed. Full sealed/selection/evidence rules remain incomplete; runtime rendering is separate. |
-| Driver/runtime and full LSP | Actual sink/state transitions, execution-stop behavior, protocol transport and complete client workflows. | Complete RFCs remain missing. [#42](https://github.com/Reilley64/rill/issues/42) retains all applicable OpenIDEA-used LSP delivery/acceptance, not diagnostics alone. |
+| Driver and runtime | Actual sink state transitions and execution-stop behavior. | Complete procedures remain missing. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -423,7 +420,7 @@ Case D19 describes stdout aliases and special files. Run/test cannot bypass the 
 
 Case D20 describes report I/O failure. A valid sink later fails write/flush/close. Return nonzero and explain best-effort on stderr, without adding prose to the JSONL stream. A previously completed analysis or parseable summary does not prove durable output.
 
-Case D21 describes front-end-only checking. Check loads/checks the selected context without emitting LLVM or executing startup, expectations, conversions or formatters. An absent parser/checker cannot be reported as a successful empty check. A front-end pass does not clear backend/client gates.
+Case D21 describes front-end-only checking. Check loads/checks the selected context without emitting LLVM or executing startup, expectations, conversions or formatters. An absent parser/checker cannot be reported as a successful empty check. A front-end pass does not establish backend support.
 
 Case D22 describes run separation. A build-phase JSONL summary passes, then the application writes raw text and exits nonzero. That application result is not overwritten by the earlier summary or converted into a compiler diagnostic. Report scope remains explicit.
 
@@ -457,24 +454,17 @@ RFC 0008 owns runtime Err/Cause formatting and opaque SourceLocation. Compiler c
 
 Driver status is separate from application exits, Rill panic and intrinsic cancellation. Required source retention, cancellation masking and native completion remain with their actual semantic/runtime owners. Reporting cannot shorten them for convenience.
 
-### LSP and source edits
-
-The common model can serve an LSP adapter without adopting LSP positions as internal source coordinates. Rich fields may need a faithful essential-message fallback in the selected client. Do not fabricate extra source diagnostics to compensate for dropped client fields.
-
-Full push/pull synchronization, stale-response handling, navigation, refactors, rename and capability negotiation remain a separate proposal. Preserve the complete applicable OpenIDEA-used scope and versioned acceptance matrix under #42. A validated schema or mocked notification does not deliver that interface.
-
 ### Source reconciliation
 
 | Input | Disposition |
 | --- | --- |
-| [#24 decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md), report contract | Preserve the rich model, stable codes, coordinates, narrow warnings, flags, statuses and separate JSONL/LSP adapters. The owner confirmed occurrence/accounting/sink precision. Detailed procedures remain unfinished. |
+| [#24 decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), [ADR 0016](../adr/0016-structured-diagnostics.md), report contract | Preserve the rich model, stable codes, coordinates, narrow warnings, flags, statuses and separate report adapters. The owner confirmed occurrence/accounting/sink precision. Detailed procedures remain unfinished. |
 | [RFC 0001 acceptance](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) | Preserve Boolean outcomes, sequence, source identity, no added user effects and 4/8/4096 capture limits. Do not complete missing capture accounting through an implicit amendment. |
 | [Diagnostic schema](../diagnostic-report.schema.json) and [code registry](../diagnostic-codes.md), exact annex digests | Propose their explicit normative adoption with this RFC, not automatic latest-file authority. Cross-record truth and operational procedures still need the body rules and validation. |
 | #9/#15/#16/#17/#19/#21 and Draft RFCs 0002 through 0007 | Preserve nominal/static facts, actual source dependencies, initialized cleanup, private access and noncapturing declarations. No source rule changes through warning text or suggestions. |
 | [RFC 0008 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6917170418), [RFC 0009 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6918885645) | Preserve exact errors, independent cause predicates and conversion-specific selection/equality. Ordinary families keep their distinct no-fallback behavior. |
 | #22/#23/#29 and runtime/backend refinements | Preserve fatal no-unwind limits and normal full runtime cause rendering. A host crash, allocation failure or report failure need not produce a final stream. |
 | [Diagnostic fixture inventory](../prototypes/21-diagnostics.md), source revision | Preserve illustrative streams, original URI prefix, source bytes/hashes and coordinate calculations. Tool-checked data is not emitted output or Rill execution. |
-| [LSP contract](../lsp-contracts.md), [#42](https://github.com/Reilley64/rill/issues/42) | Keep complete client scope and outstanding acceptance matrix. This reporting RFC does not mark server/client rows passed or allocate a new LSP RFC prematurely. |
 
 ## Compatibility and migration
 
@@ -500,7 +490,7 @@ Accepted observation constraints remain mandatory across all resource states. Fa
 
 ## Rationale, alternatives and prior art
 
-A single semantic model prevents terminal/JSONL/LSP adapters from explaining different type or ownership rules. Stable codes support automation without freezing English. Snapshot-aware locations support safe interpretation without parsing rendered paths.
+A single semantic model prevents terminal and JSONL adapters from explaining different type or ownership rules. Stable codes support automation without freezing English. Snapshot-aware locations support safe interpretation without parsing rendered paths.
 
 Text-only deduplication could hide independent failed checks. Private originating-check identity permits justified root grouping without changing the public schema. Stable order before limiting avoids worker scheduling choosing visible errors.
 
@@ -518,11 +508,11 @@ Adapters need lossless offset conversion, stable ordering, explicit omissions an
 
 The driver needs non-destructive option/sink preflight, physical/path alias checks and honest I/O failure handling. Coordinate and output procedures require supported platform implementations. No atomic client edits or global filesystem transaction is implied.
 
-Expectation reporting requires RFC 0001's actual trusted capture mechanism, which remains incomplete. This RFC defines no fallback user formatter. Compiler, runtime, driver and full LSP implementation remain absent from the scaffold.
+Expectation reporting requires RFC 0001's actual trusted capture mechanism, which remains incomplete. This RFC defines no fallback user formatter. This scaffold does not establish complete compiler, runtime or driver behavior.
 
 ## Evidence and checking plan
 
-The 2026-11-17 lexical completion adds authored coordinate cases Y1 through Y5. These are NotChecked by a Rill source mapper. Existing fixture/data checks do not validate the new procedure or complete LSP fallback behavior.
+The 2026-11-17 lexical completion adds authored coordinate cases Y1 through Y5. These are NotChecked by a Rill source mapper. Existing fixture and data checks do not validate the mapping procedure.
 
 ### Actual evidence
 
@@ -550,7 +540,6 @@ The 2026-11-17 lexical completion adds authored coordinate cases Y1 through Y5. 
 - Verify check/run/test phase boundaries and unchanged application I/O.
 - Compare actual expectation effects with and without trusted observations.
 - Test source/snapshot preconditions and inert structured suggestions.
-- Validate complete LSP workflows separately under #42's unchanged acceptance scope.
 
 These require the relevant producer, checker, runtime and target/client profiles. A schema check cannot clear their acceptance gates.
 
@@ -578,7 +567,7 @@ Complete per-command driver state tables, combined-failure precedence and struct
 
 Complete race-aware sink admission, source-protection discovery and active-execution report-failure handling on the supported hosts. Keep source snapshots, paths and physical identities distinct.
 
-RFC 0001 still needs its own bounded capture/work/cycle procedure and amendment review. This document cannot supply it through a reporting annex. Full LSP remains a separate proposal and delivery gate.
+RFC 0001 still needs its own bounded capture/work/cycle procedure and amendment review. This document cannot supply it through a reporting annex.
 
 These gaps prevent the [canonical readiness review](README.md#canonical-reviewready-checklist). Required inconsistent contracts return to [map #1](https://github.com/Reilley64/rill/issues/1), not silent source-rule or tooling-scope reduction.
 

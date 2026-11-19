@@ -428,7 +428,7 @@ No argument coercion or automatic A-to-B-to-C chain is introduced. A source alre
 | [Draft RFC 0006](0006-numbers-strings-and-primitive-operations.md) | Numeric protection/values, source widths, core pairs, parsers and logical views. | Its confirmed policies remain distinct from broader draft matrix details. Full grammar and ownership integration remain incomplete. |
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Value/source routes, reference access, initialization and cancellation-safe cleanup. | Five policies are confirmed. Complete caller/selected-signature and nested route judgments remain incomplete. |
 | [Draft RFC 0008](0008-errors-propagation-and-caused-by-wrapping.md) | Exact error identity, typed wrappers, causes, display evidence and origins. | Three policies are confirmed. Full sealed evidence, constructor and runtime judgments remain incomplete. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with library/runtime integration incomplete. | Actual core registration graph, trusted admission, ABI and accurate inference/evidence explanations. | Reporting is proposed, not accepted. [#28](https://github.com/Reilley64/rill/issues/28) and [#42](https://github.com/Reilley64/rill/issues/42) retain production/target and editor validation. |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with library/runtime integration incomplete. | Actual core registration graph, trusted admission, ABI and accurate inference/evidence explanations. | Reporting is proposed, not accepted. [#28](https://github.com/Reilley64/rill/issues/28) retains production and target validation. |
 
 ## Valid/invalid examples and diagnostics
 

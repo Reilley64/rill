@@ -83,7 +83,7 @@ description = "Unavailable: production Rill runtime/backend acceptance"
 run = "python tools/unavailable.py test:runtime"
 
 [tasks."test:lsp-client"]
-description = "Unavailable: complete OpenIDEA LSP acceptance"
+description = "Unavailable: language server protocol acceptance"
 run = "python tools/unavailable.py test:lsp-client"
 
 [tasks."plan:llvm"]
@@ -109,5 +109,5 @@ description = "Reproduce the Darwin SQLite native fixture without overwriting it
 run = "mkdir -p target/experiments && python experiments/sqlite-provider/reference/run.py --report target/experiments/sqlite-results.md"
 
 [tasks."verify:release"]
-description = "Require infrastructure and all product suites; unavailable product checks fail the release gate"
-run = ["mise run check", "mise run build", "mise run test:language", "mise run test:stdlib", "mise run test:runtime", "mise run test:lsp-client"]
+description = "Require infrastructure, product build, language, standard-library and runtime checks"
+run = ["mise run check", "mise run build", "mise run test:language", "mise run test:stdlib", "mise run test:runtime"]

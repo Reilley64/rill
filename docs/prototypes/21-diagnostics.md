@@ -2,9 +2,9 @@
 
 Read the source examples in [`prototypes/21-diagnostics`](../../prototypes/21-diagnostics).
 
-These examples follow confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](../adr/0016-structured-diagnostics-and-complete-openidea-lsp.md), the [report contracts/schema](../diagnostic-contracts.md) and the [LSP matrix](../lsp-contracts.md). The [batch-report program](10-batch-report.md) is a separate application example.
+These examples follow confirmed [#24](https://github.com/Reilley64/rill/issues/24), [ADR 0016](../adr/0016-structured-diagnostics.md), the [report contracts/schema](../diagnostic-contracts.md) and the [language server contract](../lsp-contracts.md). The [batch-report program](10-batch-report.md) is a separate application example.
 
-No Rill compiler emitted these reports, and no example ran as Rill. The report files are hand-authored protocol examples. Mechanical checks cover only coordinates, hashes and ordinary data calculations. There is no Rill compiler, runtime or server yet. [#42](https://github.com/Reilley64/rill/issues/42) owns full-scope LSP delivery and acceptance; #28/#30 retain the requirements for checker and backend evidence. Static checks do not prove inference, borrow safety, snapshot noninterference or client behavior.
+No Rill compiler emitted these reports, and no example ran as Rill. The report files are hand-authored protocol examples. Mechanical checks cover only coordinates, hashes and ordinary data calculations. There is no Rill compiler, runtime or server yet. [#42](https://github.com/Reilley64/rill/issues/42) tracks language server implementation and protocol checks; #28/#30 retain the requirements for checker and backend evidence. Static checks do not prove inference, borrow safety, snapshot noninterference or client behavior.
 
 ## Files and intended outcomes
 
@@ -69,6 +69,6 @@ The validator checks the Draft 2020-12 schema, typed records and negative data m
 
 ## Required future client/driver tests
 
-The [complete LSP matrix](../lsp-contracts.md#7-versioned-acceptance-matrix) is NOT RUN throughout. Test stale pull/push/resolve responses across dependency, context, open-close and restart races. Also test rich-message fallback, eager ranges/hints, hierarchy source re-preparation, alias/coupled-namespace rename, graph-preserving imports, meaningful refactor workflows and adverse non-atomic edits. Wiring a menu to source code or mocking an RPC acknowledgment does not clear #42.
+The [language server checks](../lsp-contracts.md#verification) have not run. Check synchronization, coordinate projection and stale results for the supported protocol capabilities. For source edits, verify alias and namespace handling, graph preservation and adverse edit outcomes. Mocked messages do not verify server behavior.
 
 Test human stderr separately from the clean JSONL sink, and verify that raw application stdout/stderr remain unchanged. Distinguish run's build-phase summary from application exit. Cover invalid/report-I/O/internal/cancel statuses, partial output without a summary, source/destination alias refusal, omitted diagnostics/counters and color/control-character safety. check/LSP must not automatically execute tools or user code. These tests add no manifest/notebook/Windows/Run-Test-DAP scope, and front-end success does not certify a backend.

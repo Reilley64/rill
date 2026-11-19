@@ -131,4 +131,4 @@ for record in invalid:
 x = deepcopy(expectations[0]); x["futureOptionalField"] = "ignored"; validator.validate(x)
 x = deepcopy(reports["check-report.jsonl"][0]); x["context"] = None; x["diagnostic"]["primary"] = None; x["diagnostic"]["code"] = "R0601"; validator.validate(x)
 print("PASS: schema v1 and 6 negative data cases; 5 illustrative reports, source hashes/ranges/counts, CRLF/scalar/UTF-16 mapping, 8 positive declarations and 9 rejection fixtures.")
-print("NOT RUN: Rill parser/type checker/expectation execution, trusted snapshot effects, LSP/backend/OpenIDEA acceptance. Delimiter/header checks are not semantic validation.")
+print("NOT RUN: Rill parser/type checker/expectation execution, trusted snapshot effects, LSP/backend acceptance. Delimiter/header checks are not semantic validation.")

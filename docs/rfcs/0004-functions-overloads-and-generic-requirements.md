@@ -671,7 +671,7 @@ Canonical Err construction has a separate location-capturing one-/two-argument e
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Captures, callable erasure/copying, argument/result dependencies, mutable retained storage and callee exits. | Proposed, not accepted. Full transfer/erasure judgments and the combined checker remain incomplete. |
 | Draft RFCs [0008](0008-errors-propagation-and-caused-by-wrapping.md) and [0009](0009-user-implementable-conversions.md). | Pair keys, selected E, identity protection, Err construction and exact propagation. | Both remain Draft. Complete constructor/evidence judgments and conversion coherence remain incomplete. RFC 0009's conversion-applicability proposal does not change ordinary no-fallback selection. |
 | Library and runtime integration | Concrete callable interfaces, protected action admission, cleanup and trusted native obligations. | No RFC assigned. This draft does not deliver the library or runtime. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with full LSP still missing. | Evidence traces, incomplete analysis, canonical failures and honest candidate navigation. | Reporting is proposed, not accepted. Complete source/driver and evidence procedures remain incomplete. Full client delivery remains [#42](https://github.com/Reilley64/rill/issues/42). |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md) | Evidence traces, incomplete analysis, canonical failures and candidate facts. | Reporting is proposed, not accepted. Complete source, driver and evidence procedures remain incomplete. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -900,8 +900,6 @@ The confirmed whole-vector rule fixes correlated-parameter ordering. Existing pa
 
 No released Rill compiler ABI exists. Source checking, evidence metadata and runtime callable representation still need implementation. This RFC does not adopt a native function-pointer ABI, dictionary ABI or runtime registry.
 
-Editor navigation must distinguish the family declaration from a selected implementation. Missing context must produce honest candidates rather than a guessed winner. Import organization must preserve the loaded implementation set.
-
 ## Security/resource implications
 
 User implementations must not intercept required guard release, owner counts or outstanding native-source retention. Trusted identities and overlap checks need enforcement beyond module spelling and private fields.
@@ -969,7 +967,7 @@ Lowering must preserve callable modes, move/copy decisions and capture cleanup. 
 - Test ordinary nested-type placement against conversion endpoint ownership.
 - Reject protected replacement through aliases, adapters, generic requirements and function values.
 - Preserve real caller and callee dependencies through returns, mutable storage, captures and cleanup.
-- Test canonical diagnostics and LSP candidate navigation in separate loaded entry graphs.
+- Test canonical diagnostics and their candidate facts in separate loaded entry graphs.
 
 The future parser/checker suite must cover all supported source-analysis profiles. Native and WebAssembly execution additionally require the runtime/backend contract and real product tests. No target or client acceptance is claimed here.
 

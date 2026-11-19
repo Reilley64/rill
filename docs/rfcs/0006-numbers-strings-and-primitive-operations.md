@@ -579,7 +579,7 @@ Canonical error display is a separate family. Standard wrapper show can bridge t
 | [Draft RFC 0005](0005-types-records-enums-and-inference.md) | Type identity, generic construction, tuples/Lists and finite representation. | Its three precision policies are confirmed; formal checking remains incomplete. |
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Logical places, backing/descriptor dependencies, copies, cleanup and exclusive restrictions. | Proposed, not accepted. Complete route/projection and cleanup judgments remain incomplete. Text signatures are not a borrow proof. |
 | Draft RFCs [0008](0008-errors-propagation-and-caused-by-wrapping.md) and [0009](0009-user-implementable-conversions.md). | Canonical pair coherence, exact E, Result/Err metadata and construction origins. | Both remain Draft. Complete origins/evidence judgments and conversion coherence remain incomplete. This RFC owns numeric pair values, not general conversion selection. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with lexical/runtime integration incomplete. | Token boundaries, source maps, statuses, LLVM/native/Wasm lowering and precise limits. | Reporting is proposed, not accepted. [#28](https://github.com/Reilley64/rill/issues/28) retains formal/production acceptance; [#42](https://github.com/Reilley64/rill/issues/42) retains full editor delivery. |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with lexical/runtime integration incomplete. | Token boundaries, source maps, statuses, LLVM/native/Wasm lowering and precise limits. | Reporting is proposed, not accepted. [#28](https://github.com/Reilley64/rill/issues/28) retains formal and production acceptance. |
 
 ## Valid/invalid examples and diagnostics
 

@@ -49,8 +49,8 @@ A `char` value representing one Unicode scalar, not necessarily a whole user-per
 _Avoid_: byte, grapheme, UTF-16 code unit
 
 **Caused-by wrapping**:
-An explicit error-context step written `inner ? outer`: use the successful value, or return the outer error with the original failure as its cause. Merely propagating an error adds no new context.
-_Avoid_: error-mapping callback, propagation report
+Construction of a new error wrapper that retains the original failure as its cause. Propagating an unchanged error does not wrap it. The M6 baseline uses `inner ? outer`. The [post-M6 rule](docs/rfcs/0008-errors-propagation-and-caused-by-wrapping.md#post-m6-wraperr-and-postfix-propagation) separates wrapping with `wrapErr` from propagation with postfix `?`.
+_Avoid_: error mapping, propagation report
 
 **Controlled TCP view**:
 A borrowed TCP view carrying explicit network control for the I/O operations it permits. It retains access dependencies without owning closure of the underlying resource.
@@ -63,6 +63,10 @@ _Avoid_: owning connection, ambient context, independent TLS direction
 **Conversion**:
 An explicit operation through canonical `into`/`from` or `tryInto`/`tryFrom` that produces a destination value from a source value. A fallible conversion has an implementation-selected error type.
 _Avoid_: implicit cast, automatic coercion, serializer
+
+**Copy**:
+Duplication that leaves the source value available. The result can own independent data or retain the same resource, as specified by the type's copy contract. A read alone does not duplicate a value.
+_Avoid_: move, read, deep clone
 
 **Diagnostic**:
 A coded compiler or driver explanation of a problem in a specific analysis context or configuration. It is distinct from an application error wrapper, expectation result or internal tool-failure record.

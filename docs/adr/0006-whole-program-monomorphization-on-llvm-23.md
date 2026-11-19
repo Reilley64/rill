@@ -10,9 +10,9 @@ The earlier LLVM tail-call plus Binaryen Asyncify composition is not the selecte
 
 ## Shared diagnostic front end and editor delivery
 
-[ADR 0016](0016-structured-diagnostics-and-complete-openidea-lsp.md) / #24 define shared source/context/checking facts for terminal, version-1 JSONL and LSP adapters. `rill check` and the native server analyze without LLVM executable generation or running startup/expectations/user formatters; success is front-end scope, not backend certification. Workspace indexing cannot add bodies to an entry's loaded implementation graph. Static ambiguity, missing inference, selected-body requirements and collection duplicates have different explanations; no new dispatch rule is introduced.
+[ADR 0016](0016-structured-diagnostics.md) / #24 define shared source/context/checking facts for terminal, version-1 JSONL and LSP adapters. `rill check` and the native server analyze without LLVM executable generation or running startup/expectations/user formatters; success is front-end scope, not backend certification. Workspace indexing cannot add bodies to an entry's loaded implementation graph. Static ambiguity, missing inference, selected-body requirements and collection duplicates have different explanations; no new dispatch rule is introduced.
 
-Complete applicable OpenIDEA v0.1.44 LSP support is prioritized in [#42](https://github.com/Reilley64/rill/issues/42), with an unpassed acceptance matrix and explicit host/client constraints. It gates tooling readiness, not drafting #28 RFCs. Exact inference/MIR/cleanup/trusted observation and backend evidence remain #28/#30. The Rust server's resources are not the analyzed program's stack budget.
+[Tooling issue #42](https://github.com/Reilley64/rill/issues/42) tracks standards-based language server support when the shared analysis can support it. It does not gate the language RFCs or backend acceptance. Exact inference/MIR/cleanup/trusted observation and backend evidence remain #28/#30. The Rust server's resources are not the analyzed program's stack budget.
 
 ## Considered options
 

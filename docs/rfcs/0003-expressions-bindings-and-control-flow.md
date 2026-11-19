@@ -280,6 +280,8 @@ The project owner [selected option B](https://github.com/Reilley64/rill/issues/2
 
 An unparenthesized chain such as `a ? b ? c` is rejected. Parentheses must state the intended nesting. A nested right operand still follows ordinary lazy evaluation and early-return rules. It does not create an automatic multi-error chain.
 
+The [post-M6 wrapping change](0008-errors-propagation-and-caused-by-wrapping.md#post-m6-wraperr-and-postfix-propagation) removes infix `?`. Postfix `?` must group before arithmetic, calls and indexing. A pipe step's postfix `?` must still apply to that step's result. Update both syntax annex artifacts when implementing the change. This note does not change the M5 or M6 grammar.
+
 ### Bindings and inference
 
 Confirmed mutation rules distinguish `let` from `let mut`. Ordinary owned parameters and `let` bindings are immutable. `let mut` permits reassignment and permitted mutation of owned fields. It does not change copyability or grant mutable access to shared payloads.
@@ -301,6 +303,8 @@ Names, `_` and tuple destructuring appear in current sources. Tuple destructurin
 A new binding enters scope after its initializer. Its initializer can therefore refer to an outer same-spelled binding. Without such an outer binding, self-reference is unresolved. The compiler rejects duplicate value bindings in the same scope. Other namespaces follow the module rules. Inner lexical shadowing remains allowed.
 
 Moving or copying a value into a binding preserves its dependencies. An immutable binding can still contain a mutable reference. Binding immutability does not weaken that reference's access restrictions or duplicate exclusive access.
+
+After M6, an owning binding moves an existing value, even for a scalar. See [RFC 0007's explicit-copy rules](0007-ownership-borrowing-mutation-and-cleanup.md#post-m6-explicit-copying) for the distinction between an owning binding and a scalar read.
 
 ### Assignment and replacement
 
@@ -863,11 +867,11 @@ The shared syntax annex records confirmed generic-argument, conditional-boundary
 
 Complete binding-pattern coverage and refutable guard-payload behavior. Complete static flow rules for divergence, value-match blocks and required returns. Complete unused-Result analysis through bindings and aggregates.
 
-[Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) proposes ownership and cleanup. [Draft RFC 0008](0008-errors-propagation-and-caused-by-wrapping.md) proposes errors and causes. [Draft RFC 0010](0010-diagnostics-and-reporting.md) proposes diagnostics/reporting. Iterator, concurrency and full LSP owners remain missing. Their exact sections/revisions are needed before ReviewReady. These gaps are not implied approvals of weaker behavior.
+[Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) proposes ownership and cleanup. [Draft RFC 0008](0008-errors-propagation-and-caused-by-wrapping.md) proposes errors and causes. [Draft RFC 0010](0010-diagnostics-and-reporting.md) proposes diagnostics/reporting. Iterator and concurrency owners remain missing. Their exact sections/revisions are needed before ReviewReady. These gaps are not implied approvals of weaker behavior.
 
 ### Implementation/validation gates
 
-The lexer, parser, checker, CFG, ownership model and runtime are absent. Execution, target lowering, cleanup/cancellation and snapshot tests have not passed. #28 retains formalization and backend acceptance; #42 retains actual LSP delivery.
+The lexer, parser, checker, CFG, ownership model and runtime are absent. Execution, target lowering, cleanup/cancellation and snapshot tests have not passed. #28 retains formalization and backend acceptance.
 
 ### Future/out-of-scope work
 

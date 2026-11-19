@@ -32,9 +32,11 @@ Full RFC/annex acceptance remains separate. Return conflicting required behavior
 | M3. Resolution and declaration collection | `crates/compiler/` | First complete candidate/cycle, namespace, scope and metadata procedures under RFC 0002. Validate canonical loaded-graph behavior independently of editor indexing. |
 | M4. Typed analysis | `crates/compiler/` | First complete inference, pattern/coverage, overload/evidence and selected-output procedures under the owning RFCs. Produce checked facts rather than inventing successful types for incomplete analysis. |
 | M5. Ownership and cleanup lowering | `crates/compiler/` | First complete dependency transfer, branch/loop, exit, capture and initialized-cleanup judgments. Validate MIR obligations and adversarial accepted/rejected cases. [Work and evidence](../crates/compiler/tests/m5-acceptance.md). |
-| M6. Execution and tools | Backend/runtime plus IDE/LSP/CLI owners | Implement only after each semantic/ABI prerequisite is complete. Native/Wasm/provider support and full #42 client acceptance retain separate gates. |
+| [M6. Execution and tools](https://github.com/Reilley64/rill/issues/77) | Backend/runtime plus IDE/LSP/CLI owners | Implement only after each semantic/ABI prerequisite is complete. Native, Wasm and provider support retain separate gates. [Language server work #42](https://github.com/Reilley64/rill/issues/42) proceeds where the analysis can support it. It does not gate execution. |
 
-M2 through M6 are sequencing markers, not detailed implementation tickets or claims of ready specifications. Their missing rules do not block M1. Full standard-library or LSP delivery is not a lexer prerequisite.
+M2 through M6 identify milestone boundaries. The table does not establish implementation readiness or replace the individual tickets. Full standard-library or LSP delivery is not a lexer prerequisite.
+
+[Post-M6 #78](https://github.com/Reilley64/rill/issues/78) tracks explicit copying, `wrapErr` and the [scoped routine API changes](standard-library-contracts.md#post-m6-scoped-routine-names). It requires completed M6 acceptance. Use the verified M6 revision as the implementation input. Do not change the M5 or M6 baseline for this work.
 
 ## M1 scope and interface
 

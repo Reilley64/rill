@@ -59,8 +59,10 @@ These are task groups, not alternate Rust compiler profiles. Invoke each task as
 | `test:language` | Language conformance is unavailable; exit nonzero. |
 | `test:stdlib` | Standard-library execution tests are unavailable; exit nonzero. |
 | `test:runtime` | Runtime acceptance is unavailable; exit nonzero. |
-| `test:lsp-client` | Complete client acceptance is unavailable; exit nonzero. |
-| `verify:release` | Require infrastructure checks, a product build and every product suite. Currently fails because product functionality is unavailable. |
+| `test:lsp-client` | Language server protocol tests are unavailable; exit nonzero. |
+| `verify:release` | Require infrastructure checks, a product build and language, standard-library and runtime suites. Currently fails because product functionality is unavailable. |
+
+A distribution that claims language server support must also pass `test:lsp-client` for its advertised capabilities. The general release check does not require a language server.
 | `plan:llvm` | Inspect the optional LLVM route and prerequisites. A plan is not installation evidence. |
 | `setup:llvm` | Explicit opt-in LLVM provisioning, separate from default setup. |
 | `test:llvm` | LLVM C-API compile/link smoke only, not a Rill backend or inkwell integration test. |
@@ -90,7 +92,7 @@ On 2026-11-16, the scaffold working tree based on `8934802` passed these checks 
 - The local-document checker found no broken destinations. All 107 tracked files under `prototypes/` and `experiments/` matched the base commit byte-for-byte.
 - Product build and all four product-suite tasks exited 2 as unavailable. `verify:release` exited 2 at the unavailable product build. `test:llvm` exited 1 for the absent project prefix; no smoke passed. The plan-only task created no LLVM output directory.
 
-The multi-platform mise lock resolved tool metadata, not four installations. GitHub workflows, other-host setup, LLVM download/build/static-link smoke, inkwell/libffi integration, native experiment reproductions, Rill execution and complete OpenIDEA acceptance were not run. This snapshot does not certify later changes or a production installation.
+The multi-platform mise lock resolved tool metadata, not four installations. GitHub workflows, other-host setup, LLVM download/build/static-link smoke, inkwell/libffi integration, native experiment reproductions, Rill execution and language server acceptance were not run. This snapshot does not certify later changes or a production installation.
 
 ## Host prerequisites
 
@@ -161,4 +163,4 @@ mise exec -- python tools/stage_typed_installation.py "$work/prefix"
 
 The staging script takes the executable, runner and ownership archive from one locked Cargo build. It copies the listed first-party sources and runtime inputs into a new prefix. The runner loads and analyzes the entry in both modes. It exits 0 only when both modes issue a typed receipt. The [M4.8 verification record](../crates/compiler/tests/m4-8-acceptance.md) records the installed outcomes separately from the scaffold checks. Neither check runs Rill or validates an ABI.
 
-For language and library rules, use the [contract index](README.md#contracts) rather than this guide. Production/formal backend acceptance remains [#28](https://github.com/Reilley64/rill/issues/28); complete OpenIDEA client delivery remains [#42](https://github.com/Reilley64/rill/issues/42). The scaffold neither closes those gates nor changes the existing Rill source examples or recorded evidence.
+For language and library rules, use the [contract index](README.md#contracts) rather than this guide. Production/formal backend acceptance remains [#28](https://github.com/Reilley64/rill/issues/28); standards-based language server support is tracked separately in [#42](https://github.com/Reilley64/rill/issues/42). The scaffold does not establish either result or change existing evidence.
