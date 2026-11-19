@@ -436,11 +436,29 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 if (flag) { job = () => [third, fourth]; }
                 return job();
             }
+            function selectedScalars(flag: bool, a: bool, b: bool, c: bool, d: bool): [bool, bool] {
+                let mut job: once () => [bool, bool] = () => [a, b];
+                if (flag) { job = () => [c, d]; }
+                return job();
+            }
             function consumed(left: string, right: string): [string, string] {
                 let job: once () => [string, string] = () => [left, right];
                 let result = job();
                 let old = job;
                 return result;
+            }
+            function liveReceiver(left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let view = &job;
+                let result = job();
+                let _ = view;
+                return result;
+            }
+            function deadReceiver(left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let view = &job;
+                let _ = view;
+                return job();
             }
             function repeatable(flag: bool, other: bool): [bool, bool] {
                 let job: () => [bool, bool] = () => [flag, other];
@@ -550,10 +568,11 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
             assert!(matches!(route.as_slice(), [_, _,
                 Operation::FormClosurePair { closure, .. },
                 Operation::Move { from, into: Some(moved) },
-                Operation::InvokeClosurePair { receiver, into, .. },
+                Operation::InvokeClosurePair { receiver, into, origin },
                 Operation::Export(output),
             ] if from.root.node == closure.node && moved.root.span.bytes() == b"now"
-                && moved.root.node == receiver.root.node && into.root.node == output.root.node));
+                && moved.root.node == receiver.root.node && into.root.node == output.root.node
+                && origin.span.bytes() == b"() => [left, right]"));
             assert!(path_drops(mir, mir.entry).is_empty());
 
             let selected = lower("selected");
@@ -589,6 +608,25 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 if fourth.root.span.bytes() == b"fourth: string" && third.root.span.bytes() == b"third: string")
             );
 
+            let scalar = lower("selectedScalars");
+            let mir = scalar
+                .mir()
+                .expect("origin survives joins even without loans or drops");
+            let (yes, no) = branch_targets(mir);
+            for (edge, expected) in [
+                (yes, b"() => [c, d]".as_slice()),
+                (no, b"() => [a, b]".as_slice()),
+            ] {
+                let calls: Vec<_> = linear(mir, edge)
+                    .into_iter()
+                    .filter(|op| matches!(op, Operation::InvokeClosurePair { .. }))
+                    .collect();
+                assert!(
+                    matches!(calls.as_slice(), [Operation::InvokeClosurePair { origin, .. }]
+                    if origin.span.bytes() == expected)
+                );
+                assert!(path_drops(mir, edge).is_empty());
+            }
             let limits = AnalysisLimits {
                 max_work: selected.statistics().work,
                 max_entries: selected.statistics().entries,
@@ -618,6 +656,24 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
             assert_eq!(finding.code(), "R0200");
             assert_eq!(finding.site.span.bytes(), b"job");
             assert_eq!(finding.related.span.bytes(), b"job()");
+            let borrowed = lower("liveReceiver");
+            assert_eq!(borrowed.completion(), Completion::SourceRejected);
+            assert!(borrowed.mir().is_none());
+            let [finding] = borrowed.findings() else {
+                panic!("expected a live receiver loan conflict")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"job()");
+            assert_eq!(finding.related.span.bytes(), b"&job");
+            let released = lower("deadReceiver");
+            let mir = released
+                .mir()
+                .expect("a dead loan does not prevent consuming invocation");
+            assert!(linear(mir, mir.entry).iter().any(
+                |op| matches!(op, Operation::InvokeClosurePair { receiver, .. }
+                if receiver.root.span.bytes() == b"job")
+            ));
+            assert!(path_drops(mir, mir.entry).is_empty());
             let repeatable = lower("repeatable");
             assert_eq!(repeatable.completion(), Completion::Incomplete);
             assert!(repeatable.mir().is_none());
