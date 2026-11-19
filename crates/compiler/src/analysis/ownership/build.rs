@@ -87,7 +87,7 @@ impl<'a, 'g> Build<'a, 'g> {
             TypeTerm::Primitive(_) if owns_text(ty) => (true, StorageCleanup::Drop),
             TypeTerm::Primitive(_) => (false, StorageCleanup::End),
             TypeTerm::Reference { mutable, .. } => (*mutable, StorageCleanup::End),
-            TypeTerm::Callable { .. } => (true, StorageCleanup::ClosureEnvironment),
+            TypeTerm::Callable { .. } => (true, StorageCleanup::End),
             TypeTerm::Nominal { .. } if let Some(release) = self.guard_release(ty)? => {
                 (true, StorageCleanup::ReleaseGuard(release))
             }
@@ -1493,15 +1493,21 @@ impl<'a, 'g> Build<'a, 'g> {
         // written pair. A tuple of these sources adds no body computation
         // to run at formation.
         let (first, second) = match arrow.captures.as_slice() {
-            [capture] if capture.site.node == body => (capture, None),
-            [first, second] if first.path.root != second.path.root => {
+            [capture] if self.ungroup(capture.site.node)? == self.ungroup(body)? => (capture, None),
+            [first, second] => {
                 self.budget.step(1)?;
                 let Some(DataExpression::Tuple { elements }) = &self.value(body)?.data else {
                     return Err(Stop::Pending(node));
                 };
-                if elements.as_slice() == [first.site.node, second.site.node] {
+                let [left, right] = elements.as_slice() else {
+                    return Err(Stop::Pending(node));
+                };
+                let written = [self.ungroup(*left)?, self.ungroup(*right)?];
+                let a = self.ungroup(first.site.node)?;
+                let b = self.ungroup(second.site.node)?;
+                if written == [a, b] {
                     (first, Some(second))
-                } else if elements.as_slice() == [second.site.node, first.site.node] {
+                } else if written == [b, a] {
                     (second, Some(first))
                 } else {
                     return Err(Stop::Pending(node));
@@ -1511,7 +1517,17 @@ impl<'a, 'g> Build<'a, 'g> {
         };
         let capture = self.capture_slot(first)?;
         let second = second
-            .map(|fact| self.capture_slot(fact).map(|slot| (fact.site.node, slot)))
+            .map(|fact| {
+                let slot = self.capture_slot(fact)?;
+                // Repeated copies and shared borrows are non-consuming. A
+                // repeated move needs the full capture/use judgment.
+                if first.path.root == fact.path.root
+                    && (self.slots[capture].moves || self.slots[slot].moves)
+                {
+                    return Err(Stop::Pending(node));
+                }
+                Ok((fact.site.node, slot))
+            })
             .transpose()?;
         let form = self.emit(
             node,
@@ -1533,7 +1549,9 @@ impl<'a, 'g> Build<'a, 'g> {
 
     fn capture_slot(&mut self, capture: &CaptureFact<'g>) -> ResultOf<Slot> {
         let node = capture.site.node;
-        let syntax = &self.module.syntax.nodes[node];
+        let shape = self.ungroup(node)?;
+        self.budget.step(1)?;
+        let syntax = &self.module.syntax.nodes[shape];
         if !capture.reachable
             || capture.through.is_some()
             || !capture.path.projections.is_empty()

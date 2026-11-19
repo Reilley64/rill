@@ -27,13 +27,44 @@ fn stored_pair_captures_transfer_backing_and_cleanup() {
                 let mut job: once () => [string, string] = () => [first, second];
                 job = () => [third, fourth];
             }
+            function replaceMoved(first: string, second: string, third: string, fourth: string): void {
+                let mut job: once () => [string, string] = () => [first, second];
+                let old = job;
+                job = () => [third, fourth];
+            }
+            function retireFirst(first: string, second: string): void {
+                let job: () => [&string, &string] = () => [&first, &second];
+                dispose(first);
+                let _ = job;
+            }
+            function retireSecond(first: string, second: string): void {
+                let job: () => [&string, &string] = () => [&first, &second];
+                dispose(second);
+                let _ = job;
+            }
             function fromParameter(view: &string, text: string): once () => [&string, string] {
                 return () => [view, text];
             }
-            function computed(text: string): void {
-                let job: once () => [i32, string] = () => [payload(), text];
+            function sameScalar(flag: bool): bool {
+                let job: () => [bool, bool] = () => [flag, flag];
+                return flag;
             }
-            function payload(): i32 { return 7i32; }
+            function sameBorrow(text: string): void {
+                let _: () => [&string, &string] = () => [&text, &text];
+            }
+            function grouped(flag: bool, text: string): bool {
+                let job: once () => [bool, string] = () => [(flag), text];
+                return flag;
+            }
+            function singleDiscard(text: string): void { let _ = () => text; }
+            function singleReplace(first: string, second: string): void {
+                let mut job = () => first;
+                job = () => second;
+            }
+            function computed(text: string, flag: bool): void {
+                let job: once () => [i32, string] = () => [payload(flag), text];
+            }
+            function payload(flag: bool): i32 { return 7i32; }
             function invoked(left: string, right: string): [string, string] {
                 let job: once () => [string, string] = () => [left, right];
                 return job();
@@ -162,10 +193,18 @@ fn stored_pair_captures_transfer_backing_and_cleanup() {
                 .mir()
                 .expect("replacement follows the environment owner");
             let mut events = Vec::new();
+            let mut formed = None;
             for op in linear(mir, mir.entry) {
                 match op {
-                    Operation::FormClosurePair { .. } => events.push(b"form".as_slice()),
-                    Operation::Install { .. } => events.push(b"install".as_slice()),
+                    Operation::FormClosurePair { closure, .. } => {
+                        formed = Some(closure.node);
+                        events.push(b"form".as_slice());
+                    }
+                    Operation::Install { incoming, target } => {
+                        assert_eq!(Some(incoming.root.node), formed);
+                        assert_eq!(target.root.span.bytes(), b"job");
+                        events.push(b"install".as_slice());
+                    }
                     Operation::Cleanup(actions) => {
                         events.extend(actions.iter().filter_map(|action| match action {
                             Obligation::DropCapture { closure, field } => {
@@ -188,6 +227,29 @@ fn stored_pair_captures_transfer_backing_and_cleanup() {
                     b"install",
                     b"fourth",
                     b"third"
+                ]
+            );
+
+            let moved = lower("replaceMoved");
+            let mir = moved
+                .mir()
+                .expect("moving the old environment prevents displacement cleanup");
+            let drops: Vec<_> = path_drops(mir, mir.entry)
+                .into_iter()
+                .map(|action| {
+                    let Obligation::DropCapture { closure, field } = action else {
+                        panic!("expected only capture cleanup")
+                    };
+                    (closure.span.bytes(), field.span.bytes())
+                })
+                .collect();
+            assert_eq!(
+                drops,
+                [
+                    (b"old".as_slice(), b"second".as_slice()),
+                    (b"old", b"first"),
+                    (b"job", b"fourth"),
+                    (b"job", b"third"),
                 ]
             );
 
@@ -245,8 +307,110 @@ fn stored_pair_captures_transfer_backing_and_cleanup() {
                     "{name} related"
                 );
             }
+            for (name, site, backing) in [
+                (
+                    "retireFirst",
+                    b"dispose(first)".as_slice(),
+                    b"&first".as_slice(),
+                ),
+                (
+                    "retireSecond",
+                    b"dispose(second)".as_slice(),
+                    b"&second".as_slice(),
+                ),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one live backing conflict")
+                };
+                assert_eq!(finding.code(), "R0203");
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), backing);
+            }
+            let repeated = lower("sameScalar");
+            let mir = repeated
+                .mir()
+                .expect("the same scalar can supply both copyable positions");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. } | Operation::FormClosurePair { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Copy { from: first, into: Some(staged1) },
+                Operation::Copy { from: second, into: Some(staged2) },
+                Operation::FormClosurePair { captures, .. },
+                Operation::Copy { from: after, .. },
+            ] if first.root.node == second.root.node && second.root.node == after.root.node
+                && staged1.root.node == captures[0].node && staged2.root.node == captures[1].node));
+            let loan = lower("sameBorrow");
+            let mir = loan
+                .mir()
+                .expect("two shared loans of a stable place are compatible");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. } | Operation::FormClosurePair { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Borrow { source: first, holder: first_holder, exclusive: false },
+                Operation::Borrow { source: second, holder: second_holder, exclusive: false },
+                Operation::FormClosurePair { captures, .. },
+            ] if first.root.node == second.root.node && first_holder.root.node == captures[0].node
+                && second_holder.root.node == captures[1].node));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
+                if text.root.span.bytes() == b"text: string")
+            );
+            let grouped = lower("grouped");
+            let mir = grouped
+                .mir()
+                .expect("grouping does not change the capture acquisition");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. }
+                            | Operation::Move { .. }
+                            | Operation::FormClosurePair { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Copy { from: flag, into: Some(staged) },
+                Operation::Move { into: Some(text), .. },
+                Operation::FormClosurePair { captures, .. },
+                Operation::Copy { from: after, .. },
+            ] if flag.root.span.bytes() == b"flag: bool" && flag.root.node == after.root.node
+                && staged.root.node == captures[0].node && text.root.node == captures[1].node));
+            for (name, capture) in [
+                ("singleDiscard", b"text".as_slice()),
+                ("singleReplace", b"first".as_slice()),
+            ] {
+                let report = lower(name);
+                let mir = report.mir().unwrap();
+                let standalone: Vec<_> = linear(mir, mir.entry)
+                    .into_iter()
+                    .filter_map(|op| match op {
+                        Operation::DropCapture { field, .. } => Some(field.span.bytes()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(standalone, [capture], "{name}");
+            }
             for (name, site) in [
-                ("computed", "() => [payload(), text]"),
+                ("computed", "() => [payload(flag), text]"),
                 ("invoked", "job()"),
             ] {
                 let report = lower(name);

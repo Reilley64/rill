@@ -409,7 +409,7 @@ fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultO
         StorageCleanup::Unlowered => Err(Stop::Pending(node)),
         StorageCleanup::Drop => Ok(Cleanup::Drop(place)),
         StorageCleanup::ReleaseGuard(release) => Ok(release.cleanup(place)),
-        StorageCleanup::End | StorageCleanup::ClosureEnvironment => Ok(Cleanup::EndStorage(place)),
+        StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
 }
 
@@ -418,9 +418,32 @@ fn cleanup_operation<'g>(
     local: Local<'g>,
     state: State,
     node: NodeId,
+    budget: &mut Budget,
 ) -> ResultOf<Operation<'g>> {
-    if !matches!(state, State::Initialized(_)) {
+    let State::Initialized(held) = state else {
         return Ok(Operation::None);
+    };
+    let closure = local.place(module).root;
+    match held.capture_drops {
+        [Some(first), Some(second)] => {
+            budget.reserve(2)?;
+            return Ok(Operation::Cleanup(
+                [second, first]
+                    .into_iter()
+                    .map(|field| Cleanup::DropCapture {
+                        closure,
+                        field: site_at(module, field),
+                    })
+                    .collect(),
+            ));
+        }
+        [Some(field), None] | [None, Some(field)] => {
+            return Ok(Operation::DropCapture {
+                closure,
+                field: site_at(module, field),
+            });
+        }
+        [None, None] => {}
     }
     Ok(match cleanup_of(module, local, node)? {
         Cleanup::Drop(place) => Operation::Drop(place),
@@ -1224,7 +1247,7 @@ pub(super) fn run<'g>(
                     )?;
                     let displaced = std::mem::replace(&mut state[target], State::Vacant);
                     retire_loans(&slots, &mut state, &[target], budget)?;
-                    cleanup_operation(module, slots[target], displaced, node)?
+                    cleanup_operation(module, slots[target], displaced, node, budget)?
                 }
                 Action::Install { target, incoming } => {
                     require_initialized(&slots, &state, incoming, node, budget)?;
@@ -1386,7 +1409,7 @@ pub(super) fn run<'g>(
                         )?;
                         let ended = std::mem::replace(&mut state[slot], State::Vacant);
                         retire_loans(&slots, &mut state, &[slot], budget)?;
-                        cleanup_operation(module, slots[slot], ended, node)?
+                        cleanup_operation(module, slots[slot], ended, node, budget)?
                     } else {
                         state[slot] = State::Vacant;
                         Operation::None

@@ -671,7 +671,6 @@ enum StorageCleanup<'g> {
     End,
     Drop,
     Unlowered,
-    ClosureEnvironment,
     ReleaseGuard(GuardRelease<'g>),
 }
 
@@ -681,10 +680,7 @@ impl<'g> Local<'g> {
     }
 
     fn needs_boundary_cleanup(self) -> bool {
-        self.members > 0
-            || self.custom_disposer.is_some()
-            || self.guard_release().is_some()
-            || self.cleanup == StorageCleanup::ClosureEnvironment
+        self.members > 0 || self.custom_disposer.is_some() || self.guard_release().is_some()
     }
 
     fn guard_release(self) -> Option<GuardRelease<'g>> {
