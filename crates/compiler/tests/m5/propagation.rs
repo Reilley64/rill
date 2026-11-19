@@ -223,9 +223,9 @@ fn option_pipe_propagates_the_staged_call_output_once() {
                 let _ = taken |> bad?;
                 return Option.Some(true);
             }
-            function passText(value: string): Option<string> { return Option.Some(value); }
+            function passNumber(value: string): Option<i32> { dispose(value); return Option.Some(1i32); }
             function unsupported(input: string): Option<bool> {
-                let _ = input |> passText?;
+                let _ = input |> passNumber?;
                 return Option.Some(true);
             }
             function nonExact(taken: string): Option<bool> {
@@ -328,7 +328,7 @@ fn option_pipe_propagates_the_staged_call_output_once() {
                 assert_eq!(finding.related.span.bytes(), related.as_bytes());
             }
             for (name, site) in [
-                ("unsupported", "input |> passText?"),
+                ("unsupported", "input |> passNumber?"),
                 ("nonExact", "taken |> pass(Option<bool>.Some(true), _)?"),
             ] {
                 let unsupported = check(name);
@@ -4796,6 +4796,230 @@ fn option_text_factory_propagation_checks_the_reached_call_once() {
             let grouped = lower("named", depth);
             assert_eq!(grouped.completion(), Completion::ResourceLimit);
             assert!(grouped.mir().is_none());
+            let exact = AnalysisLimits {
+                max_work: named.statistics().work,
+                max_entries: named.statistics().entries,
+                ..default
+            };
+            assert!(lower("named", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("named", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner() {
+    probe_with_typed(
+        "propagation::option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner",
+        r#"
+            function stage(owner: string): string { return owner; }
+            function choose(flag: bool): bool { return flag; }
+            function after(bit: bool): bool { return bit; }
+            function make(flag: bool, owner: string): Option<string> {
+                if (flag) { return Option<string>.Some(owner); }
+                return Option<string>.None;
+            }
+            function makeSome(flag: bool, owner: string): Option<string>.Some { return Option<string>.Some(owner); }
+            function makeNone(owner: string): Option<string>.None { dispose(owner); return Option<string>.None; }
+            function named(owner: string, flag: bool, later: string): Option<bool> {
+                let output = stage(owner) |> make(choose(flag), _)?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function absent(owner: string, later: string): Option<bool> {
+                let _ = stage(owner) |> makeNone?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function combined(flag: Option<bool>, owner: string, later: string): Option<bool> {
+                (flag?) |> makeSome(stage(owner))?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function terminal(flag: Option<bool>.None, owner: string): Option<bool> {
+                let _ = (flag?) |> makeSome(stage(owner))?;
+                return Option.Some(true);
+            }
+            function keep(flag: bool, owner: string): bool { dispose(owner); return flag; }
+            function terminalScalar(flag: Option<bool>.None, owner: string): Option<bool> {
+                let _ = (flag?) |> keep(stage(owner));
+                return Option.Some(true);
+            }
+            function writtenFailure(owner: string, flag: Option<bool>.None): Option<bool> {
+                let _ = stage(owner) |> make(flag?, _)?;
+                return Option.Some(true);
+            }
+            function invalid(owner: string): Option<string>.None {
+                dispose(owner); dispose(owner); return Option<string>.None;
+            }
+            function reached(owner: string): Option<bool> {
+                let _ = owner |> invalid?;
+                return Option.Some(true);
+            }
+            function composite(input: Option<bool>, owner: string): Option<string> { return Option<string>.Some(owner); }
+            function excluded(input: Option<bool>, owner: string): Option<bool> {
+                let _ = input |> composite(owner)?;
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let named = lower("named", default);
+            let mir = named
+                .mir()
+                .unwrap_or_else(|| panic!("named pipe: {:?}", named.completion()));
+            let source = b"stage(owner) |> make(choose(flag), _)?";
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, source);
+            let prefix: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| matches!(op, Operation::Call(_) | Operation::TestVariant { .. }))
+                .collect();
+            let [
+                Operation::Call(stage),
+                Operation::Call(choose),
+                Operation::Call(make),
+                Operation::TestVariant { operand, .. },
+            ] = prefix.as_slice()
+            else {
+                panic!("expected input, written argument, step, then variant test: {prefix:?}")
+            };
+            assert_eq!(
+                [*stage, *choose, *make],
+                [id("stage"), id("choose"), id("make")]
+            );
+            assert!(linear(mir, yes).iter().any(
+                |op| matches!(op, Operation::TakeOptionPayload { operand: carrier, into }
+                if carrier.root.node == operand.root.node && into.root.span.bytes() == b"output")
+            ));
+            assert!(linear(mir, no).iter().any(|op| matches!(op, Operation::EndEmptyOption(carrier) if carrier.root.node == operand.root.node)));
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("choose"), id("make"), id("after")]
+            );
+            assert_eq!(
+                calls_on_path(mir, [false]),
+                [id("stage"), id("choose"), id("make")]
+            );
+            assert_return(
+                &linear(mir, yes),
+                &option.some.id,
+                true,
+                &[b"output", b"later: string"],
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"later: string"],
+            );
+            let absent = lower("absent", default);
+            let mir = absent
+                .mir()
+                .expect("known None skips only the variant test and the continuation");
+            assert_eq!(calls_on_path(mir, []), [id("stage"), id("makeNone")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"later: string"],
+            );
+            let combined = lower("combined", default);
+            let mir = combined
+                .mir()
+                .expect("known Some drops the string only after the input continues");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"flag");
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_eq!(
+                calls_on_path(mir, [true]),
+                [id("stage"), id("makeSome"), id("after")]
+            );
+            assert_return(
+                &linear(mir, no),
+                &option.none.id,
+                false,
+                &[b"later: string", b"owner: string"],
+            );
+            assert!(
+                matches!(path_drops(mir, yes).as_slice(), [Obligation::Drop(payload), Obligation::Drop(later)]
+                if payload.root.span.bytes() == b"(flag?) |> makeSome(stage(owner))?" && later.root.span.bytes() == b"later: string")
+            );
+            let success: Vec<_> = linear(mir, yes).into_iter().filter(|op| match op {
+                Operation::TakeOptionPayload { .. } => true,
+                Operation::Cleanup(actions) => actions.iter().any(|action| matches!(action, Obligation::Drop(place) if place.root.span.bytes() == b"(flag?) |> makeSome(stage(owner))?")),
+                Operation::Call(callee) => *callee == id("after"),
+                _ => false,
+            }).collect();
+            assert!(
+                matches!(success.as_slice(), [Operation::TakeOptionPayload { into, .. }, Operation::Cleanup(actions), Operation::Call(_)]
+                if matches!(actions.as_slice(), [Obligation::Drop(place)] if place.root.node == into.root.node)),
+                "{success:?}"
+            );
+            let terminal = lower("terminal", default);
+            let mir = terminal
+                .mir()
+                .expect("known argument failure skips the carrier production");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"owner: string"],
+            );
+            let scalar = lower("terminalScalar", default);
+            assert!(scalar.mir().is_some());
+            assert_eq!(terminal.statistics().entries, scalar.statistics().entries);
+            let written = lower("writtenFailure", default);
+            let mir = written
+                .mir()
+                .expect("known written failure only drops the staged input");
+            assert_eq!(calls_on_path(mir, []), [id("stage")]);
+            assert_return(
+                &linear(mir, mir.entry),
+                &option.none.id,
+                false,
+                &[b"stage(owner)"],
+            );
+            let reached = lower("reached", default);
+            assert_eq!(reached.completion(), Completion::SourceRejected);
+            assert!(reached.mir().is_none());
+            let [finding] = reached.findings() else {
+                panic!("expected one reached-step finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(owner)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(owner)");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let excluded = lower("excluded", default);
+            assert_eq!(excluded.completion(), Completion::Incomplete);
+            assert!(excluded.mir().is_none());
+            assert_eq!(
+                excluded.blocked_at().unwrap().span.bytes(),
+                b"input |> composite(owner)?"
+            );
             let exact = AnalysisLimits {
                 max_work: named.statistics().work,
                 max_entries: named.statistics().entries,

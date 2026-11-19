@@ -78,6 +78,7 @@ enum OptionTextSource {
     Move(Slot),
     Constructor,
     Factory,
+    PipeStep,
 }
 
 struct CheckedPropagation<'a, 'g> {
@@ -1561,41 +1562,20 @@ impl<'a, 'g> Build<'a, 'g> {
             let text = match payload {
                 OptionPayload::Bool => None,
                 OptionPayload::Text(ty) => {
-                    if syntax.kind != NodeKind::Propagate
-                        || !matches!(site, PropagationSite::StatementRoot)
-                    {
+                    if !matches!(site, PropagationSite::StatementRoot) {
                         return Err(Stop::Pending(node));
                     }
-                    self.budget.step(1)?;
-                    let source_facts = source_facts.ok_or(Stop::Pending(node))?;
-                    let source = if let Some(path) = source_facts
-                        .path
-                        .as_ref()
-                        .filter(|path| path.projections.is_empty())
-                    {
-                        self.budget.step(1)?;
-                        OptionTextSource::Move(self.resolve_place(source, path)?)
+                    let source = if piped {
+                        OptionTextSource::PipeStep
+                    } else if syntax.kind == NodeKind::Propagate {
+                        self.check_option_text_source(
+                            node,
+                            source,
+                            operand,
+                            source_facts.ok_or(Stop::Pending(node))?,
+                        )?
                     } else {
-                        let root = self.ungroup(source)?;
-                        let origin = if root == source {
-                            source_facts
-                        } else {
-                            self.budget.step(1)?;
-                            self.value(root)?
-                        };
-                        if matches!(origin.data, Some(DataExpression::Construction(_))) {
-                            OptionTextSource::Constructor
-                        } else {
-                            self.budget.step(1)?;
-                            let call = origin.call.as_deref().ok_or(Stop::Pending(node))?;
-                            if self.module.syntax.nodes[root].kind != NodeKind::Call
-                                || call.pipe_input.is_some()
-                            {
-                                return Err(Stop::Pending(node));
-                            }
-                            self.check_exact_primitive_call(node, call, operand)?;
-                            OptionTextSource::Factory
-                        }
+                        return Err(Stop::Pending(node));
                     };
                     Some((ty, source))
                 }
@@ -1612,6 +1592,41 @@ impl<'a, 'g> Build<'a, 'g> {
             wrapper,
             option_text,
         })
+    }
+
+    fn check_option_text_source(
+        &mut self,
+        node: NodeId,
+        source: NodeId,
+        operand: &Type<'g>,
+        facts: &'a ExpressionFacts<'g>,
+    ) -> ResultOf<OptionTextSource> {
+        self.budget.step(1)?;
+        if let Some(path) = facts
+            .path
+            .as_ref()
+            .filter(|path| path.projections.is_empty())
+        {
+            self.budget.step(1)?;
+            return Ok(OptionTextSource::Move(self.resolve_place(source, path)?));
+        }
+        let root = self.ungroup(source)?;
+        let origin = if root == source {
+            facts
+        } else {
+            self.budget.step(1)?;
+            self.value(root)?
+        };
+        if matches!(origin.data, Some(DataExpression::Construction(_))) {
+            return Ok(OptionTextSource::Constructor);
+        }
+        self.budget.step(1)?;
+        let call = origin.call.as_deref().ok_or(Stop::Pending(node))?;
+        if self.module.syntax.nodes[root].kind != NodeKind::Call || call.pipe_input.is_some() {
+            return Err(Stop::Pending(node));
+        }
+        self.check_exact_primitive_call(node, call, operand)?;
+        Ok(OptionTextSource::Factory)
     }
 
     fn propagate(
@@ -2002,14 +2017,17 @@ impl<'a, 'g> Build<'a, 'g> {
         // The pipe node's expression type describes the success payload.
         // The declared result is the carrier to stage before branching.
         let (parameters, result) = self.direct_application_signature(node, call)?;
-        if !(self.bool_option_role(result).is_some() || self.scalar_result_role(result).is_some()) {
+        let option = self.admitted_option(result);
+        if !(option.is_some() || self.scalar_result_role(result).is_some()) {
             return Err(Stop::Pending(node));
         }
+        let owns_payload = matches!(option, Some((_, OptionPayload::Text(_))));
         for (formal, &arg) in parameters.iter().zip(&call.arguments) {
             self.budget.step(2)?;
             if !(matches!(formal.ty.as_ref(), TypeTerm::Primitive(_))
-                || self.bool_option_role(&formal.ty).is_some()
-                || self.scalar_result_role(&formal.ty).is_some())
+                || !owns_payload
+                    && (self.bool_option_role(&formal.ty).is_some()
+                        || self.scalar_result_role(&formal.ty).is_some()))
                 || self.value(arg)?.ty != formal.ty
             {
                 return Err(Stop::Pending(node));
