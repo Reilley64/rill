@@ -213,7 +213,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let ty = &parameter.ty;
         if let Some(slot) = self.nested_record_parameter(node, ty)? {
             self.budget.reserve(1)?;
-            self.nested_record_parameters
+            self.nested_record_values
                 .insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
@@ -852,18 +852,83 @@ impl<'a, 'g> Build<'a, 'g> {
         self.resolve_place(node, path)
     }
 
-    fn read_projection(&mut self, node: NodeId, facts: &ExpressionFacts<'g>) -> ResultOf<Slot> {
+    fn nested_record_root(&mut self, path: &PlacePath<'g>) -> ResultOf<Option<Slot>> {
+        if self.nested_record_values.is_empty() {
+            return Ok(None);
+        }
+        self.budget.step(1)?;
+        Ok(self.nested_record_values.get(path.root).copied())
+    }
+
+    fn read_value_place(&mut self, node: NodeId, facts: &ExpressionFacts<'g>) -> ResultOf<Slot> {
         let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
         if facts.access == Access::Owned
-            && let [PathProjection::Field(field)] = path.projections.as_slice()
-            && !self.nested_record_parameters.is_empty()
+            && let Some(root) = self.nested_record_root(path)?
         {
-            self.budget.step(1)?;
-            if let Some(&root) = self.nested_record_parameters.get(path.root) {
-                return self.field(node, root, field);
-            }
+            return match path.projections.as_slice() {
+                [] => Ok(root),
+                [PathProjection::Field(field)] => self.field(node, root, field),
+                _ => Err(Stop::Pending(node)),
+            };
         }
         self.resolve_place(node, path)
+    }
+
+    fn nested_transfer_slot(
+        &mut self,
+        value: NodeId,
+        dest: NodeId,
+        expected: &Type<'g>,
+    ) -> ResultOf<Option<Slot>> {
+        if self.nested_record_values.is_empty() {
+            return Ok(None);
+        }
+        let root = self.ungroup(value)?;
+        self.budget.step(1)?;
+        if self.module.syntax.nodes[root].kind != NodeKind::ValueReference {
+            return Ok(None);
+        }
+        self.budget.step(1)?;
+        let facts = self.value(root)?;
+        let Some(path) = facts
+            .path
+            .as_ref()
+            .filter(|path| path.projections.is_empty())
+        else {
+            return Ok(None);
+        };
+        if facts.access != Access::Owned {
+            return Ok(None);
+        }
+        let Some(from) = self.nested_record_root(path)? else {
+            return Ok(None);
+        };
+        // The source layout is already proved for this exact nominal type.
+        self.budget.step(1)?;
+        if facts.ty != *expected {
+            return Err(Stop::Pending(value));
+        }
+        let region = self.slots[from].storage(from);
+        let owner = self.slots.len();
+        self.budget.step(region.len())?;
+        self.budget.reserve(region.len())?;
+        for slot in region {
+            self.slots.push(Local {
+                node: dest,
+                owner,
+                ..self.slots[slot]
+            });
+        }
+        Ok(Some(owner))
+    }
+
+    fn binding_destination(&mut self, node: NodeId, id: &DeclarationId) -> ResultOf<Slot> {
+        self.budget.step(1)?;
+        self.locals
+            .get(id)
+            .or_else(|| self.nested_record_values.get(id))
+            .copied()
+            .ok_or(Stop::Pending(node))
     }
 
     fn resolve_place(&mut self, node: NodeId, path: &PlacePath<'g>) -> ResultOf<Slot> {
@@ -1018,7 +1083,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 if self.propagates_directly(initializer)? {
                     let into = match binding {
                         Binding::Discard => None,
-                        Binding::Name { declaration, .. } => Some(self.locals[declaration]),
+                        Binding::Name { declaration, .. } => {
+                            Some(self.binding_destination(node, declaration)?)
+                        }
                         _ => return Err(Stop::Pending(node)),
                     };
                     return self.propagate(initializer, into, next, exits.returning, depth + 1);
@@ -1028,7 +1095,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 {
                     let into = match binding {
                         Binding::Discard => None,
-                        Binding::Name { declaration, .. } => Some(self.locals[declaration]),
+                        Binding::Name { declaration, .. } => {
+                            Some(self.binding_destination(node, declaration)?)
+                        }
                         _ => return Err(Stop::Pending(node)),
                     };
                     return self.lower_propagating_value_call(node, call, into, next, depth + 1);
@@ -1036,7 +1105,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
                     Binding::Name { declaration, .. } => {
-                        let into = self.locals[declaration];
+                        let into = self.binding_destination(node, declaration)?;
                         let temporary = self.temporary_projection(initializer, false)?;
                         let tail = if let Some(temp) = temporary {
                             self.cleanup(node, &[temp.scratch], next)?
@@ -1115,7 +1184,13 @@ impl<'a, 'g> Build<'a, 'g> {
                 let returning = self.check_retained(node, exits.returning)?;
                 if let Some(&value) = children.first() {
                     let ty = self.value(value)?.ty.clone();
-                    let output = self.slot(value, &ty)?;
+                    let output = if let Some(slot) =
+                        self.nested_transfer_slot(value, value, self.return_contract.1)?
+                    {
+                        slot
+                    } else {
+                        self.slot(value, &ty)?
+                    };
                     if self.slots[output].contains_guard() {
                         return Err(Stop::Pending(value));
                     }
@@ -1460,7 +1535,14 @@ impl<'a, 'g> Build<'a, 'g> {
                 ty,
                 site,
             } => {
-                let local = self.local(declaration, site, ty)?;
+                let value = *self.module.syntax.nodes[node].children.last().unwrap();
+                let local = if let Some(slot) = self.nested_transfer_slot(value, site, ty)? {
+                    self.budget.reserve(1)?;
+                    self.nested_record_values.insert(declaration, slot);
+                    slot
+                } else {
+                    self.local(declaration, site, ty)?
+                };
                 self.budget.reserve(1)?;
                 locals.push(local);
                 Ok(())
@@ -2673,7 +2755,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 Action::ForbiddenBorrowedMove(root)
             } else {
                 Action::Read {
-                    from: self.read_projection(node, facts)?,
+                    from: self.read_value_place(node, facts)?,
                     into,
                 }
             };
@@ -2691,7 +2773,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
             NodeKind::ValueReference => Action::Read {
-                from: self.place(node)?,
+                from: self.read_value_place(node, facts)?,
                 into,
             },
             NodeKind::Prefix("&" | "&mut") => {

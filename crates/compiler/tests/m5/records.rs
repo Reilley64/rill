@@ -137,9 +137,22 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                     }
                 }
             }
+            let whole = lower("wholeMove", default);
+            let mir = whole
+                .mir()
+                .expect("an untouched incoming record can transfer directly to the return slot");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Export(_)))
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::Move { from, into: Some(staged) }, Operation::Export(output)]
+                if from.root.span.bytes() == b"value: Outer" && from.projection.is_none() && staged.projection.is_none()
+                    && staged.root.node == output.root.node && output.root.span.bytes() == b"value")
+            );
+            assert!(path_drops(mir, mir.entry).is_empty());
             for (name, at) in [
-                ("wholeMove", b"value".as_slice()),
-                ("borrow", b"value"),
+                ("borrow", b"value".as_slice()),
                 ("construct", b"value"),
                 ("protectedSibling", b"value: GuardRoot"),
                 ("customChild", b"value: CustomChild"),
@@ -449,6 +462,182 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
                 },
             ] {
                 let limited = lower("branch", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children() {
+    use compiler::analysis::ownership::Projection;
+
+    probe_with_typed(
+        "records::whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children",
+        r#"
+            type Inner = { text: string; }
+            type Outer = { child: Inner; sibling: string; }
+            function localExit(value: Outer): void { let saved = (value); }
+            function give(value: Outer): Outer {
+                let saved = value;
+                return (saved);
+            }
+            function afterWhole(value: Outer): string {
+                let saved = value;
+                let taken = saved.child;
+                return saved.sibling;
+            }
+            function partial(flag: bool, value: Outer): Outer {
+                if (flag) { let taken = value.child; }
+                return value;
+            }
+            function partialLocal(value: Outer): void {
+                let saved = value;
+                let taken = saved.child;
+                let again = saved;
+            }
+            function movedAgain(value: Outer): void {
+                let saved = value;
+                let again = value;
+            }
+            function borrowedLocal(value: Outer): void { let saved = value; let borrowed = &saved; }
+            function replaceLocal(value: Outer, replacement: Outer): void {
+                let mut saved = value;
+                saved = replacement;
+            }
+            function argument(value: Outer): Outer { return give(value); }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let default = AnalysisLimits::default();
+            let local = lower("localExit", default);
+            let mir = local
+                .mir()
+                .unwrap_or_else(|| panic!("whole nested transfer: {:?}", local.completion()));
+            let moves: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. }))
+                .collect();
+            let [
+                Operation::Move {
+                    from,
+                    into: Some(saved),
+                },
+            ] = moves.as_slice()
+            else {
+                panic!("expected one whole transfer")
+            };
+            assert_eq!(from.root.span.bytes(), b"value: Outer");
+            assert_eq!(saved.root.span.bytes(), b"saved");
+            assert!(from.projection.is_none() && saved.projection.is_none());
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(sibling), Obligation::Drop(text)]
+                if sibling.root.node == saved.root.node && text.root.node == saved.root.node
+                    && sibling.field().is_some_and(|member| &member.id == field("Outer", "sibling"))
+                    && matches!(text.projection, Some(Projection::NestedField { outer, inner }) if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "text")))
+            );
+            let exported = lower("give", default);
+            let mir = exported
+                .mir()
+                .expect("export the complete nested value without local drops");
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Export(_)))
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Move { from: input, into: Some(saved) },
+                Operation::Move { from: stored, into: Some(staged) }, Operation::Export(output),
+            ] if input.root.span.bytes() == b"value: Outer" && saved.root.span.bytes() == b"saved"
+                && saved.root.node == stored.root.node && staged.root.node == output.root.node && output.root.span.bytes() == b"(saved)"
+                && [input, saved, stored, staged, output].iter().all(|place| place.projection.is_none())));
+            let partial_transfer = lower("afterWhole", default);
+            let mir = partial_transfer
+                .mir()
+                .expect("direct field transfers also work from the moved-to local");
+            let moves: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Export(_)))
+                .collect();
+            let [
+                Operation::Move {
+                    into: Some(saved), ..
+                },
+                Operation::Move {
+                    from: child,
+                    into: Some(taken),
+                },
+                Operation::Move {
+                    from: sibling,
+                    into: Some(staged),
+                },
+                Operation::Export(output),
+            ] = moves.as_slice()
+            else {
+                panic!("expected root, child, sibling and export")
+            };
+            assert_eq!(saved.root.node, child.root.node);
+            assert_eq!(saved.root.node, sibling.root.node);
+            assert_eq!(&child.field().unwrap().id, field("Outer", "child"));
+            assert_eq!(&sibling.field().unwrap().id, field("Outer", "sibling"));
+            assert_eq!(staged.root.node, output.root.node);
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
+                if text.root.node == taken.root.node && text.field().is_some_and(|member| &member.id == field("Inner", "text")))
+            );
+            for (name, site, related) in [
+                ("partial", b"value".as_slice(), b"value.child".as_slice()),
+                ("partialLocal", b"saved", b"saved.child"),
+                ("movedAgain", b"value", b"value"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected one incomplete initialization finding")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), related);
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+            for (name, site) in [
+                ("borrowedLocal", b"saved".as_slice()),
+                ("replaceLocal", b"saved"),
+                ("argument", b"give(value)"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete);
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
+            }
+            let exact = AnalysisLimits {
+                max_work: partial_transfer.statistics().work,
+                max_entries: partial_transfer.statistics().entries,
+                ..default
+            };
+            assert!(lower("afterWhole", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("afterWhole", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }

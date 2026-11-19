@@ -552,7 +552,7 @@ fn lower<'g>(
         body,
         facts: BTreeMap::new(),
         locals: BTreeMap::new(),
-        nested_record_parameters: BTreeMap::new(),
+        nested_record_values: BTreeMap::new(),
         retained: BTreeMap::new(),
         retains_exclusive_bool,
         incoming_exclusive_bools: Vec::new(),
@@ -922,8 +922,8 @@ struct Build<'a, 'g> {
     body: NodeId,
     facts: BTreeMap<NodeId, &'a NodeFacts<'g>>,
     locals: BTreeMap<&'g DeclarationId, Slot>,
-    /// Incoming nested regions expose direct field values only, not general places.
-    nested_record_parameters: BTreeMap<&'g DeclarationId, Slot>,
+    /// Checked nested regions expose value transfers, not general places.
+    nested_record_values: BTreeMap<&'g DeclarationId, Slot>,
     /// Separate contents of checked caller destinations from the access descriptors.
     retained: BTreeMap<Slot, Slot>,
     retains_exclusive_bool: bool,
