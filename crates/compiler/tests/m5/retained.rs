@@ -318,6 +318,230 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
 }
 
 #[test]
+fn retained_pipes_separate_formal_roles_from_staging_order() {
+    probe(
+        "retained::retained_pipes_separate_formal_roles_from_staging_order",
+        r#"
+            function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function reversed(input: &bool, slot: &mut &bool): void { *slot = input; }
+            function stash(slot: &mut &bool, input: &mut bool): void { *slot = &*input; }
+            function pipedSource(seed: &bool, flag: bool): bool {
+                let mut out = seed;
+                &flag |> remember(&mut out, _);
+                return *out;
+            }
+            function pipedDestination(seed: &bool, flag: bool): bool {
+                let mut out = seed;
+                &mut out |> reversed(&flag, _);
+                return *out;
+            }
+            function forwarded(out: &mut &bool, source: &mut bool): void {
+                source |> stash(out, _);
+            }
+            function suspended(seed: &bool): bool {
+                let mut flag = true;
+                let source = &mut flag;
+                let mut out = seed;
+                source |> stash(&mut out, _);
+                let early = *source;
+                return *out;
+            }
+            function resumes(seed: &bool): bool {
+                let mut flag = true;
+                let source = &mut flag;
+                let mut out = seed;
+                source |> stash(&mut out, _);
+                let last = *out;
+                let after = *source;
+                return last;
+            }
+            function expired(seed: &bool): bool {
+                let mut out = seed;
+                { let flag = true; &flag |> remember(&mut out, _); }
+                return *out;
+            }
+            function keepsOld(seed: &bool): bool {
+                let mut out = seed;
+                { let old = true; out = &old; &mut out |> reversed(seed, _); }
+                return *out;
+            }
+            function overwritten(seed: &bool): bool {
+                let mut out = seed;
+                { let flag = true; &flag |> remember(&mut out, _); out = seed; }
+                return *out;
+            }
+            function rejectsLocal(out: &mut &bool): void {
+                let flag = true;
+                &flag |> remember(out, _);
+            }
+            function broken(slot: &mut &bool, input: &bool): void {
+                let local = true;
+                *slot = &local;
+            }
+            function reachedBad(seed: &bool): bool {
+                let mut out = seed;
+                seed |> broken(&mut out, _);
+                return *out;
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let source = check("pipedSource");
+            let mir = source
+                .mir()
+                .unwrap_or_else(|| panic!("pipedSource: {:?}", source.completion()));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. }
+                            | Operation::CallRetaining { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source: flag, holder, exclusive: false },
+                Operation::Borrow { source: out, exclusive: true, .. },
+                Operation::CallRetaining { callee, destination: RetainedPlace::Local(dest), input },
+                Operation::Dereference(read),
+            ] if *callee == &declaration("remember").id && flag.root.span.bytes() == b"flag: bool"
+                && out.root.span.bytes() == b"out" && dest.root.node == out.root.node && read.root.node == out.root.node
+                && holder.root.node == input.root.node),
+                "{route:?}"
+            );
+            let target = check("pipedDestination");
+            let mir = target.mir().expect("the pipe input can be the destination");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. }
+                            | Operation::CallRetaining { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source: out, exclusive: true, .. },
+                Operation::Borrow { source: flag, holder, exclusive: false },
+                Operation::CallRetaining { callee, destination: RetainedPlace::Local(dest), input },
+                Operation::Dereference(read),
+            ] if *callee == &declaration("reversed").id && flag.root.span.bytes() == b"flag: bool"
+                && out.root.span.bytes() == b"out" && dest.root.node == out.root.node && read.root.node == out.root.node
+                && holder.root.node == input.root.node),
+                "{route:?}"
+            );
+            let forwarded = check("forwarded");
+            let mir = forwarded
+                .mir()
+                .expect("both incoming access descriptors can reborrow");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::CallRetaining { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Reborrow { parent: source, holder, exclusive: true },
+                Operation::Reborrow { parent: out, exclusive: true, .. },
+                Operation::CallRetaining { callee, destination: RetainedPlace::ThroughParameter(dest), input },
+            ] if *callee == &declaration("stash").id && source.root.span.bytes() == b"source: &mut bool"
+                && out.root.span.bytes() == b"out: &mut &bool" && dest.root.node == out.root.node
+                && holder.root.node == input.root.node),
+                "{route:?}"
+            );
+            let resumed = check("resumes");
+            let mir = resumed
+                .mir()
+                .expect("the retained source resumes after last use of the destination");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. }
+                            | Operation::CallRetaining { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Reborrow { parent, holder, exclusive: true },
+                Operation::CallRetaining { destination: RetainedPlace::Local(out), input, .. },
+                Operation::Dereference(last), Operation::Dereference(after),
+            ] if holder.root.node == input.root.node && out.root.node == last.root.node
+                && parent.root.node == after.root.node && parent.root.span.bytes() == b"source"),
+                "{route:?}"
+            );
+            let suspended = check("suspended");
+            assert_eq!(suspended.completion(), Completion::SourceRejected);
+            assert!(suspended.mir().is_none());
+            let [finding] = suspended.findings() else {
+                panic!("expected one suspended source finding")
+            };
+            assert_eq!(finding.code(), "R0201");
+            assert_eq!(finding.site.span.bytes(), b"*source");
+            assert_eq!(finding.related.span.bytes(), b"source");
+            assert!(check("overwritten").mir().is_some());
+            for (name, code, related) in [
+                ("expired", "R0203", "&flag"),
+                ("keepsOld", "R0203", "&old"),
+                ("rejectsLocal", "R0202", "&flag"),
+                ("reachedBad", "R0202", "&local"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected exactly one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            let limits = AnalysisLimits {
+                max_work: source.statistics().work,
+                max_entries: source.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("pipedSource", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("pipedSource", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
     probe(
         "retained::forwarding_reborrows_the_descriptor_and_keeps_its_contents",

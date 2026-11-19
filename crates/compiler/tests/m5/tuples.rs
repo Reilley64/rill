@@ -1772,8 +1772,8 @@ fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
                 let bit = input |> option?;
                 return Option<bool>.Some(bit);
             }
-            function store(destination: &mut &bool, source: &bool): void { *destination = source; }
-            function retained(destination: &mut &bool, source: &bool): void { source |> store(destination, _); }
+            function store(destination: &mut &bool, source: &bool, flag: bool): void { *destination = source; }
+            function retained(destination: &mut &bool, source: &bool): void { source |> store(destination, _, true); }
             function owned(first: &[bool, string], second: [bool, string]): bool { return false; }
             function ownedArgument(first: &[bool, string], second: [bool, string]): bool { return second |> owned(first, _); }
         "#,
@@ -1899,7 +1899,7 @@ fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
             for (name, site) in [
-                ("retained", "source |> store(destination, _)"),
+                ("retained", "source |> store(destination, _, true)"),
                 ("ownedArgument", "second |> owned(first, _)"),
                 ("propagating", "input |> option?"),
             ] {
