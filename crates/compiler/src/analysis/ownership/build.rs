@@ -229,9 +229,9 @@ impl<'a, 'g> Build<'a, 'g> {
                     OptionPayload::Text(_) if matches!(ty.as_ref(), TypeTerm::Variant { declaration, .. } if *declaration == &role.none.id) => {
                         (false, StorageCleanup::End)
                     }
-                    // Cleanup of a carrier that can hold text would need
-                    // variant-aware disposal.
-                    OptionPayload::Text(_) => (true, StorageCleanup::Unlowered),
+                    OptionPayload::Text(_) => {
+                        (true, StorageCleanup::DropOptionPayload(&role.some.id))
+                    }
                 }
             }
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }

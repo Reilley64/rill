@@ -4009,10 +4009,6 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
                 let _ = input?;
                 return Option.Some(true);
             }
-            function live(flag: bool, input: Option<string>): Option<bool> {
-                if (flag) { let _ = input?; }
-                return Option.Some(true);
-            }
             function useText(value: string): bool { dispose(value); return true; }
             function embedded(input: Option<string>): Option<bool> {
                 let bit = useText(input?);
@@ -4184,18 +4180,6 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
             assert_eq!(finding.site.span.bytes(), b"input");
             assert_eq!(finding.related.span.bytes(), b"input");
             assert!(finding.related.span.start() < finding.site.span.start());
-            let live = lower("live", default);
-            assert_eq!(live.completion(), Completion::Incomplete);
-            assert!(live.mir().is_none());
-            let function = module
-                .declarations
-                .iter()
-                .find(|d| &d.id == id("live"))
-                .unwrap();
-            assert_eq!(
-                live.blocked_at().unwrap().node,
-                module.syntax.nodes[function.node].children[1]
-            );
             for (name, site) in [
                 ("embedded", b"input?".as_slice()),
                 ("piped", b"input |> relay?".as_slice()),
@@ -4222,6 +4206,190 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
                 },
             ] {
                 let limited = lower("discarded", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn live_option_text_cleanup_drops_only_the_initialized_carrier_payload() {
+    probe_with_typed(
+        "propagation::live_option_text_cleanup_drops_only_the_initialized_carrier_payload",
+        r#"
+            function normal(before: string, carrier: Option<string>, after: string): bool { return true; }
+            function early(before: string, carrier: Option<string>, input: Option<bool>, after: string): Option<bool> {
+                let bit = input?;
+                return Option.Some(bit);
+            }
+            function conditional(flag: bool, before: string, carrier: Option<string>, after: string): Option<bool> {
+                if (flag) { let _ = carrier?; }
+                return Option.Some(true);
+            }
+            function some(carrier: Option<string>.Some): bool { return true; }
+            function none(carrier: Option<string>.None): bool { return true; }
+            function exported(carrier: Option<string>): Option<string> {
+                let held = carrier;
+                return held;
+            }
+            function replace(old: Option<string>, incoming: Option<string>): Option<string> {
+                let mut held = old;
+                held = incoming;
+                return held;
+            }
+            function afterDrop(bit: bool): bool { return bit; }
+            function discarded(carrier: Option<string>): bool {
+                let _ = carrier;
+                return afterDrop(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let normal = lower("normal", default);
+            let mir = normal
+                .mir()
+                .unwrap_or_else(|| panic!("normal: {:?}", normal.completion()));
+            let tail = linear(mir, mir.entry);
+            let export = tail
+                .iter()
+                .position(|op| matches!(op, Operation::Export(_)))
+                .unwrap();
+            assert!(
+                !tail[..export]
+                    .iter()
+                    .any(|op| matches!(op, Operation::Cleanup(_)))
+            );
+            let option = typed.option_role().unwrap();
+            let assert_carrier_cleanup = |actions: &[Obligation<'_>]| {
+                assert!(
+                    matches!(actions, [Obligation::Drop(after), Obligation::DropOptionPayload { operand, some }, Obligation::Drop(before)]
+                    if after.root.span.bytes() == b"after: string" && operand.root.span.bytes() == b"carrier: Option<string>"
+                        && *some == &option.some.id && before.root.span.bytes() == b"before: string"),
+                    "{actions:?}"
+                );
+            };
+            assert_carrier_cleanup(&path_drops(mir, mir.entry));
+            let early = lower("early", default);
+            let mir = early
+                .mir()
+                .expect("live carrier survives until either lexical exit");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            for entry in [yes, no] {
+                let ops = linear(mir, entry);
+                let export = ops
+                    .iter()
+                    .position(|op| matches!(op, Operation::Export(_)))
+                    .unwrap();
+                assert!(
+                    ops[..export]
+                        .iter()
+                        .all(|op| !matches!(op, Operation::Cleanup(_)))
+                );
+                assert_carrier_cleanup(&path_drops(mir, entry));
+            }
+            let conditional = lower("conditional", default);
+            let mir = conditional
+                .mir()
+                .expect("the join cleans only the carrier still initialized there");
+            let route = straight_blocks(mir, mir.entry);
+            let Terminator::Branch { yes, no } = route.last().unwrap().terminator else {
+                panic!("expected the flag split")
+            };
+            assert_carrier_cleanup(&path_drops(mir, no));
+            let (yes, no) = variant_edges(mir, yes, &option.some.id, b"carrier");
+            assert!(
+                matches!(path_drops(mir, yes).as_slice(), [Obligation::Drop(payload), Obligation::Drop(after), Obligation::Drop(before)]
+                if payload.root.span.bytes() == b"carrier?" && after.root.span.bytes() == b"after: string" && before.root.span.bytes() == b"before: string")
+            );
+            assert!(
+                matches!(path_drops(mir, no).as_slice(), [Obligation::Drop(after), Obligation::Drop(before)]
+                if after.root.span.bytes() == b"after: string" && before.root.span.bytes() == b"before: string")
+            );
+            let some = lower("some", default);
+            let mir = some
+                .mir()
+                .expect("statically known Some requires payload cleanup");
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
+                if operand.root.span.bytes() == b"carrier: Option<string>.Some" && *some == &option.some.id)
+            );
+            for name in ["none", "exported"] {
+                let report = lower(name, default);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                assert!(path_drops(mir, mir.entry).is_empty());
+            }
+            let replaced = lower("replace", default);
+            let mir = replaced
+                .mir()
+                .expect("whole replacement cleans the old carrier, not the exported replacement");
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
+                if operand.root.span.bytes() == b"held" && *some == &option.some.id)
+            );
+            let ops = linear(mir, mir.entry);
+            let replacement: Vec<_> = ops
+                .iter()
+                .copied()
+                .filter(|op| match op {
+                    Operation::Move { from, .. } => {
+                        from.root.span.bytes() == b"incoming: Option<string>"
+                    }
+                    Operation::Cleanup(actions) => actions
+                        .iter()
+                        .any(|action| matches!(action, Obligation::DropOptionPayload { .. })),
+                    Operation::Install { .. } | Operation::Export(_) => true,
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(replacement.as_slice(), [Operation::Move { into: Some(staged), .. }, Operation::Cleanup(_), Operation::Install { target, incoming }, Operation::Export(_)]
+                if staged.root.node == incoming.root.node && target.root.span.bytes() == b"held"),
+                "{replacement:?}"
+            );
+            let discarded = lower("discarded", default);
+            let mir = discarded
+                .mir()
+                .expect("discard drops the moved carrier before continuing");
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
+                if operand.root.span.bytes() == b"carrier" && *some == &option.some.id)
+            );
+            let ops = linear(mir, mir.entry);
+            let drop = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::DropOptionPayload { .. })))).unwrap();
+            let after = ops
+                .iter()
+                .position(|op| matches!(op, Operation::Call(callee) if *callee == id("afterDrop")))
+                .unwrap();
+            assert!(drop < after);
+            let exact = AnalysisLimits {
+                max_work: conditional.statistics().work,
+                max_entries: conditional.statistics().entries,
+                ..default
+            };
+            assert!(lower("conditional", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("conditional", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }

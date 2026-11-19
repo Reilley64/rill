@@ -314,6 +314,11 @@ pub enum RetainedPlace<'g> {
 pub enum Cleanup<'g> {
     EndStorage(Place<'g>),
     Drop(Place<'g>),
+    /// Consume an owned Option<string>, dropping its string only in `some`.
+    DropOptionPayload {
+        operand: Place<'g>,
+        some: &'g DeclarationId,
+    },
     DropCapture {
         closure: Site<'g>,
         field: Site<'g>,
@@ -727,6 +732,7 @@ impl<'g> GuardRelease<'g> {
 enum StorageCleanup<'g> {
     End,
     Drop,
+    DropOptionPayload(&'g DeclarationId),
     Unlowered,
     ReleaseGuard(GuardRelease<'g>),
 }

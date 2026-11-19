@@ -430,6 +430,10 @@ fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultO
     match local.cleanup {
         StorageCleanup::Unlowered => Err(Stop::Pending(node)),
         StorageCleanup::Drop => Ok(Cleanup::Drop(place)),
+        StorageCleanup::DropOptionPayload(some) => Ok(Cleanup::DropOptionPayload {
+            operand: place,
+            some,
+        }),
         StorageCleanup::ReleaseGuard(release) => Ok(release.cleanup(place)),
         StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
@@ -470,6 +474,10 @@ fn cleanup_operation<'g>(
     Ok(match cleanup_of(module, local, node)? {
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
+        cleanup @ Cleanup::DropOptionPayload { .. } => {
+            budget.reserve(1)?;
+            Operation::Cleanup(vec![cleanup])
+        }
         Cleanup::EndStorage(_) => Operation::None,
         Cleanup::InvokeDisposer { .. }
         | Cleanup::DeferDisposerFields { .. }
