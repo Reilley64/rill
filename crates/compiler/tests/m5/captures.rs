@@ -692,8 +692,19 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
                 let [saved, _] = job();
                 return saved;
             }
+            function grouped(view: &string, owner: string): &string {
+                let job: once () => [&string, string] = () => [(view), owner];
+                let [saved, _] = job();
+                return saved;
+            }
             function local(text: string, owner: string): &string {
                 let job: once () => [&string, string] = () => [&text, owner];
+                let [saved, _] = job();
+                return saved;
+            }
+            function carriedLocal(text: string, owner: string): &string {
+                let view = &text;
+                let job: once () => [&string, string] = () => [view, owner];
                 let [saved, _] = job();
                 return saved;
             }
@@ -716,7 +727,7 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
                 let _ = saved;
             }
         "#,
-        |_, module, receipt, _| {
+        |request, module, receipt, typed| {
             let declaration = |name| {
                 module
                     .declarations
@@ -789,6 +800,9 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(remaining)]
                 if remaining.root.node == into.root.node && remaining.tuple_element() == Some(1))
             );
+            let grouped = lower("grouped");
+            assert_eq!(grouped.completion(), Completion::Checked);
+            assert!(grouped.mir().is_some());
             let dead = lower("dead");
             let mir = dead
                 .mir()
@@ -798,6 +812,7 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
                 .into_iter()
                 .filter(|op| match op {
                     Operation::Borrow { .. }
+                    | Operation::Copy { .. }
                     | Operation::FormClosurePair { .. }
                     | Operation::InvokeClosurePair { .. }
                     | Operation::Dispose { .. } => true,
@@ -811,9 +826,14 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
                 Operation::Borrow { source, holder, exclusive: false },
                 Operation::FormClosurePair { closure, captures, .. },
                 Operation::InvokeClosurePair { receiver, into, .. },
-                Operation::Cleanup(drops), Operation::Dispose { operand, .. },
+                Operation::Copy { from: field, into: Some(saved) },
+                Operation::Cleanup(drops),
+                Operation::Copy { from: last_use, .. },
+                Operation::Dispose { operand, .. },
             ] if source.root.span.bytes() == b"text: string" && source.root.node == operand.root.node
                 && holder.root.node == captures[0].node && receiver.root.node == closure.node
+                && field.root.node == into.root.node && field.tuple_element() == Some(0)
+                && saved.root.node == last_use.root.node && saved.root.span.bytes() == b"saved"
                 && drops.iter().filter(|action| matches!(action, Obligation::Drop(..))).count() == 1
                 && drops.iter().any(|a| matches!(a, Obligation::Drop(place)
                     if place.root.node == into.root.node && place.tuple_element() == Some(1)))));
@@ -824,6 +844,7 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
 
             for (name, code, at, source) in [
                 ("local", "R0202", "return saved;", "text: string"),
+                ("carriedLocal", "R0202", "return saved;", "text: string"),
                 ("live", "R0203", "dispose(text)", "&text"),
                 ("two", "R0203", "dispose(second)", "&second"),
             ] {
@@ -865,6 +886,64 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
                 assert_eq!(report.completion(), Completion::ResourceLimit);
                 assert!(report.mir().is_none());
             }
+            let type_limits = AnalysisLimits {
+                max_work: typed.statistics().work,
+                max_entries: typed.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            let graph = loader::load_installed(request.clone()).unwrap();
+            let type_check = |limits| analyze_typed(&graph, limits);
+            assert!(type_check(type_limits).receipt().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: type_limits.max_work - 1,
+                    ..type_limits
+                },
+                AnalysisLimits {
+                    max_entries: type_limits.max_entries - 1,
+                    ..type_limits
+                },
+            ] {
+                let report = type_check(short);
+                assert_eq!(
+                    report.completion(),
+                    compiler::analysis::typed::TypedCompletion::ResourceLimit
+                );
+                assert!(report.receipt().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn borrowed_pair_handoff_does_not_acknowledge_an_unrelated_result() {
+    use compiler::analysis::typed::{ResultDiscardKind, TypedCompletion};
+
+    probe_report(
+        "captures::borrowed_pair_handoff_does_not_acknowledge_an_unrelated_result",
+        r#"
+            function unacknowledged(untouched: Result<bool, i32>.Ok, outward: &string, owner: string): &string {
+                let job: once () => [&string, string] = () => [outward, owner];
+                let [view, _] = job();
+                return view;
+            }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::SourceRejected);
+            assert!(typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty());
+            let [discard] = uses.discards() else {
+                panic!("expected an unacknowledged Result")
+            };
+            assert_eq!(discard.code(), "R0103");
+            assert_eq!(discard.kind, ResultDiscardKind::ScopeExit);
+            assert_eq!(discard.origin.module, &module.key);
+            assert_eq!(
+                discard.origin.span.bytes(),
+                b"untouched: Result<bool, i32>.Ok"
+            );
+            assert_eq!(discard.discard.span.bytes(), b"return view;");
         },
     );
 }
@@ -897,21 +976,35 @@ fn broader_invocations_still_need_typed_evidence() {
             assert!(typed.core_blockers().is_empty());
             assert!(typed.receipt().is_none());
             let pending = typed.result_use().unwrap().pending();
-            for written in [b"return job();".as_slice(), b"= opaque();", b"= work();"] {
+            for (written, call) in [
+                (b"return job();".as_slice(), b"job()".as_slice()),
+                (b"= opaque();", b"opaque()"),
+                (b"= work();", b"work()"),
+            ] {
                 let at = module
                     .snapshot
                     .bytes()
                     .windows(written.len())
                     .position(|w| w == written)
                     .unwrap();
-                let skip = written.iter().position(|&b| b == b' ').unwrap() + 1;
-                assert!(
-                    pending
-                        .iter()
-                        .any(|p| p.blocker == ResultUseBlocker::CallBoundary
+                let start = at + written.len() - call.len() - 1;
+                let blocker = pending
+                    .iter()
+                    .find(|p| {
+                        p.blocker == ResultUseBlocker::CallBoundary
                             && p.site.module == &module.key
-                            && p.site.span.start() == at + skip)
-                );
+                            && p.site.span.start() == start
+                    })
+                    .unwrap();
+                assert_eq!(blocker.site.span.bytes(), call);
+                let fact = typed
+                    .bodies()
+                    .node(module, blocker.site.node)
+                    .unwrap()
+                    .unwrap();
+                let invocation = fact.callable.as_ref().unwrap().invocation.as_ref().unwrap();
+                assert_eq!(invocation.mode, compiler::analysis::InvocationMode::Once);
+                assert!(invocation.assumption.is_none());
             }
         },
     );
