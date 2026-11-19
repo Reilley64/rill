@@ -100,13 +100,7 @@ enum Binding<'a, 'g> {
         shape: NodeId,
         facts: &'a PatternFacts<'g>,
         access: Access,
-        reborrow: Option<PatternReborrow<'a, 'g>>,
     },
-}
-
-struct PatternReborrow<'a, 'g> {
-    site: NodeId,
-    parent: &'a PlacePath<'g>,
 }
 
 #[derive(Clone, Copy)]
@@ -719,12 +713,9 @@ impl<'a, 'g> Build<'a, 'g> {
                         };
                         self.stage_value(value, into, tail, temporary, depth + 1)
                     }
-                    Binding::IrrefutableProduct {
-                        facts,
-                        access,
-                        reborrow,
-                        ..
-                    } => self.bind_product(node, facts, access, reborrow, next, depth + 1),
+                    Binding::IrrefutableProduct { facts, access, .. } => {
+                        self.bind_product(node, facts, access, next, depth + 1)
+                    }
                 }
             }
             NodeKind::ExpressionStatement => self.discard(node, children[0], next, depth + 1),
@@ -921,9 +912,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 if facts.access != Access::Owned || !facts.coverage.exhaustive() {
                     return Err(Stop::Pending(pattern));
                 }
-                let (access, reborrow) = match (kind, facts.ty.as_ref()) {
+                let access = match (kind, facts.ty.as_ref()) {
                     (NodeKind::BracketPattern, TypeTerm::Tuple(_))
-                    | (NodeKind::RecordPattern, TypeTerm::Nominal { .. }) => (Access::Owned, None),
+                    | (NodeKind::RecordPattern, TypeTerm::Nominal { .. }) => Access::Owned,
                     (
                         NodeKind::BracketPattern,
                         TypeTerm::Reference {
@@ -938,7 +929,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         {
                             return Err(Stop::Pending(pattern));
                         }
-                        (Access::ReadOnly, None)
+                        Access::ReadOnly
                     }
                     (
                         NodeKind::RecordPattern,
@@ -946,26 +937,23 @@ impl<'a, 'g> Build<'a, 'g> {
                             mutable: false,
                             referent,
                         },
-                    ) if matches!(referent.as_ref(), TypeTerm::Nominal { .. }) => {
-                        (Access::ReadOnly, None)
-                    }
+                    ) if matches!(referent.as_ref(), TypeTerm::Nominal { .. }) => Access::ReadOnly,
                     (
                         NodeKind::BracketPattern,
                         TypeTerm::Reference {
                             mutable: true,
                             referent,
                         },
-                    ) if let TypeTerm::Tuple(elements) = referent.as_ref() => (
-                        Access::Writable,
-                        self.check_exclusive_pattern_source(pattern, facts, elements)?,
-                    ),
+                    ) if let TypeTerm::Tuple(elements) = referent.as_ref() => {
+                        self.check_exclusive_pattern_source(pattern, facts, elements)?;
+                        Access::Writable
+                    }
                     _ => return Err(Stop::Pending(pattern)),
                 };
                 Ok(Binding::IrrefutableProduct {
                     shape,
                     facts,
                     access,
-                    reborrow,
                 })
             }
             _ => {
@@ -983,50 +971,80 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
+    fn exclusive_tuple_reborrow_path(
+        &mut self,
+        operand: NodeId,
+        result: &Type<'g>,
+    ) -> ResultOf<Option<&'a PlacePath<'g>>> {
+        let syntax = &self.module.syntax.nodes[operand];
+        if syntax.kind != NodeKind::Prefix("*") {
+            return Ok(None);
+        }
+        let TypeTerm::Reference {
+            mutable: true,
+            referent,
+        } = result.as_ref()
+        else {
+            return Ok(None);
+        };
+        let TypeTerm::Tuple(elements) = referent.as_ref() else {
+            return Ok(None);
+        };
+        let name = self.ungroup(syntax.children[0])?;
+        if self.module.syntax.nodes[name].kind != NodeKind::ValueReference {
+            return Ok(None);
+        }
+        self.budget.step(1 + 2 * elements.len())?;
+        let input = self.value(name)?;
+        if input.access != Access::Owned
+            || *result != input.ty
+            || !elements
+                .iter()
+                .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
+        {
+            return Ok(None);
+        }
+        Ok(input.path.as_ref().filter(|path| {
+            matches!(
+                path.root.kind,
+                DeclarationKind::Binding | DeclarationKind::Parameter
+            ) && path.projections.is_empty()
+        }))
+    }
+
     fn check_exclusive_pattern_source(
         &mut self,
         pattern: NodeId,
         facts: &PatternFacts<'g>,
         elements: &[Type<'g>],
-    ) -> ResultOf<Option<PatternReborrow<'a, 'g>>> {
+    ) -> ResultOf<()> {
         let source = self.ungroup(facts.source.node)?;
         let syntax = &self.module.syntax.nodes[source];
         if syntax.kind != NodeKind::Prefix("&mut") {
             return Err(Stop::Pending(pattern));
         }
         let operand = self.ungroup(syntax.children[0])?;
-        let dereference = &self.module.syntax.nodes[operand];
-        let parent = if dereference.kind == NodeKind::Prefix("*") {
-            Some(self.ungroup(dereference.children[0])?)
-        } else {
-            None
-        };
-        let name = parent.unwrap_or(operand);
-        self.budget.step(1 + elements.len() + facts.binders.len())?;
-        let input = self.value(name)?;
-        let path = input.path.as_ref().ok_or(Stop::Pending(pattern))?;
-        // The source is either the whole owned tuple or an explicit
-        // reborrow of its named descriptor, never a split into siblings.
-        if self.module.syntax.nodes[name].kind != NodeKind::ValueReference
-            || input.access != Access::Owned
-            || !path.projections.is_empty()
-            || !elements
-                .iter()
-                .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
-        {
-            return Err(Stop::Pending(pattern));
-        }
-        if parent.is_some() {
-            self.budget.step(1 + elements.len())?;
-            if !matches!(
-                path.root.kind,
-                DeclarationKind::Binding | DeclarationKind::Parameter
-            ) || input.ty != facts.ty
+        self.budget.step(facts.binders.len())?;
+        if self.module.syntax.nodes[operand].kind == NodeKind::Prefix("*") {
+            if self
+                .exclusive_tuple_reborrow_path(operand, &facts.ty)?
+                .is_none()
             {
                 return Err(Stop::Pending(pattern));
             }
-        } else if path.root.kind != DeclarationKind::Binding {
-            return Err(Stop::Pending(pattern));
+        } else {
+            self.budget.step(1 + elements.len())?;
+            let input = self.value(operand)?;
+            if self.module.syntax.nodes[operand].kind != NodeKind::ValueReference
+                || input.access != Access::Owned
+                || !matches!(&input.path, Some(path) if path.root.kind == DeclarationKind::Binding
+                    && path.projections.is_empty())
+                || !elements
+                    .iter()
+                    .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
+            {
+                return Err(Stop::Pending(pattern));
+            }
         }
         let supported = match facts.binders.as_slice() {
             [binder] => matches!(
@@ -1041,10 +1059,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if !supported {
             return Err(Stop::Pending(pattern));
         }
-        Ok(parent.map(|_| PatternReborrow {
-            site: source,
-            parent: path,
-        }))
+        Ok(())
     }
 
     fn declare_binding(&mut self, node: NodeId, locals: &mut Vec<Slot>) -> ResultOf<()> {
@@ -1122,7 +1137,6 @@ impl<'a, 'g> Build<'a, 'g> {
         node: NodeId,
         facts: &PatternFacts<'g>,
         access: Access,
-        reborrow: Option<PatternReborrow<'a, 'g>>,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
@@ -1202,21 +1216,7 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
-        if let Some(reborrow) = reborrow {
-            let parent = self.resolve_place(reborrow.site, reborrow.parent)?;
-            self.emit(
-                reborrow.site,
-                Action::Reborrow {
-                    parent,
-                    into: scratch,
-                    exclusive: true,
-                    suspends: true,
-                },
-                Edges::Next(tail),
-            )
-        } else {
-            self.expression(source, Some(scratch), tail, depth)
-        }
+        self.expression(source, Some(scratch), tail, depth)
     }
 
     fn propagate(
@@ -1644,7 +1644,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 let into = into.ok_or(Stop::Pending(node))?;
                 let exclusive = syntax.kind == NodeKind::Prefix("&mut");
                 let source = &self.module.syntax.nodes[operand];
-                if source.kind == NodeKind::Prefix("*") && primitive_reference(&facts.ty) {
+                if exclusive
+                    && let Some(path) = self.exclusive_tuple_reborrow_path(operand, &facts.ty)?
+                {
+                    Action::Reborrow {
+                        parent: self.resolve_place(operand, path)?,
+                        into,
+                        exclusive: true,
+                        suspends: true,
+                    }
+                } else if source.kind == NodeKind::Prefix("*") && primitive_reference(&facts.ty) {
                     let parent = source.children[0];
                     let suspends = matches!(
                         self.value(parent)?.ty.as_ref(),

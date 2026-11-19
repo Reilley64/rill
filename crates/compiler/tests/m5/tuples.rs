@@ -684,10 +684,66 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 let mut owner = seed;
                 return compoundResult(&mut owner);
             }
-            function unsupportedExplicit(seed: [bool, string]): bool {
+            function explicitSnapshot(seed: [bool, string]): bool {
                 let mut owner = seed;
                 let parent = &mut owner;
-                return snapshot(&mut *parent);
+                let bit = snapshot(&mut *(parent));
+                let _ = parent;
+                owner[1] = "new";
+                return bit;
+            }
+            function explicitChain(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let child = (&mut *parent);
+                let view = project(&mut *child);
+                touch(view);
+                let _ = child;
+                let _ = parent;
+                owner[1] = "new";
+                return owner[0];
+            }
+            function explicitSuspended(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let view = project(&mut *parent);
+                let bit = snapshot(&mut *(parent));
+                touch(view);
+                return bit;
+            }
+            function explicitOwner(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let child = &mut *parent;
+                let view = project(&mut *child);
+                let bit = owner[0];
+                touch(view);
+                return bit;
+            }
+            function parentStillSuspended(seed: [bool, string], fallback: &mut string): bool {
+                let mut owner = seed;
+                let parent = &mut owner;
+                let mut view = fallback;
+                { let child = &mut *parent; view = project(&mut *child); }
+                let bit = snapshot(parent);
+                touch(view);
+                return bit;
+            }
+            function escapedDescriptor(seed: [bool, string]): &mut [bool, string] {
+                let mut owner = seed;
+                let parent = &mut owner;
+                return &mut *parent;
+            }
+            function unsupportedIndirect(parent: &mut &mut [bool, string]): bool {
+                return snapshot(&mut **parent);
+            }
+            function unsupportedReborrowContents(parent: &mut [&bool, string]): void {
+                let child = &mut *parent;
+                let _ = child;
+            }
+            function unsupportedSharedReborrow(parent: &mut [bool, string]): void {
+                let child = &*parent;
+                let _ = child;
             }
             function twoArgs(parent: &mut [bool, string], bit: bool): bool { return bit; }
             function unsupportedSecondArg(seed: [bool, string]): bool {
@@ -741,12 +797,13 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 && **snapshot == declaration("snapshot").id && **project == declaration("project").id && **touch == declaration("touch").id),
                 "named tuple call path: {route:?}"
             );
+            let explicit = check("explicitChain");
             let limits = AnalysisLimits {
-                max_work: resumes.statistics().work,
-                max_entries: resumes.statistics().entries,
+                max_work: explicit.statistics().work,
+                max_entries: explicit.statistics().entries,
                 ..AnalysisLimits::default()
             };
-            assert!(lower("resumes", limits).mir().is_some());
+            assert!(lower("explicitChain", limits).mir().is_some());
             for short in [
                 AnalysisLimits {
                     max_work: limits.max_work - 1,
@@ -757,7 +814,7 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                     ..limits
                 },
             ] {
-                let limited = lower("resumes", short);
+                let limited = lower("explicitChain", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }
@@ -771,6 +828,47 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 let mir = literal
                     .mir()
                     .unwrap_or_else(|| panic!("{name}: {:?}", literal.completion()));
+                assert!(
+                    matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(new)]
+                    if old.root.node == new.root.node && old.root.span.bytes() == b"owner"
+                        && old.tuple_element() == Some(1) && new.tuple_element() == Some(1))
+                );
+            }
+            for name in ["explicitSnapshot", "explicitChain"] {
+                let report = check(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let route = accesses(mir);
+                if name == "explicitSnapshot" {
+                    assert!(
+                        matches!(route.as_slice(), [
+                        Operation::Borrow { source, holder: original, exclusive: true },
+                        Operation::Reborrow { parent, holder: staged, exclusive: true },
+                        Operation::Call(callee),
+                        Operation::Install { target, .. },
+                    ] if source.projection.is_none() && source.root.node == target.root.node && target.tuple_element() == Some(1)
+                        && original.root.node == parent.root.node && staged.root.span.bytes() == b"&mut *(parent)"
+                        && **callee == declaration("snapshot").id),
+                        "{name}: {route:?}"
+                    );
+                } else {
+                    assert!(
+                        matches!(route.as_slice(), [
+                        Operation::Borrow { source, holder: original, exclusive: true },
+                        Operation::Reborrow { parent, holder: local, exclusive: true },
+                        Operation::Reborrow { parent: child, holder: staged, exclusive: true },
+                        Operation::Call(project),
+                        Operation::Reborrow { parent: view, exclusive: true, .. },
+                        Operation::Call(touch),
+                        Operation::Install { target, .. },
+                    ] if source.projection.is_none() && source.root.node == target.root.node && target.tuple_element() == Some(1)
+                        && original.root.node == parent.root.node && local.root.node == child.root.node
+                        && staged.root.span.bytes() == b"&mut *child" && view.root.span.bytes() == b"view"
+                        && **project == declaration("project").id && **touch == declaration("touch").id),
+                        "{name}: {route:?}"
+                    );
+                }
                 assert!(
                     matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(new)]
                     if old.root.node == new.root.node && old.root.span.bytes() == b"owner"
@@ -797,6 +895,20 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 ("liveFresh", "R0201", "owner[0]", "&mut owner"),
                 ("sharedStillExclusive", "R0201", "owner[0]", "&mut owner"),
                 ("suspended", "R0201", "(parent)", "parent"),
+                (
+                    "explicitSuspended",
+                    "R0201",
+                    "&mut *(parent)",
+                    "&mut *parent",
+                ),
+                ("explicitOwner", "R0201", "owner[0]", "&mut owner"),
+                ("parentStillSuspended", "R0201", "parent", "&mut *parent"),
+                (
+                    "escapedDescriptor",
+                    "R0202",
+                    "return &mut *parent;",
+                    "owner",
+                ),
                 ("escapes", "R0202", "return project(&mut owner);", "owner"),
                 (
                     "expires",
@@ -820,7 +932,9 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 ("unsupportedContents", "&mut owner"),
                 ("unsupportedShared", "&seed"),
                 ("unsupportedResult", "&mut owner"),
-                ("unsupportedExplicit", "*parent"),
+                ("unsupportedIndirect", "**parent"),
+                ("unsupportedReborrowContents", "*parent"),
+                ("unsupportedSharedReborrow", "*parent"),
                 ("unsupportedSecondArg", "&mut owner"),
             ] {
                 let report = check(name);
