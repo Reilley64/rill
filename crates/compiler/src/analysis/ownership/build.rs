@@ -82,6 +82,7 @@ struct CheckedPropagation<'a, 'g> {
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
     option_text: Option<&'a Type<'g>>,
+    option_move_from: Option<Slot>,
 }
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
@@ -1508,6 +1509,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             (source, &operand.ty, Some(operand))
         };
+        let mut option_move_from = None;
         let (wrapper, option_text) = if let Some(error) = &exit.error {
             let (role, _) = self
                 .scalar_result_role(operand)
@@ -1539,11 +1541,23 @@ impl<'a, 'g> Build<'a, 'g> {
                         return Err(Stop::Pending(node));
                     }
                     self.budget.step(1)?;
-                    if !source_facts
-                        .and_then(|value| value.path.as_ref())
-                        .is_some_and(|path| path.projections.is_empty())
+                    let source_facts = source_facts.ok_or(Stop::Pending(node))?;
+                    if let Some(path) = source_facts
+                        .path
+                        .as_ref()
+                        .filter(|path| path.projections.is_empty())
                     {
-                        return Err(Stop::Pending(node));
+                        self.budget.step(1)?;
+                        option_move_from = Some(self.resolve_place(source, path)?);
+                    } else {
+                        let root = self.ungroup(source)?;
+                        self.budget.step(1)?;
+                        if !matches!(
+                            self.value(root)?.data,
+                            Some(DataExpression::Construction(_))
+                        ) {
+                            return Err(Stop::Pending(node));
+                        }
                     }
                     Some(ty)
                 }
@@ -1559,6 +1573,7 @@ impl<'a, 'g> Build<'a, 'g> {
             operand,
             wrapper,
             option_text,
+            option_move_from,
         })
     }
 
@@ -1581,6 +1596,7 @@ impl<'a, 'g> Build<'a, 'g> {
             operand,
             wrapper,
             option_text,
+            option_move_from,
         } = self.checked_propagation(node, facts, site)?;
         let pipe_arguments = if matches!(site, PropagationSite::StatementRoot)
             && piped
@@ -1726,10 +1742,8 @@ impl<'a, 'g> Build<'a, 'g> {
             self.call_with_propagating_arguments(node, call, Some(scratch), split, depth, arguments)
         } else if piped {
             self.call(node, facts, Some(scratch), split, depth, Some(operand))
-        } else if option_text.is_some() {
+        } else if let Some(from) = option_move_from {
             self.depth(depth)?;
-            self.budget.step(2)?;
-            let from = self.place(source)?;
             self.emit(
                 source,
                 Action::Move {
@@ -2078,7 +2092,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let TypeTerm::Variant { declaration, .. } = data.ty.as_ref() else {
             return Err(Stop::Pending(node));
         };
-        let option = self.bool_option_role(&data.ty);
+        let option = self.admitted_option(&data.ty).map(|(role, _)| role);
         let payload = match data.arguments.as_slice() {
             [] if option.is_some_and(|role| *declaration == &role.none.id) => None,
             [value]
@@ -2246,7 +2260,7 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(node));
         }
         if let Some(DataExpression::Construction(data)) = &facts.data
-            && (self.bool_option_role(&data.ty).is_some()
+            && (self.admitted_option(&data.ty).is_some()
                 || self.scalar_result_role(&data.ty).is_some())
         {
             return self.construct_variant(

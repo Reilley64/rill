@@ -4412,6 +4412,190 @@ fn live_option_text_cleanup_drops_only_the_initialized_carrier_payload() {
     );
 }
 
+#[test]
+fn explicit_option_text_disposal_still_needs_a_typed_selection() {
+    use compiler::analysis::scalars::ScalarUnsupported;
+    use compiler::analysis::typed::TypedCompletion;
+
+    probe_report(
+        "propagation::explicit_option_text_disposal_still_needs_a_typed_selection",
+        r#"
+            import std::core::dispose as release;
+            function disposeCarrier(carrier: Option<string>): void { release((carrier)); }
+            function disposeNone(carrier: Option<string>.None): void { release(carrier); }
+        "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            let obligations = typed.bodies().obligations();
+            assert_eq!(obligations.len(), 2);
+            assert!(
+                obligations
+                    .iter()
+                    .all(|o| o.reason == ScalarUnsupported::FamilySelection)
+            );
+            assert_eq!(
+                obligations
+                    .iter()
+                    .map(|o| o.site.span.bytes())
+                    .collect::<Vec<_>>(),
+                [
+                    b"release((carrier))".as_slice(),
+                    b"release(carrier)".as_slice()
+                ]
+            );
+        },
+    );
+}
+
+#[test]
+fn fresh_option_text_propagation_stages_the_constructor_once() {
+    probe_with_typed(
+        "propagation::fresh_option_text_propagation_stages_the_constructor_once",
+        r#"
+            function relay(owner: string): string { return owner; }
+            function after(bit: bool): bool { return bit; }
+            function named(owner: string): Option<bool> {
+                let payload = (Option<string>.Some(relay(owner)))?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function discarded(owner: string): Option<bool> {
+                Option<string>.Some(relay(owner))?;
+                return Option.Some(after(true));
+            }
+            function empty(owner: string): Option<bool> {
+                let _ = Option<string>.None?;
+                let bit = after(true);
+                return Option.Some(bit);
+            }
+            function live(owner: string): bool {
+                let held = Option<string>.Some(owner);
+                return true;
+            }
+            function make(owner: string): Option<string> { return Option<string>.Some(owner); }
+            function returned(owner: string): Option<bool> {
+                let _ = make(owner)?;
+                return Option.Some(true);
+            }
+            function reused(owner: string): Option<bool> {
+                let _ = Option<string>.Some(relay(owner))?;
+                dispose(owner);
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let default = AnalysisLimits::default();
+            let option = typed.option_role().unwrap();
+            let named = lower("named", default);
+            let mir = named
+                .mir()
+                .unwrap_or_else(|| panic!("named: {:?}", named.completion()));
+            assert_eq!(calls_on_path(mir, []), [id("relay"), id("after")]);
+            let ops = linear(mir, mir.entry);
+            assert_return(&ops, &option.some.id, true, &[b"payload"]);
+            let (take, operand) = ops
+                .iter()
+                .enumerate()
+                .find_map(|(i, op)| match op {
+                    Operation::TakeOptionPayload { operand, into }
+                        if into.root.span.bytes() == b"payload" =>
+                    {
+                        Some((i, *operand))
+                    }
+                    _ => None,
+                })
+                .expect("move the constructed Some payload into the named binding");
+            let construction = ops.iter().position(|op| matches!(op, Operation::ConstructVariant { variant, payload: Some(payload), into }
+                if *variant == &option.some.id && into.root.node == operand.root.node && payload.root.span.bytes() == b"relay(owner)")).unwrap();
+            let relay = ops
+                .iter()
+                .position(|op| matches!(op, Operation::Call(callee) if *callee == id("relay")))
+                .unwrap();
+            assert!(relay < construction && construction < take);
+            let discarded = lower("discarded", default);
+            let mir = discarded
+                .mir()
+                .expect("fresh Some does not need variant testing");
+            assert_eq!(calls_on_path(mir, []), [id("relay"), id("after")]);
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(payload)]
+                if payload.root.span.bytes() == b"Option<string>.Some(relay(owner))?")
+            );
+            let empty = lower("empty", default);
+            let mir = empty.mir().expect("fresh None has only the failure edge");
+            assert!(calls_on_path(mir, []).is_empty());
+            let ops = linear(mir, mir.entry);
+            assert_return(&ops, &option.none.id, false, &[b"owner: string"]);
+            let none: Vec<_> = ops
+                .iter()
+                .copied()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::ConstructVariant { .. }
+                            | Operation::EndEmptyOption(_)
+                            | Operation::TakeOptionPayload { .. }
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(none.as_slice(), [Operation::ConstructVariant { variant: input, payload: None, into }, Operation::EndEmptyOption(operand), Operation::ConstructVariant { variant: returned, payload: None, .. }]
+                if *input == &option.none.id && *returned == &option.none.id && into.root.node == operand.root.node),
+                "{none:?}"
+            );
+            let live = lower("live", default);
+            let mir = live.mir().expect("fresh carrier joins normal cleanup");
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::DropOptionPayload { operand, some }]
+                if operand.root.span.bytes() == b"held" && *some == &option.some.id)
+            );
+            let returned = lower("returned", default);
+            assert_eq!(returned.completion(), Completion::Incomplete);
+            assert!(returned.mir().is_none());
+            assert_eq!(returned.blocked_at().unwrap().span.bytes(), b"make(owner)?");
+            let reused = lower("reused", default);
+            assert_eq!(reused.completion(), Completion::SourceRejected);
+            assert!(reused.mir().is_none());
+            let [finding] = reused.findings() else {
+                panic!("expected one moved-source finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(owner)");
+            assert_eq!(finding.related.span.bytes(), b"owner");
+            let exact = AnalysisLimits {
+                max_work: named.statistics().work,
+                max_entries: named.statistics().entries,
+                ..default
+            };
+            assert!(lower("named", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("named", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
 fn variant_edges(
     mir: &Mir<'_>,
     mut pc: usize,
