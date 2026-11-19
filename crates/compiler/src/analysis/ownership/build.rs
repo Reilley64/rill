@@ -279,28 +279,33 @@ impl<'a, 'g> Build<'a, 'g> {
         argument: &Type<'g>,
         result: &Type<'g>,
     ) -> ResultOf<bool> {
-        // A single exclusive flat primitive tuple has no stored reference
-        // destination. Reuse the existing leaf-result dependency contract.
+        // A primitive tuple has no stored reference destination. Reuse
+        // the existing leaf-result contract for one exact tuple argument.
         if call.arguments.len() != 1
             || call.pipe_input.is_some()
             || !(matches!(result.as_ref(), TypeTerm::Primitive(_)) || primitive_reference(result))
         {
             return Ok(false);
         }
-        let TypeTerm::Reference {
-            mutable: true,
-            referent,
-        } = argument.as_ref()
-        else {
+        let TypeTerm::Reference { mutable, referent } = argument.as_ref() else {
             return Ok(false);
         };
         let TypeTerm::Tuple(elements) = referent.as_ref() else {
             return Ok(false);
         };
-        if !self.primitive_tuple_elements(elements)? {
-            return Ok(false);
+        self.budget.step(elements.len())?;
+        let mut width = elements.len();
+        for element in elements {
+            match element.as_ref() {
+                TypeTerm::Primitive(_) => {}
+                TypeTerm::Tuple(inner) if !mutable && self.primitive_tuple_elements(inner)? => {
+                    width = width.checked_add(inner.len()).ok_or(Stop::Limit)?;
+                }
+                _ => return Ok(false),
+            }
         }
-        self.budget.step(2 + elements.len())?;
+        // Equality can visit the outer tuple and all admitted inner leaves.
+        self.budget.step(width.checked_add(2).ok_or(Stop::Limit)?)?;
         let Some(function) = self
             .typed
             .inventory()

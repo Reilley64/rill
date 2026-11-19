@@ -1535,7 +1535,6 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
                 let [[_, _], bit] = value;
                 return bit;
             }
-            function caller(value: &[[bool, string], bool]): &string { return view(value); }
             function ownedNested(value: [[bool, string], bool]): bool {
                 let [[bit, _], _] = value;
                 return bit;
@@ -1713,7 +1712,6 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
             }
             for (name, site) in [
                 ("nestedName", "pair"),
-                ("caller", "value"),
                 ("ownedNested", "value: [[bool, string], bool]"),
                 ("deeper", "[[[bit, _], _], _]"),
                 ("nestedReference", "[[saved, _], _]"),

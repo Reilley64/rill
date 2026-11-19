@@ -677,8 +677,6 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 let mut owner = seed;
                 return containsReference(&mut owner);
             }
-            function shared(parent: &[bool, string]): bool { return true; }
-            function unsupportedShared(seed: [bool, string]): bool { return shared(&seed); }
             function compoundResult(parent: &mut [bool, string]): [bool, bool] { return [true, false]; }
             function unsupportedResult(seed: [bool, string]): [bool, bool] {
                 let mut owner = seed;
@@ -965,7 +963,6 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
             }
             for (name, site) in [
                 ("unsupportedContents", "&mut owner"),
-                ("unsupportedShared", "&seed"),
                 ("unsupportedResult", "&mut owner"),
                 ("unsupportedIndirect", "**parent"),
                 ("unsupportedReborrowContents", "*parent"),
@@ -979,6 +976,215 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 assert_eq!(
                     report.blocked_at().unwrap().span.bytes(),
                     site.as_bytes(),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn direct_shared_tuple_calls_keep_only_the_result_backing() {
+    probe(
+        "tuples::direct_shared_tuple_calls_keep_only_the_result_backing",
+        r#"
+            function nestedView(value: &[[bool, string], bool]): &string {
+                let [[_, text], _] = value;
+                return text;
+            }
+            function caller(value: &[[bool, string], bool]): &string { return nestedView(value); }
+            function forwardsAlias(value: &[[bool, string], bool], fallback: &string): &string {
+                let mut out = fallback;
+                { let alias = value; out = nestedView(alias); }
+                return out;
+            }
+            function snapshot(value: &[bool, string]): bool {
+                let [bit, _] = value;
+                return bit;
+            }
+            function view(value: &[bool, string]): &string {
+                let [_, text] = value;
+                return text;
+            }
+            function resumes(seed: [bool, string]): bool {
+                let mut owner = seed;
+                let bit = snapshot(&owner);
+                owner[1] = "staged";
+                let alias = &owner;
+                let text = view(alias);
+                let _ = text;
+                owner[1] = "replaced";
+                return bit;
+            }
+            function live(seed: [bool, string]): void {
+                let mut owner = seed;
+                let text = view(&owner);
+                owner[1] = "blocked";
+                let _ = text;
+            }
+            function escapes(seed: [bool, string]): &string { return view(&seed); }
+            function expires(seed: [bool, string], fallback: &string, branch: bool): &string {
+                let mut out = fallback;
+                if (branch) { let local = seed; out = view(&local); }
+                return out;
+            }
+            function partial(seed: [bool, string]): &string {
+                let moved = seed[1];
+                return view(&seed);
+            }
+            function bad(value: &[[bool, string], bool]): &string {
+                let local = "local";
+                return &local;
+            }
+            function reachedBad(value: &[[bool, string], bool]): &string { return bad(value); }
+            function deeper(value: &[[[bool, string], bool], bool]): bool { return false; }
+            function unsupportedDeep(value: &[[[bool, string], bool], bool]): bool { return deeper(value); }
+            function carried(value: &[&bool, string]): bool { return false; }
+            function unsupportedCarried(value: &[&bool, string]): bool { return carried(value); }
+            function exclusive(value: &mut [[bool, string], bool]): bool { return false; }
+            function unsupportedExclusive(value: &mut [[bool, string], bool]): bool { return exclusive(value); }
+            function compoundResult(value: &[[bool, string], bool]): [bool, bool] { return [false, true]; }
+            function unsupportedResult(value: &[[bool, string], bool]): [bool, bool] { return compoundResult(value); }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let check = |name| lower(name, AnalysisLimits::default());
+            let caller = check("caller");
+            let mir = caller
+                .mir()
+                .unwrap_or_else(|| panic!("caller: {:?}", caller.completion()));
+            assert!(path_drops(mir, mir.entry).is_empty());
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. } | Operation::Call(_) | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Copy { from, into: Some(argument) }, Operation::Call(callee), Operation::Export(result),
+            ] if from.root.span.bytes() == b"value: &[[bool, string], bool]" && argument.root.span.bytes() == b"value"
+                && **callee == declaration("nestedView").id && result.root.span.bytes() == b"nestedView(value)"),
+                "{route:?}"
+            );
+            let limits = AnalysisLimits {
+                max_work: caller.statistics().work,
+                max_entries: caller.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower("caller", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower("caller", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+            let scoped = check("forwardsAlias");
+            let mir = scoped
+                .mir()
+                .expect("the returned view does not borrow the local descriptor slot");
+            let ops = linear(mir, mir.entry);
+            let ended = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action|
+                matches!(action, Obligation::EndStorage(place) if place.root.span.bytes() == b"alias")))).unwrap();
+            assert!(ops[..ended].iter().any(|op| matches!(op, Operation::Call(callee) if **callee == declaration("nestedView").id)));
+            assert!(
+                matches!(ops[ended + 1..].iter().copied().filter(|op| matches!(op, Operation::Copy { .. } | Operation::Export(_))).collect::<Vec<_>>().as_slice(), [
+                Operation::Copy { from, into: Some(result) }, Operation::Export(out)
+            ] if from.root.span.bytes() == b"out" && result.root.node == out.root.node)
+            );
+            let resumes = check("resumes");
+            let mir = resumes
+                .mir()
+                .expect("both call-scoped loans end after their last use");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Borrow { .. }
+                    | Operation::Call(_)
+                    | Operation::Drop(_)
+                    | Operation::Install { .. } => true,
+                    Operation::Copy { from, .. } => {
+                        from.root.span.bytes() == b"alias" || from.root.span.bytes() == b"text"
+                    }
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source, exclusive: false, .. }, Operation::Call(snapshot),
+                Operation::Drop(first), Operation::Install { target: staged, .. },
+                Operation::Borrow { source: original, holder: descriptor, exclusive: false },
+                Operation::Copy { from: alias, .. }, Operation::Call(view), Operation::Copy { from: text, .. },
+                Operation::Drop(second), Operation::Install { target: replaced, .. },
+            ] if source.projection.is_none() && original.projection.is_none() && source.root.node == original.root.node
+                && [first, staged, second, replaced].iter().all(|place| place.root.node == source.root.node && place.tuple_element() == Some(1))
+                && descriptor.root.node == alias.root.node && text.root.span.bytes() == b"text"
+                && **snapshot == declaration("snapshot").id && **view == declaration("view").id),
+                "{route:?}"
+            );
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(first), Obligation::Drop(second), Obligation::Drop(last)]
+                if first.root.node == second.root.node && second.root.node == last.root.node
+                    && first.root.span.bytes() == b"owner" && [first, second, last].iter().all(|place| place.tuple_element() == Some(1)))
+            );
+            for (name, code, site, related) in [
+                ("live", "R0203", "owner[1] = \"blocked\";", "&owner"),
+                (
+                    "escapes",
+                    "R0202",
+                    "return view(&seed);",
+                    "seed: [bool, string]",
+                ),
+                ("partial", "R0200", "&seed", "seed[1]"),
+                (
+                    "expires",
+                    "R0203",
+                    "{ let local = seed; out = view(&local); }",
+                    "&local",
+                ),
+                ("reachedBad", "R0202", "return &local;", "local"),
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one finding")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            for name in [
+                "unsupportedDeep",
+                "unsupportedCarried",
+                "unsupportedExclusive",
+                "unsupportedResult",
+            ] {
+                let report = check(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    b"value",
                     "{name}"
                 );
             }
