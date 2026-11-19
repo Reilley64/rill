@@ -2,6 +2,7 @@ name: "Test: Native acceptance"
 
 on:
   push:
+    branches: [main]
     paths: &native_paths
       - 'crates/**'
       - 'stdlib/**'
