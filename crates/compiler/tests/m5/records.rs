@@ -13,13 +13,6 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
             type Outer = { child: Inner; sibling: string; }
             function cleanup(value: Outer): void {}
             function exits(flag: bool, value: Outer): void { if (flag) { return; } }
-            function branch(flag: bool, value: Outer): void {
-                if (flag) { let taken = value.child; }
-            }
-            function projection(value: Outer): string { return value.sibling; }
-            function backedge(flag: bool, value: Outer): void {
-                while (flag) { let taken = value.child; continue; }
-            }
             function wholeMove(value: Outer): Outer { return value; }
             function borrow(value: Outer): void { let held = &value; }
             function construct(child: Inner): void { let value = Outer { child: child, sibling: "sibling" }; }
@@ -135,10 +128,7 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                 }
             }
             for (name, at) in [
-                ("branch", b"value.child".as_slice()),
-                ("projection", b"value.sibling"),
-                ("backedge", b"value.child"),
-                ("wholeMove", b"value"),
+                ("wholeMove", b"value".as_slice()),
                 ("borrow", b"value"),
                 ("construct", b"value"),
                 ("protectedSibling", b"value: GuardRoot"),
@@ -173,6 +163,235 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                 },
             ] {
                 let limited = lower("cleanup", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
+    use compiler::analysis::DeclarationShape;
+    use compiler::analysis::ownership::Projection;
+
+    probe_with_typed(
+        "records::moving_a_nested_record_field_leaves_its_sibling_initialized",
+        r#"
+            type Inner = { text: string; }
+            type Outer = { child: Inner; sibling: string; }
+            function branch(flag: bool, value: Outer): string {
+                if (flag) { let taken = value.child; }
+                return value.sibling;
+            }
+            function backedge(flag: bool, value: Outer): void {
+                while (flag) { let taken = value.child; continue; }
+            }
+            function reread(flag: bool, value: Outer): Inner {
+                if (flag) { let taken = value.child; }
+                return value.child;
+            }
+            type Pair = { front: string; marker: i32; back: string; }
+            type Stacked = { first: Pair; middle: string; last: Pair; }
+            function takeLast(value: Stacked): void { let taken = (value.last); }
+            type Scalars = { flag: bool; marker: i32; }
+            type CopyChild = { child: Scalars; sibling: string; }
+            function copyChild(value: CopyChild): bool {
+                let first = value.child;
+                let again = value.child;
+                return again.flag;
+            }
+            function borrowField(value: Outer): void { let held = &value.child; }
+            function nestedLeaf(value: Outer): string { return value.child.text; }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let field = |record, name| {
+                let facts = typed
+                    .inventory()
+                    .type_facts()
+                    .declarations()
+                    .find(|facts| facts.declaration.id == declaration(record).id)
+                    .unwrap();
+                let DeclarationShape::Record { fields } = &facts.shape else {
+                    panic!("expected checked record fields")
+                };
+                &fields
+                    .iter()
+                    .find(|member| member.declaration.name.as_deref() == Some(name))
+                    .unwrap()
+                    .declaration
+                    .id
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let default = AnalysisLimits::default();
+            let branch = lower("branch", default);
+            let mir = branch
+                .mir()
+                .unwrap_or_else(|| panic!("nested child move: {:?}", branch.completion()));
+            let (yes, no) = branch_targets(mir);
+            for (entry, moved) in [(yes, true), (no, false)] {
+                let ops = linear(mir, entry);
+                let moves: Vec<_> = ops
+                    .iter()
+                    .copied()
+                    .filter(|op| matches!(op, Operation::Move { .. } | Operation::Export(_)))
+                    .collect();
+                let (child, remaining) = if moved {
+                    (Some(moves[0]), &moves[1..])
+                } else {
+                    (None, moves.as_slice())
+                };
+                let [
+                    Operation::Move {
+                        from: sibling,
+                        into: Some(staged),
+                    },
+                    Operation::Export(output),
+                ] = remaining
+                else {
+                    panic!("expected the sibling move and export")
+                };
+                assert_eq!(sibling.root.span.bytes(), b"value: Outer");
+                assert_eq!(&sibling.field().unwrap().id, field("Outer", "sibling"));
+                assert_eq!(staged.root.node, output.root.node);
+                let drops = path_drops(mir, entry);
+                let [Obligation::Drop(text)] = drops.as_slice() else {
+                    panic!("drop only the child string")
+                };
+                if let Some(child) = child {
+                    assert!(matches!(child, Operation::Move { from, into: Some(taken) }
+                        if from.root.node == sibling.root.node && from.field().is_some_and(|member| &member.id == field("Outer", "child"))
+                            && taken.root.span.bytes() == b"taken" && taken.root.node == text.root.node
+                            && text.field().is_some_and(|member| &member.id == field("Inner", "text"))));
+                } else {
+                    assert_eq!(text.root.node, sibling.root.node);
+                    assert!(
+                        matches!(text.projection, Some(Projection::NestedField { outer, inner })
+                        if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "text"))
+                    );
+                }
+                let export = ops
+                    .iter()
+                    .position(|op| matches!(op, Operation::Export(_)))
+                    .unwrap();
+                let drop = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::Drop(_))))).unwrap();
+                assert_eq!(drop < export, moved);
+            }
+            let grouped = lower("takeLast", default);
+            let mir = grouped
+                .mir()
+                .expect("moving a grouped subtree transfers all its initialized fields");
+            let drops = path_drops(mir, mir.entry);
+            let expected = [
+                (b"taken".as_slice(), "Pair", "back", None),
+                (b"taken".as_slice(), "Pair", "front", None),
+                (b"value: Stacked".as_slice(), "Stacked", "middle", None),
+                (
+                    b"value: Stacked".as_slice(),
+                    "Stacked",
+                    "first",
+                    Some("back"),
+                ),
+                (
+                    b"value: Stacked".as_slice(),
+                    "Stacked",
+                    "first",
+                    Some("front"),
+                ),
+            ];
+            assert_eq!(drops.len(), expected.len());
+            for (drop, (root, record, outer, inner)) in drops.iter().zip(expected) {
+                let Obligation::Drop(place) = drop else {
+                    panic!("expected an owned leaf drop")
+                };
+                assert_eq!(place.root.span.bytes(), root);
+                match (place.projection, inner) {
+                    (Some(Projection::Field(member)), None) => {
+                        assert_eq!(&member.id, field(record, outer))
+                    }
+                    (
+                        Some(Projection::NestedField {
+                            outer: parent,
+                            inner: member,
+                        }),
+                        Some(inner),
+                    ) => {
+                        assert_eq!(&parent.id, field(record, outer));
+                        assert_eq!(&member.id, field("Pair", inner));
+                    }
+                    _ => panic!("expected the exact transferred or remaining field"),
+                }
+            }
+            let copied = lower("copyChild", default);
+            let mir = copied
+                .mir()
+                .expect("a copyable child stays initialized after extraction");
+            let copies: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::Copy {
+                        from,
+                        into: Some(dest),
+                    } if from.root.span.bytes() == b"value: CopyChild" => Some((from, dest)),
+                    _ => None,
+                })
+                .collect();
+            assert!(matches!(copies.as_slice(), [(from, first), (again, second)]
+                if from.root.node == again.root.node && first.root.span.bytes() == b"first" && second.root.span.bytes() == b"again"
+                    && [from, again].iter().all(|place| place.field().is_some_and(|member| &member.id == field("CopyChild", "child")))));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(remaining)]
+                if remaining.root.span.bytes() == b"value: CopyChild" && remaining.field().is_some_and(|member| &member.id == field("CopyChild", "sibling")))
+            );
+            for name in ["reread", "backedge"] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected one moved field finding")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), b"value.child");
+                assert_eq!(finding.related.span.bytes(), b"value.child");
+                assert_eq!(
+                    finding.site.node == finding.related.node,
+                    name == "backedge"
+                );
+            }
+            for (name, site) in [
+                ("borrowField", b"value.child".as_slice()),
+                ("nestedLeaf", b"value.child.text"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete);
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
+            }
+            let exact = AnalysisLimits {
+                max_work: branch.statistics().work,
+                max_entries: branch.statistics().entries,
+                ..default
+            };
+            assert!(lower("branch", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("branch", short);
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none());
             }

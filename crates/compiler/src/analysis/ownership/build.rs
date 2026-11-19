@@ -211,19 +211,16 @@ impl<'a, 'g> Build<'a, 'g> {
     pub(super) fn parameter(&mut self, parameter: &MemberType<'g>) -> ResultOf<Slot> {
         let node = parameter.declaration.node;
         let ty = &parameter.ty;
-        if let Some(slot) = self.nested_record_cleanup_parameter(node, ty)? {
-            // Cleanup owns this initialized region, but it is not yet a
-            // source place: reads, projections and borrows must stay pending.
+        if let Some(slot) = self.nested_record_parameter(node, ty)? {
+            self.budget.reserve(1)?;
+            self.nested_record_parameters
+                .insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
         self.local(&parameter.declaration.id, node, ty)
     }
 
-    fn nested_record_cleanup_parameter(
-        &mut self,
-        node: NodeId,
-        ty: &Type<'g>,
-    ) -> ResultOf<Option<Slot>> {
+    fn nested_record_parameter(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Option<Slot>> {
         let Some(fields) = self.record_fields(ty.as_ref())? else {
             return Ok(None);
         };
@@ -241,38 +238,44 @@ impl<'a, 'g> Build<'a, 'g> {
         if self.outer_disposer(node, ty)?.is_some() {
             return Err(Stop::Pending(node));
         }
-        // Lay out initialized leaves in declaration order. The ordinary
-        // boundary reverses that order without acquiring another disposer.
-        let mut leaves = Vec::new();
+        // Keep each child record in one contiguous region with the same
+        // slot order as its standalone type. A field transfer moves that
+        // region; outer cleanup still walks the remaining slots in reverse.
+        let root = self.aggregate_root(node, None, 0)?;
         for outer in fields {
             self.budget.step(1)?;
-            if matches!(outer.ty.as_ref(), TypeTerm::Primitive(_)) {
-                self.budget.reserve(1)?;
-                leaves.push((Projection::Field(outer.declaration), &outer.ty));
-                continue;
-            }
-            let inner_fields = self.record_fields(&outer.ty)?.ok_or(Stop::Pending(node))?;
-            self.budget.step(inner_fields.len())?;
-            if !inner_fields
-                .iter()
-                .all(|inner| matches!(inner.ty.as_ref(), TypeTerm::Primitive(_)))
-                || self.outer_disposer(node, &outer.ty)?.is_some()
-            {
-                return Err(Stop::Pending(node));
-            }
-            self.budget.step(inner_fields.len())?;
-            self.budget.reserve(inner_fields.len())?;
-            leaves.extend(inner_fields.iter().map(|inner| {
-                (
-                    Projection::NestedField {
-                        outer: outer.declaration,
-                        inner: inner.declaration,
-                    },
-                    &inner.ty,
-                )
-            }));
+            let child = if matches!(outer.ty.as_ref(), TypeTerm::Primitive(_)) {
+                self.slot(node, &outer.ty)?
+            } else {
+                let inner_fields = self.record_fields(&outer.ty)?.ok_or(Stop::Pending(node))?;
+                self.budget.step(inner_fields.len())?;
+                if !inner_fields
+                    .iter()
+                    .all(|inner| matches!(inner.ty.as_ref(), TypeTerm::Primitive(_)))
+                    || self.outer_disposer(node, &outer.ty)?.is_some()
+                {
+                    return Err(Stop::Pending(node));
+                }
+                self.aggregate(
+                    node,
+                    None,
+                    inner_fields.iter().map(|inner| {
+                        (
+                            Projection::NestedField {
+                                outer: outer.declaration,
+                                inner: inner.declaration,
+                            },
+                            &inner.ty,
+                        )
+                    }),
+                )?
+            };
+            self.slots[child].owner = root;
+            self.slots[child].projection = Some(Projection::Field(outer.declaration));
+            self.slots[root].moves |= self.slots[child].moves;
         }
-        self.aggregate(node, None, leaves.into_iter()).map(Some)
+        self.slots[root].members = self.slots.len() - root - 1;
+        Ok(Some(root))
     }
 
     fn local(&mut self, id: &'g DeclarationId, node: NodeId, ty: &Type<'g>) -> ResultOf<Slot> {
@@ -693,6 +696,28 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(())
     }
 
+    fn aggregate_root(
+        &mut self,
+        node: NodeId,
+        custom_disposer: Option<&'g DeclarationId>,
+        members: usize,
+    ) -> ResultOf<Slot> {
+        self.budget.reserve(1 + members)?;
+        let root = self.slots.len();
+        self.slots.push(Local {
+            node,
+            owner: root,
+            projection: None,
+            members,
+            reference_member: false,
+            has_guard_field: false,
+            custom_disposer,
+            moves: custom_disposer.is_some(),
+            cleanup: StorageCleanup::End,
+        });
+        Ok(root)
+    }
+
     fn aggregate<'t>(
         &mut self,
         node: NodeId,
@@ -702,19 +727,7 @@ impl<'a, 'g> Build<'a, 'g> {
     where
         'g: 't,
     {
-        self.budget.reserve(1 + members.len())?;
-        let root = self.slots.len();
-        self.slots.push(Local {
-            node,
-            owner: root,
-            projection: None,
-            members: members.len(),
-            reference_member: false,
-            has_guard_field: false,
-            custom_disposer,
-            moves: custom_disposer.is_some(),
-            cleanup: StorageCleanup::End,
-        });
+        let root = self.aggregate_root(node, custom_disposer, members.len())?;
         for (projection, ty) in members {
             self.budget.step(1)?;
             let reference_member = custom_disposer.is_none() && shared_primitive_reference(ty);
@@ -833,6 +846,20 @@ impl<'a, 'g> Build<'a, 'g> {
 
     fn place(&mut self, node: NodeId) -> ResultOf<Slot> {
         let path = self.value(node)?.path.as_ref().ok_or(Stop::Pending(node))?;
+        self.resolve_place(node, path)
+    }
+
+    fn read_projection(&mut self, node: NodeId, facts: &ExpressionFacts<'g>) -> ResultOf<Slot> {
+        let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
+        if facts.access == Access::Owned
+            && let [PathProjection::Field(field)] = path.projections.as_slice()
+            && !self.nested_record_parameters.is_empty()
+        {
+            self.budget.step(1)?;
+            if let Some(&root) = self.nested_record_parameters.get(path.root) {
+                return self.field(node, root, field);
+            }
+        }
         self.resolve_place(node, path)
     }
 
@@ -2643,7 +2670,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 Action::ForbiddenBorrowedMove(root)
             } else {
                 Action::Read {
-                    from: self.place(node)?,
+                    from: self.read_projection(node, facts)?,
                     into,
                 }
             };
