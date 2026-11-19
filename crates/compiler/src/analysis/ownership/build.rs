@@ -2116,10 +2116,27 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(node));
         }
         let piped = call.pipe_input.is_some();
-        let mut retains_result = primitive_reference(&facts.ty);
-        if piped && !retains_result && !matches!(facts.ty.as_ref(), TypeTerm::Primitive(_)) {
-            return Err(Stop::Pending(node));
+        let mut tuple_or_leaf_admitted =
+            piped && self.admits_direct_tuple_or_leaf_call(call, &facts.ty)?;
+        if piped && !tuple_or_leaf_admitted {
+            // Only the bounded two-slot retention route can proceed to
+            // call_destination. Reject other shapes before building slots.
+            let [first, second] = call.arguments.as_slice() else {
+                return Err(Stop::Pending(node));
+            };
+            if !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "void") {
+                return Err(Stop::Pending(node));
+            }
+            self.budget.step(2)?;
+            let first = &self.value(*first)?.ty;
+            let second = &self.value(*second)?.ty;
+            if !(retained_bool_contents_type(first).is_some() && primitive_reference(second)
+                || retained_bool_contents_type(second).is_some() && primitive_reference(first))
+            {
+                return Err(Stop::Pending(node));
+            }
         }
+        let mut retains_result = primitive_reference(&facts.ty);
         if matches!(
             facts.ty.as_ref(),
             TypeTerm::Nominal { .. } | TypeTerm::Tuple(_)
@@ -2141,7 +2158,6 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut args = Vec::with_capacity(call.arguments.len());
         let mut destination = None;
         let mut pipe_argument = None;
-        let mut exact_signature_checked = false;
         for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
             if Some(arg) == call.pipe_input {
@@ -2152,11 +2168,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 if destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
-            } else if !self.direct_call_type(&ty) && !exact_signature_checked {
+            } else if !self.direct_call_type(&ty) && !tuple_or_leaf_admitted {
                 if !self.admits_direct_tuple_or_leaf_call(call, &facts.ty)? {
-                    return Err(Stop::Pending(if piped { node } else { arg }));
+                    return Err(Stop::Pending(arg));
                 }
-                exact_signature_checked = true;
+                tuple_or_leaf_admitted = true;
             }
             let slot = self.slot(arg, &ty)?;
             if self.slots[slot].contains_guard() {
@@ -2164,18 +2180,10 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             args.push(slot);
         }
+        let index = self.calls.len();
         let destination = destination
             .map(|position| self.call_destination(node, call, position, &args))
             .transpose()?;
-        // Retaining calls have their own exact two-argument contract.
-        if piped
-            && destination.is_none()
-            && !exact_signature_checked
-            && !self.admits_direct_tuple_or_leaf_call(call, &facts.ty)?
-        {
-            return Err(Stop::Pending(node));
-        }
-        let index = self.calls.len();
         self.calls.push(Call {
             callee: call.callee,
             args,

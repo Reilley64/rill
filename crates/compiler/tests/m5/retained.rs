@@ -501,7 +501,30 @@ fn retained_pipes_separate_formal_roles_from_staging_order() {
             assert_eq!(finding.code(), "R0201");
             assert_eq!(finding.site.span.bytes(), b"*source");
             assert_eq!(finding.related.span.bytes(), b"source");
-            assert!(check("overwritten").mir().is_some());
+            let overwritten = check("overwritten");
+            let mir = overwritten
+                .mir()
+                .expect("exact overwrite releases the piped backing");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CallRetaining { .. }
+                            | Operation::Install { .. }
+                            | Operation::Dereference(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::CallRetaining { callee, destination: RetainedPlace::Local(dest), input },
+                Operation::Install { target, .. },
+                Operation::Dereference(read),
+            ] if *callee == &declaration("remember").id && input.root.span.bytes() == b"&flag"
+                && dest.root.node == target.root.node && dest.root.node == read.root.node),
+                "{route:?}"
+            );
             for (name, code, related) in [
                 ("expired", "R0203", "&flag"),
                 ("keepsOld", "R0203", "&old"),

@@ -1776,6 +1776,8 @@ fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
             function retained(destination: &mut &bool, source: &bool): void { source |> store(destination, _, true); }
             function owned(first: &[bool, string], second: [bool, string]): bool { return false; }
             function ownedArgument(first: &[bool, string], second: [bool, string]): bool { return second |> owned(first, _); }
+            function ownedNested(value: [[bool, bool], bool]): bool { return false; }
+            function nestedArgument(): bool { return [[true, false], true] |> ownedNested; }
         "#,
         |_, module, receipt| {
             let declaration = |name| {
@@ -1901,6 +1903,7 @@ fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
             for (name, site) in [
                 ("retained", "source |> store(destination, _, true)"),
                 ("ownedArgument", "second |> owned(first, _)"),
+                ("nestedArgument", "[[true, false], true] |> ownedNested"),
                 ("propagating", "input |> option?"),
             ] {
                 let report = check(name);
