@@ -977,8 +977,9 @@ fn explicit_exclusive_tuple_pattern_reborrow_suspends_the_named_parent() {
                 let mut owner = seed;
                 let parent = &mut owner;
                 let [_, view] = &mut *parent;
+                let moved = view;
                 let [bit, _] = &mut *(parent);
-                touch(view);
+                touch(moved);
                 return bit;
             }
             function ownerStillBorrowed(seed: [bool, string]): bool {
@@ -1006,6 +1007,14 @@ fn explicit_exclusive_tuple_pattern_reborrow_suspends_the_named_parent() {
                 touch(out);
                 owner[1] = "replacement";
                 return owner[0];
+            }
+            function holderEndsEarly(seed: [bool, string], fallback: &mut string): bool {
+                let mut owner = seed;
+                let mut out = fallback;
+                { let parent = &mut owner; let [_, view] = &mut *parent; out = view; }
+                let bit = owner[0];
+                touch(out);
+                return bit;
             }
             function backingEnds(seed: [bool, string], fallback: &mut string, branch: bool): void {
                 let mut out = fallback;
@@ -1139,6 +1148,7 @@ fn explicit_exclusive_tuple_pattern_reborrow_suspends_the_named_parent() {
             for (name, code, at, cause) in [
                 ("suspended", "R0201", "&mut *(parent)", "&mut *parent"),
                 ("ownerStillBorrowed", "R0201", "owner[0]", "&mut owner"),
+                ("holderEndsEarly", "R0201", "owner[0]", "&mut owner"),
                 ("localEscape", "R0202", "return view;", "owner"),
                 (
                     "backingEnds",
