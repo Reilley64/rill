@@ -4155,7 +4155,7 @@ impl<'a, 'g> Build<'a, 'g> {
         call: &crate::analysis::scalars::CallFacts<'g>,
         position: usize,
         result: &Type<'g>,
-        value_output: Option<Slot>,
+        value_use: bool,
     ) -> ResultOf<RetainedBoolContract<'a, 'g>> {
         // The declaration determines the possible inputs. Do not use the
         // callee body to narrow them.
@@ -4163,7 +4163,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if declared_result != result {
             return Err(Stop::Pending(node));
         }
-        let contract = if let Some(output) = value_output
+        let contract = if value_use
             && call.pipe_input.is_none()
             && matches!(declared_result.as_ref(), TypeTerm::Nominal { .. })
             && self.bool_option_role(declared_result).is_some()
@@ -4181,7 +4181,7 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             RetainedBoolContract {
                 contents,
-                extra: Some(RetainedCallExtra::OptionBool { output }),
+                extra: Some(RetainedCallExtra::OptionBool),
                 exclusive_source: false,
             }
         } else {
@@ -4208,7 +4208,7 @@ impl<'a, 'g> Build<'a, 'g> {
         self.budget.step(args.len())?;
         let independent = contract.extra.map(|extra| match extra {
             RetainedCallExtra::Bool { position } => position,
-            RetainedCallExtra::OptionBool { .. } => 2,
+            RetainedCallExtra::OptionBool => 2,
         });
         let mut sources = (0..args.len())
             .filter(|&i| i != position && independent != Some(i))
@@ -4222,7 +4222,7 @@ impl<'a, 'g> Build<'a, 'g> {
             second_input,
             extra: contract.extra,
         };
-        let option_call = matches!(contract.extra, Some(RetainedCallExtra::OptionBool { .. }));
+        let option_call = matches!(contract.extra, Some(RetainedCallExtra::OptionBool));
         let (argument, _) = self.ungroup_expression_at(call.arguments[position], depth)?;
         let syntax = &self.module.syntax.nodes[argument];
         if syntax.kind == NodeKind::ValueReference {
@@ -4528,7 +4528,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if retained_bool_contents_type(&self.value(arg)?.ty).is_some() {
                     pipe_retention = Some((
                         position,
-                        self.retained_call_contract(node, call, position, result, None)?,
+                        self.retained_call_contract(node, call, position, result, false)?,
                     ));
                     break;
                 }
@@ -4591,7 +4591,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     call,
                     position,
                     result,
-                    into.filter(|_| checked_carrier.is_none()),
+                    into.is_some() && checked_carrier.is_none(),
                 )?,
             )),
             (None, None) => None,

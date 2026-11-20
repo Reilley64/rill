@@ -3049,6 +3049,9 @@ fn direct_retaining_option_call_checks_reached_propagation_exits() {
             function callerBad(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
                 return after(slot, seed, gate);
             }
+            function groupedDest(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                return before((((((((slot))))))), seed, gate);
+            }
             function knownSome(slot: &mut &bool, seed: &bool, gate: Option<bool>.Some): Option<bool> {
                 let flag = true;
                 *slot = &flag;
@@ -3128,6 +3131,10 @@ fn direct_retaining_option_call_checks_reached_propagation_exits() {
             ] if ended_gate.root.node == gate.root.node && ended_seed.root.node == seed.root.node
                 && ended_slot.root.node == parent.root.node));
             assert_retained_call_limits(&good, |limits| check("callerOK", limits));
+            let grouped = lower("groupedDest");
+            require_mir(&grouped, "groupedDest");
+            assert!(grouped.statistics().max_depth > good.statistics().max_depth);
+            assert_retained_call_limits(&grouped, |limits| check("groupedDest", limits));
 
             assert!(bad.mir().is_none());
             let [finding] = bad.findings() else {

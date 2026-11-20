@@ -1498,13 +1498,13 @@ pub(super) fn run<'g>(
                     }
                     if let Some((destination, contents, retention, held)) = contents {
                         state[contents] = State::Initialized(held);
-                        if let Some(RetainedCallExtra::OptionBool { output }) = retention.extra {
+                        if let Some(RetainedCallExtra::OptionBool) = retention.extra {
                             budget.step(call.args.len())?;
                             Operation::CallRetainingWithOptionBool {
                                 callee: call.callee,
                                 destination,
                                 arguments: std::array::from_fn(|i| local(call.args[i])),
-                                into: local(output),
+                                into: local(call.into.ok_or(Stop::Pending(node))?),
                             }
                         } else if retention.extra.is_some() {
                             budget.step(call.args.len())?;

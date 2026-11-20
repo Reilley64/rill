@@ -676,7 +676,7 @@ struct RetainedBoolContract<'a, 'g> {
 #[derive(Clone, Copy)]
 enum RetainedCallExtra {
     Bool { position: usize },
-    OptionBool { output: Slot },
+    OptionBool,
 }
 
 // Void calls: one destination, one or two compatible sources and at most one
