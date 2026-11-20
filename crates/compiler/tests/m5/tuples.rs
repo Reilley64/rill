@@ -180,7 +180,7 @@ fn nested_tuple_leaf_replacement_repairs_joins_and_backedges() {
                     { let taken = current[0][0]; }
                     current[0][0] = fresh;
                 } else {
-                    current[0][0] = fresh;
+                    ((current[0][0])) = fresh;
                 }
                 current[1] = (tail);
                 return current;
@@ -328,6 +328,32 @@ fn nested_tuple_leaf_replacement_repairs_joins_and_backedges() {
                 *backedge.last().unwrap(),
                 *straight_blocks(mir, mir.entry).last().unwrap()
             ));
+            let exit_route: Vec<_> = linear(mir, exit)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. } | Operation::Copy { .. } | Operation::Export(_)
+                    )
+                })
+                .collect();
+            let [
+                Operation::Move {
+                    from,
+                    into: Some(staged),
+                },
+                Operation::Export(output),
+            ] = exit_route.as_slice()
+            else {
+                panic!("expected whole repaired owner to move into the return slot");
+            };
+            assert_eq!(from.root.span.bytes(), b"current");
+            assert_eq!(staged.root.node, output.root.node);
+            assert!(
+                [from, staged, output]
+                    .iter()
+                    .all(|place| place.projection.is_none())
+            );
             assert!(path_drops(mir, exit).is_empty());
 
             let skipped = lower("skipped");

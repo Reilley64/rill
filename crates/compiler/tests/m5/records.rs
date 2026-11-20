@@ -1455,7 +1455,10 @@ fn nested_record_initializers_transfer_written_fields_into_canonical_storage() {
 
 #[test]
 fn named_nested_record_cleanup_after_one_edge_child_move() {
-    use compiler::analysis::ownership::{Place, Projection};
+    use compiler::analysis::{
+        ownership::{Place, Projection},
+        scalars::NodeFactKind,
+    };
     use compiler::parser::NodeKind;
 
     probe_with_typed(
@@ -1471,12 +1474,14 @@ fn named_nested_record_cleanup_after_one_edge_child_move() {
             type CustomInner = { text: string; }
             type WithCustomChild = { child: CustomInner; sibling: string; }
             implement release(value: CustomInner): void {}
+            function selectInner(inner: CustomInner): void { release(inner); }
             function innerDisposer(flag: bool, incoming: CustomInner, text: string): void {
                 let saved = WithCustomChild { sibling: text, child: incoming };
                 if (flag) { let taken = saved.child; }
             }
             type CustomOuter = { child: Inner; sibling: string; }
             implement release(value: CustomOuter): void {}
+            function selectOuter(outer: CustomOuter): void { release(outer); }
             function outerDisposer(flag: bool, incoming: Inner, text: string): void {
                 let saved = CustomOuter { sibling: text, child: incoming };
                 if (flag) { let taken = saved.child; }
@@ -1587,7 +1592,52 @@ fn named_nested_record_cleanup_after_one_edge_child_move() {
                         if flag.root.span.bytes() == b"flag: bool" && flag.projection.is_none())));
             }
 
-            for name in ["innerDisposer", "outerDisposer"] {
+            for (name, call_span, implementation_span) in [
+                (
+                    "innerDisposer",
+                    b"release(inner)".as_slice(),
+                    b"implement release(value: CustomInner): void {}".as_slice(),
+                ),
+                (
+                    "outerDisposer",
+                    b"release(outer)",
+                    b"implement release(value: CustomOuter): void {}",
+                ),
+            ] {
+                let call_node = module
+                    .syntax
+                    .nodes
+                    .iter()
+                    .position(|node| node.kind == NodeKind::Call && node.span.bytes() == call_span)
+                    .unwrap();
+                let Some(NodeFactKind::Expression(call)) = typed
+                    .bodies()
+                    .node(module, call_node)
+                    .unwrap()
+                    .map(|fact| &fact.kind)
+                else {
+                    panic!("expected checked explicit dispose call: {name}");
+                };
+                let call = call.call.as_deref().unwrap();
+                assert_eq!(
+                    call.callee,
+                    &typed.dispose_role().expect("canonical dispose").id
+                );
+                let selected = call
+                    .selection
+                    .as_ref()
+                    .expect("exact disposer selection")
+                    .implementation;
+                let implementation = module
+                    .declarations
+                    .iter()
+                    .find(|decl| &decl.id == selected)
+                    .unwrap();
+                assert_eq!(
+                    module.syntax.nodes[implementation.node].span.bytes(),
+                    implementation_span
+                );
+
                 let report = lower(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(

@@ -1028,7 +1028,6 @@ impl<'a, 'g> Build<'a, 'g> {
     ) -> ResultOf<Option<Slot>> {
         if facts.access != Access::Owned
             || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(_))
-            || !matches!(&facts.data, Some(DataExpression::TupleIndex { .. }))
             || self.nested_tuple_parameters.is_empty() && self.nested_tuple_bindings.is_empty()
         {
             return Ok(None);
@@ -1047,7 +1046,21 @@ impl<'a, 'g> Build<'a, 'g> {
         let Some(root) = self.named_nested_tuple_root(path)? else {
             return Ok(None);
         };
-        self.nested_tuple_pattern_member(node, root, outer, inner)
+        if !matches!(&facts.data, Some(DataExpression::TupleIndex { .. })) {
+            // Typed groups preserve the exact place; indexing data stays on the inner node.
+            let inner = self.ungroup(node)?;
+            if inner == node {
+                return Ok(None);
+            }
+            self.budget.step(1)?;
+            if !matches!(
+                &self.value(inner)?.data,
+                Some(DataExpression::TupleIndex { .. })
+            ) {
+                return Ok(None);
+            }
+        }
+        self.nested_tuple_member_slot(node, root, outer, inner)
             .map(Some)
     }
 
@@ -1176,7 +1189,7 @@ impl<'a, 'g> Build<'a, 'g> {
         Err(Stop::Pending(node))
     }
 
-    fn nested_tuple_pattern_member(
+    fn nested_tuple_member_slot(
         &mut self,
         node: NodeId,
         root: Slot,
@@ -2136,7 +2149,7 @@ impl<'a, 'g> Build<'a, 'g> {
             } else {
                 let from = match member {
                     ProductMember::TupleElement(position) if nested_tuple => {
-                        self.nested_tuple_pattern_member(site, scratch, position, None)?
+                        self.nested_tuple_member_slot(site, scratch, position, None)?
                     }
                     ProductMember::TupleElement(position) => {
                         self.element(site, scratch, position)?
@@ -2146,7 +2159,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         self.nested_field(site, scratch, outer, inner)?
                     }
                     ProductMember::NestedTupleElement { outer, inner } if nested_tuple => {
-                        self.nested_tuple_pattern_member(site, scratch, outer, Some(inner))?
+                        self.nested_tuple_member_slot(site, scratch, outer, Some(inner))?
                     }
                     ProductMember::NestedTupleElement { .. } => return Err(Stop::Pending(site)),
                 };
