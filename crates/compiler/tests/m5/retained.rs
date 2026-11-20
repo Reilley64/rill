@@ -712,16 +712,19 @@ fn loop_carried_input_reaches_destination_on_second_iteration() {
 
                 let exit: Vec<_> = linear(mir, no)
                     .into_iter()
-                    .filter(|op| {
-                        matches!(
-                            op,
-                            Operation::Install { .. }
-                                | Operation::Dereference(_)
-                                | Operation::CallRetaining { .. }
-                        )
+                    .filter(|op| match op {
+                        Operation::Copy { from, .. } => from.root.span.bytes() == b"seed: &bool",
+                        Operation::Install { .. }
+                        | Operation::Dereference(_)
+                        | Operation::CallRetaining { .. } => true,
+                        _ => false,
                     })
                     .collect();
                 let [
+                    Operation::Copy {
+                        into: Some(staged_seed),
+                        ..
+                    },
                     Operation::Install {
                         target: out,
                         incoming: seed,
@@ -734,7 +737,7 @@ fn loop_carried_input_reaches_destination_on_second_iteration() {
                         "expected repair, write and read after {iterations} iterations: {exit:?}"
                     );
                 };
-                assert_eq!(seed.root.span.bytes(), b"seed");
+                assert_eq!(seed.root.node, staged_seed.root.node);
                 assert_eq!(out.root.span.bytes(), b"out");
                 assert_eq!(flag.root.span.bytes(), b"flag");
                 assert_eq!(read.root.node, out.root.node);
