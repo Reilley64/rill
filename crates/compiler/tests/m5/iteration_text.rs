@@ -126,6 +126,10 @@ fn explicit_disposal_in_an_owning_text_loop_has_a_checked_element_edge() {
         import std::core::dispose as release;
         function explicit(xs: List<string>): void { for (let item of xs) { (release)((item)); break; } }
         function reuse(xs: List<string>): void { for (let item of xs) { break; } dispose(xs); }
+        function early(xs: List<string>, skip: bool): void {
+            if (skip) { release(xs); return; }
+            for (let item of xs) { break; }
+        }
     "#,
         |_, module, receipt, typed| {
             let report = analyze_ownership(receipt, AnalysisLimits::default());
@@ -135,6 +139,31 @@ fn explicit_disposal_in_an_owning_text_loop_has_a_checked_element_edge() {
                 .find(|p| p.role == PrimitiveRole::Dispose && p.primitive == Primitive::String)
                 .unwrap();
             let bridge = &role.binding.unwrap().declaration.id;
+            let early = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("early"))
+                .unwrap();
+            let early_body =
+                lower_body(receipt, module, &early.id, AnalysisLimits::default()).unwrap();
+            let early_root = report
+                .roots()
+                .iter()
+                .find(|r| r.site().module == &module.key && r.site().node == early.node)
+                .unwrap();
+            for mir in [early_body.mir().unwrap(), early_root.mir().unwrap()] {
+                let (yes, _) = branch_targets(mir);
+                let path = straight_blocks(mir, yes);
+                let drops = path_drops(mir, yes);
+                assert!(
+                    matches!(drops.as_slice(),[Obligation::DisposeListText{operand,element,..}] if operand.root.span.bytes()==b"xs: List<string>" && element.bridge==bridge)
+                );
+                assert!(
+                    !path
+                        .iter()
+                        .any(|b| matches!(b.operation, Operation::OpenOwnedListText { .. }))
+                );
+            }
             for (name, expected) in [
                 ("explicit", Completion::Checked),
                 ("reuse", Completion::SourceRejected),
@@ -160,6 +189,13 @@ fn explicit_disposal_in_an_owning_text_loop_has_a_checked_element_edge() {
                     for mir in [local.mir().unwrap(), root.mir().unwrap()] {
                         let (yes, _) = branch_targets(mir);
                         let path = straight_blocks(mir, yes);
+                        let text=path.iter().position(|b|matches!(b.operation,Operation::DisposeText {operand,element} if operand.root.span.bytes()==b"item" && std::ptr::eq(element.implementation,&role.implementation.id) && std::ptr::eq(element.bridge,bridge))).unwrap();
+                        assert!(
+                            obligations(&path[text + 1..]).any(|op| matches!(
+                                op,
+                                Obligation::DisposeOwnedListIterText { .. }
+                            ))
+                        );
                         assert!(!obligations(&path).any(|c| matches!(c, Obligation::Drop(_))));
                         assert_eq!(
                             obligations(&path)
