@@ -3096,6 +3096,10 @@ fn terminal_nested_retained_writes_receive_typed_receipts() {
                     max_entries: exact.max_entries - 1,
                     ..exact
                 },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
             ] {
                 let limited = analyze_typed(&graph, short);
                 assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
@@ -3180,6 +3184,9 @@ fn nested_retained_write_handoff_requires_unchanged_original_bool_route() {
             function pointeeResult(slot: &mut &mut &Result<bool, i32>, input: &Result<bool, i32>): void {
                 **slot = input;
             }
+            function unrelatedBinder<T>(slot: &mut &mut &bool, input: &bool): void {
+                **slot = input;
+            }
             function unknown<T>(slot: &mut &mut T, input: T): void {
                 **slot = input;
             }
@@ -3210,6 +3217,7 @@ fn nested_retained_write_handoff_requires_unchanged_original_bool_route() {
                 ("borrowedParameter", "**slot = &flag;"),
                 ("displacedResult", "**slot = input;"),
                 ("pointeeResult", "**slot = input;"),
+                ("unrelatedBinder", "**slot = input;"),
                 ("unknown", "**slot = input;"),
             ] {
                 let function = module
