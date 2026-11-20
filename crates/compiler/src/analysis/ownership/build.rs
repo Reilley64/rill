@@ -4600,8 +4600,25 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(pending());
         }
-        let index = self.normal_value(*selector)?;
-        self.depth(depth + 1)?;
+        let nodes = &self.module.syntax.nodes;
+        // Dynamic selectors and unbound incoming descriptors aren't this
+        // local backing proof. Keep their existing pending budgets.
+        if !matches!(nodes[*selector].kind, NodeKind::Literal | NodeKind::Group)
+            || facts.path.as_ref().is_some_and(|p| {
+                p.root.kind == DeclarationKind::Parameter
+                    && matches!(
+                        p.projections.as_slice(),
+                        [PathProjection::Dereference, PathProjection::ListElement]
+                    )
+            })
+        {
+            return Err(pending());
+        }
+        let (selector, _) = self.ungroup_expression_at(*selector, depth + 1)?;
+        if nodes[selector].kind != NodeKind::Literal {
+            return Err(pending());
+        }
+        let index = self.normal_value(selector)?;
         let Some(LiteralValue::Integer {
             magnitude,
             negative: false,
@@ -4609,9 +4626,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         else {
             return Err(pending());
         };
-        if self.module.syntax.nodes[*selector].kind != NodeKind::Literal
-            || scalar::scalar(&index.ty) != Some(Primitive::U64)
-        {
+        if scalar::scalar(&index.ty) != Some(Primitive::U64) {
             return Err(pending());
         }
         let index = u64::try_from(magnitude).map_err(|_| pending())?;

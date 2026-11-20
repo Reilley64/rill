@@ -546,6 +546,72 @@ fn installed_shared_list_literal_reads() {
 }
 
 #[test]
+fn grouped_list_index_and_unadmitted_selectors() {
+    probe(
+        "scoped_jobs::grouped_list_index_and_unadmitted_selectors",
+        r#"
+            function bare(xs: List<i32>): i32 { return (&xs)[1u64]; }
+            function grouped(xs: List<i32>): i32 { return ((&((xs))))[((((((1u64))))))]; }
+            function named(xs: List<i32>): i32 { let view = &xs; let alias = view; return ((alias))[(0u64)]; }
+            function dynamic(xs: List<i32>, i: u64): i32 { return (&xs)[i]; }
+            function unknown(view: &List<i32>): i32 { return view[0u64]; }
+            function exclusive(view: &mut List<i32>): i32 { return view[0u64]; }
+        "#,
+        |_, module, receipt| {
+            let run = |name: &str, limits| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, limits).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            for (name, index) in [("bare", 1), ("grouped", 1), ("named", 0)] {
+                let report = run(name, default);
+                let mir = report.mir().expect("shared local index read");
+                let mut reads = mir.blocks.iter().filter_map(|b| match b.operation {
+                    Operation::ReadListI32 { index, backing, .. } => {
+                        Some((index, backing.root.span.bytes()))
+                    }
+                    _ => None,
+                });
+                assert_eq!(reads.next(), Some((index, b"xs: List<i32>".as_slice())));
+                assert!(reads.next().is_none());
+            }
+            let depth = run("grouped", default).statistics().max_depth;
+            assert!(depth > run("bare", default).statistics().max_depth);
+            let limited = run(
+                "grouped",
+                AnalysisLimits {
+                    max_depth: depth - 1,
+                    ..default
+                },
+            );
+            assert_eq!(limited.completion(), Completion::ResourceLimit);
+            assert!(limited.mir().is_none());
+            // Exact budgets for these unchanged pending routes on 9b020d1.
+            for (name, max_work, max_entries) in [
+                ("dynamic", 2008, 88),
+                ("unknown", 1983, 84),
+                ("exclusive", 1983, 84),
+            ] {
+                let pending = run(
+                    name,
+                    AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth: 3,
+                    },
+                );
+                assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
+                assert!(pending.mir().is_none() && pending.findings().is_empty());
+            }
+        },
+    );
+}
+
+#[test]
 fn overflowing_list_selector_is_static_invalid() {
     probe_report(
         "scoped_jobs::overflowing_list_selector_is_static_invalid",
