@@ -278,8 +278,17 @@ enum Binding<'a, 'g> {
 #[derive(Clone, Copy)]
 pub(super) struct NarrowVariantParameter<'a, 'g> {
     slot: Slot,
-    ty: &'a Type<'g>,
+    parent: &'g DeclarationId,
+    variant: &'g DeclarationId,
     payload: &'a Type<'g>,
+}
+
+impl NarrowVariantParameter<'_, '_> {
+    fn has_type(&self, ty: &TypeTerm<'_>) -> bool {
+        matches!(ty, TypeTerm::Variant { parent, declaration } if std::ptr::eq(*declaration, self.variant)
+            && matches!(parent.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                if std::ptr::eq(*declaration, self.parent) && arguments.is_empty()))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -474,17 +483,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || parent_id.kind != DeclarationKind::Enum
             || parent_id.module.origin != Origin::Application
             || declaration.kind != DeclarationKind::Variant
-            || declaration.module != parent_id.module
         {
             return Err(pending());
         }
-        let facts = self
-            .typed
-            .inventory()
-            .type_facts()
-            .declarations
-            .get(parent_id)
-            .ok_or_else(pending)?;
+        let headers = &self.typed.inventory().type_facts().declarations;
+        graph::charge_key(&parent_id.module, headers.len(), self.budget)?;
+        let facts = headers.get(parent_id).ok_or_else(pending)?;
         let DeclarationShape::Enum { variants } = &facts.shape else {
             return Err(pending());
         };
@@ -494,7 +498,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.budget.step(variants.len())?;
         let variant = variants
             .iter()
-            .find(|variant| &variant.declaration.id == *declaration)
+            .find(|variant| std::ptr::eq(&variant.declaration.id, *declaration))
             .ok_or_else(pending)?;
         let Payload::Tuple(types) = &variant.payload else {
             return Err(pending());
@@ -517,7 +521,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let winner = protection
             .iter()
             .find(|scope| {
-                Some(scope.family) == self.dispose
+                self.dispose
+                    .is_some_and(|id| std::ptr::eq(scope.family, id))
                     && scope.role == PrimitiveRole::Dispose
                     && scope.primitive == primitive
                     && scope.coverage == PrimitiveCoverage::Clear
@@ -527,10 +532,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let providers = self.typed.primitive_providers();
         self.budget.step(providers.len())?;
         if !providers.iter().any(|provider| {
-            Some(provider.family) == self.dispose
+            self.dispose
+                .is_some_and(|id| std::ptr::eq(provider.family, id))
                 && provider.role == PrimitiveRole::Dispose
                 && provider.primitive == primitive
-                && &provider.implementation.id == winner
+                && std::ptr::eq(&provider.implementation.id, winner)
                 && provider.binding.map(|binding| binding.operation)
                     == (primitive == Primitive::String).then_some(PrimitiveOperation::DisposeText)
         }) {
@@ -543,8 +549,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let slot = self.aggregate(node, None, std::iter::once((projection, payload)))?;
         self.budget.reserve(1)?;
         self.narrow_variant_parameters.insert(
-            &parameter.declaration.id,
-            NarrowVariantParameter { slot, ty, payload },
+            std::ptr::from_ref(&parameter.declaration.id),
+            NarrowVariantParameter {
+                slot,
+                parent: parent_id,
+                variant: declaration,
+                payload,
+            },
         );
         Ok(slot)
     }
@@ -2588,12 +2599,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let pending = Stop::Pending(pattern);
         let (shape, pattern_depth) = self.variant_pattern_at(pattern, depth)?;
         let statement = &self.module.syntax.nodes[node];
-        let [_, source] = statement.children.as_slice() else {
+        let Some(source) = statement.children.last() else {
             return Err(pending);
         };
         let [_, child] = self.module.syntax.nodes[shape].children.as_slice() else {
             return Err(pending);
         };
+        let (read, _) = self.ungroup_expression_at(*source, depth)?;
+        let (child, _) = self.variant_pattern_at(*child, pattern_depth + 1)?;
         let Some(NodeFactKind::Pattern(facts)) = self.fact(&pattern).map(|fact| &fact.kind) else {
             return Err(pending);
         };
@@ -2605,20 +2618,21 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(pending);
         }
-        let (read, _) = self.ungroup_expression_at(*source, depth)?;
         let (input, path) = self.named_owned_place(read)?.ok_or(Stop::Pending(read))?;
         self.budget.step(1)?;
         let parameter = self
             .narrow_variant_parameters
-            .get(path.root)
+            .get(&std::ptr::from_ref(path.root))
             .copied()
             .ok_or(Stop::Pending(read))?;
         let initializer = self.normal_value(*source)?;
         // Match the declared parameter type, not a flow-refined or admitted type.
-        if input.binding != Some(path.root)
-            || &input.ty != parameter.ty
-            || &facts.ty != parameter.ty
-            || &initializer.ty != parameter.ty
+        if !input
+            .binding
+            .is_some_and(|binding| std::ptr::eq(binding, path.root))
+            || !parameter.has_type(&input.ty)
+            || !parameter.has_type(&facts.ty)
+            || !parameter.has_type(&initializer.ty)
             || input.refinement.is_some()
             || initializer.refinement.is_some()
             || input.admission.is_some()
@@ -2627,7 +2641,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || input.call.is_some()
             || input.place == TypedPlace::Value
             || initializer.access != Access::Owned
-            || initializer.path.as_ref() != Some(path)
+            || !initializer.path.as_ref().is_some_and(|source| {
+                std::ptr::eq(source.root, path.root) && source.projections.is_empty()
+            })
         {
             return Err(Stop::Pending(read));
         }
@@ -2644,10 +2660,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let [typed_child] = children.as_slice() else {
             return Err(pending);
         };
-        if *tag != variant || *site != shape {
+        if !std::ptr::eq(*tag, variant) || *site != shape {
             return Err(pending);
         }
-        let (child, _) = self.variant_pattern_at(*child, pattern_depth + 1)?;
         let syntax = &self.module.syntax.nodes;
         let binder = match (
             syntax[child].kind,
@@ -2657,13 +2672,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             (NodeKind::Wildcard, Pattern::Wildcard, []) => None,
             (NodeKind::NamePattern, Pattern::Any, [binder]) => {
                 self.budget.step(1)?;
+                graph::charge_key(&self.module.key, 1, self.budget)?;
                 if binder.declaration.kind != DeclarationKind::Binding
                     || binder.declaration.module != self.module.key
                     || binder.declaration.start != syntax[child].span.start()
                     || binder.mutable
                     || &binder.ty != parameter.payload
                     || &binder.source_type != parameter.payload
-                    || !matches!(binder.projections.as_slice(), [PatternProjection::Payload { variant: projected, index: position }] if *projected == variant && *position == index)
+                    || !matches!(binder.projections.as_slice(), [PatternProjection::Payload { variant: projected, index: position }] if std::ptr::eq(*projected, variant) && *position == index)
                 {
                     return Err(pending);
                 }
@@ -2690,7 +2706,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let scratch = self.clone_region(from, source)?;
         let mut tail = self.cleanup(node, &[scratch], next)?;
         if let Some((site, binder)) = binder {
-            self.budget.step(1)?;
+            graph::charge_key(&binder.declaration.module, self.locals.len(), self.budget)?;
             let into = *self
                 .locals
                 .get(binder.declaration)
@@ -2851,6 +2867,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             Binding::Discard => Ok(()),
             Binding::IrrefutableVariant { binder, .. } => {
                 if let Some((site, binder)) = binder {
+                    graph::charge_key(&binder.declaration.module, self.locals.len(), self.budget)?;
                     self.budget.reserve(1)?;
                     locals.push(self.local(binder.declaration, site, &binder.ty)?);
                 }

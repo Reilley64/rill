@@ -1761,7 +1761,8 @@ struct Build<'a, 'g, 'b> {
     /// Exact named tuple bindings with their proved initializer slot.
     nested_tuple_bindings: BTreeMap<&'g DeclarationId, (Slot, Slot)>,
     /// Incoming narrow variants are visible only to the irrefutable binding path.
-    narrow_variant_parameters: BTreeMap<&'g DeclarationId, build::NarrowVariantParameter<'a, 'g>>,
+    narrow_variant_parameters:
+        BTreeMap<*const DeclarationId, build::NarrowVariantParameter<'a, 'g>>,
     whole_child_patterns: BTreeSet<NodeId>,
     /// Separate contents of checked caller destinations from the access descriptors.
     retained: BTreeMap<Slot, RetainedContents>,

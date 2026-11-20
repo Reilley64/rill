@@ -14,6 +14,7 @@ fn owned_narrow_variant_exports_the_lexical_payload() {
         r#"
         enum Parcel { Text(string), Empty }
         function keep(input: Parcel.Text): string { let Parcel.Text(text) = input; return text; }
+        function annotated(input: Parcel.Text): string { let Parcel.Text(text): Parcel.Text = input; return text; }
         function discard(input: Parcel.Text, after: string): string { let Parcel.Text(_) = input; return after; }
         function reuse(input: Parcel.Text): string { let Parcel.Text(first) = input; let Parcel.Text(second) = input; return second; }
         function untouched(input: Parcel.Text): void {}
@@ -64,7 +65,7 @@ fn owned_narrow_variant_exports_the_lexical_payload() {
                     .collect();
                 let drops = path_drops(mir, mir.entry);
                 match name {
-                    "keep" | "groupedSource" | "groupedPattern" => {
+                    "keep" | "annotated" | "groupedSource" | "groupedPattern" => {
                         assert!(matches!(transfers.as_slice(), [
                             Operation::Move { from: input, into: Some(stage) },
                             Operation::Move { from: leaf, into: Some(local) },
@@ -213,6 +214,7 @@ fn owned_narrow_variant_exports_the_lexical_payload() {
             assert!(root("reuse").ordinary_mir().is_none());
             for name in [
                 "keep",
+                "annotated",
                 "discard",
                 "untouched",
                 "bound",
@@ -313,6 +315,90 @@ fn owned_narrow_variant_exports_the_lexical_payload() {
 }
 
 #[test]
+fn narrow_variant_early_exit_keeps_only_the_reached_owner() {
+    use compiler::analysis::ownership::Projection;
+    installed(
+        "patterns::narrow_variant_early_exit_keeps_only_the_reached_owner",
+        |request| {
+            let mut short = [AnalysisLimits::default(); 2];
+            for width in [1, 64] {
+                let name = "v".repeat(width);
+                fs::write(
+                    &request.entry,
+                    roots::MAIN.replace("import helper::ready;", &format!("import {name}::ready;")),
+                )
+                .unwrap();
+                let file = format!("{name}.rill");
+                fs::write(
+                    request.entry.with_file_name(&file),
+                    r#"
+                export function ready(): bool { return true; }
+                enum Parcel { Empty, Text(string) }
+                function branch(input: Parcel.Text, early: bool): bool {
+                    if (early) { return true; }
+                    let Parcel.Text(text) = input;
+                    return false;
+                }
+            "#,
+                )
+                .unwrap();
+                for (i, test_mode) in [false, true].into_iter().enumerate() {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let typed = analyze_typed(&graph, AnalysisLimits::default());
+                    let receipt = typed.receipt().unwrap();
+                    let module = graph.modules().iter().find(|m| m.key.path == file).unwrap();
+                    let decl = module
+                        .declarations
+                        .iter()
+                        .find(|d| d.name.as_deref() == Some("branch"))
+                        .unwrap();
+                    let variant = module
+                        .declarations
+                        .iter()
+                        .find(|d| {
+                            d.name.as_deref() == Some("Text")
+                                && d.id.kind == loader::DeclarationKind::Variant
+                        })
+                        .unwrap();
+                    let run = |limits| lower_body(&receipt, module, &decl.id, limits).unwrap();
+                    let result = run(AnalysisLimits::default());
+                    let mir = result
+                        .mir()
+                        .expect("both exits have exactly one initialized owner");
+                    let (yes, no) = branch_targets(mir);
+                    assert!(
+                        matches!(path_drops(mir,yes).as_slice(), [Obligation::Drop(p)] if p.root.span.bytes()==b"input: Parcel.Text" && matches!(p.projection, Some(Projection::VariantPayload{variant:id,index:0}) if std::ptr::eq(id,&variant.id)))
+                    );
+                    assert!(
+                        matches!(path_drops(mir,no).as_slice(), [Obligation::Drop(p)] if p.root.span.bytes()==b"text" && p.projection.is_none())
+                    );
+                    let stats = result.statistics();
+                    if width == 1 {
+                        short[i] = AnalysisLimits {
+                            max_work: stats.work,
+                            max_entries: stats.entries,
+                            max_depth: stats.max_depth,
+                        };
+                    } else {
+                        assert_eq!(
+                            (stats.entries, stats.max_depth),
+                            (short[i].max_entries, short[i].max_depth)
+                        );
+                        let exhausted = run(short[i]);
+                        assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+                        assert!(exhausted.mir().is_none());
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn owned_narrow_variant_keeps_other_storage_routes_incomplete() {
     use compiler::analysis::{ownership::analyze_ownership, scalars::BodyOwner};
 
@@ -323,6 +409,8 @@ fn owned_narrow_variant_keeps_other_storage_routes_incomplete() {
         enum Singleton { Text(string) }
         enum Generic<T> { Text(T), Empty }
         function borrowed(input: &Parcel.Text): &string { let Parcel.Text(text) = input; return text; }
+        function groupedInput(input: &Parcel.Text): &string { let Parcel.Text(text) = ((((((((((input)))))))))); return text; }
+        function groupedChild(input: &Parcel.Text): &string { let Parcel.Text(((((((((((text))))))))))) = input; return text; }
         function protected(input: Parcel.Guard): void { let Parcel.Guard(_) = input; }
         function nested(input: Parcel.Nested): void { let Parcel.Nested([_, _]) = input; }
         function parent(input: Singleton): string { let Singleton.Text(text) = input; return text; }
@@ -334,6 +422,8 @@ fn owned_narrow_variant_keeps_other_storage_routes_incomplete() {
             let graph = analyze_ownership(receipt, limits);
             for name in [
                 "borrowed",
+                "groupedInput",
+                "groupedChild",
                 "protected",
                 "nested",
                 "parent",
@@ -357,6 +447,24 @@ fn owned_narrow_variant_keeps_other_storage_routes_incomplete() {
                 assert!(root.ordinary_mir().is_none());
             }
             assert!(graph.findings().is_empty());
+            let run = |name: &str, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let tight = AnalysisLimits {
+                max_depth: run("borrowed", limits).statistics().max_depth,
+                ..limits
+            };
+            assert_eq!(run("borrowed", tight).completion(), Completion::Incomplete);
+            for name in ["groupedInput", "groupedChild"] {
+                let short = run(name, tight);
+                assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
+                assert!(short.mir().is_none() && short.findings().is_empty());
+            }
         },
     );
 }
