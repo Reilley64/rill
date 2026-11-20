@@ -9,10 +9,31 @@ fn interrupted_record_commits_binders_only_on_success() {
         type Pack = { first: string; check: bool; second: string; last: string; }
         function pass(value: string): string { return value; }
         function event(): void {}
+        function directTotal(a: string, b: string, c: string, spare: string, gate: bool): Option<bool> {
+            let kept = spare;
+            let Pack { first: selected, check: bit, last: _ } = Pack { second: pass(c), first: a, check: gate, last: pass(b) };
+            event(); let tail = selected; return Option.Some(bit);
+        }
+        function splitInterrupt(a: string, b: string, c: string, spare: string, gate: Option<bool>): Option<bool> {
+            let kept = spare;
+            let owner = Pack { second: pass(c), first: a, check: gate?, last: pass(b) };
+            let Pack { first: selected, check: bit, last: _ } = owner;
+            event(); let tail = selected; return Option.Some(bit);
+        }
         function directInterrupt(a: string, b: string, c: string, spare: string, gate: Option<bool>): Option<bool> {
             let kept = spare;
             let Pack { first: selected, check: bit, last: _ } = Pack { second: pass(c), first: a, check: gate?, last: pass(b) };
             event(); let tail = selected; return Option.Some(bit);
+        }
+        function grouped(a: string, b: string, c: string, spare: string, gate: Option<bool>): Option<bool> {
+            let kept = spare;
+            let Pack { first: selected, check: bit, last: _ } = (((Pack { second: pass(c), first: a, check: (((((((gate?))))))), last: pass(b) })));
+            event(); let tail = selected; return Option.Some(bit);
+        }
+        function afterCommit(a: string, b: string, c: string, spare: string, gate: Option<bool>): Option<bool> {
+            let kept = spare;
+            let Pack { first: selected, last: _ } = Pack { second: pass(c), first: a, check: true, last: pass(b) };
+            let bit = gate?; event(); let tail = selected; return Option.Some(bit);
         }
         function skipMovedSuffix(a: string, b: string, c: string): Option<bool> {
             let prior = b;
@@ -40,6 +61,25 @@ fn interrupted_record_commits_binders_only_on_success() {
             };
             let run = |name, limits| lower_body(receipt, module, &decl(name).id, limits).unwrap();
             let default = AnalysisLimits::default();
+            // Exact pre-change budgets measured at ff8f725 for this capture.
+            for (name, max_work, max_entries) in [
+                ("directTotal", 10759, 2216),
+                ("splitInterrupt", 13171, 3297),
+            ] {
+                assert!(
+                    run(
+                        name,
+                        AnalysisLimits {
+                            max_work,
+                            max_entries,
+                            ..default
+                        }
+                    )
+                    .mir()
+                    .is_some(),
+                    "{name}"
+                );
+            }
             let graph = analyze_ownership(receipt, default);
             let root = |name| {
                 graph
@@ -95,6 +135,20 @@ fn interrupted_record_commits_binders_only_on_success() {
                     })
                     .collect();
                 assert_eq!(prefix_calls, [(&decl("pass").id, b"pass(c)".as_slice())]);
+                let committed = |op: &Operation<'_>| match op {
+                    Operation::Initialize(p) => {
+                        p.projection.is_none() && p.root.span.bytes().starts_with(b"Pack {")
+                    }
+                    Operation::Move { into: Some(p), .. }
+                    | Operation::Copy { into: Some(p), .. } => {
+                        matches!(p.root.span.bytes(), b"selected" | b"bit")
+                    }
+                    _ => false,
+                };
+                assert!(
+                    prefix.iter().all(|b| !committed(&b.operation)),
+                    "uncommitted prefix"
+                );
                 let failure: Vec<_> = linear(mir, no)
                     .into_iter()
                     .filter(|op| !matches!(op, Operation::None))
@@ -144,16 +198,22 @@ fn interrupted_record_commits_binders_only_on_success() {
                     (*pass, *site, *notify),
                     (&decl("pass").id, b"pass(b)".as_slice(), &decl("event").id)
                 );
-                let (commit, stage) = success
+                let headers: Vec<_> = success
                     .iter()
                     .enumerate()
-                    .find_map(|(i, b)| match b.operation {
-                        Operation::Initialize(p) if p.root.span.bytes().starts_with(b"Pack {") => {
+                    .filter_map(|(i, b)| match b.operation {
+                        Operation::Initialize(p)
+                            if p.projection.is_none()
+                                && p.root.span.bytes().starts_with(b"Pack {") =>
+                        {
                             Some((i, p.root.node))
                         }
                         _ => None,
                     })
-                    .unwrap();
+                    .collect();
+                let [(commit, stage)] = headers[..] else {
+                    panic!("expected one complete header only on success")
+                };
                 assert_eq!(
                     stage, first.root.node,
                     "both edges use the one constructor stage"
@@ -193,6 +253,13 @@ fn interrupted_record_commits_binders_only_on_success() {
                         .unwrap()
                 };
                 let m = binder(b"selected".as_slice(), field("first"), true);
+                let Operation::Move {
+                    into: Some(selected),
+                    ..
+                } = success[m].operation
+                else {
+                    unreachable!()
+                };
                 let c = binder(b"bit".as_slice(), field("check"), false);
                 let remainder: Vec<_> = success
                     .iter()
@@ -216,10 +283,34 @@ fn interrupted_record_commits_binders_only_on_success() {
                 };
                 assert_eq!((*last, *second), (field("last"), field("second")));
                 assert!(*suffix < commit && commit < m && m < c && c < *i && i <= j && *j < *event);
-                assert!(success[*event + 1..].windows(2).any(|pair| matches!(
+                let (moved, tail_node) = success
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, b)| match b.operation {
+                        Operation::Move {
+                            from,
+                            into: Some(to),
+                        } if from.root.node == selected.root.node
+                            && to.root.span.bytes() == b"tail" =>
+                        {
+                            Some((i, to.root.node))
+                        }
+                        _ => None,
+                    })
+                    .unwrap();
+                let exported = success
+                    .windows(2)
+                    .position(|pair| {
+                        matches!(
                     (&pair[0].operation, &pair[1].operation),
                     (Operation::ConstructVariant {variant, into, ..}, Operation::Export(out))
-                        if *variant == &role.some.id && into.root.node == out.root.node)));
+                        if *variant == &role.some.id && into.root.node == out.root.node)
+                    })
+                    .unwrap()
+                    + 1;
+                assert!(*event < moved && moved < exported);
+                assert!(success[exported+1..].iter().any(|b| matches!(&b.operation,
+                    Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::Drop(p) if p.root.node == tail_node)))));
                 assert!(
                     matches!(path_drops(mir,yes).as_slice(),[Obligation::Drop(last),Obligation::Drop(second),Obligation::Drop(tail),Obligation::Drop(kept)] if last.root.node==stage && second.root.node==stage && tail.root.span.bytes()==b"tail" && kept.root.span.bytes()==b"kept")
                 );
@@ -229,6 +320,30 @@ fn interrupted_record_commits_binders_only_on_success() {
             assert!(root("skipMovedSuffix").ordinary_mir().is_some());
             assert!(!mir.blocks.iter().any(|b| b.site.span.bytes() == b"pass(b)"
                 || matches!(b.operation,Operation::Call(id) if id==&decl("event").id)));
+            assert!(mir.blocks.iter().all(|b| match &b.operation {
+                Operation::Initialize(p) => p.projection.is_some() || !p.root.span.bytes().starts_with(b"Pack {"),
+                Operation::Move {into:Some(p),..} | Operation::Copy {into:Some(p),..} => !matches!(p.root.span.bytes(), b"selected" | b"bit"),
+                Operation::Cleanup(actions) => !actions.iter().any(|a| matches!(a, Obligation::EndStorage(p)|Obligation::Drop(p) if matches!(p.root.span.bytes(), b"selected" | b"bit") || p.root.span.bytes().starts_with(b"Pack {"))),
+                _=>true,
+            }));
+            assert!(
+                matches!(path_drops(mir,mir.entry).as_slice(), [Obligation::Drop(first),Obligation::Drop(second),Obligation::Drop(prior)] if first.field().map(|d|&d.id)==Some(field("first")) && second.field().map(|d|&d.id)==Some(field("second")) && prior.root.span.bytes()==b"prior")
+            );
+            let after = run("afterCommit", default);
+            let attached = after.mir().expect("postfix after a complete binding");
+            let (_, failure) = branch_targets(attached);
+            assert!(
+                matches!(path_drops(attached, failure).as_slice(), [Obligation::Drop(selected), Obligation::Drop(kept)] if selected.root.span.bytes()==b"selected" && kept.root.span.bytes()==b"kept")
+            );
+            let grouped = run("grouped", default);
+            assert!(grouped.mir().is_some());
+            let grouped_depth = AnalysisLimits {
+                max_depth: direct.statistics().max_depth,
+                ..default
+            };
+            let short = run("grouped", grouped_depth);
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
             for (name, read, prior) in [
                 (
                     "reachMovedSuffix",
@@ -270,6 +385,18 @@ fn interrupted_record_commits_binders_only_on_success() {
                     && g.site.span == f.site.span
                     && g.related.span == f.related.span));
             }
+            let short_graph = analyze_ownership(
+                receipt,
+                AnalysisLimits {
+                    max_entries: graph.statistics().entries - 1,
+                    ..default
+                },
+            );
+            assert_eq!(
+                short_graph.completion(),
+                compiler::analysis::ownership::GraphCompletion::ResourceLimit
+            );
+            assert!(short_graph.roots().iter().all(|r| r.mir().is_none()));
             let s = direct.statistics();
             let exact = AnalysisLimits {
                 max_work: s.work,

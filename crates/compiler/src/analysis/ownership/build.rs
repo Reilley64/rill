@@ -40,6 +40,11 @@ enum ExpressionProof<'t, 'g> {
     NestedRecordConstruction,
     UnloweredRebuildRead(Slot),
     NamedRecordRebuild,
+    PatternRecord {
+        constructor: NodeId,
+        returning: Pc,
+        depth: usize,
+    },
     NestedRecordFieldTemporary(ProjectedTemporary),
 }
 
@@ -2041,12 +2046,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         self.budget.step(1)?;
                         if self.module.syntax.nodes[initializer].kind == NodeKind::Construction {
                             if let Some(entry) = self.initialize_propagating_record(
-                                value,
                                 initializer,
                                 into,
                                 next,
                                 exits.returning,
-                                depth + 1,
+                                initializer_depth,
                             )? {
                                 return Ok(entry);
                             }
@@ -2084,11 +2088,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         nested_reborrow,
                         ..
                     } => {
-                        let record = (access == Access::Owned
-                            && self.module.syntax.nodes[initializer].kind
-                                == NodeKind::Construction)
-                            .then_some(initializer)
-                            .zip(exits.returning);
+                        let record = exits
+                            .returning
+                            .filter(|_| {
+                                access == Access::Owned
+                                    && self.module.syntax.nodes[initializer].kind
+                                        == NodeKind::Construction
+                            })
+                            .map(|returning| ExpressionProof::PatternRecord {
+                                constructor: initializer,
+                                returning,
+                                depth: initializer_depth,
+                            });
                         self.bind_product(
                             node,
                             facts,
@@ -3066,7 +3077,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         facts: &PatternFacts<'g>,
         (access, nested_reborrow): (Access, Option<&PlacePath<'g>>),
-        record: Option<(NodeId, Pc)>,
+        record: Option<ExpressionProof<'a, 'g>>,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
@@ -3216,20 +3227,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 source_depth,
             );
         }
-        // `tail` starts binder commitment. An interrupted construction returns
-        // directly through prefix and lexical cleanup, bypassing that tail.
+        // `tail` begins commitment. The constructor can return through prefix
+        // and lexical cleanup without reaching the binder transfers.
         if !nested_record
-            && let Some((constructor, returning)) = record
-            && let Some(entry) = self.initialize_propagating_record(
-                source,
-                constructor,
-                scratch,
-                tail,
-                Some(returning),
-                depth,
-            )?
+            && let Some(ExpressionProof::PatternRecord {
+                constructor, depth, ..
+            }) = record
         {
-            return Ok(entry);
+            return self.expression_with_proof(constructor, Some(scratch), tail, depth, record);
         }
         let proof = tuple_source
             .map(ExpressionProof::NestedTupleSource)
@@ -4384,7 +4389,60 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             self.budget.step(2)?;
         }
         let syntax = &self.module.syntax.nodes[node];
-        let facts = self.normal_value(node)?;
+        let facts = match self.normal_value(node) {
+            Err(Stop::Pending(_))
+                if let Some(ExpressionProof::PatternRecord {
+                    constructor,
+                    returning,
+                    ..
+                }) = proof
+                    && node == constructor =>
+            {
+                return self
+                    .initialize_propagating_record(
+                        node,
+                        into.ok_or(Stop::Pending(node))?,
+                        next,
+                        Some(returning),
+                        depth,
+                    )?
+                    .ok_or(Stop::Pending(node));
+            }
+            result => result?,
+        };
+        if syntax.kind == NodeKind::Propagate
+            && let Some(ExpressionProof::PatternRecord {
+                constructor,
+                returning,
+                depth: record_depth,
+            }) = proof
+        {
+            // A known-success postfix is encountered during the ordinary field
+            // walk. No earlier field needs failure cleanup on this route.
+            let into = into.ok_or(Stop::Pending(node))?;
+            self.budget.step(1)?;
+            let Some(DataExpression::Construction(data)) = &self.value(constructor)?.data else {
+                return Err(Stop::Pending(constructor));
+            };
+            let checked = self.checked_record_postfix(
+                constructor,
+                data,
+                self.slots[into].owner,
+                node,
+                record_depth,
+            )?;
+            if checked.exit.can_return || !checked.exit.can_continue {
+                return Err(Stop::Pending(node));
+            }
+            return self.lower_checked_propagation(
+                node,
+                Some(into),
+                next,
+                returning,
+                depth,
+                checked,
+            );
+        }
         if let Some(DataExpression::Construction(data)) = &facts.data
             && (self.admitted_option(&data.ty).is_some()
                 || self.scalar_result_role(&data.ty).is_some())
@@ -4601,7 +4659,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     .iter()
                     .enumerate()
                     .map(|(i, &value)| (Projection::TupleElement(i), value));
-                return self.initialize_members(node, into, next, depth + 1, initializers, false);
+                return self.initialize_members(node, into, next, depth + 1, initializers, None);
             }
             NodeKind::Construction => {
                 let into = into.ok_or(Stop::Pending(node))?;
@@ -4627,7 +4685,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     .fields
                     .iter()
                     .map(|field| (Projection::Field(field.field), field.expression));
-                return self.initialize_members(node, into, next, depth + 1, initializers, nested);
+                return self.initialize_members(node, into, next, depth + 1, initializers, proof);
             }
             NodeKind::Arrow => {
                 return self.closure(node, into.ok_or(Stop::Pending(node))?, next, depth + 1);
@@ -4814,7 +4872,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
 
     fn initialize_propagating_record(
         &mut self,
-        value: NodeId,
         node: NodeId,
         into: Slot,
         next: Pc,
@@ -4831,41 +4888,23 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let mut postfix = None;
         for (position, field) in data.fields.iter().enumerate() {
             self.budget.step(1)?;
-            let root = self.ungroup(field.expression)?;
+            let (root, root_depth) =
+                if self.module.syntax.nodes[field.expression].kind == NodeKind::Group {
+                    self.ungroup_expression_at(field.expression, depth + 1)?
+                } else {
+                    (field.expression, depth + 1)
+                };
             if self.module.syntax.nodes[root].kind == NodeKind::Propagate
-                && postfix.replace((position, root)).is_some()
+                && postfix.replace((position, root, root_depth)).is_some()
             {
                 return Err(Stop::Pending(node));
             }
         }
-        let Some((position, postfix)) = postfix else {
+        let Some((position, postfix, postfix_depth)) = postfix else {
             return Ok(None);
         };
         let returning = returning.ok_or(Stop::Pending(postfix))?;
-        let fields = self.record_fields(&data.ty)?.ok_or(Stop::Pending(node))?;
-        self.budget.step(fields.len())?;
-        if self.slots[into].members != fields.len()
-            || fields.len() != data.fields.len()
-            || !fields
-                .iter()
-                .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(_)))
-            || self.contains_unadmitted_propagation(value, Some(postfix), depth)?
-        {
-            return Err(Stop::Pending(node));
-        }
-        // Read the postfix syntax and facts, its operand facts, and constructor flow.
-        self.budget.step(4)?;
-        let checked = self.checked_propagation(postfix, self.value(postfix)?)?;
-        let flow = &self.fact(&node).ok_or(Stop::Pending(node))?.flow;
-        if self.bool_option_role(checked.operand).is_none()
-            || flow.pending
-            || flow.normal != checked.exit.can_continue
-            || flow.returns != checked.exit.can_return
-            || !flow.breaks.is_empty()
-            || !flow.continues.is_empty()
-        {
-            return Err(Stop::Pending(node));
-        }
+        let checked = self.checked_record_postfix(node, data, into, postfix, depth)?;
         let mut failure = returning;
         if checked.exit.can_return {
             // The record header is still vacant. End just the reached fields,
@@ -4891,13 +4930,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     .can_continue
                     .then(|| self.field(node, into, &field.field.id))
                     .transpose()?;
-                self.depth(depth + 1)?;
+                self.depth(postfix_depth)?;
                 tail = self.lower_checked_propagation(
                     postfix,
                     target,
                     tail,
                     failure,
-                    depth + 1,
+                    postfix_depth,
                     checked,
                 )?;
             } else {
@@ -4908,6 +4947,42 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(Some(tail))
     }
 
+    fn checked_record_postfix(
+        &mut self,
+        node: NodeId,
+        data: &Construction<'g>,
+        into: Slot,
+        postfix: NodeId,
+        depth: usize,
+    ) -> ResultOf<CheckedPropagation<'a, 'g>> {
+        let fields = self.record_fields(&data.ty)?.ok_or(Stop::Pending(node))?;
+        self.budget.step(fields.len())?;
+        if data.base.is_some()
+            || !data.arguments.is_empty()
+            || self.slots[into].members != fields.len()
+            || fields.len() != data.fields.len()
+            || !fields
+                .iter()
+                .all(|f| matches!(f.ty.as_ref(), TypeTerm::Primitive(_)))
+            || self.contains_unadmitted_propagation(node, Some(postfix), depth)?
+        {
+            return Err(Stop::Pending(node));
+        }
+        self.budget.step(4)?;
+        let checked = self.checked_propagation(postfix, self.value(postfix)?)?;
+        let flow = &self.fact(&node).ok_or(Stop::Pending(node))?.flow;
+        if self.bool_option_role(checked.operand).is_none()
+            || flow.pending
+            || flow.normal != checked.exit.can_continue
+            || flow.returns != checked.exit.can_return
+            || !flow.breaks.is_empty()
+            || !flow.continues.is_empty()
+        {
+            return Err(Stop::Pending(node));
+        }
+        Ok(checked)
+    }
+
     fn initialize_members(
         &mut self,
         node: NodeId,
@@ -4915,17 +4990,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         next: Pc,
         depth: usize,
         initializers: impl DoubleEndedIterator<Item = (Projection<'g>, NodeId)>,
-        nested: bool,
+        source: Option<ExpressionProof<'_, 'g>>,
     ) -> ResultOf<Pc> {
         let mut tail = self.emit(node, Action::Init(into), Edges::Next(next))?;
         for (projection, value) in initializers.rev() {
             let target = self.member(node, into, projection)?;
-            let proof = if nested {
+            let proof = if matches!(source, Some(ExpressionProof::NestedRecordConstruction)) {
                 let initializer = self.ungroup(value)?;
                 self.temporary_projection(initializer, false)?
                     .map(ExpressionProof::NestedRecordFieldTemporary)
             } else {
-                None
+                source.filter(|p| matches!(p, ExpressionProof::PatternRecord { constructor, .. } if *constructor == node))
             };
             tail = self.expression_with_proof(value, Some(target), tail, depth, proof)?;
         }
