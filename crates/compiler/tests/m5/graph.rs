@@ -93,6 +93,48 @@ fn callable_transfer_specialization_is_not_an_open_source_root_proof() {
 }
 
 #[test]
+fn closed_callable_transfer_preserves_the_callees_ordinary_finding() {
+    probe(
+        "graph::closed_callable_transfer_preserves_the_callees_ordinary_finding",
+        r#"
+        function forward(job: once () => [&bool, bool]): once () => [&bool, bool] {
+            let text = "owner"; let first = text; let again = text; return job;
+        }
+        function caller(seed: bool): void {
+            let other = true; let held = forward(() => [&seed, other]); let _ = held;
+        }
+    "#,
+        |_, module, receipt| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            let caller = root(&report, b"function caller");
+            let producer = root(&report, b"function forward");
+            assert_eq!(producer.completion(), Completion::Incomplete);
+            assert_eq!(caller.ordinary_completion(), Completion::SourceRejected);
+            assert!(caller.mir().is_none());
+            let BodyOwner::Declaration(id) = caller.owner() else {
+                panic!("named caller")
+            };
+            let targeted = lower_body(receipt, module, id, AnalysisLimits::default()).unwrap();
+            assert_eq!(targeted.completion(), Completion::SourceRejected);
+            assert!(targeted.mir().is_none());
+            for findings in [targeted.findings(), report.findings()] {
+                let [finding] = findings else {
+                    panic!("expected one callee finding")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), b"text");
+                assert_eq!(finding.related.span.bytes(), b"text");
+                assert!(
+                    producer.site().span.start() <= finding.related.span.start()
+                        && finding.related.span.start() < finding.site.span.start()
+                        && finding.site.span.end() <= producer.site().span.end()
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn uncalled_enabled_frame_rejects_only_the_delivery_judgment() {
     let source = format!(
         r#"{HELPER}

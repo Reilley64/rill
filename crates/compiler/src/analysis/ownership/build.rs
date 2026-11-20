@@ -331,30 +331,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         })
     }
 
-    // This specialization has no external dependency other than its bound
-    // carrier. Withhold calls and non-primitive cleanup even on alternate exits.
-    pub(super) fn check_callable_transfer_dependencies(&mut self) -> ResultOf<()> {
-        self.budget.step(self.slots.len())?;
-        self.budget.step(self.code.len())?;
-        if self.slots.iter().any(|slot| {
-            slot.custom_disposer.is_some()
-                || !matches!(slot.cleanup, StorageCleanup::End | StorageCleanup::Drop)
-        }) || self.code.iter().any(|instruction| {
-            matches!(
-                instruction.action,
-                Action::Call(_)
-                    | Action::Dispose(_)
-                    | Action::ConstructResultError { .. }
-                    | Action::WrapResultFailure { .. }
-                    | Action::InvokeClosurePair { .. }
-                    | Action::InvokeMutableI32Cell { .. }
-            )
-        }) {
-            return Err(Stop::Pending(self.body));
-        }
-        Ok(())
-    }
-
     fn fact(&self, node: &NodeId) -> Option<&'a NodeFacts<'g>> {
         self.indexed_facts.unwrap_or(&self.facts).get(node).copied()
     }
@@ -4637,9 +4613,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 let [left, right] = elements.as_slice() else {
                     return Err(Stop::Pending(node));
                 };
-                let written = [self.ungroup(*left)?, self.ungroup(*right)?];
-                let a = self.ungroup(first.site.node)?;
-                let b = self.ungroup(second.site.node)?;
+                let written = [
+                    self.ungroup_expression_at(*left, depth + 1)?.0,
+                    self.ungroup_expression_at(*right, depth + 1)?.0,
+                ];
+                let a = self.ungroup_expression_at(first.site.node, depth + 1)?.0;
+                let b = self.ungroup_expression_at(second.site.node, depth + 1)?.0;
                 if written == [a, b] {
                     (first, Some(second))
                 } else if written == [b, a] {
@@ -5461,6 +5440,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let (Some(into), [argument]) = (into, call.arguments.as_slice()) else {
             return Err(pending());
         };
+        // Preflight the written operand even when the transport header or
+        // actual environment cannot be admitted. Keep its original stage site.
+        self.ungroup_expression_at(*argument, depth + 1)?;
         self.budget.step(1 + self.module.key.path.len())?;
         if self.callable_frame.is_some()
             || call.callee.module != self.module.key

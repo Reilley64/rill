@@ -1755,7 +1755,17 @@ pub(super) fn run<'a, 'g>(
     }
     let mut callable_proofs = BTreeMap::new();
     let mut callable_exported = false;
+    let mut unsupported_cleanup = Vec::new();
     if let Some((layout, _)) = callable_frame {
+        budget.step(slots.len())?;
+        for (slot, local) in slots.iter().enumerate() {
+            if local.custom_disposer.is_some()
+                || !matches!(local.cleanup, StorageCleanup::End | StorageCleanup::Drop)
+            {
+                budget.reserve(1)?;
+                unsupported_cleanup.push(slot);
+            }
+        }
         let [formal] = params.as_slice() else {
             return Err(Stop::Pending(body));
         };
@@ -1844,6 +1854,25 @@ pub(super) fn run<'a, 'g>(
             }
         }
         let operation = (|| -> ResultOf<_> {
+            if callable_frame.is_some() {
+                // A bound transfer has no proof for other calls or protected
+                // cleanup. Stop this path, not independent paths in the body.
+                budget.step(1 + unsupported_cleanup.len())?;
+                if matches!(
+                    action,
+                    Action::Call(_)
+                        | Action::Dispose(_)
+                        | Action::ConstructResultError { .. }
+                        | Action::WrapResultFailure { .. }
+                        | Action::InvokeClosurePair { .. }
+                        | Action::InvokeMutableI32Cell { .. }
+                ) || unsupported_cleanup
+                    .iter()
+                    .any(|&slot| matches!(state[slot], State::Initialized(_)))
+                {
+                    return Err(Stop::Pending(node));
+                }
+            }
             Ok(match action {
                 Action::None | Action::BudgetBackedge => Operation::None,
                 Action::Init(slot) => {

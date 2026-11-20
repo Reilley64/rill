@@ -163,6 +163,37 @@ fn private_callable_transfer_keeps_backing_and_owns_string_cleanup() {
                     .iter()
                     .any(|op| matches!(op, Operation::Install { .. }))
             );
+            let caller = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("after"))
+                .unwrap();
+            let used = after.statistics();
+            let exact = AnalysisLimits {
+                max_work: used.work,
+                max_entries: used.entries,
+                max_depth: used.max_depth,
+            };
+            let run = |limits| lower_body(receipt, module, &caller.id, limits).unwrap();
+            assert!(run(exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: used.work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: used.entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: used.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let exhausted = run(short);
+                assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+                assert!(exhausted.mir().is_none() && exhausted.findings().is_empty());
+            }
             let overlap = lower("overlap");
             assert_eq!(overlap.completion(), Completion::SourceRejected);
             let [finding] = overlap.findings() else {
@@ -214,6 +245,20 @@ fn callable_transfer_withholds_unproved_environments_and_checks_escape() {
                 let _ = held;
                 flag = true;
             }
+            function side(): void {}
+            function independent(job: once () => [&bool, bool]): once () => [&bool, bool] {
+                let mut gate = false; if (gate) { side(); return job; }
+                let local = true; let _ = job; return () => [&local, local];
+            }
+            function beyond(job: once () => [&bool, bool]): once () => [&bool, bool] {
+                side(); let local = true; let _ = job; return () => [&local, local];
+            }
+            function independentEscape(seed: bool): void {
+                let bit = false; let _ = independent(() => [&seed, bit]);
+            }
+            function beyondCall(seed: bool): void {
+                let bit = false; let _ = beyond(() => [&seed, bit]);
+            }
             function escapesCaller(seed: bool): once () => [&bool, bool] {
                 let flag = seed; let other = true; return forward(() => [&flag, other]);
             }
@@ -250,6 +295,7 @@ fn callable_transfer_withholds_unproved_environments_and_checks_escape() {
                 "unknownCleanup",
                 "unprovedReturn",
                 "unprovedPair",
+                "beyondCall",
             ] {
                 let checked = lower(name);
                 assert_eq!(checked.completion(), Completion::Incomplete, "{name}");
@@ -258,6 +304,7 @@ fn callable_transfer_withholds_unproved_environments_and_checks_escape() {
             for (name, related) in [
                 ("escapesCallee", &b"&local"[..]),
                 ("escapesCaller", &b"&flag"[..]),
+                ("independentEscape", &b"&local"[..]),
             ] {
                 let checked = lower(name);
                 assert_eq!(checked.completion(), Completion::SourceRejected, "{name}");
@@ -267,6 +314,49 @@ fn callable_transfer_withholds_unproved_environments_and_checks_escape() {
                 assert_eq!(finding.code(), "R0202");
                 assert_eq!(finding.related.span.bytes(), related);
                 assert!(checked.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn callable_transfer_preflight_respects_argument_and_field_depth() {
+    probe(
+        "captures::callable_transfer_preflight_respects_argument_and_field_depth",
+        r#"
+function forward(job: once () => [&bool, bool]): once () => [&bool, bool] { return job; }
+export function openForward(job: once () => [&bool, bool]): once () => [&bool, bool] { return job; }
+function bare(flag: bool, bit: bool): void { let held = forward(() => [&flag, bit]); let _ = held; }
+function grouped(flag: bool, bit: bool): void { let held = forward(((((((((((() => [&flag, bit]))))))))))); let _ = held; }
+function unproved(flag: bool, bit: bool): void { let held = openForward(((((((((((() => [&flag, bit]))))))))))); let _ = held; }
+function computed(flag: bool, bit: bool): void { let held = forward(() => [&flag, ((((((((((!bit))))))))))]); let _ = held; }
+"#,
+        |_, module, receipt| {
+            let query = |name: &str, limits| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, limits).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            let bare = query("bare", default);
+            assert!(bare.mir().is_some());
+            let limit = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..default
+            };
+            assert!(query("bare", limit).mir().is_some());
+            for (name, expected) in [
+                ("grouped", Completion::Checked),
+                ("unproved", Completion::Incomplete),
+                ("computed", Completion::Incomplete),
+            ] {
+                assert_eq!(query(name, default).completion(), expected, "{name}");
+                let result = query(name, limit);
+                assert_eq!(result.completion(), Completion::ResourceLimit, "{name}");
+                assert!(result.mir().is_none());
             }
         },
     );

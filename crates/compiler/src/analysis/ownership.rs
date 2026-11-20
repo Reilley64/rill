@@ -1070,9 +1070,6 @@ fn lower<'a, 'g>(
         },
         1,
     )?;
-    if build.callable_frame.is_some() {
-        build.check_callable_transfer_dependencies()?;
-    }
     // Only an empty application frame can contribute its entry and no other
     // delivery point. Ordinary lowering already has its body and signature.
     let empty_entry = (matches!(frame, Frame::OrdinaryFunction)

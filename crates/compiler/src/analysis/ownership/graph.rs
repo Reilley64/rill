@@ -899,12 +899,8 @@ pub(super) fn lower_callable_transfer<'g>(
         budget,
     )
     .map_err(|stop| match stop {
-        Stop::Limit
-        | Stop::Rejected {
-            kind: Conflict::Escape,
-            ..
-        } => stop,
-        _ => Stop::Pending(site),
+        Stop::Limit | Stop::Rejected { .. } => stop,
+        Stop::Pending(_) => Stop::Pending(site),
     })?;
     // The preflight rules out unresolved dependencies before source findings;
     // also require the actual ordinary MIR to have no external edge.
