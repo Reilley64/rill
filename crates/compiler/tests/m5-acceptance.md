@@ -1376,6 +1376,20 @@ For `join([() => input, () => { let local = 2i32; return &local; }])`, M4 now is
 
 The [installed regressions](m5/scoped_join.rs) count written tuple, arrow and operand groups in the depth limit and preserve the written return span. In both modes the escape capture checks at 488,972 work / 55,894 entries / depth 12 in M4, and rejects at 2,958 / 430 / 10 in M5. A one-short cap gives `ResourceLimit`, not another language finding. Nineteen focused M5 tests, 39 M4 tests and four compiler unit tests passed. A separate replay checked 15 installed captures in both modes, including the unchanged scalar join, conflicting capture, and 17-source baseline. The prior canonical scalar batch passed all four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44795397219); its [native profiles](https://github.com/Reilley64/rill/actions/runs/44795397274) all stopped at the unimplemented runtime task. #66 and #71 remain open. No Rill program ran.
 
+## Publishing caller-backed reference results from a scoped join
+
+At `b331ccd`, `join([() => input, () => other])` with two incoming `&i32` parameters gets checked ownership MIR in both installed modes, for the targeted body and its graph root. [`installed_join_checks_reference_result_escape_per_slot`](m5/scoped_join.rs) checks distinct parameters, both jobs using the same parameter, and swapped parameters. A grouped, swapped call has the same result origins. The capture is a copy of the descriptor and its dependency on caller storage, not a borrow of the parameter slot.
+
+On child export, the unpublished result stage takes its own copy of that dependency. Ending the environment does not end the staged result’s dependency. The parent retains both sources while waiting. If cancellation wins, both children must finish execution and cleanup; only then are initialized result stages retired, before parent cleanup. The installed test visits terminal paths with neither stage initialized, either one alone, or both. On normal completion, in either child order, the retained keys transfer to the corresponding parent tuple members in input order. This does not infer a narrower contract for an ordinary function that calls `join` on behalf of its caller.
+
+| Installed contrast | M5 targeted and graph-root outcome |
+| --- | --- |
+| `slot-escape-good`: return both incoming descriptors | `Checked`; exact target 26,381 work / 15,659 entries / depth 7. Each dimension independently one short withholds MIR. The full graph is still incomplete. |
+| `escape`: return a child-local borrow in one slot | `R0202` at `return &local;`, related to `local`. Neither query publishes MIR. |
+| Ordinary relay caller keeps an alias of the second tuple member | Disposing `first` while the alias will still be read gives `R0203` related to `&first`: the ordinary call contract retains both compatible inputs. Reading the alias for the last time before disposal checks. |
+
+A fresh executable-relative installation reproduced the old scalar positive and conflict limits exactly, the original 17-source M4 cap, and the reference results in both modes. Verification: 21 focused M5 tests, the installed M4 ownership regression, two lifecycle/flow unit tests, scoped Clippy, formatting, and separate staged replays of 23 ownership/control captures and 77 typed/load cases. No Rill code ran. The heterogeneous `result-order` and Result-valued cases are still incomplete, not covered by these reference proofs; #71 and #66 remain open.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
