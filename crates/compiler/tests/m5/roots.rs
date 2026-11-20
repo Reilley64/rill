@@ -6,7 +6,7 @@ use compiler::analysis::{
 };
 use compiler::loader::{Declaration, DeclarationKind};
 
-const MAIN: &str = r#"import std::{List, Result, Err};
+pub(super) const MAIN: &str = r#"import std::{List, Result, Err};
 import std::channel::{Receiver, Sender};
 import std::convert::{into, tryInto};
 import std::error::formatError;
@@ -20,7 +20,7 @@ import helper::ready;
 function entryControl(flag: bool): bool { return flag; }
 expect ready();
 "#;
-const HELPER: &str = r#"export function ready(): bool { return true; }
+pub(super) const HELPER: &str = r#"export function ready(): bool { return true; }
 function unused(value: string): bool;
 implement unused(value: string): bool { let taken = value;  return true; }
 function retainedControl(value: string): bool { let taken = value;  return true; }
@@ -29,8 +29,23 @@ let text = "startup";
 let taken = text;
 "#;
 
-fn fixture(
+pub(super) fn fixture(
     test: &str,
+    sources: &[&str],
+    verify: impl for<'g> FnMut(
+        usize,
+        &InstalledRequest,
+        &'g loader::Graph,
+        &TypedReceipt<'_, 'g>,
+        &TypedReport<'g>,
+    ),
+) {
+    fixture_with_main(test, MAIN, sources, verify);
+}
+
+pub(super) fn fixture_with_main(
+    test: &str,
+    main: &str,
     sources: &[&str],
     mut verify: impl for<'g> FnMut(
         usize,
@@ -41,7 +56,7 @@ fn fixture(
     ),
 ) {
     installed(test, |request| {
-        fs::write(&request.entry, MAIN).unwrap();
+        fs::write(&request.entry, main).unwrap();
         for (index, source) in sources.iter().enumerate() {
             fs::write(request.entry.with_file_name("helper.rill"), source).unwrap();
             for test_mode in [false, true] {

@@ -14,6 +14,12 @@ use std::ops::Range;
 
 mod build;
 mod flow;
+mod graph;
+
+pub use graph::{
+    Dependency, DependencyContract, GraphCompletion, GraphObligation, GraphReport, RootReport,
+    analyze_ownership,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Completion {
@@ -90,7 +96,8 @@ pub struct Mir<'g> {
 }
 
 impl<'g> Mir<'g> {
-    /// On the root MIR, look up an active disposer reached by this query.
+    /// On targeted root MIR, look up a reached active disposer. Graph reports
+    /// store these frames separately in [`GraphReport::active_disposers`].
     pub fn disposer(&self, implementation: &DeclarationId) -> Option<&Mir<'g>> {
         self.disposer_bodies.get(implementation)
     }
@@ -634,15 +641,7 @@ fn report<'g>(result: Result<Mir<'g>, (&'g Module, Stop)>, statistics: Statistic
             },
         )) => (
             Completion::SourceRejected,
-            vec![Finding {
-                site: site_at(module, site),
-                related: site_at(module, related),
-                cancellation_delivery: match kind {
-                    Conflict::CancellationEscape { delivery } => Some(site_at(module, delivery)),
-                    _ => None,
-                },
-                kind,
-            }],
+            vec![finding(module, site, related, kind)],
             None,
             None,
         ),
@@ -660,6 +659,18 @@ fn report<'g>(result: Result<Mir<'g>, (&'g Module, Stop)>, statistics: Statistic
         blocked_at,
         mir,
         statistics,
+    }
+}
+
+fn finding<'g>(module: &'g Module, site: NodeId, related: NodeId, kind: Conflict) -> Finding<'g> {
+    Finding {
+        site: site_at(module, site),
+        related: site_at(module, related),
+        cancellation_delivery: match kind {
+            Conflict::CancellationEscape { delivery } => Some(site_at(module, delivery)),
+            _ => None,
+        },
+        kind,
     }
 }
 
@@ -684,50 +695,31 @@ fn checked_graph<'g>(
                    seen: &mut BTreeMap<&'g DeclarationId, Option<Site<'g>>>,
                    budget: &mut Budget|
      -> ResultOf<()> {
-        for block in &mir.blocks {
-            budget.step(1)?;
-            let call = match block.operation {
-                Operation::Call(callee)
-                | Operation::CallBorrowingRecord { callee, .. }
-                | Operation::CallIntoTemporary { callee, .. }
-                | Operation::CallRetaining { callee, .. }
-                | Operation::CallRetainingPair { callee, .. }
-                | Operation::CallRetainingWithBool { callee, .. }
-                | Operation::CallRetainingWithOptionBool { callee, .. } => Some((callee, false)),
-                _ => None,
+        graph::visit_dependencies(mir, budget, |edge, budget| {
+            let is_disposer = match edge.contract {
+                DependencyContract::OrdinaryCall => false,
+                DependencyContract::ActiveDisposer => true,
+                // Preserve the targeted query's narrower dependency contract.
+                _ => return Ok(()),
             };
-            let cleanup = match &block.operation {
-                Operation::Cleanup(actions) => actions.as_slice(),
-                _ => &[],
-            };
-            budget.step(cleanup.len())?;
-            for (callee, is_disposer) in
-                call.into_iter()
-                    .chain(cleanup.iter().filter_map(|action| match action {
-                        Cleanup::InvokeDisposer { implementation, .. } => {
-                            Some((*implementation, true))
-                        }
-                        _ => None,
-                    }))
-            {
-                if seen.contains_key(callee) {
-                    continue;
-                }
-                let mut target = None;
-                for candidate in typed.inventory().graph().modules() {
-                    budget.step(1)?;
-                    if candidate.key == callee.module {
-                        target = Some(candidate);
-                        break;
-                    }
-                }
-                let target = target.ok_or(Stop::Pending(block.site.node))?;
-                budget.reserve(2)?;
-                seen.insert(callee, None);
-                pending.push_back((target, callee, is_disposer));
+            let callee = edge.declaration;
+            if seen.contains_key(callee) {
+                return Ok(());
             }
-        }
-        Ok(())
+            let mut target = None;
+            for candidate in typed.inventory().graph().modules() {
+                budget.step(1)?;
+                if candidate.key == callee.module {
+                    target = Some(candidate);
+                    break;
+                }
+            }
+            let target = target.ok_or(Stop::Pending(edge.site.node))?;
+            budget.reserve(2)?;
+            seen.insert(callee, None);
+            pending.push_back((target, callee, is_disposer));
+            Ok(())
+        })
     };
 
     let mut seen = BTreeMap::new();
@@ -738,7 +730,7 @@ fn checked_graph<'g>(
             seen.insert(&header.declaration.id, None);
             (
                 header.declaration.node,
-                lower(typed, module, header, Frame::Query, budget),
+                lower(typed, module, header, Frame::Query, None, budget),
             )
         }
         RootPlan::Implementation(declaration) => (
@@ -797,7 +789,7 @@ fn checked_graph<'g>(
             mir,
             empty_entry,
             trace: callee_trace,
-        } = lower(typed, target, selected, frame, budget).map_err(|stop| (target, stop))?;
+        } = lower(typed, target, selected, frame, None, budget).map_err(|stop| (target, stop))?;
         if direct != 0 {
             direct -= 1;
             known_entry |= empty_entry.is_some();
@@ -831,6 +823,7 @@ struct Lowered<'a, 'g> {
 }
 
 enum Frame {
+    Ordinary,
     Query,
     ReachedCall { enabled: bool },
     PlainImplementation { body: NodeId },
@@ -842,6 +835,7 @@ fn lower<'a, 'g>(
     module: &'g Module,
     header: &'a DeclarationFacts<'g>,
     frame: Frame,
+    facts: Option<&'a NodeIndex<'a, 'g>>,
     budget: &mut Budget,
 ) -> ResultOf<Lowered<'a, 'g>> {
     let entry_site = header.declaration.node;
@@ -873,6 +867,7 @@ fn lower<'a, 'g>(
         module,
         body,
         Some((&header.declaration.id, result)),
+        facts,
         budget,
     )?;
     build.retains_exclusive_bool = retains_exclusive_bool;
@@ -976,7 +971,6 @@ fn lower_implementation<'a, 'g>(
     declaration: &'g Declaration,
     budget: &mut Budget,
 ) -> ResultOf<Lowered<'a, 'g>> {
-    use super::ordinary::Compatibility;
     use crate::loader::Origin;
 
     let site = declaration.node;
@@ -1016,11 +1010,7 @@ fn lower_implementation<'a, 'g>(
         .iter()
         .find(|body| std::ptr::eq(body.source, source))
         .ok_or(Stop::Pending(site))?;
-    if implementation.compatibility != Compatibility::Compatible
-        || !implementation.header.binders.is_empty()
-    {
-        return Err(Stop::Pending(site));
-    }
+    let body = concrete_implementation_body(implementation)?;
     typed
         .bodies()
         .checked_body(module, BodyOwner::Declaration(&declaration.id), budget)?
@@ -1029,11 +1019,21 @@ fn lower_implementation<'a, 'g>(
         typed,
         module,
         &implementation.header,
-        Frame::PlainImplementation {
-            body: source.body_node,
-        },
+        Frame::PlainImplementation { body },
+        None,
         budget,
     )
+}
+
+fn concrete_implementation_body(
+    implementation: &super::ordinary::ImplementationFacts<'_>,
+) -> ResultOf<NodeId> {
+    if implementation.compatibility != super::ordinary::Compatibility::Compatible
+        || !implementation.header.binders.is_empty()
+    {
+        return Err(Stop::Pending(implementation.header.declaration.node));
+    }
+    Ok(implementation.source.body_node)
 }
 
 fn lower_expectation<'a, 'g>(
@@ -1048,7 +1048,18 @@ fn lower_expectation<'a, 'g>(
         .checked_body(module, BodyOwner::Declaration(&declaration.id), budget)?
         .and_then(|body| body.result.as_ref())
         .ok_or(Stop::Pending(root))?;
-    let mut build = Build::new(typed, module, root, None, budget)?;
+    lower_expectation_body(typed, module, root, result, None, budget)
+}
+
+fn lower_expectation_body<'a, 'g>(
+    typed: &'a TypedReport<'g>,
+    module: &'g Module,
+    root: NodeId,
+    result: &'a Type<'g>,
+    facts: Option<&'a NodeIndex<'a, 'g>>,
+    budget: &mut Budget,
+) -> ResultOf<Lowered<'a, 'g>> {
+    let mut build = Build::new(typed, module, root, None, facts, budget)?;
     let entry = build.expectation(result)?;
     let (mir, trace) = flow::run(build, entry, Vec::new(), None, false)?;
     Ok(Lowered {
@@ -1068,7 +1079,16 @@ fn lower_startup<'a, 'g>(
         .bodies()
         .checked_body(module, BodyOwner::Startup, budget)?
         .ok_or(Stop::Pending(root))?;
-    let mut build = Build::new(typed, module, root, None, budget)?;
+    lower_startup_body(typed, module, None, budget)
+}
+
+fn lower_startup_body<'a, 'g>(
+    typed: &'a TypedReport<'g>,
+    module: &'g Module,
+    facts: Option<&'a NodeIndex<'a, 'g>>,
+    budget: &mut Budget,
+) -> ResultOf<Lowered<'a, 'g>> {
+    let mut build = Build::new(typed, module, module.syntax.root, None, facts, budget)?;
     let entry = build.startup()?;
     let (mir, trace) = flow::run(build, entry, Vec::new(), None, false)?;
     Ok(Lowered {
@@ -1435,11 +1455,15 @@ struct Loop {
     continues: Pc,
 }
 
+type NodeIndex<'a, 'g> = BTreeMap<NodeId, &'a NodeFacts<'g>>;
+
 struct Build<'a, 'g, 'b> {
     typed: &'a TypedReport<'g>,
     module: &'g Module,
     body: NodeId,
-    facts: BTreeMap<NodeId, &'a NodeFacts<'g>>,
+    // The targeted query hands this owned index to its cancellation trace.
+    facts: NodeIndex<'a, 'g>,
+    indexed_facts: Option<&'a NodeIndex<'a, 'g>>,
     locals: BTreeMap<&'g DeclarationId, Slot>,
     /// Checked nested regions expose value transfers, not general places.
     nested_record_values: BTreeMap<&'g DeclarationId, Slot>,

@@ -235,13 +235,25 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         module: &'g Module,
         body: NodeId,
         return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
+        indexed_facts: Option<&'a NodeIndex<'a, 'g>>,
         budget: &'b mut Budget,
     ) -> ResultOf<Self> {
-        let mut build = Self {
+        let mut facts = BTreeMap::new();
+        if indexed_facts.is_none() {
+            for fact in typed.bodies().typed_nodes() {
+                budget.step(1)?;
+                if fact.site.module == &module.key {
+                    budget.reserve(1)?;
+                    facts.insert(fact.site.node, fact);
+                }
+            }
+        }
+        Ok(Self {
             typed,
             module,
             body,
-            facts: BTreeMap::new(),
+            facts,
+            indexed_facts,
             locals: BTreeMap::new(),
             nested_record_values: BTreeMap::new(),
             nested_tuple_parameters: BTreeMap::new(),
@@ -258,15 +270,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return_contract,
             proved_variant_cleanup: Vec::new(),
             budget,
-        };
-        for fact in typed.bodies().typed_nodes() {
-            build.budget.step(1)?;
-            if fact.site.module == &module.key {
-                build.budget.reserve(1)?;
-                build.facts.insert(fact.site.node, fact);
-            }
-        }
-        Ok(build)
+        })
+    }
+
+    fn fact(&self, node: &NodeId) -> Option<&'a NodeFacts<'g>> {
+        self.indexed_facts.unwrap_or(&self.facts).get(node).copied()
     }
 
     fn depth(&mut self, depth: usize) -> ResultOf<()> {
@@ -968,7 +976,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     }
 
     fn value(&self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
-        let Some(NodeFactKind::Expression(value)) = self.facts.get(&node).map(|f| &f.kind) else {
+        let Some(NodeFactKind::Expression(value)) = self.fact(&node).map(|f| &f.kind) else {
             return Err(Stop::Pending(node));
         };
         Ok(value)
@@ -976,7 +984,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
 
     fn normal_value(&mut self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
         self.budget.step(1)?;
-        let fact = self.facts.get(&node).ok_or(Stop::Pending(node))?;
+        let fact = self.fact(&node).ok_or(Stop::Pending(node))?;
         let NodeFactKind::Expression(facts) = &fact.kind else {
             return Err(Stop::Pending(node));
         };
@@ -1645,8 +1653,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             // Typed statement flow already composes nested exits.
             // An infeasible suffix introduces no slots or obligations.
             if self
-                .facts
-                .get(&control)
+                .fact(&control)
                 .is_some_and(|facts| !facts.flow.normal && !facts.flow.pending)
             {
                 prefix = index + 1;
@@ -2193,7 +2200,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         match self.module.syntax.nodes[shape].kind {
             NodeKind::Wildcard => Ok(Binding::Discard),
             NodeKind::NamePattern if shape != pattern => {
-                let Some(NodeFactKind::Pattern(facts)) = self.facts.get(&pattern).map(|f| &f.kind)
+                let Some(NodeFactKind::Pattern(facts)) = self.fact(&pattern).map(|f| &f.kind)
                 else {
                     return Err(Stop::Pending(pattern));
                 };
@@ -2214,7 +2221,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             kind @ (NodeKind::BracketPattern | NodeKind::RecordPattern) => {
                 self.budget.step(1)?;
-                let Some(NodeFactKind::Pattern(facts)) = self.facts.get(&pattern).map(|f| &f.kind)
+                let Some(NodeFactKind::Pattern(facts)) = self.fact(&pattern).map(|f| &f.kind)
                 else {
                     return Err(Stop::Pending(pattern));
                 };
@@ -2281,8 +2288,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 })
             }
             _ => {
-                let Some(NodeFactKind::Binding(binding)) = self.facts.get(&node).map(|f| &f.kind)
-                else {
+                let Some(NodeFactKind::Binding(binding)) = self.fact(&node).map(|f| &f.kind) else {
                     return Err(Stop::Pending(node));
                 };
                 let ty = binding.ty.as_ref().ok_or(Stop::Pending(node))?;
@@ -2984,7 +2990,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 depth,
             )? {
             self.budget.step(1)?;
-            let flow = &self.facts.get(&node).ok_or(Stop::Pending(node))?.flow;
+            let flow = &self.fact(&node).ok_or(Stop::Pending(node))?.flow;
             let reaches_step = arguments.terminal_failure.is_none();
             if flow.pending
                 || flow.normal != (reaches_step && exit.can_continue)
@@ -3302,7 +3308,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Ok(None);
         }
         self.budget.step(1)?;
-        if let Some(fact) = self.facts.get(&node).copied()
+        if let Some(fact) = self.fact(&node)
             && let NodeFactKind::Expression(facts) = &fact.kind
             && let Some(call) = facts.call.as_deref()
         {
@@ -3375,7 +3381,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let root = self.ungroup(arg)?;
             if self.propagates_directly(root)? {
                 self.budget.step(1)?;
-                let fact = self.facts.get(&root).copied().ok_or(Stop::Pending(root))?;
+                let fact = self.fact(&root).ok_or(Stop::Pending(root))?;
                 let NodeFactKind::Expression(value) = &fact.kind else {
                     return Err(Stop::Pending(root));
                 };
@@ -3452,7 +3458,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 };
                 self.budget.step(3)?;
                 let syntax = &self.module.syntax.nodes[postfix.root];
-                let argument = self.facts.get(arg).ok_or(Stop::Pending(*arg))?;
+                let argument = self.fact(arg).ok_or(Stop::Pending(*arg))?;
                 let NodeFactKind::Expression(value) = &argument.kind else {
                     return Err(Stop::Pending(*arg));
                 };
@@ -4352,7 +4358,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // Read the postfix syntax and facts, its operand facts, and constructor flow.
         self.budget.step(4)?;
         let checked = self.checked_propagation(postfix, self.value(postfix)?)?;
-        let flow = &self.facts[&node].flow;
+        let flow = &self.fact(&node).ok_or(Stop::Pending(node))?.flow;
         if self.bool_option_role(checked.operand).is_none()
             || flow.pending
             || flow.normal != checked.exit.can_continue
@@ -4431,8 +4437,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     fn closure(&mut self, node: NodeId, into: Slot, next: Pc, depth: usize) -> ResultOf<Pc> {
         self.budget.step(1)?;
         let arrow = self
-            .facts
-            .get(&node)
+            .fact(&node)
             .and_then(|f| f.callable.as_ref()?.arrow.as_deref())
             .ok_or(Stop::Pending(node))?;
         let body = self.module.syntax.nodes[node].children[1];
@@ -4689,8 +4694,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     fn invoke_closure_pair(&mut self, node: NodeId, into: Slot, next: Pc) -> ResultOf<Pc> {
         self.budget.step(2)?;
         let invocation = self
-            .facts
-            .get(&node)
+            .fact(&node)
             .and_then(|fact| fact.callable.as_ref()?.invocation.as_deref())
             .ok_or(Stop::Pending(node))?;
         let syntax = &self.module.syntax.nodes[node];

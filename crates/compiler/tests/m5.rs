@@ -22,6 +22,8 @@ mod captures;
 mod disposers;
 #[path = "m5/field_routes.rs"]
 mod field_routes;
+#[path = "m5/graph.rs"]
+mod graph;
 #[path = "m5/patterns.rs"]
 mod patterns;
 #[path = "m5/propagation.rs"]
