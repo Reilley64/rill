@@ -1019,7 +1019,17 @@ Independent Standards and Spec reviews found no blocking discrepancy. The follow
 
 Five focused installed checks passed at the review pin, including tuple loans, active and protected disposal, and the multi-module check. The staged baseline, field-route source and multi-module graph issued both M4 typed receipts without ownership or execution. The previous head `470a729` passed `check`, `build:scaffold` and `check:ci` in all four [hosted scaffold jobs](https://github.com/Reilley64/rill/actions/runs/44664621286); all four [native jobs](https://github.com/Reilley64/rill/actions/runs/44664621454) stopped at unimplemented `test:runtime`.
 
-The next distinct #68 witness is `project(x: &Holder): &bool { return x.value; }`, where `value` stores a shared reference. At the preflight pin this had both M4 receipts but stopped at `x.value` in M5. The ownership proof must preserve the stored reference's backing without misclassifying it as a borrow of the field's storage slot. #68 still gates #69.
+The next distinct #68 witness at this checkpoint was `project(x: &Holder): &bool { return x.value; }`, where `value` stores a shared reference. At the preflight pin this had both M4 receipts but stopped at `x.value` in M5. The ownership proof must preserve the stored reference's backing without misclassifying it as a borrow of the field's storage slot. #68 still gates #69.
+
+## Copying a reference field through an incoming shared record
+
+At the [#68](https://github.com/Reilley64/rill/issues/68) review pin `91f6a2e5aa175a62c0043149afe4fe1c64bee4d0`, `project(x: &Holder): &bool { return x.value; }` copies the shared reference stored in the canonical `Holder.value` field. The installed probe in [`field_routes.rs`](m5/field_routes.rs) first stopped at `x.value` with a typed receipt and no MIR. It now checks a single `CopyReference` through the incoming descriptor followed by export of that unprojected destination. No borrow or reborrow of the field slot is emitted. An incoming descriptor does not identify which caller sources back the stored value; this rule supplies no static lifetime or disjointness proof.
+
+Borrowing the local copy's slot and returning that borrow reports `R0202`. Replacing the local copy while its slot borrow is live reports `R0203` at the assignment, related to `&view`. Neither rejection publishes MIR. The direct projection does not admit a local descriptor alias, a grouped receiver, an unsupported sibling layout, or `return &x.value`. The caller-local escape witness still stops at `&x` with `Incomplete`, not an escape diagnostic. A caller-side proof must retain possible input backing and restrictions under the separate #69 contract.
+
+Both independent reviews found no blocking defect. The follow-up pins the exact copy before export, both diagnostic sites, and the receiver and record-layout boundaries. Grouping the whole projection checks at the default depth; the bare projection's depth limit rejects the grouped expression with `ResourceLimit`. Exact work and entry limits pass and either one-short limit withholds MIR.
+
+Four focused installed tests passed at the review pin, including the carried-reference pattern and multi-module regression. Staged replay issued M4 receipts in both modes for the baseline, the projection fixture, and the multi-module graph, without ownership or execution. All four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44666614486) passed at `29eb176`; the [native jobs](https://github.com/Reilley64/rill/actions/runs/44666614536) stopped at unimplemented `test:runtime`.
 
 ## Priority across the nine open M5 blockers
 

@@ -18,6 +18,11 @@ fn incoming_shared_record_copies_carried_field() {
             type Other = { value: &bool; }
             type Holder = { value: &bool; }
             function project(x: &Holder): &bool { return x.value; }
+            function grouped(x: &Holder): &bool { return ((x.value)); }
+            function groupedReceiver(x: &Holder): &bool { return (x).value; }
+            function alias(x: &Holder): &bool { let saved = x; return saved.value; }
+            type Wider = { value: &bool; pair: [bool, bool]; }
+            function unsupportedSibling(x: &Wider): &bool { return x.value; }
             function slot(x: &Holder): &&bool { return &x.value; }
             function localSlot(x: &Holder): &&bool {
                 let view = x.value;
@@ -37,14 +42,15 @@ fn incoming_shared_record_copies_carried_field() {
             }
         "#,
         |request, module, receipt, typed| {
-            let lower = |name| {
+            let check = |name, limits| {
                 let decl = module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap();
-                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+                lower_body(receipt, module, &decl.id, limits).unwrap()
             };
+            let lower = |name| check(name, AnalysisLimits::default());
             let report = lower("project");
             if report.completion() != Completion::Checked {
                 blockers.push((
@@ -77,10 +83,16 @@ fn incoming_shared_record_copies_carried_field() {
                         into,
                         binding: CopyReference,
                     },
+                    Operation::Export(output),
                 ] = ops
                     .iter()
                     .copied()
-                    .filter(|op| matches!(op, Operation::BindBorrowedMember { .. }))
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::BindBorrowedMember { .. } | Operation::Export(_)
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .as_slice()
                 else {
@@ -90,7 +102,8 @@ fn incoming_shared_record_copies_carried_field() {
                 assert!(descriptor.projection.is_none());
                 assert_eq!(field.name.as_deref(), Some("value"));
                 assert_eq!(field.id, fields[0].declaration.id);
-                assert!(ops.iter().any(|op| matches!(op, Operation::Export(place) if place.root.node == into.root.node && place.projection.is_none())));
+                assert_eq!(output.root.node, into.root.node);
+                assert!(output.projection.is_none() && into.projection.is_none());
                 assert!(
                     !ops.iter().any(|op| matches!(
                         op,
@@ -100,6 +113,37 @@ fn incoming_shared_record_copies_carried_field() {
                 assert!(path_drops(mir, mir.entry).is_empty());
             }
             if report.completion() == Completion::Checked {
+                let stats = report.statistics();
+                let exact = AnalysisLimits {
+                    max_work: stats.work,
+                    max_entries: stats.entries,
+                    max_depth: stats.max_depth,
+                };
+                assert!(check("project", exact).mir().is_some());
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = check("project", short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none());
+                }
+                assert!(lower("grouped").mir().is_some());
+                let limited = check(
+                    "grouped",
+                    AnalysisLimits {
+                        max_depth: exact.max_depth,
+                        ..AnalysisLimits::default()
+                    },
+                );
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
                 let local_slot = lower("localSlot");
                 assert_eq!(local_slot.completion(), Completion::SourceRejected);
                 assert!(local_slot.mir().is_none());
@@ -117,9 +161,16 @@ fn incoming_shared_record_copies_carried_field() {
                     panic!("expected a conflict with the live slot borrow");
                 };
                 assert_eq!(finding.code(), "R0203");
+                assert_eq!(finding.site.span.bytes(), b"view = seed;");
                 assert_eq!(finding.related.span.bytes(), b"&view");
             }
-            for (name, blocked) in [("slot", b"x.value".as_slice()), ("callerEscape", b"&x")] {
+            for (name, blocked) in [
+                ("slot", b"x.value".as_slice()),
+                ("callerEscape", b"&x"),
+                ("alias", b"saved.value"),
+                ("groupedReceiver", b"(x).value"),
+                ("unsupportedSibling", b"x.value"),
+            ] {
                 let report = lower(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert_eq!(report.blocked_at().unwrap().span.bytes(), blocked, "{name}");
