@@ -988,9 +988,218 @@ pub(super) struct CancellationTrace<'a, 'g> {
     live: Vec<BTreeSet<Slot>>,
     flat: bool,
     loop_delivery: bool,
+    branching: bool,
+    calls_reached: usize,
+    call_block: Option<usize>,
+}
+
+pub(super) struct EnabledRetainingCall<'a, 'g> {
+    pub(super) callee: &'g DeclarationId,
+    frame: CancellationFrame<'a, 'g>,
+    body: NodeId,
+    entry: &'a [State],
+    block: usize,
+    node: NodeId,
+    stages: [Place<'g>; 3],
+    destination: Slot,
+    suspended: Vec<State>,
+}
+
+impl<'g> EnabledRetainingCall<'_, 'g> {
+    pub(super) fn finish(
+        self,
+        trace: CancellationTrace<'_, 'g>,
+        mut body: Mir<'g>,
+        budget: &mut Budget,
+    ) -> Result<Option<Cancellation<'g>>, (&'g Module, Stop)> {
+        // Only a flat leaf with a possible body checkpoint composes here.
+        // Do not descend into another call, even if its ordinary MIR is known.
+        if !trace.flat || !trace.loop_delivery || trace.calls_reached != 0 {
+            return Ok(None);
+        }
+        let &[slot, input, gate] = trace.params.as_slice() else {
+            return Ok(None);
+        };
+        if !matches!(trace.retained.get(&slot), Some(RetainedContents::OneHop(_))) {
+            return Ok(None);
+        }
+        let parameters = [slot, input, gate].map(|slot| trace.slots[slot].place(trace.module));
+        let callee = trace.module;
+        // Callee ownership states use formal slots. Its incoming shared
+        // backing is opaque, not storage owned by that frame. Check its actual
+        // feasible exits before retiring any caller storage. Caller loans keep
+        // the concrete old and compatible new sources alive across this check.
+        let Some(callee_proof) = trace
+            .finish(&body, &BTreeMap::new(), false, false, budget)
+            .map_err(|stop| (callee, stop))?
+        else {
+            return Ok(None);
+        };
+        body.cancellation = Some(callee_proof);
+
+        self.finish_caller(body, parameters, budget)
+            .map_err(|stop| (self.frame.module, stop))
+    }
+
+    fn finish_caller(
+        &self,
+        body: Mir<'g>,
+        parameters: [Place<'g>; 3],
+        budget: &mut Budget,
+    ) -> ResultOf<Option<Cancellation<'g>>> {
+        let Some(mut proof) = self.frame.entry(self.entry, self.body, budget)? else {
+            return Ok(None);
+        };
+        let loans = &initialized(&self.suspended[self.destination], self.node)?.loans;
+        budget.step(loans.len())?;
+        budget.reserve(loans.len() + self.stages.len() + 2)?;
+        let possible_backing = loans
+            .iter()
+            .map(|loan| self.frame.slots[loan.source].place(self.frame.module))
+            .collect();
+        let exit = self.frame.exit(&self.suspended, self.node, budget)?;
+        let arguments = std::array::from_fn(|i| CancellationArgument {
+            staged: self.stages[i],
+            parameter: parameters[i],
+        });
+        proof.successors.insert(
+            self.block,
+            CancellationSuccessor::RetainingCall(Box::new(RetainingCallCancellation {
+                callee: self.callee,
+                arguments,
+                body,
+                destination: self.frame.slots[self.destination].place(self.frame.module),
+                possible_backing,
+                caller_cleanup: exit.cleanup,
+            })),
+        );
+        Ok(Some(proof))
+    }
 }
 
 impl<'g> CancellationTrace<'_, 'g> {
+    fn frame(&self) -> CancellationFrame<'_, 'g> {
+        CancellationFrame {
+            module: self.module,
+            slots: &self.slots,
+            locals: &self.locals,
+            params: &self.params,
+            retained: &self.retained,
+        }
+    }
+
+    pub(super) fn prepare_retaining_call(
+        &self,
+        mir: &Mir<'g>,
+        budget: &mut Budget,
+    ) -> ResultOf<Option<EnabledRetainingCall<'_, 'g>>> {
+        if !self.flat
+            || self.branching
+            || self.loop_delivery
+            || self.calls_reached != 1
+            || !self.retained.is_empty()
+        {
+            return Ok(None);
+        }
+        let block = self.call_block.unwrap();
+        let pc = self.pending[block].0;
+        let Instruction {
+            node,
+            action: Action::Call(index),
+            ..
+        } = self.code[pc]
+        else {
+            unreachable!("call block records a reached call");
+        };
+        let call = &self.calls[index];
+        let (
+            &[access, input, gate],
+            Some(CallDestination {
+                storage: CallStorage::Local(target),
+                argument,
+                input: source,
+                second_input: None,
+                extra: Some(RetainedCallExtra::Bool { position: 2 }),
+            }),
+        ) = (call.args.as_slice(), call.destination)
+        else {
+            return Ok(None);
+        };
+        if access != argument || input != source {
+            return Ok(None);
+        }
+        // The sole reached call in this straight frame is unmasked. Its
+        // direct immutable Bool input admits both values, independently of
+        // reaching the call. No caller-side correlation is discarded.
+        budget.step(1)?;
+        let Some(NodeFactKind::Expression(facts)) = self.facts.get(&node).map(|fact| &fact.kind)
+        else {
+            return Ok(None);
+        };
+        let Some(facts) = &facts.call else {
+            return Ok(None);
+        };
+        if facts.callee != call.callee
+            || facts.pipe_input.is_some()
+            || self
+                .branch_parameter(self.slots[gate].node, budget)?
+                .is_none()
+        {
+            return Ok(None);
+        }
+        let state = self.known[&pc].keys().next().unwrap();
+        let old = initialized(&state[target], node)?;
+        let source = initialized(&state[input], node)?;
+        if old.loans.is_empty()
+            || source.loans.is_empty()
+            || initialized(&state[access], node)?.exact_target != Some(ExactTarget::Local(target))
+        {
+            return Ok(None);
+        }
+        let mut backing = BTreeSet::new();
+        for &loan in old.loans.iter().chain(source.loans.iter()) {
+            budget.step(1)?;
+            if loan.kind != LoanKind::Backing
+                || loan.exclusive
+                || !matches!(state[loan.source], State::Initialized(_))
+            {
+                return Ok(None);
+            }
+            insert_loan(&mut backing, loan, budget)?;
+        }
+        // These stages become callee parameters, not caller cleanup operands.
+        // Bound the slot by its old and sole compatible input loans, never by
+        // the transient access loan. Entry itself still has the old contents.
+        let loans = loan_set(backing, budget)?;
+        budget.reserve(state.len())?;
+        let mut suspended = state.to_vec();
+        for arg in [access, input, gate] {
+            suspended[arg] = State::Vacant;
+        }
+        suspended[target] = State::Initialized(Held {
+            loans,
+            ..Held::default()
+        });
+        let frame = self.frame();
+        if !frame.check(&suspended, node, budget)? {
+            return Ok(None);
+        }
+        Ok(Some(EnabledRetainingCall {
+            callee: call.callee,
+            frame,
+            body: self.body,
+            entry: self.known[&self.pending[mir.entry].0]
+                .keys()
+                .next()
+                .unwrap(),
+            block,
+            node,
+            stages: [access, input, gate].map(|slot| self.slots[slot].place(self.module)),
+            destination: target,
+            suspended,
+        }))
+    }
+
     // Dynamic branches only admit a direct read of an immutable Bool
     // parameter. Values of locals, arbitrary expressions and call results
     // are not independent choices. The ordinary CFG's one-way edges already
@@ -1043,13 +1252,7 @@ impl<'g> CancellationTrace<'_, 'g> {
         if !complete && (!checkpoints || self.retained.is_empty()) {
             return Ok(None);
         }
-        let frame = CancellationFrame {
-            module: self.module,
-            slots: &self.slots,
-            locals: &self.locals,
-            params: &self.params,
-            retained: &self.retained,
-        };
+        let frame = self.frame();
         if !checkpoints {
             let initial = self.known[&self.pending[mir.entry].0]
                 .keys()
@@ -1323,6 +1526,9 @@ pub(super) fn run<'a, 'g>(
         );
     let mut flat = true;
     let mut loop_delivery = false;
+    let mut branching = false;
+    let mut calls_reached = 0;
+    let mut call_block = None;
     let Build {
         module,
         body,
@@ -1440,9 +1646,14 @@ pub(super) fn run<'a, 'g>(
         // Constant-size admission tagging at an already charged ordinary
         // state visit. No graph walk or allocation on behalf of cancellation.
         if candidate {
-            flat &= flat_action(action, &slots)
-                && !matches!(action, Action::Call(index) if return_contract.is_some_and(|(id, _)| calls[index].callee == id));
+            flat &= flat_action(action, &slots);
             loop_delivery |= matches!(action, Action::BudgetBackedge);
+            branching |= matches!(edges, Edges::Branch { .. });
+            if let Action::Call(index) = action {
+                calls_reached += 1;
+                call_block = Some(blocks.len());
+                flat &= !return_contract.is_some_and(|(id, _)| calls[index].callee == id);
+            }
         }
         let operation = (|| -> ResultOf<_> {
             Ok(match action {
@@ -2393,6 +2604,9 @@ pub(super) fn run<'a, 'g>(
         live,
         flat,
         loop_delivery,
+        branching,
+        calls_reached,
+        call_block,
     });
     Ok((
         Mir {

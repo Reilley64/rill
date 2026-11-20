@@ -1,6 +1,6 @@
 use super::*;
 use compiler::analysis::ownership::{
-    CancellationExit, CancellationSuccessor, Cleanup as MirCleanup,
+    CancellationExit, CancellationSuccessor, Cleanup as MirCleanup, RetainedPlace,
 };
 use compiler::analysis::scalars::{BodyOwner, NodeFactKind};
 use compiler::parser::{NodeId, NodeKind};
@@ -171,6 +171,310 @@ function repairAfter(slot: &mut &bool, input: &bool): bool {
 }
 
 #[test]
+fn installed_retaining_call_cancellation_checks_the_reached_body() {
+    probe_with_typed(
+        "cancellation::installed_retaining_call_cancellation_checks_the_reached_body",
+        r#"
+function safeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    *slot = input;
+    while (enter) { continue; }
+}
+function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+}
+function good(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    safeBody(&mut slot, &input, enter);
+}
+function bad(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeBody(&mut slot, &input, enter);
+}
+function safeWithOwner(slot: &mut &bool, input: &bool, enter: bool): void {
+    let calleeText = "callee";
+    let flag = true;
+    *slot = &flag;
+    if (enter) { *slot = input; }
+    while (enter) { continue; }
+    *slot = input;
+    let calleeSuffix = "only on normal return";
+}
+function goodWithOwner(enter: bool): bool {
+    let callerText = "caller";
+    let initial = false;
+    let mut slot = &initial;
+    let prior = false;
+    let input = true;
+    slot = &prior;
+    safeWithOwner(&mut slot, &input, enter);
+    let callerSuffix = "only on normal return";
+    return enter;
+}
+function nestedCaller(enter: bool): void { bad(enter); }
+import std::core::dispose as release;
+type Owner = { enter: bool; text: string; }
+implement release(value: Owner): void { bad(value.enter); }
+function maskedCaller(value: Owner): void { dispose(value); }
+function constantCaller(): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeBody(&mut slot, &input, false);
+}
+function guardedCaller(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    if (enter) {} else { unsafeBody(&mut slot, &input, enter); }
+}
+function leaf(): void {}
+function unsafeWithNested(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+    leaf();
+}
+function callerOfNestedBody(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeWithNested(&mut slot, &input, enter);
+}
+        "#,
+        |request, module, receipt, _| {
+            let bad = query(receipt, module, "bad");
+            assert_eq!(
+                bad.completion(),
+                Completion::SourceRejected,
+                "test_mode={}: {bad:?}",
+                request.test_mode
+            );
+            assert!(bad.mir().is_none() && bad.blocked_at().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected the reached callee's escape: {bad:?}");
+            };
+            let nodes = &module.syntax.nodes;
+            let unsafe_body = nodes[declaration(module, "unsafeBody").node].children[1];
+            let [_, store, backedge, _] = nodes[unsafe_body].children[..] else {
+                panic!("expected paired stores around the backedge");
+            };
+            assert_eq!(finding.code(), "R0202");
+            for (actual, node, bytes) in [
+                (finding.site, store, b"*slot = &flag;".as_slice()),
+                (finding.related, nodes[store].children[1], b"&flag"),
+                (
+                    finding.cancellation_delivery.unwrap(),
+                    backedge,
+                    b"while (enter) { continue; }",
+                ),
+            ] {
+                assert_eq!((actual.module, actual.node), (&module.key, node));
+                assert_eq!(actual.span.bytes(), bytes);
+            }
+            for name in [
+                "nestedCaller",
+                "maskedCaller",
+                "constantCaller",
+                "guardedCaller",
+                "callerOfNestedBody",
+            ] {
+                let report = query(receipt, module, name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::Checked,
+                    "{name}: {report:?}"
+                );
+                assert!(report.mir().unwrap().cancellation().is_none(), "{name}");
+            }
+            for (name, callee) in [("good", "safeBody"), ("goodWithOwner", "safeWithOwner")] {
+                let good = query(receipt, module, name);
+                assert_eq!(good.completion(), Completion::Checked, "{name}: {good:?}");
+                let mir = good.mir().unwrap();
+                let proof = mir
+                    .cancellation()
+                    .expect("bounded caller cancellation proof");
+                assert!(
+                    matches!(proof.on_entry_delivery.cleanup.as_slice(), [MirCleanup::EndStorage(place)]
+                    if place.root.span.bytes() == b"enter: bool")
+                );
+                let [(block, CancellationSuccessor::RetainingCall(call))] = (0..mir.blocks.len())
+                    .filter_map(|i| proof.successor(i).map(|edge| (&mir.blocks[i], edge)))
+                    .collect::<Vec<_>>()[..]
+                else {
+                    panic!("expected only the reached retaining call");
+                };
+                let callee = declaration(module, callee);
+                let Operation::CallRetainingWithBool {
+                    callee: selected,
+                    destination: RetainedPlace::Local(slot),
+                    arguments,
+                    ..
+                } = &block.operation
+                else {
+                    panic!("expected the exact ordinary retaining call");
+                };
+                assert_eq!(call.callee, &callee.id);
+                assert_eq!(*selected, call.callee);
+                assert_place(call.destination, slot.root.node, module);
+                let signature = nodes[callee.node].children[0];
+                let parameters = nodes[signature]
+                    .children
+                    .iter()
+                    .find(|&&node| nodes[node].kind == NodeKind::ValueParameters)
+                    .map(|&node| nodes[node].children.as_slice())
+                    .unwrap();
+                for ((transfer, actual), &formal) in
+                    call.arguments.iter().zip(arguments).zip(parameters)
+                {
+                    assert_place(transfer.staged, actual.root.node, module);
+                    assert_place(transfer.parameter, formal, module);
+                }
+
+                let body = &call.body;
+                let callee_proof = body.cancellation().expect("enabled callee proof");
+                assert_eq!(callee_proof.entry_site.node, nodes[callee.node].children[1]);
+                let at_entry = &callee_proof.on_entry_delivery;
+                assert_parameter_ends(&at_entry.cleanup, parameters, module);
+                let retained = at_entry.retained.as_ref().unwrap();
+                assert_place(retained.parameter, parameters[0], module);
+                assert!(
+                    retained.last_store.is_none(),
+                    "entry preserves old contents"
+                );
+                let [(backedge, CancellationSuccessor::LoopBackedge { on_delivery })] =
+                    (0..body.blocks.len())
+                        .filter_map(|i| {
+                            callee_proof
+                                .successor(i)
+                                .map(|edge| (&body.blocks[i], edge))
+                        })
+                        .collect::<Vec<_>>()[..]
+                else {
+                    panic!("expected the feasible callee backedge");
+                };
+                assert_eq!(backedge.site.span.bytes(), b"while (enter) { continue; }");
+                let retained = on_delivery.retained.as_ref().unwrap();
+                assert_place(retained.parameter, parameters[0], module);
+                let repair = retained.last_store.unwrap();
+                assert_eq!(repair.span.bytes(), b"*slot = input;");
+                assert!(repair.span.start() < backedge.site.span.start());
+                let [
+                    MirCleanup::EndStorage(flag),
+                    locals @ ..,
+                    param_2,
+                    param_1,
+                    param_0,
+                ] = on_delivery.cleanup.as_slice()
+                else {
+                    panic!("expected callee owners and parameters");
+                };
+                assert_eq!(flag.root.span.bytes(), b"flag");
+                assert_parameter_ends(&[*param_2, *param_1, *param_0], parameters, module);
+
+                let backing = call
+                    .possible_backing
+                    .iter()
+                    .map(|place| place.root.span.bytes())
+                    .collect::<std::collections::BTreeSet<_>>();
+                assert_eq!(backing, [b"prior".as_slice(), b"input"].into());
+                let mut ended = Vec::new();
+                let mut dropped = Vec::new();
+                for action in &call.caller_cleanup {
+                    match action {
+                        MirCleanup::EndStorage(place) => ended.push(place.root.span.bytes()),
+                        MirCleanup::Drop(place) => dropped.push(place.root.span.bytes()),
+                        other => panic!("unexpected caller delivery cleanup: {other:?}"),
+                    }
+                }
+                let Terminator::Goto(next) = block.terminator else {
+                    panic!("missing ordinary call continuation");
+                };
+                let normal = straight_blocks(mir, next);
+                assert!(matches!(
+                    normal.last().unwrap().terminator,
+                    Terminator::Return
+                ));
+                if name == "goodWithOwner" {
+                    assert!(
+                        matches!(locals, [MirCleanup::Drop(place)] if place.root.span.bytes() == b"calleeText")
+                    );
+                    // Both possible backing owners were declared after slot; without
+                    // the retained dependencies they would retire before the slot.
+                    assert_eq!(
+                        ended,
+                        [
+                            b"slot".as_slice(),
+                            b"input",
+                            b"prior",
+                            b"initial",
+                            b"enter: bool"
+                        ]
+                    );
+                    assert_eq!(dropped, [b"callerText"]);
+                    assert!(
+                        normal
+                            .iter()
+                            .any(|block| matches!(block.operation, Operation::Export(_)))
+                    );
+                    assert!(
+                        matches!(path_drops(mir, next).as_slice(), [Obligation::Drop(suffix), Obligation::Drop(text)]
+                        if suffix.root.span.bytes() == b"callerSuffix" && text.root.span.bytes() == b"callerText")
+                    );
+                } else {
+                    assert!(locals.is_empty() && dropped.is_empty());
+                    assert_eq!(
+                        ended,
+                        [b"slot".as_slice(), b"input", b"prior", b"enter: bool"]
+                    );
+                    let start = straight_blocks(body, body.entry);
+                    let Terminator::Branch { no, .. } = start.last().unwrap().terminator else {
+                        panic!("enter=false must be able to skip the loop");
+                    };
+                    assert!(matches!(
+                        straight_blocks(body, no).last().unwrap().terminator,
+                        Terminator::Return
+                    ));
+                    let used = good.statistics();
+                    let exact = AnalysisLimits {
+                        max_work: used.work,
+                        max_entries: used.entries,
+                        max_depth: used.max_depth,
+                    };
+                    let at = |limits| {
+                        lower_body(receipt, module, &declaration(module, name).id, limits).unwrap()
+                    };
+                    assert!(at(exact).mir().unwrap().cancellation().is_some());
+                    for short in [
+                        AnalysisLimits {
+                            max_work: used.work - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_entries: used.entries - 1,
+                            ..exact
+                        },
+                    ] {
+                        let report = at(short);
+                        assert_eq!(report.completion(), Completion::ResourceLimit);
+                        assert!(report.mir().is_none());
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_only_reached_budget_checks_contribute_delivery_edges() {
     probe_with_typed(
         "cancellation::installed_only_reached_budget_checks_contribute_delivery_edges",
@@ -298,6 +602,7 @@ function caller(enter: bool): void {
     let flag = true;
     let input = false;
     let mut slot = &flag;
+    leaf();
     unsafeBody(&mut slot, &input, enter);
 }
         "#,

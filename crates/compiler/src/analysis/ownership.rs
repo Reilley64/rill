@@ -112,8 +112,9 @@ pub struct Cancellation<'g> {
 }
 
 impl<'g> Cancellation<'g> {
-    /// The alternate edge at a reached ordinary MIR block. Within a known
-    /// proof, absence means this block contributes no delivery edge.
+    /// The delivery proof associated with a reached ordinary MIR block.
+    /// Within a known proof, absence means this block contributes no delivery edge.
+    /// A retaining call links checkpoints inside the callee; it is not itself a checkpoint.
     pub fn successor(&self, block: usize) -> Option<&CancellationSuccessor<'g>> {
         self.successors.get(&block)
     }
@@ -131,6 +132,28 @@ pub enum CancellationSuccessor<'g> {
         entry: Site<'g>,
         on_delivery: CancellationExit<'g>,
     },
+    /// Delivery in a nonempty, directly called retaining frame, not at the call instruction.
+    RetainingCall(Box<RetainingCallCancellation<'g>>),
+}
+
+#[derive(Debug)]
+pub struct RetainingCallCancellation<'g> {
+    pub callee: &'g DeclarationId,
+    /// Formal order. The callee now owns these values; caller cleanup does not end the stages.
+    pub arguments: [CancellationArgument<'g>; 3],
+    /// Its entry and reached backedges carry the callee's terminal cleanup.
+    pub body: Mir<'g>,
+    pub destination: Place<'g>,
+    /// The checked slot can retain old or compatible new backing, never the access stage.
+    pub possible_backing: Vec<Place<'g>>,
+    /// Runs only after the callee checks the slot and cleans its frame, for either delivery site.
+    pub caller_cleanup: Vec<Cleanup<'g>>,
+}
+
+#[derive(Debug)]
+pub struct CancellationArgument<'g> {
+    pub staged: Place<'g>,
+    pub parameter: Place<'g>,
 }
 
 /// The terminal successor of an actual budget yield with a pending intrinsic
@@ -732,6 +755,12 @@ fn checked_graph<'g>(
         ..
     } = lowered.map_err(|stop| (module, stop))?;
     reached(&root, &mut pending, &mut seen, budget).map_err(|stop| (module, stop))?;
+    let mut retaining = match &trace {
+        Some(trace) => trace
+            .prepare_retaining_call(&root, budget)
+            .map_err(|stop| (module, stop))?,
+        None => None,
+    };
     // All direct dependencies of the root are queued before transitive ones.
     let mut direct = pending.len();
     let mut known_entry = false;
@@ -756,13 +785,16 @@ fn checked_graph<'g>(
             typed.inventory().type_facts().declarations.get(id)
         }
         .ok_or(missing)?;
+        let enabled = !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
         let frame = if is_disposer {
             Frame::ActiveDisposer
         } else {
-            Frame::ReachedCall
+            Frame::ReachedCall { enabled }
         };
         let Lowered {
-            mir, empty_entry, ..
+            mir,
+            empty_entry,
+            trace: callee_trace,
         } = lower(typed, target, selected, frame, budget).map_err(|stop| (target, stop))?;
         if direct != 0 {
             direct -= 1;
@@ -773,12 +805,16 @@ fn checked_graph<'g>(
             }
         }
         reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
-        if is_disposer {
+        if let Some(call) = retaining.take_if(|_| enabled) {
+            if let Some(callee_trace) = callee_trace {
+                root.cancellation = call.finish(callee_trace, mir, budget)?;
+            }
+        } else if is_disposer {
             budget.reserve(1).map_err(|()| (target, Stop::Limit))?;
             root.disposer_bodies.insert(id, mir);
         }
     }
-    if let Some(trace) = trace {
+    if let Some(trace) = trace.filter(|_| root.cancellation.is_none()) {
         root.cancellation = trace
             .finish(&root, &seen, known_entry, unknown_entry, budget)
             .map_err(|stop| (module, stop))?;
@@ -794,7 +830,7 @@ struct Lowered<'a, 'g> {
 
 enum Frame {
     Query,
-    ReachedCall,
+    ReachedCall { enabled: bool },
     PlainImplementation { body: NodeId },
     ActiveDisposer,
 }
@@ -914,16 +950,17 @@ fn lower<'a, 'g>(
     )?;
     // Only an empty application frame can contribute its entry and no other
     // delivery point. Ordinary lowering already has its body and signature.
-    let empty_entry = (matches!(frame, Frame::ReachedCall)
+    let empty_entry = (matches!(frame, Frame::ReachedCall { .. })
         && module.key.origin == crate::loader::Origin::Application
         && parameters.is_empty()
         && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
         && module.syntax.nodes[body].kind == crate::parser::NodeKind::Block
         && module.syntax.nodes[body].children.is_empty())
     .then(|| site_at(module, body));
-    // Reached ordinary bodies may run under an enclosing mask. We have not
-    // proved those contexts. The root proof links only admitted callee entries.
-    let (mir, trace) = flow::run(build, entry, params, active, matches!(frame, Frame::Query))?;
+    // A reached ordinary body alone says nothing about delivery being enabled.
+    // Capture its states only for the exact call from a proved unmasked caller.
+    let check_cancellation = matches!(frame, Frame::Query | Frame::ReachedCall { enabled: true });
+    let (mir, trace) = flow::run(build, entry, params, active, check_cancellation)?;
     Ok(Lowered {
         mir,
         trace,
