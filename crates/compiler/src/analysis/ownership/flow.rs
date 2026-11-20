@@ -163,8 +163,8 @@ fn liveness(
             | Action::BudgetBackedge
             | Action::Cleanup(_)
             | Action::EndScope(_)
-            | Action::CheckRetained
-            | Action::CheckScopedReferenceResults => use_one(None, None),
+            | Action::CheckRetained => use_one(None, None),
+            Action::CheckScopedReferenceResults { entries, .. } => (entries.map(Some), None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
             Action::Read { from, into }
             | Action::Move { from, into }
@@ -2969,12 +2969,22 @@ pub(super) fn run<'a, 'g>(
                         mode,
                     }
                 }
-                Action::CheckScopedReferenceResults => {
+                Action::CheckScopedReferenceResults {
+                    entries,
+                    body_depths,
+                } => {
+                    // Both entry inputs must have formed, in written order, before
+                    // even an independently known invalid child can export.
+                    for stage in entries {
+                        budget.step(1)?;
+                        initialized(&state[stage], node)?;
+                    }
                     build::check_scoped_reference_results(
                         typed,
                         module,
                         facts.nodes(),
                         node,
+                        body_depths,
                         budget,
                     )?;
                     return Err(Stop::Pending(node));

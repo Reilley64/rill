@@ -10,66 +10,46 @@ pub(super) fn shared_i32(ty: &Type<'_>) -> bool {
     matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if i32_type(referent))
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum ReferenceSource {
+    Incoming {
+        value: NodeId,
+    },
+    ChildLocal {
+        binding: NodeId,
+        returning: NodeId,
+        operand: NodeId,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ReferenceShape {
+    pub origin: NodeId,
+    expression: NodeId,
+    source: ReferenceSource,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ReferencePlan<'g> {
+    pub expression: NodeId,
+    pub reference: ScopedJoinReference<'g>,
+    binding: Option<(NodeId, &'g DeclarationId)>,
+}
+
 impl<'a, 'g> Check<'a, 'g> {
-    pub(super) fn reference_child(
-        &mut self,
-        origin: NodeId,
-        arrow: &ArrowFacts<'g>,
-        stored: (&[Located<'g>], ResultComponent<'g>),
-        caller: &Residence<'g>,
-        depth: usize,
-    ) -> Work<Option<(NodeId, ScopedJoinReference<'g>)>> {
-        self.depth(depth)?;
-        if arrow.mode != Some(InvocationMode::ReadOnly) {
+    pub(super) fn reference_shape(&mut self, element: NodeId) -> Work<Option<ReferenceShape>> {
+        let origin = self.ungroup_value(element)?;
+        let nodes = &self.module.syntax.nodes;
+        if nodes[origin].kind != NodeKind::Arrow {
             return Ok(None);
         }
-        let nodes = &self.module.syntax.nodes;
         let body = nodes[origin].children[1];
-        let (expression, binding, capture, reference) = match nodes[body].kind {
-            NodeKind::ValueReference => {
-                let [capture] = arrow.captures.as_slice() else {
-                    return Ok(None);
-                };
-                let parameter = capture.path.root;
-                if capture.site.node != body
-                    || !std::ptr::eq(capture.site.module, &self.module.key)
-                    || !capture.reachable
-                    || capture.through.is_some()
-                    || !capture.path.projections.is_empty()
-                    || capture.form != (CaptureForm::CarriedReference { mutable: false })
-                    || capture.access != Access::Owned
-                    || capture.storage.as_ref() != Some(&arrow.result)
-                    || !caller
-                        .contents(Root::Local(parameter), &[], self.budget)?
-                        .is_empty()
-                {
-                    return Ok(None);
-                }
-                self.budget.step(self.current_parameters.len())?;
-                if !self
-                    .current_parameters
-                    .iter()
-                    .any(|p| std::ptr::eq(&p.declaration.id, parameter) && p.ty == arrow.result)
-                    || !self.expression_facts(body)?.is_some_and(|value| {
-                        value.binding.is_some_and(|id| std::ptr::eq(id, parameter))
-                            && value.access == Access::Owned
-                    })
-                {
-                    return Ok(None);
-                }
-                // The value of an incoming descriptor, not a borrow of its slot.
-                (
-                    body,
-                    None,
-                    Some(parameter),
-                    ScopedJoinReference::Incoming {
-                        parameter,
-                        value: self.site(body),
-                    },
-                )
-            }
-            NodeKind::Block if arrow.captures.is_empty() => {
-                let [binding, returning] = nodes[body].children.as_slice() else {
+        let root = self.ungroup_value(body)?;
+        let (expression, source) = match nodes[root].kind {
+            NodeKind::ValueReference => (body, ReferenceSource::Incoming { value: root }),
+            NodeKind::Block => {
+                self.budget.step(4)?;
+                let [binding, returning] = nodes[root].children.as_slice() else {
                     return Ok(None);
                 };
                 let (NodeKind::Binding { mutable: false }, [name, initializer]) =
@@ -83,29 +63,122 @@ impl<'a, 'g> Check<'a, 'g> {
                 ) else {
                     return Ok(None);
                 };
+                let borrowed = self.ungroup_value(*expression)?;
                 if nodes[*name].kind != NodeKind::NamePattern
-                    || nodes[*initializer].kind != NodeKind::Literal
-                    || nodes[*expression].kind != NodeKind::Prefix("&")
-                    || !self.facts(*returning)?.is_some_and(|f| {
-                        matches!(f.kind, NodeFactKind::ArrowReturn { target } if target == origin)
+                    || nodes[self.ungroup_value(*initializer)?].kind != NodeKind::Literal
+                    || nodes[borrowed].kind != NodeKind::Prefix("&")
+                {
+                    return Ok(None);
+                };
+                let operand = self.ungroup_value(nodes[borrowed].children[0])?;
+                if nodes[operand].kind != NodeKind::ValueReference {
+                    return Ok(None);
+                };
+                (
+                    *expression,
+                    ReferenceSource::ChildLocal {
+                        binding: *binding,
+                        returning: *returning,
+                        operand,
+                    },
+                )
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(ReferenceShape {
+            origin,
+            expression,
+            source,
+        }))
+    }
+
+    pub(super) fn reference_plan(
+        &mut self,
+        shape: ReferenceShape,
+        arrow: &ArrowFacts<'g>,
+        stored: (&[Located<'g>], ResultComponent<'g>),
+        caller: &Residence<'g>,
+        depth: usize,
+    ) -> Work<Option<ReferencePlan<'g>>> {
+        self.depth(depth)?;
+        if arrow.mode != Some(InvocationMode::ReadOnly) {
+            return Ok(None);
+        }
+        let ReferenceShape {
+            origin,
+            expression,
+            source,
+        } = shape;
+        let (binding, capture, reference) = match source {
+            ReferenceSource::Incoming { value: root } => {
+                let [capture] = arrow.captures.as_slice() else {
+                    return Ok(None);
+                };
+                let parameter = capture.path.root;
+                if !std::ptr::eq(capture.site.module, &self.module.key)
+                    || self.ungroup_value(capture.site.node)? != root
+                    || !capture.reachable
+                    || capture.through.is_some()
+                    || !capture.path.projections.is_empty()
+                    || capture.form != (CaptureForm::CarriedReference { mutable: false })
+                    || capture.access != Access::Owned
+                    || capture.storage.as_ref() != Some(&arrow.result)
+                    || caller.contains_local(parameter, self.budget)?
+                {
+                    return Ok(None);
+                }
+                self.budget.step(self.current_parameters.len())?;
+                if !self
+                    .current_parameters
+                    .iter()
+                    .any(|p| std::ptr::eq(&p.declaration.id, parameter) && p.ty == arrow.result)
+                    || !self.expression_facts(root)?.is_some_and(|value| {
+                        value.binding.is_some_and(|id| std::ptr::eq(id, parameter))
+                            && value.access == Access::Owned
                     })
                 {
                     return Ok(None);
                 }
-                let Some(NodeFactKind::Binding(local)) = self.facts(*binding)?.map(|f| &f.kind)
+                // The value of an incoming descriptor, not a borrow of its slot.
+                (
+                    None,
+                    Some(parameter),
+                    ScopedJoinReference::Incoming {
+                        parameter,
+                        value: self.site(root),
+                    },
+                )
+            }
+            ReferenceSource::ChildLocal {
+                binding,
+                returning,
+                operand,
+            } if arrow.captures.is_empty() => {
+                if !self.facts(returning)?.is_some_and(
+                    |f| matches!(f.kind, NodeFactKind::ArrowReturn { target } if target == origin),
+                ) {
+                    return Ok(None);
+                }
+                let Some(NodeFactKind::Binding(local)) = self.facts(binding)?.map(|f| &f.kind)
                 else {
                     return Ok(None);
                 };
-                if !local.ty.as_ref().is_some_and(i32_type) {
+                if !self.expression_facts(operand)?.is_some_and(|v| {
+                    v.ordinary_context.is_none()
+                        && v.access == Access::Owned
+                        && v.path.as_ref().is_some_and(|p| {
+                            std::ptr::eq(p.root, local.declaration) && p.projections.is_empty()
+                        })
+                }) || !local.ty.as_ref().is_some_and(i32_type)
+                {
                     return Ok(None);
                 }
                 (
-                    *expression,
-                    Some((*binding, local.declaration)),
+                    Some((binding, local.declaration)),
                     None,
                     ScopedJoinReference::ChildLocal {
-                        binding: self.site(*binding),
-                        returning: self.site(*returning),
+                        binding: self.site(binding),
+                        returning: self.site(returning),
                     },
                 )
             }
@@ -118,19 +191,36 @@ impl<'a, 'g> Check<'a, 'g> {
         {
             return Ok(None);
         }
+        Ok(Some(ReferencePlan {
+            expression,
+            binding,
+            reference,
+        }))
+    }
+
+    pub(super) fn prove_reference_plan(
+        &mut self,
+        plan: ReferencePlan<'g>,
+        depth: usize,
+    ) -> Work<bool> {
+        let ReferencePlan {
+            expression,
+            binding,
+            ..
+        } = plan;
         let mut proof = self.callable_check(self.module)?;
         let mut entry = Residence::default();
         if let Some((binding, _)) = binding {
             let mut states = proof.statement(binding, entry, depth + 1)?;
             if states.len() != 1 {
-                return Ok(None);
+                return Ok(false);
             }
             entry = states.pop().unwrap();
         }
         let expression_depth = depth + if binding.is_some() { 2 } else { 1 };
         let mut states = proof.expression(expression, entry, expression_depth)?;
         let [state] = states.as_mut_slice() else {
-            return Ok(None);
+            return Ok(false);
         };
         let values = state.take(Root::Temporary(expression), &[], proof.budget)?;
         let residence = match (binding, values.as_slice()) {
@@ -144,9 +234,6 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         // Neither descriptor carries a Result occurrence. Keep the exact
         // backing origin separately: a child-local address is not caller storage.
-        Ok(
-            (residence && !proof.has_pending && !state.may_owe_result(proof.budget)?)
-                .then_some((expression, reference)),
-        )
+        Ok(residence && !proof.has_pending && !state.may_owe_result(proof.budget)?)
     }
 }

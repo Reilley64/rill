@@ -1306,6 +1306,95 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
 }
 
 #[test]
+fn grouped_reference_children_charge_depth_and_keep_the_written_escape() {
+    probe(
+        "scoped_join::grouped_reference_children_charge_depth_and_keep_the_written_escape",
+        r#"
+        import std::routine::join;
+        function bare(input: &i32): [&i32,&i32] {return join([() => input, () => { let local=2i32; return &local; }]);}
+        function grouped(input: &i32): [&i32,&i32] {
+            return join((((([((() => (((input))))), ((() => { let local=((2i32)); return ((&((local)))); }))])))));
+        }
+        function skipped(input: &i32): [&i32,&i32] {if(false) { return join([() => { let local=2i32; return &local; }, () => input]); } return [input,input];}
+    "#,
+        |_, module, receipt| {
+            let run = |name: &str, limit| {
+                let d = &module.declarations[named(module, name)];
+                lower_body(receipt, module, &d.id, limit).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            let bare = run("bare", default);
+            let grouped = run("grouped", default);
+            assert_eq!(bare.completion(), Completion::SourceRejected);
+            assert_eq!(grouped.completion(), Completion::SourceRejected);
+            let [finding] = grouped.findings() else {
+                panic!("one failed child export")
+            };
+            assert_eq!(finding.code(), "R0202");
+            assert_eq!(finding.site.span.bytes(), b"return ((&((local))));");
+            assert_eq!(finding.related.span.bytes(), b"local");
+            assert!(grouped.mir().is_none());
+            assert!(grouped.statistics().max_depth > bare.statistics().max_depth);
+            let capped = run(
+                "grouped",
+                AnalysisLimits {
+                    max_depth: bare.statistics().max_depth,
+                    ..default
+                },
+            );
+            assert_eq!(capped.completion(), Completion::ResourceLimit);
+            assert!(capped.mir().is_none() && capped.findings().is_empty());
+            assert!(run("skipped", default).mir().is_some());
+        },
+    );
+}
+
+#[test]
+fn unsupported_reference_children_preserve_prior_typed_caps() {
+    installed(
+        "scoped_join::unsupported_reference_children_preserve_prior_typed_caps",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            for (params, jobs, max_work, max_entries, max_depth) in [
+                (
+                    "input: &i32, work: () => &i32",
+                    "() => input, work",
+                    487296,
+                    55357,
+                    12,
+                ),
+                (
+                    "input: &i32",
+                    "() => input, () => { let local = 2i32; return &(local + 1i32); }",
+                    488293,
+                    55667,
+                    14,
+                ),
+            ] {
+                fs::write(&request.entry,format!("{BASE}\nimport std::routine::join;\nfunction joined({params}): [&i32, &i32] {{\n    return join([{jobs}]);\n}}\n")).unwrap();
+                for test_mode in [false, true] {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let old = analyze_typed(
+                        &graph,
+                        AnalysisLimits {
+                            max_work,
+                            max_entries,
+                            max_depth,
+                        },
+                    );
+                    assert_eq!(old.completion(), TypedCompletion::Incomplete);
+                    assert!(old.receipt().is_none());
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_join_checks_reference_result_escape_per_slot() {
     use compiler::analysis::ownership::{GraphCompletion, GraphObligation, analyze_ownership};
     use compiler::analysis::scalars::generics::{GoalId, GoalJudgment, callables::CaptureForm};

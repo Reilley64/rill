@@ -86,6 +86,20 @@ impl<'g> Residence<'g> {
         Ok(self.clone())
     }
 
+    pub(super) fn contains_local(
+        &self,
+        local: &'g DeclarationId,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        for (root, _) in &self.locations {
+            budget.step(1)?;
+            if matches!(root,Root::Local(id) if std::ptr::eq(*id,local)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub(super) fn may_owe_result(&self, budget: &mut Budget) -> Work<bool> {
         for (_, value) in &self.locations {
             budget.step(1)?;

@@ -520,6 +520,17 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(false);
         };
         let references = scoped.is_some() && shared_i32(out0) && shared_i32(out1);
+        let shapes = if references {
+            let Some(a) = self.reference_shape(*first)? else {
+                return Ok(false);
+            };
+            let Some(b) = self.reference_shape(*second)? else {
+                return Ok(false);
+            };
+            Some([a, b])
+        } else {
+            None
+        };
         let root = Root::Temporary(*argument);
         let stored = state.contents(root, &[], self.budget)?;
         self.budget.step(stored.len())?;
@@ -532,11 +543,15 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(false);
         }
         let elements = [*first, *second];
-        let first = self.ungroup_value(*first)?;
-        let second = self.ungroup_value(*second)?;
+        let [first, second] = if let Some(shapes) = shapes {
+            shapes.map(|s| s.origin)
+        } else {
+            [self.ungroup_value(*first)?, self.ungroup_value(*second)?]
+        };
         if first == second {
             return Ok(false);
         }
+        let mut reference_plans = [None, None];
         let mut outputs = [Vec::new(), Vec::new()];
         let mut children = [None, None];
         let mut scoped_slots = [None, None];
@@ -605,14 +620,14 @@ impl<'a, 'g> Check<'a, 'g> {
                 return Ok(false);
             };
             let slot_path = ResultComponent::TupleElement(i);
-            let (expression, result, reference_result) = if references {
-                let Some((expression, reference)) =
-                    self.reference_child(origin, arrow, (&stored, slot_path), state, depth + 1)?
+            let (expression, result, reference_result) = if let Some(shapes) = shapes {
+                let Some(plan) =
+                    self.reference_plan(shapes[i], arrow, (&stored, slot_path), state, depth + 1)?
                 else {
                     return Ok(false);
                 };
-                self.budget.reserve(1)?;
-                (Some(expression), Vec::new(), Some(reference))
+                reference_plans[i] = Some(plan);
+                (Some(plan.expression), Vec::new(), Some(plan.reference))
             } else {
                 let Some((expression, result)) = self.pair_child(
                     origin,
@@ -639,7 +654,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 let Some(child) = child else {
                     return Ok(false);
                 };
-                self.budget.reserve(3)?;
+                if !references {
+                    self.budget.reserve(3)?;
+                }
                 scoped_slots[i] = Some(ScopedJoinSlot {
                     path: [i],
                     child,
@@ -650,6 +667,14 @@ impl<'a, 'g> Check<'a, 'g> {
                 });
             } else {
                 children[i] = child;
+            }
+        }
+        if let [Some(left), Some(right)] = reference_plans {
+            self.budget.reserve(8)?; // two reference origins and three goal handles per slot
+            if !self.prove_reference_plan(left, depth + 1)?
+                || !self.prove_reference_plan(right, depth + 1)?
+            {
+                return Ok(false);
             }
         }
         // Transfer Result residence only after checking both environments and

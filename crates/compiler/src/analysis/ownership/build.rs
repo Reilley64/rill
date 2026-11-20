@@ -6622,13 +6622,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return self.written_scalar_copy(node, facts, call, into, next, depth);
         }
         if checked_carrier.is_none()
-            && call.scoped_join.as_ref().is_some_and(|join| {
-                join.slots
-                    .iter()
-                    .all(|slot| slot.reference_result.is_some())
-            })
+            && let Some(join) = call.scoped_join.as_deref()
+            && join
+                .slots
+                .iter()
+                .all(|slot| slot.reference_result.is_some())
         {
-            return self.emit(node, Action::CheckScopedReferenceResults, Edges::End);
+            return self.stage_scoped_reference_results(node, join, next, depth);
         }
         if checked_carrier.is_none() && list_arrows::scalar_pair(&facts.ty) {
             let route = if let Some(join) = call.scoped_join.as_deref() {

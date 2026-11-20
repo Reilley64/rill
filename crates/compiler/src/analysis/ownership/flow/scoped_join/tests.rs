@@ -599,7 +599,92 @@ fn real_frames_drive_the_scoped_join_transitions() {
         return;
     }
 
-    let root = std::env::temp_dir().join(format!("j{}", std::process::id()));
+    installed_probe("real_frames_drive_the_scoped_join_transitions", SOURCE);
+}
+
+#[test]
+fn moved_second_capture_precedes_first_child_export() {
+    let Some(root) = std::env::var_os("RILL_JOIN_PROBE_ROOT") else {
+        return installed_probe(
+            "moved_second_capture_precedes_first_child_export",
+            &format!(
+                "{SOURCE}\nimport std::routine::join;\nfunction swapped(input: &i32): [&i32,&i32] {{ return join([() => {{ let local=2i32; return &local; }}, () => input]); }}"
+            ),
+        );
+    };
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            entry: PathBuf::from(&root).join("main.rill"),
+            target: "aarch64-apple-darwin".into(),
+            options: Default::default(),
+            test_mode,
+            limits: Default::default(),
+        })
+        .unwrap();
+        let typed = analyze_typed(&graph, AnalysisLimits::default());
+        assert!(typed.receipt().is_some());
+        let module = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.origin == Origin::Application)
+            .unwrap();
+        let d = module
+            .declarations
+            .iter()
+            .find(|d| d.name.as_deref() == Some("swapped"))
+            .unwrap();
+        let header = &typed.inventory().type_facts().declarations[&d.id];
+        let DeclarationShape::Function { parameters, result } = &header.shape else {
+            panic!()
+        };
+        let body = module.syntax.nodes[d.node].children[1];
+        let mut budget = budget(AnalysisLimits::default());
+        let mut build = checked(Build::new(
+            &typed,
+            module,
+            body,
+            Some((&d.id, result)),
+            None,
+            None,
+            &mut budget,
+        ));
+        let input = checked(build.parameter(&parameters[0]));
+        let end = checked(build.emit(body, Action::None, Edges::End));
+        let exit = checked(build.cleanup_scope(body, &[input], end));
+        let entry = checked(build.statement(
+            body,
+            exit,
+            Exits {
+                returning: Some(exit),
+                looping: None,
+            },
+            1,
+        ));
+        // Flow-level seed, not a claim that reading a shared parameter moves it.
+        let moved_at = parameters[0].declaration.node;
+        let entry = checked(build.emit(
+            moved_at,
+            Action::Move {
+                from: input,
+                into: None,
+            },
+            Edges::Next(entry),
+        ));
+        let Err(Stop::Rejected {
+            site,
+            related,
+            kind: Conflict::Moved,
+        }) = run(build, entry, vec![input], None, false, None)
+        else {
+            panic!("second capture must be checked before any child export")
+        };
+        assert_eq!(module.syntax.nodes[site].span.bytes(), b"input");
+        assert_eq!(related, moved_at);
+    }
+}
+
+fn installed_probe(name: &str, source: &str) {
+    let root = std::env::temp_dir().join(format!("j{}-{name}", std::process::id()));
     fs::create_dir(&root).unwrap();
     let _cleanup = Temp(&root);
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -609,8 +694,11 @@ fn real_frames_drive_the_scoped_join_transitions() {
     for path in [&stdlib, &runtime, &root.join("bin")] {
         fs::create_dir_all(path).unwrap();
     }
-    for name in
-        include_str!("../../../../../../../tests/installed/typed/stdlib-sources.txt").lines()
+    for name in include_str!("../../../../../../../tests/installed/typed/stdlib-sources.txt")
+        .lines()
+        .chain(
+            include_str!("../../../../../../../tests/installed/typed/routine-sources.txt").lines(),
+        )
     {
         fs::copy(repo.join("stdlib").join(name), stdlib.join(name)).unwrap();
     }
@@ -624,13 +712,10 @@ fn real_frames_drive_the_scoped_join_transitions() {
         runtime.join("error.rs"),
     )
     .unwrap();
-    fs::write(root.join("main.rill"), SOURCE).unwrap();
+    fs::write(root.join("main.rill"), source).unwrap();
     let executable = root.join("bin/probe");
     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
-    let test = concat!(
-        module_path!(),
-        "::real_frames_drive_the_scoped_join_transitions"
-    );
+    let test = format!("{}::{name}", module_path!());
     let output = Command::new(executable)
         .env("RILL_JOIN_PROBE_ROOT", &root)
         .current_dir(&root)

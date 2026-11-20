@@ -1993,7 +1993,10 @@ enum Action<'g> {
         receivers: [Slot; 2],
         into: Slot,
     },
-    CheckScopedReferenceResults,
+    CheckScopedReferenceResults {
+        entries: [Slot; 2],
+        body_depths: [usize; 2],
+    },
     FormClosure {
         capture: Slot,
         second: Option<Slot>,
