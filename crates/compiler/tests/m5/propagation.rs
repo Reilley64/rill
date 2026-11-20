@@ -3812,11 +3812,6 @@ fn propagating_calls_create_owning_results_only_on_success() {
                 dispose(output); dispose(output);
                 return Option.Some(true);
             }
-            function compound(bit: bool): [string, string] { return ["left", "right"]; }
-            function unsupported(input: Option<bool>): Option<bool> {
-                let output = compound(input?);
-                return Option.Some(true);
-            }
         "#,
         |_, module, receipt, typed| {
             let id = |name| {
@@ -3939,13 +3934,6 @@ fn propagating_calls_create_owning_results_only_on_success() {
             assert_eq!(finding.site.span.bytes(), b"dispose(output)");
             assert_eq!(finding.related.span.bytes(), b"dispose(output)");
             assert!(finding.related.span.start() < finding.site.span.start());
-            let unsupported = lower("unsupported", default);
-            assert_eq!(unsupported.completion(), Completion::Incomplete);
-            assert!(unsupported.mir().is_none());
-            assert_eq!(
-                unsupported.blocked_at().unwrap().span.bytes(),
-                b"compound(input?)"
-            );
             let exact = AnalysisLimits {
                 max_work: pipe.statistics().work,
                 max_entries: pipe.statistics().entries,
@@ -7356,6 +7344,319 @@ fn discarded_compound_call_cleans_only_the_materialized_success_result() {
 }
 
 #[test]
+fn named_compound_call_keeps_the_result_until_lexical_exit() {
+    fn calls<'g>(ops: &[&Operation<'g>]) -> Vec<(usize, &'g loader::DeclarationId)> {
+        ops.iter()
+            .enumerate()
+            .filter_map(|(index, op)| match op {
+                Operation::Call(callee) | Operation::CallIntoTemporary { callee, .. } => {
+                    Some((index, *callee))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    let mut unmet = Vec::new();
+    probe_with_typed(
+        "propagation::named_compound_call_keeps_the_result_until_lexical_exit",
+        r#"
+            function compound(bit: bool): [string, string] { return ["left", "right"]; }
+            function after(): bool { return true; }
+            function named(input: Option<bool>, keep: string): Option<bool> {
+                let output = compound(input?);
+                let bit = after();
+                return Option.Some(bit);
+            }
+            function reused(input: Option<bool>): Option<bool> {
+                let output = compound(input?);
+                let taken = output;
+                let again = output;
+                return Option.Some(true);
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower =
+                |name| lower_body(receipt, module, id(name), AnalysisLimits::default()).unwrap();
+            let producer = lower("compound");
+            assert_eq!(producer.completion(), Completion::Checked);
+            assert!(producer.mir().is_some(), "the tuple constructor must lower");
+
+            let named = lower("named");
+            let reused = lower("reused");
+            // Report both modes before failing an unmet completion judgment.
+            for (name, report, expected) in [
+                ("named", &named, Completion::Checked),
+                ("reused", &reused, Completion::SourceRejected),
+            ] {
+                let actual = report.completion();
+                let blocker = report
+                    .blocked_at()
+                    .map(|site| site.span.bytes().escape_ascii().to_string());
+                eprintln!(
+                    "test_mode={}: M4={:?}; producer M5={:?}; {name} M5={actual:?}, blocker={blocker:?}, MIR={}, findings={}",
+                    request.test_mode,
+                    typed.completion(),
+                    producer.completion(),
+                    report.mir().is_some(),
+                    report.findings().len(),
+                );
+                if actual != expected {
+                    unmet.push((request.test_mode, name, expected, actual, blocker));
+                }
+            }
+
+            if let Some(mir) = named.mir() {
+                let option = typed.option_role().unwrap();
+                let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+                let prefix = straight_blocks(mir, mir.entry);
+                let path = |edge| {
+                    prefix
+                        .iter()
+                        .map(|block| &block.operation)
+                        .chain(linear(mir, edge))
+                        .collect::<Vec<_>>()
+                };
+                let success = path(yes);
+                let failure = path(no);
+                let success_calls = calls(&success);
+                let [(called, producer), (after, next)] = success_calls.as_slice() else {
+                    panic!("expected one producer call and one next statement: {success_calls:?}");
+                };
+                assert_eq!([*producer, *next], [id("compound"), id("after")]);
+                let Operation::TestVariant {
+                    operand: carrier, ..
+                } = &prefix.last().unwrap().operation
+                else {
+                    panic!("expected the input carrier test before either exit");
+                };
+                let staged: Vec<_> = success[..*called]
+                    .iter()
+                    .filter_map(|op| match op {
+                        Operation::CopyOptionPayload { operand, into } => Some((operand, into)),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(matches!(staged.as_slice(), [(operand, into)]
+                    if operand.root.node == carrier.root.node && operand.projection.is_none()
+                    && into.root.span.bytes() == b"input?" && into.projection.is_none()));
+                assert!(calls(&failure).is_empty());
+                assert!(!failure.iter().any(|op| matches!(
+                    op,
+                    Operation::CopyOptionPayload { .. } | Operation::Initialize(_)
+                )));
+                let export = success
+                    .iter()
+                    .position(|op| matches!(op, Operation::Export(_)))
+                    .unwrap();
+                assert!(*after < export);
+                assert_return(
+                    &success,
+                    &option.some.id,
+                    true,
+                    &[b"output", b"output", b"keep: string"],
+                );
+                let leaves: Vec<_> = path_drops(mir, yes)
+                    .into_iter()
+                    .filter_map(|action| match action {
+                        Obligation::Drop(place) if place.root.span.bytes() == b"output" => {
+                            Some((place.root.node, place.tuple_element()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert!(
+                    matches!(leaves.as_slice(), [(high, Some(1)), (low, Some(0))] if high == low)
+                );
+
+                assert_return(&failure, &option.none.id, false, &[b"keep: string"]);
+                assert!(!failure.iter().any(|op| matches!(op, Operation::Cleanup(actions)
+                    if actions.iter().any(|action| matches!(action, Obligation::EndStorage(place)
+                        if [b"output".as_slice(), b"compound(input?)"].contains(&place.root.span.bytes()))))));
+
+                let exact = AnalysisLimits {
+                    max_work: named.statistics().work,
+                    max_entries: named.statistics().entries,
+                    max_depth: named.statistics().max_depth,
+                };
+                let bounded = |limits| lower_body(receipt, module, id("named"), limits).unwrap();
+                assert!(bounded(exact).mir().is_some());
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = bounded(short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none());
+                }
+            } else {
+                assert_ne!(named.completion(), Completion::Checked);
+            }
+
+            assert!(reused.mir().is_none());
+            if reused.completion() == Completion::SourceRejected {
+                let [finding] = reused.findings() else {
+                    panic!("expected one moved-result finding");
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), b"output");
+                assert_eq!(finding.related.span.bytes(), b"output");
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+        },
+    );
+    assert!(
+        unmet.is_empty(),
+        "named compound result judgments: {unmet:?}"
+    );
+}
+
+#[test]
+fn named_compound_call_checks_only_reached_ownership() {
+    probe_with_typed(
+        "propagation::named_compound_call_checks_only_reached_ownership",
+        r#"
+            function compound(bit: bool): [string, string] { return ["left", "right"]; }
+            function broken(bit: bool): [string, string] {
+                let text = "owned";
+                dispose(text);
+                dispose(text);
+                return ["left", "right"];
+            }
+            function gate(text: string): Option<bool>.None { return Option<bool>.None; }
+            function gateLive(text: string): Option<bool> { return Option.Some(true); }
+            function read(view: &string): bool { return true; }
+            function after(): bool { return true; }
+            function transferred(input: Option<bool>.Some): Option<bool> {
+                let output = compound(input?);
+                let taken = output;
+                return Option.Some(after());
+            }
+            function stopped(input: Option<bool>.None, keep: string): Option<bool> {
+                let output = broken(input?);
+                let taken = output;
+                return Option.Some(after());
+            }
+            function reached(input: Option<bool>.Some): Option<bool> {
+                let output = broken(input?);
+                return Option.Some(true);
+            }
+            function moved(text: string): Option<bool> {
+                dispose(text);
+                let output = compound(gate(text)?);
+                return Option.Some(true);
+            }
+            function loaned(text: string): Option<bool> {
+                let view = &text;
+                let output = compound(gateLive(text)?);
+                return Option.Some(read(view));
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower =
+                |name| lower_body(receipt, module, id(name), AnalysisLimits::default()).unwrap();
+            let option = typed.option_role().unwrap();
+            let transferred = lower("transferred");
+            let mir = transferred
+                .mir()
+                .expect("known Some transfers the named owner");
+            assert_eq!(calls_on_path(mir, []), [id("compound"), id("after")]);
+            let ops = linear(mir, mir.entry);
+            let compound = ops
+                .iter()
+                .position(|op| matches!(op, Operation::Call(callee) if *callee == id("compound")))
+                .unwrap();
+            let after = ops
+                .iter()
+                .position(|op| matches!(op, Operation::Call(callee) if *callee == id("after")))
+                .unwrap();
+            let transfers: Vec<_> = ops
+                .iter()
+                .enumerate()
+                .filter_map(|(index, op)| match op {
+                    Operation::Move { from, into } if from.root.span.bytes() == b"output" => {
+                        Some((index, from, into))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(matches!(transfers.as_slice(), [(index, from, Some(into))]
+                if compound < *index && *index < after && into.root.span.bytes() == b"taken"
+                && from.projection.is_none() && into.projection.is_none()));
+            assert_return(&ops, &option.some.id, true, &[b"taken", b"taken"]);
+            let drops: Vec<_> = path_drops(mir, mir.entry)
+                .into_iter()
+                .map(|drop| match drop {
+                    Obligation::Drop(place) => place.tuple_element(),
+                    _ => panic!("expected tuple member cleanup"),
+                })
+                .collect();
+            assert_eq!(drops, [Some(1), Some(0)]);
+
+            let stopped = lower("stopped");
+            let mir = stopped
+                .mir()
+                .expect("known None skips the invalid producer and suffix");
+            assert!(calls_on_path(mir, []).is_empty());
+            let ops = linear(mir, mir.entry);
+            assert_return(&ops, &option.none.id, false, &[b"keep: string"]);
+            assert!(!ops.iter().any(|op| matches!(op,
+                Operation::Initialize(_) | Operation::CopyOptionPayload { .. } | Operation::Move { .. })
+                || matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
+                    Obligation::EndStorage(place) if [b"output".as_slice(), b"taken", b"broken(input?)"].contains(&place.root.span.bytes()))))));
+
+            for (name, site) in [("reached", b"dispose(text)".as_slice()), ("moved", b"text")] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected one moved-use finding for {name}");
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), b"dispose(text)");
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+            let loaned = lower("loaned");
+            assert_eq!(loaned.completion(), Completion::SourceRejected);
+            assert!(loaned.mir().is_none());
+            let [finding] = loaned.findings() else {
+                panic!("expected one conflict with the live loan");
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"text");
+            assert_eq!(finding.related.span.bytes(), b"&text");
+        },
+    );
+}
+
+#[test]
 fn discarded_compound_call_checks_only_reached_ownership() {
     probe_with_typed(
         "propagation::discarded_compound_call_checks_only_reached_ownership",
@@ -7513,6 +7814,26 @@ fn compound_propagating_results_stay_outside_other_call_routes() {
                 withGuard(input?, lease);
                 return Option.Some(true);
             }
+            function namedPiped(input: Option<bool>): Option<bool> {
+                let output = (input?) |> compound;
+                return Option.Some(true);
+            }
+            function namedEmbedded(input: Option<bool>): Option<bool> {
+                let output = compound(gate(input?)?);
+                return Option.Some(true);
+            }
+            function namedGeneric(input: Option<bool>.None): Option<bool> {
+                let output = generic<bool>(input?);
+                return Option.Some(true);
+            }
+            function namedMixed(input: Option<bool>): Option<bool> {
+                let output = mixed(input?);
+                return Option.Some(true);
+            }
+            function namedBorrowed(input: Option<bool>, keep: string): Option<bool> {
+                let output = withBorrow(input?, &keep);
+                return Option.Some(true);
+            }
         "#,
         |_, module, receipt| {
             for (name, site) in [
@@ -7526,6 +7847,11 @@ fn compound_propagating_results_stay_outside_other_call_routes() {
                 ("resultCarrier", b"compound(input?)"),
                 ("borrowed", b"withBorrow(input?, &keep)"),
                 ("protectedArg", b"withGuard(input?, lease)"),
+                ("namedPiped", b"(input?) |> compound"),
+                ("namedEmbedded", b"compound(gate(input?)?)"),
+                ("namedGeneric", b"generic<bool>(input?)"),
+                ("namedMixed", b"mixed(input?)"),
+                ("namedBorrowed", b"withBorrow(input?, &keep)"),
             ] {
                 let declaration = module
                     .declarations

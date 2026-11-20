@@ -24,7 +24,8 @@ use std::sync::Arc;
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
-    DiscardedTextPair(&'a Type<'g>),
+    // A named destination or statement discard uses the same exact call proof.
+    TextPair(&'a Type<'g>),
     CheckedPipeCarrier { primitive_arguments_checked: bool },
 }
 
@@ -1848,7 +1849,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 }
                 if let Some(call) = self.check_value_call_propagation(
                     initializer,
-                    false,
+                    matches!(binding, Binding::Name { .. }),
                     exits.returning,
                     initializer_depth,
                 )? {
@@ -3444,7 +3445,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     fn check_value_call_propagation(
         &mut self,
         node: NodeId,
-        statement_discard: bool,
+        allow_text_pair: bool,
         returning: Option<Pc>,
         depth: usize,
     ) -> ResultOf<Option<PropagatingValueCall<'a, 'g>>> {
@@ -3459,17 +3460,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             && let Some(call) = facts.call.as_deref()
         {
             let mut output = PropagatingCallOutput::Value(&facts.ty);
-            if statement_discard
+            if allow_text_pair
                 && kind == NodeKind::Call
                 && let TypeTerm::Tuple(elements) = facts.ty.as_ref()
                 && let [left, right] = elements.as_slice()
             {
                 self.budget.step(2)?;
                 if owns_text(left) && owns_text(right) {
-                    output = PropagatingCallOutput::DiscardedTextPair(&facts.ty);
+                    output = PropagatingCallOutput::TextPair(&facts.ty);
                 }
             }
-            let text_pair = matches!(output, PropagatingCallOutput::DiscardedTextPair(_));
+            let text_pair = matches!(output, PropagatingCallOutput::TextPair(_));
             let Some(arguments) =
                 self.propagating_arguments(node, output, call, returning, depth)?
             else {
@@ -3598,7 +3599,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 }
                 self.check_exact_primitive_call(node, call, expected)?;
             }
-            PropagatingCallOutput::DiscardedTextPair(expected) => {
+            PropagatingCallOutput::TextPair(expected) => {
                 let ([arg], [postfix]) = (call.arguments.as_slice(), roots.as_slice()) else {
                     return Err(Stop::Pending(node));
                 };
@@ -3626,8 +3627,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     return Err(Stop::Pending(node));
                 }
                 self.check_exact_primitive_call(node, call, expected)?;
-                // The reached route proves default cleanup when allocating the
-                // tuple slot. Prove it here if the postfix makes that impossible.
+                // Slot allocation proves default cleanup for a reached call.
+                // Keep the proof even when the argument never reaches the call.
                 if terminal_root_index.is_some() && self.outer_disposer(node, expected)?.is_some() {
                     return Err(Stop::Pending(node));
                 }
