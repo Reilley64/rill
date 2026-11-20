@@ -407,6 +407,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             incoming_list_arrow: None,
             cleanups: Vec::new(),
             body_scope: None,
+            list_delivery_loop: None,
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
             dispose: typed.dispose_role().map(|d| &d.id),
@@ -2064,6 +2065,29 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         for &child in children[..prefix].iter().rev() {
             tail = self.statement(child, tail, exits, depth + 1)?;
+            // Record the bounded List checkpoint while lowering its statement,
+            // not by walking every ordinary frame to discover whether it fits.
+            if node == self.body && self.module.syntax.nodes[child].kind == NodeKind::While {
+                let syntax = &self.module.syntax.nodes;
+                let [test, inner] = syntax[child].children[..] else {
+                    unreachable!()
+                };
+                let simple = match syntax[inner].children.as_slice() {
+                    [] => true,
+                    [one] => syntax[*one].kind == NodeKind::Continue,
+                    _ => false,
+                };
+                if simple
+                    && let Action::Read { from, into: None } = self.code[tail].action
+                    && from < u64::BITS as usize
+                    && syntax[self.slots[from].node].kind == NodeKind::Parameter
+                    && let Edges::Next(branch) = self.code[tail].edges
+                    && self.code[branch].node == test
+                    && matches!(self.code[branch].edges, Edges::Branch { .. })
+                {
+                    self.list_delivery_loop = Some((child, test));
+                }
+            }
         }
         Ok(tail)
     }

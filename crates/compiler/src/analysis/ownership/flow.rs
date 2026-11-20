@@ -1140,6 +1140,7 @@ pub(super) struct CancellationTrace<'a, 'g> {
     live: Vec<BTreeSet<Slot>>,
     flat: bool,
     loop_delivery: bool,
+    list_backing: bool,
     branching: bool,
     calls_reached: usize,
     call_block: Option<usize>,
@@ -1490,6 +1491,7 @@ impl<'g> CancellationTrace<'_, 'g> {
         };
         enqueue((mir.entry, 0u64, 0u64), &mut visited, &mut pending, budget)?;
         let mut deliveries = BTreeMap::new();
+        let mut feasible_backedge = false;
         while let Some((block, yes_bits, no_bits)) = pending.pop() {
             if !complete && self.retained.is_empty() {
                 return Ok(None);
@@ -1521,6 +1523,7 @@ impl<'g> CancellationTrace<'_, 'g> {
                 complete &= admitted;
                 if complete {
                     budget.reserve(1)?;
+                    feasible_backedge |= matches!(action, Action::BudgetBackedge);
                     deliveries.insert(block, callee);
                 }
             }
@@ -1568,7 +1571,7 @@ impl<'g> CancellationTrace<'_, 'g> {
                 Terminator::FinishStartup | Terminator::FinishExpectation => return Ok(None),
             }
         }
-        if !complete {
+        if !complete || (self.list_backing && !feasible_backedge) {
             return Ok(None);
         }
 
@@ -2064,6 +2067,7 @@ pub(super) fn run<'a, 'g>(
         incoming_list_arrow,
         mut cleanups,
         body_scope,
+        list_delivery_loop,
         dispose,
         retained,
         retains_exclusive_bool,
@@ -2099,7 +2103,7 @@ pub(super) fn run<'a, 'g>(
         .collect();
     // This admits the installed backing in a leaf frame only; in particular
     // it adds no contract for outward storage or for transferred call frames.
-    candidate &= !list_backing || retained.is_empty();
+    candidate &= !list_backing || (list_delivery_loop.is_some() && retained.is_empty());
     for &slot in &params {
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
@@ -2214,8 +2218,16 @@ pub(super) fn run<'a, 'g>(
         if active.is_some() && matches!(action, Action::BudgetBackedge) {
             single_active_call = false;
         }
-        if list_backing && matches!(action, Action::Call(_)) {
-            candidate = false;
+        if list_backing
+            && candidate
+            && let Some((loop_node, test)) = list_delivery_loop
+        {
+            // Any other reached branch, call, or backedge is outside this
+            // leaf proof. In particular, do not pay for a speculative path
+            // walk that will veto a local condition or a live nested scope.
+            candidate = !matches!(action, Action::Call(_))
+                && (!matches!(action, Action::BudgetBackedge) || node == loop_node)
+                && (!matches!(edges, Edges::Branch { .. }) || node == test);
         }
         if matches!(action, Action::CallListArrows { .. }) {
             candidate = false;
@@ -3622,7 +3634,7 @@ pub(super) fn run<'a, 'g>(
     }
     // Add the List-backed delivery judgment only for frames with a reached
     // loop check. Entry-only List readers keep their ordinary-only contract.
-    let (trace, replacement) = if candidate && (!list_backing || loop_delivery) {
+    let (trace, replacement) = if candidate && (!list_backing || (flat && loop_delivery)) {
         (
             Some(CancellationTrace {
                 module,
@@ -3639,6 +3651,7 @@ pub(super) fn run<'a, 'g>(
                 live,
                 flat,
                 loop_delivery,
+                list_backing,
                 branching,
                 calls_reached,
                 call_block,

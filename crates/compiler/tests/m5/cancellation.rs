@@ -6,6 +6,61 @@ use compiler::analysis::scalars::{BodyOwner, NodeFactKind};
 use compiler::parser::{NodeId, NodeKind};
 
 #[test]
+fn ordinary_only_list_loops_keep_the_pre_delivery_caps() {
+    use compiler::analysis::ownership::{Delivery, analyze_ownership};
+    probe(
+        "cancellation::ordinary_only_list_loops_keep_the_pre_delivery_caps",
+        r#"
+        function entryOnly(xs: List<i32>): i32 { return (&xs)[0u64]; }
+        function noop(): void {}
+        function across(xs: List<i32>, again: bool): void { noop(); while (again) { continue; } dispose(xs); }
+        function veto(xs: List<i32>, again: bool): void { let gate = again; while (gate) { continue; } dispose(xs); }
+        function impossible(xs: List<i32>, again: bool): void { while (again) { if (again) { break; } } }
+        function nested(xs: List<i32>, again: bool): void { { let view = &xs; while (again) { continue; } let last = view; } }
+    "#,
+        |_, module, receipt| {
+            // These are afd1afd's exact caps on this entire capture, not caps
+            // derived by first running the new optional proof.
+            let limits = |max_work, max_entries, max_depth| AnalysisLimits {
+                max_work,
+                max_entries,
+                max_depth,
+            };
+            let graph = analyze_ownership(receipt, limits(191781, 4867, 6));
+            for (name, work, entries, depth) in [
+                ("entryOnly", 2197, 175, 6),
+                ("across", 4353, 344, 5),
+                ("veto", 2400, 276, 5),
+                ("impossible", 2195, 180, 6),
+                ("nested", 2364, 254, 5),
+            ] {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let local =
+                    lower_body(receipt, module, &d.id, limits(work, entries, depth)).unwrap();
+                assert_eq!(local.completion(), Completion::Checked, "{name}");
+                assert!(local.mir().unwrap().cancellation().is_none());
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                    .unwrap();
+                assert!(root.mir().is_some(), "{name}");
+                assert!(matches!(root.enabled_frame(), Delivery::Unresolved));
+                let unconstrained = lower_body(receipt, module, &d.id, Default::default()).unwrap();
+                assert!(
+                    unconstrained.mir().unwrap().cancellation().is_none(),
+                    "{name} must not publish an entry-only proof"
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_list_backing_on_budget_delivery() {
     use compiler::analysis::Statistics;
     use compiler::analysis::ownership::{

@@ -2094,6 +2094,8 @@ struct Build<'a, 'g, 'b> {
     incoming_list_arrow: Option<(Slot, Slot)>,
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
+    /// A top-level empty/continue loop whose only decision reads a Bool formal.
+    list_delivery_loop: Option<(NodeId, NodeId)>,
     scalar_copy_read: Option<NodeId>,
     copied_origins: BTreeSet<NodeId>,
     dispose: Option<&'g DeclarationId>,
