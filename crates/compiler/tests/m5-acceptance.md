@@ -1426,6 +1426,22 @@ M4 records the simple body shape during its existing check; it does not grant ow
 
 Thirteen focused M5 tests, two installed M4 controls and three Rust collection-storage tests passed. External replay confirmed targeted and graph-root ordinary MIR and preserved the old baseline, List `while`, and wrapping controls. Destruction of an owning yielded item and unyielded owning elements, propagation with a live cursor, and borrowed iteration remain separate. No Rill program ran; [#76](https://github.com/Reilley64/rill/issues/76) remains open.
 
+## Cleaning the current string and the unyielded List suffix
+
+At `e50939f`, [`installed_consuming_string_iteration`](m5/iteration_text.rs) checks an ordinary loop over an incoming `List<string>`. Opening moves the List backing to the installed owned cursor. Each `Some` moves one actual string into the named binder, leaving only the unyielded suffix in the cursor. `None` never fabricates a current owner. If a normal return bypasses a loop reachable on another path, the parent still owns and cleans the entire List.
+
+| Reached exit | Cleanup in ownership MIR |
+| --- | --- |
+| Break with a view of the current item | End the view, drop the current string, dispose only the suffix through the selected cursor bridge and protected `DisposeText` element operation, then clean outer owners. No further advance. |
+| Return the item | Move the string into the return slot and export it. Retire the suffix and clean outer owners, without dropping the transferred string. Returning a different value leaves the current item to drop before the suffix. |
+| Continue or fall through | End the iteration’s remaining owners before `next`. A string moved into another binding is cleaned from that binding, not from the vacated item slot. Exhaustion disposes the empty cursor. |
+
+Explicit `dispose(item)` selects the protected string implementation and bridge even through a grouped alias. Its dependency occurs at the written call, not just at cursor cleanup; there is no second item drop. Reusing the current item, a disposed owner from a prior iteration, or the consumed source gives `R0200` with no MIR. A linked Rust storage test observed suffix release in order `third, second` after one yield, `third` after two, and no elements after exhaustion. This tests the backing operation, not Rill execution.
+
+The parameter handoff identifies a named yield from a reachable top-level loop in the function’s ordinary prefix. A dead suffix, a pruned nested loop, and a wildcard do not authorize storage. All text-List formals in the signature must qualify; an unrelated sibling cannot inherit a proof. M4 charges for this new handoff. M5 still independently checks the selected providers, capture-local storage identities and body. In both modes `onBreak` now has targeted and graph-root MIR at a target cap of 2,547 work / 312 entries / depth 6. The unrelated sibling still stops at the first parameter at its pre-change 1,966 / 74 / 0 cap. Exact and one-short tests cover M4, target and graph; scalar iteration retains its previous caps.
+
+Thirteen focused M5 tests, two installed M4 controls, three Rust collection-storage tests, scoped Clippy and formatting passed. List literals, record-valued yields, propagation with a live string cursor, and iterator cancellation remain outside this judgment. [#76](https://github.com/Reilley64/rill/issues/76) remains open.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
