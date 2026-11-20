@@ -1326,6 +1326,19 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 if (extra) { *slot = &*holder; return; }
                 *slot = &*src;
             }
+            function forwardLocal(slot: &mut &bool, stable: &bool, extra: bool): void {
+                let access = slot;
+                let mut local = true;
+                broaderContract(access, &mut local, extra);
+                return;
+            }
+            function forwardRepaired(slot: &mut &bool, stable: &bool, extra: bool): void {
+                let access = slot;
+                let mut local = true;
+                broaderContract(access, &mut local, extra);
+                *access = stable;
+                return;
+            }
             function broaderReachesBad(seed: &bool): bool {
                 let mut flag = true;
                 let mut out = seed;
@@ -1543,6 +1556,11 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 ("broaderLocal", "*slot = &local;", "&local"),
                 ("broaderLocalEarly", "*slot = &*holder;", "&mut local"),
                 ("broaderReachesBad", "*slot = &*holder;", "&mut local"),
+                (
+                    "forwardLocal",
+                    "broaderContract(access, &mut local, extra)",
+                    "&mut local",
+                ),
             ] {
                 let report = lower(name);
                 assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
@@ -1555,6 +1573,23 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
 
+            let repaired = lower("forwardRepaired");
+            let mir = require_mir(&repaired, "forwardRepaired");
+            let effects: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CallRetainingWithBool { .. } | Operation::InstallThrough { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(effects.as_slice(), [
+                Operation::CallRetainingWithBool { callee, destination: RetainedPlace::ThroughParameterAlias { descriptor: alias, parameter }, .. },
+                Operation::InstallThrough { descriptor, incoming },
+            ] if *callee == &declaration("broaderContract").id && parameter.root.span.bytes() == b"slot: &mut &bool"
+                && alias.root.span.bytes() == b"access" && alias.root.node == descriptor.root.node
+                && incoming.root.span.bytes() == b"stable"));
             let reached = lower("broaderCaller");
             let mir = require_mir(&reached, "broaderCaller");
             let route: Vec<_> = linear(mir, mir.entry)
@@ -1592,31 +1627,7 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
             );
 
             for (name, report) in [("caller", caller), ("broaderCaller", reached)] {
-                let stats = report.statistics();
-                let limits = AnalysisLimits {
-                    max_work: stats.work,
-                    max_entries: stats.entries,
-                    max_depth: stats.max_depth,
-                };
-                assert!(check(name, limits).mir().is_some());
-                for short in [
-                    AnalysisLimits {
-                        max_work: limits.max_work - 1,
-                        ..limits
-                    },
-                    AnalysisLimits {
-                        max_entries: limits.max_entries - 1,
-                        ..limits
-                    },
-                    AnalysisLimits {
-                        max_depth: limits.max_depth - 1,
-                        ..limits
-                    },
-                ] {
-                    let limited = check(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none(), "{name}");
-                }
+                assert_retained_call_limits(&report, |limits| check(name, limits));
             }
         },
     );
@@ -1678,15 +1689,9 @@ fn scalar_stages_do_not_narrow_or_extend_retained_backing() {
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap()
             };
-            let lower = |name| {
-                lower_body(
-                    receipt,
-                    module,
-                    &declaration(name).id,
-                    AnalysisLimits::default(),
-                )
-                .unwrap()
-            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
             let pair = lower("pair");
             let mir = require_mir(&pair, "pair");
             let (returned, fallthrough) = branch_targets(mir);
@@ -1702,6 +1707,7 @@ fn scalar_stages_do_not_narrow_or_extend_retained_backing() {
             );
 
             let piped = lower("piped");
+            assert_retained_call_limits(&piped, |limits| check("piped", limits));
             let mir = require_mir(&piped, "piped");
             let route: Vec<_> = linear(mir, mir.entry)
                 .into_iter()
@@ -1756,6 +1762,24 @@ fn scalar_stages_do_not_narrow_or_extend_retained_backing() {
                 assert_eq!(finding.code(), "R0201", "{name}");
                 assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+                if name == "overlap" {
+                    let call = module
+                        .syntax
+                        .nodes
+                        .iter()
+                        .find(|node| {
+                            node.span.bytes() == b"pair(first, scalar(first), slot, unused)"
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        finding.related.span.start(),
+                        call.span.start() + b"pair(".len()
+                    );
+                    assert_eq!(
+                        finding.site.span.start(),
+                        call.span.start() + b"pair(first, scalar(".len()
+                    );
+                }
             }
             for (name, blocked) in [
                 ("unproved", "*slot = &*src;"),
@@ -2998,6 +3022,37 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
             }
         },
     );
+}
+
+fn assert_retained_call_limits<'g>(
+    report: &Report<'g>,
+    check: impl Fn(AnalysisLimits) -> Report<'g>,
+) {
+    let stats = report.statistics();
+    let limits = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    assert!(check(limits).mir().is_some());
+    for short in [
+        AnalysisLimits {
+            max_work: limits.max_work - 1,
+            ..limits
+        },
+        AnalysisLimits {
+            max_entries: limits.max_entries - 1,
+            ..limits
+        },
+        AnalysisLimits {
+            max_depth: limits.max_depth - 1,
+            ..limits
+        },
+    ] {
+        let limited = check(short);
+        assert_eq!(limited.completion(), Completion::ResourceLimit);
+        assert!(limited.mir().is_none());
+    }
 }
 
 fn require_mir<'a, 'g>(report: &'a Report<'g>, name: &str) -> &'a Mir<'g> {

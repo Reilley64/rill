@@ -213,8 +213,8 @@ pub enum Operation<'g> {
         destination: RetainedPlace<'g>,
         inputs: [Place<'g>; 2],
     },
-    /// Stages in formal order, with only the compatible reference inputs
-    /// contributing backing to the destination. The Bool stage carries none.
+    /// `arguments` lists already-staged operands in formal parameter order.
+    /// Only compatible reference inputs contribute backing; the Bool stage carries none.
     CallRetainingWithBool {
         callee: &'g DeclarationId,
         destination: RetainedPlace<'g>,
