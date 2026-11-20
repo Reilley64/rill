@@ -985,6 +985,7 @@ pub(super) struct CancellationTrace<'a, 'g> {
     calls: Vec<Call<'g>>,
     pending: Vec<(Pc, Vec<State>)>,
     known: KnownStates,
+    live: Vec<BTreeSet<Slot>>,
     flat: bool,
     loop_delivery: bool,
 }
@@ -994,7 +995,7 @@ impl<'g> CancellationTrace<'_, 'g> {
     // parameter. Values of locals, arbitrary expressions and call results
     // are not independent choices. The ordinary CFG's one-way edges already
     // exclude branches ruled out by the typed outcomes.
-    fn branch_bit(&self, mut node: NodeId, budget: &mut Budget) -> ResultOf<Option<u64>> {
+    fn branch_parameter(&self, mut node: NodeId, budget: &mut Budget) -> ResultOf<Option<Slot>> {
         use crate::parser::NodeKind;
 
         loop {
@@ -1026,7 +1027,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             return Ok(None);
         }
         let slot = self.bindings[path.root];
-        Ok((slot < u64::BITS as usize).then(|| 1 << slot))
+        Ok((slot < u64::BITS as usize).then_some(slot))
     }
 
     pub(super) fn finish(
@@ -1040,14 +1041,6 @@ impl<'g> CancellationTrace<'_, 'g> {
         let mut complete = self.flat && !unknown_entry;
         let checkpoints = self.loop_delivery || known_entry;
         if !complete && (!checkpoints || self.retained.is_empty()) {
-            return Ok(None);
-        }
-        budget.step(self.slots.len())?;
-        if !self.slots.iter().all(|slot| {
-            slot.projection.is_none()
-                && !slot.needs_boundary_cleanup()
-                && matches!(slot.cleanup, StorageCleanup::End | StorageCleanup::Drop)
-        }) {
             return Ok(None);
         }
         let frame = CancellationFrame {
@@ -1139,13 +1132,22 @@ impl<'g> CancellationTrace<'_, 'g> {
                     )?;
                 }
                 Terminator::Branch { yes, no } => {
-                    let Some(bit) = self.branch_bit(node, budget)? else {
+                    let Some(slot) = self.branch_parameter(node, budget)? else {
                         complete = false;
                         continue;
                     };
+                    let bit = 1u64 << slot;
+                    // The condition has already read its parameter. Preserve that
+                    // decision only if another read is possible, including on a backedge.
+                    budget.step(1)?;
+                    let keep = if self.live[self.pending[block].0].contains(&slot) {
+                        bit
+                    } else {
+                        0
+                    };
                     if yes_bits & bit == 0 {
                         enqueue(
-                            (no, yes_bits, no_bits | bit),
+                            (no, yes_bits, (no_bits & !bit) | keep),
                             &mut visited,
                             &mut pending,
                             budget,
@@ -1153,7 +1155,7 @@ impl<'g> CancellationTrace<'_, 'g> {
                     }
                     if no_bits & bit == 0 {
                         enqueue(
-                            (yes, yes_bits | bit, no_bits),
+                            (yes, (yes_bits & !bit) | keep, no_bits),
                             &mut visited,
                             &mut pending,
                             budget,
@@ -1206,6 +1208,7 @@ impl<'g> CancellationFrame<'_, 'g> {
         if !self.check(state, body, budget)? {
             return Ok(None);
         }
+        budget.reserve(1)?;
         Ok(Some(Cancellation {
             entry_site: site_at(self.module, body),
             on_entry_delivery: self.exit(state, body, budget)?,
@@ -1251,6 +1254,8 @@ impl<'g> CancellationFrame<'_, 'g> {
     ) -> ResultOf<CancellationExit<'g>> {
         let outward = self.retained.iter().next();
         let contents = outward.map(|(_, contents)| contents.slot());
+        // The outward evidence and the live-set member are distinct entries.
+        budget.reserve(usize::from(outward.is_some()))?;
         let retained = outward.map(|(&parameter, contents)| RetainedAtDelivery {
             parameter: self.slots[parameter].place(self.module),
             last_store: match &state[contents.slot()] {
@@ -1307,7 +1312,7 @@ pub(super) fn run<'a, 'g>(
     active: Option<DisposerFrame>,
     check_cancellation: bool,
 ) -> ResultOf<(Mir<'g>, Option<CancellationTrace<'a, 'g>>)> {
-    let candidate = check_cancellation
+    let mut candidate = check_cancellation
         && build.module.key.origin == crate::loader::Origin::Application
         && !build.retains_exclusive_bool
         && build.retained.len() <= 1
@@ -1364,7 +1369,16 @@ pub(super) fn run<'a, 'g>(
     };
     // A worklist index is also the eventual MIR block index.
     budget.reserve(slots.len())?;
-    let mut state = vec![State::Vacant; slots.len()];
+    let mut state: Vec<_> = slots
+        .iter()
+        .map(|slot| {
+            candidate = candidate
+                && slot.projection.is_none()
+                && !slot.needs_boundary_cleanup()
+                && matches!(slot.cleanup, StorageCleanup::End | StorageCleanup::Drop);
+            State::Vacant
+        })
+        .collect();
     for &slot in &params {
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
@@ -2373,6 +2387,7 @@ pub(super) fn run<'a, 'g>(
         calls,
         pending,
         known,
+        live,
         flat,
         loop_delivery,
     });

@@ -341,6 +341,94 @@ function caller(enter: bool): void {
     );
 }
 
+#[test]
+fn aggregate_outside_cancellation_keeps_ordinary_budget() {
+    probe_with_typed(
+        "cancellation::aggregate_outside_cancellation_keeps_ordinary_budget",
+        "function tupleOnly(pair: [bool, bool]): void {}\n",
+        |_, module, receipt, _| {
+            // Both are the measured ordinary limits for this capture at 0fbf765.
+            let limits = AnalysisLimits {
+                max_work: 2273,
+                max_entries: 108,
+                ..Default::default()
+            };
+            let report = lower_body(
+                receipt,
+                module,
+                &declaration(module, "tupleOnly").id,
+                limits,
+            )
+            .unwrap();
+            assert_eq!(report.completion(), Completion::Checked);
+            assert!(report.mir().unwrap().cancellation().is_none());
+        },
+    );
+}
+
+#[test]
+fn empty_entry_proof_costs_an_entry() {
+    probe_with_typed(
+        "cancellation::empty_entry_proof_costs_an_entry",
+        "function leaf(): void {}\n",
+        |_, module, receipt, _| {
+            let report = query(receipt, module, "leaf");
+            assert!(report.mir().unwrap().cancellation().is_some());
+            // Without the entry proof the ordinary result occupied nine entries.
+            let limits = AnalysisLimits {
+                max_entries: 9,
+                ..Default::default()
+            };
+            let short =
+                lower_body(receipt, module, &declaration(module, "leaf").id, limits).unwrap();
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
+        },
+    );
+}
+
+#[test]
+fn independent_conditions_reconverge_before_callee_entry() {
+    probe_with_typed(
+        "cancellation::independent_conditions_reconverge_before_callee_entry",
+        r#"function leaf(): void {}
+function diamonds8(b0: bool, b1: bool, b2: bool, b3: bool, b4: bool, b5: bool, b6: bool, b7: bool): void {
+    if (b0) {}
+    if (b1) {}
+    if (b2) {}
+    if (b3) {}
+    if (b4) {}
+    if (b5) {}
+    if (b6) {}
+    if (b7) {}
+    leaf();
+}
+"#,
+        |_, module, receipt, _| {
+            let limits = AnalysisLimits {
+                max_entries: 2000,
+                ..Default::default()
+            };
+            let report = lower_body(
+                receipt,
+                module,
+                &declaration(module, "diamonds8").id,
+                limits,
+            )
+            .unwrap();
+            assert_eq!(report.completion(), Completion::Checked);
+            let mir = report.mir().unwrap();
+            let proof = mir.cancellation().unwrap();
+            let entries: Vec<_> = (0..mir.blocks.len())
+                .filter_map(|i| proof.successor(i))
+                .collect();
+            assert!(
+                matches!(entries.as_slice(), [CancellationSuccessor::CalleeEntry { callee, .. }] if **callee == declaration(module, "leaf").id)
+            );
+        },
+    );
+}
+
 fn declaration<'g>(module: &'g loader::Module, name: &str) -> &'g loader::Declaration {
     module
         .declarations
