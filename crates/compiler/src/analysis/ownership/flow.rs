@@ -115,7 +115,9 @@ fn liveness(
             | Action::Dereference { from, into } => {
                 use_one(Some(slots[from].carried_loan_root(from)), into)
             }
-            Action::ForbiddenBorrowedMove(slot) => use_one(Some(slot), None),
+            Action::CheckRebuild { base, .. }
+            | Action::UnloweredRebuildRead(base)
+            | Action::ForbiddenBorrowedMove(base) => use_one(Some(base), None),
             Action::Borrow { from, into, .. } => use_one(Some(from), Some(into)),
             Action::BindBorrowedMember {
                 descriptor, into, ..
@@ -941,6 +943,40 @@ pub(super) fn run<'g>(
                             into: into.map(local),
                         }
                     }
+                }
+                Action::CheckRebuild { base, staged } => {
+                    budget.step(1)?;
+                    initialized(&state[base], node)?;
+                    if let Some((first, count)) = staged {
+                        // A live root with a hole is outside this slice, not a
+                        // rejected use of an omitted field or permission to repair it.
+                        let region = slots[base].storage(base);
+                        budget.step(region.len() + count)?;
+                        for member in region.chain(first..first + count) {
+                            if !matches!(&state[member], State::Initialized(held)
+                                if held.loans.is_empty() && held.exact_target.is_none())
+                            {
+                                return Err(Stop::Pending(node));
+                            }
+                        }
+                        forbid_active_escape(&state[base], node)?;
+                        // Check the entire owner before any original field is retired.
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            base,
+                            (node, Conflict::Release),
+                            Access::Exclusive,
+                            budget,
+                        )?;
+                    }
+                    Operation::None
+                }
+                Action::UnloweredRebuildRead(source) => {
+                    budget.step(1)?;
+                    initialized(&state[source], node)?;
+                    return Err(Stop::Pending(node));
                 }
                 Action::TestVariant { operand, success } => {
                     initialized(&state[operand], node)?;

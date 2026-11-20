@@ -1,6 +1,259 @@
 use super::*;
 
 #[test]
+fn custom_record_rebuild() {
+    use compiler::analysis::{DeclarationShape, ownership::Place, scalars::NodeFactKind};
+    use compiler::parser::NodeKind;
+
+    let mut failures = Vec::new();
+    probe_with_typed(
+        "disposers::custom_record_rebuild",
+        r#"
+            import std::core::dispose as release;
+            type Custom = { keep: string; mark: bool; last: string; }
+            implement release(value: Custom): void { dispose(value.last); }
+            function select(value: Custom): void { release(value); }
+            function rebuilt(base: Custom, replacement: string, before: string, after: string): void {
+                {
+                    let saved = Custom { ...base, last: replacement, mark: base.mark };
+                    dispose(before);
+                }
+                dispose(after);
+            }
+            function reused(base: Custom, replacement: string, before: string, after: string): void {
+                {
+                    let saved = Custom { ...base, last: replacement, mark: base.mark };
+                    let taken = base.keep;
+                    dispose(before);
+                }
+                dispose(after);
+            }
+            type Plain = { keep: string; mark: bool; last: string; }
+            function repair(base: Plain, replacement: string): void {
+                let taken = base.last;
+                let saved = Plain { ...base, last: replacement, mark: base.mark };
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            let alias_call = module
+                .syntax
+                .nodes
+                .iter()
+                .position(|node| {
+                    node.kind == NodeKind::Call && node.span.bytes() == b"release(value)"
+                })
+                .unwrap();
+            let NodeFactKind::Expression(alias) = &typed
+                .bodies()
+                .node(module, alias_call)
+                .unwrap()
+                .unwrap()
+                .kind
+            else {
+                panic!("expected the typed alias call");
+            };
+            let alias = alias.call.as_deref().unwrap();
+            let canonical = &typed.dispose_role().unwrap().id;
+            assert_eq!(alias.callee, canonical);
+            let selected = alias.selection.as_ref().unwrap().implementation;
+
+            let record = typed
+                .inventory()
+                .type_facts()
+                .declarations()
+                .find(|facts| {
+                    facts.declaration.id.module == module.key
+                        && facts.declaration.name.as_deref() == Some("Custom")
+                })
+                .unwrap();
+            let DeclarationShape::Record { fields } = &record.shape else {
+                panic!("expected the checked Custom fields");
+            };
+            let field = |name| {
+                &fields
+                    .iter()
+                    .find(|member| member.declaration.name.as_deref() == Some(name))
+                    .unwrap()
+                    .declaration
+                    .id
+            };
+            let (keep, mark, last) = (field("keep"), field("mark"), field("last"));
+            let is_root = |place: &Place<'_>, bytes: &[u8]| {
+                place.root.module == &module.key
+                    && place.root.span.bytes() == bytes
+                    && place.projection.is_none()
+            };
+            let same_root = |a: &Place<'_>, b: &Place<'_>| {
+                a.root.module == b.root.module && a.root.node == b.root.node
+            };
+            let check_disposer = |mir: &Mir<'_>| {
+                let active = mir
+                    .disposer(selected)
+                    .expect("selected custom disposer body");
+                let effects = rebuild_effects(active);
+                let [Operation::Dispose { callee, operand }, _] = effects.as_slice() else {
+                    panic!("expected explicit disposal followed by remaining-field cleanup");
+                };
+                assert_eq!(*callee, canonical);
+                assert_eq!(operand.root.span.bytes(), b"value: Custom");
+                assert_eq!(operand.field().map(|f| &f.id), Some(last));
+                assert!(
+                    matches!(path_drops(active, active.entry).as_slice(), [Obligation::Drop(place)]
+                    if place.field().is_some_and(|f| &f.id == keep))
+                );
+            };
+            let control = lower("select");
+            let control = control
+                .mir()
+                .expect("ordinary canonical custom disposal must lower");
+            assert!(matches!(path_drops(control, control.entry).as_slice(),
+                [Obligation::InvokeDisposer { operand, implementation }]
+                    if is_root(operand, b"value: Custom") && *implementation == selected));
+            check_disposer(control);
+
+            // A partially moved plain base avoids the separate restriction on moving
+            // a field out of an ordinary custom owner. Repair is not a checked slice.
+            let repair = lower("repair");
+            assert_eq!(repair.completion(), Completion::Incomplete);
+            assert!(repair.findings().is_empty() && repair.mir().is_none());
+
+            for (name, expected) in [
+                ("rebuilt", Completion::Checked),
+                ("reused", Completion::SourceRejected),
+            ] {
+                let report = lower(name);
+                if report.completion() != expected {
+                    failures.push(format!(
+                        "test_mode={}, {name}: M4 receipt issued; expected {expected:?}, got {:?} at {:?}; MIR={}, findings={}",
+                        request.test_mode,
+                        report.completion(),
+                        report.blocked_at().map(|site| site.span.bytes().escape_ascii().to_string()),
+                        report.mir().is_some(),
+                        report.findings().len(),
+                    ));
+                    continue;
+                }
+                if name == "reused" {
+                    assert!(report.mir().is_none());
+                    let [finding] = report.findings() else {
+                        panic!("expected one moved-field finding");
+                    };
+                    assert_eq!(finding.code(), "R0200");
+                    assert_eq!(finding.site.span.bytes(), b"base.keep");
+                    continue;
+                }
+
+                let mir = report.mir().expect("rebuild MIR");
+                let effects = rebuild_effects(mir);
+                // A whole-region handoff carries keep; there is no separate field
+                // read, initialization, or cleanup of keep on this path.
+                let [
+                    Operation::Move {
+                        from: replacement,
+                        into: Some(last_stage),
+                    },
+                    Operation::Copy {
+                        from: original_mark,
+                        into: Some(mark_stage),
+                    },
+                    _, // old last drop
+                    Operation::Install {
+                        target: last_target,
+                        incoming: new_last,
+                    },
+                    Operation::Install {
+                        target: mark_target,
+                        incoming: new_mark,
+                    },
+                    Operation::Move {
+                        from: base,
+                        into: Some(saved),
+                    },
+                    Operation::Dispose {
+                        operand: before, ..
+                    },
+                    _, // lexical exit of saved
+                    Operation::Dispose { operand: after, .. },
+                ] = effects.as_slice()
+                else {
+                    panic!(
+                        "expected written-order staging, displacement, handoff, then scope exit"
+                    );
+                };
+                assert!(is_root(replacement, b"replacement: string"));
+                assert!(is_root(base, b"base: Custom") && is_root(saved, b"saved"));
+                assert!(!same_root(last_stage, mark_stage));
+                for stage in [last_stage, mark_stage] {
+                    assert!(stage.projection.is_none());
+                    assert!(
+                        [replacement, base, saved]
+                            .iter()
+                            .all(|root| !same_root(stage, root))
+                    );
+                }
+                for (place, id) in [
+                    (original_mark, mark),
+                    (last_target, last),
+                    (mark_target, mark),
+                ] {
+                    assert!(same_root(place, base));
+                    assert_eq!(place.field().map(|f| &f.id), Some(id));
+                }
+                assert!(new_last.projection.is_none() && same_root(new_last, last_stage));
+                assert!(new_mark.projection.is_none() && same_root(new_mark, mark_stage));
+                assert!(is_root(before, b"before: string") && is_root(after, b"after: string"));
+
+                let cleanup = path_drops(mir, mir.entry);
+                let [
+                    Obligation::Drop(old),
+                    Obligation::InvokeDisposer {
+                        operand,
+                        implementation,
+                    },
+                ] = cleanup.as_slice()
+                else {
+                    panic!("expected only the old last drop and the rebuilt owner's disposer");
+                };
+                assert!(same_root(old, base) && old.field().is_some_and(|f| &f.id == last));
+                assert!(same_root(operand, saved) && operand.projection.is_none());
+                assert_eq!(*implementation, selected);
+                check_disposer(mir);
+            }
+        },
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn rebuild_effects<'a, 'g>(mir: &'a Mir<'g>) -> Vec<&'a Operation<'g>> {
+    linear(mir, mir.entry)
+        .into_iter()
+        .filter(|op| match op {
+            Operation::Move { .. }
+            | Operation::Copy { .. }
+            | Operation::Install { .. }
+            | Operation::Dispose { .. }
+            | Operation::Drop(_) => true,
+            Operation::Initialize(place) => place.projection.is_some(),
+            Operation::Cleanup(actions) => actions.iter().any(|action| {
+                matches!(
+                    action,
+                    Obligation::Drop(_) | Obligation::InvokeDisposer { .. }
+                )
+            }),
+            _ => false,
+        })
+        .collect()
+}
+
+#[test]
 fn protected_guard_cleanup_follows_the_initialized_owner() {
     probe_with_typed(
         "disposers::protected_guard_cleanup_follows_the_initialized_owner",

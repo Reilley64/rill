@@ -34,6 +34,7 @@ enum ExpressionProof<'t, 'g> {
     NestedTupleSource(Slot),
     NamedNestedTupleLeaf,
     NestedRecordConstruction,
+    NamedRecordRebuild,
     NestedRecordFieldTemporary(ProjectedTemporary),
 }
 
@@ -1395,17 +1396,24 @@ impl<'a, 'g> Build<'a, 'g> {
                             );
                         }
                         self.budget.step(1)?;
-                        if self.module.syntax.nodes[initializer].kind == NodeKind::Construction
-                            && let Some(entry) = self.initialize_propagating_record(
+                        if self.module.syntax.nodes[initializer].kind == NodeKind::Construction {
+                            if let Some(entry) = self.initialize_propagating_record(
                                 value,
                                 initializer,
                                 into,
                                 next,
                                 exits.returning,
                                 depth + 1,
-                            )?
-                        {
-                            return Ok(entry);
+                            )? {
+                                return Ok(entry);
+                            }
+                            return self.expression_with_proof(
+                                value,
+                                Some(into),
+                                next,
+                                depth + 1,
+                                Some(ExpressionProof::NamedRecordRebuild),
+                            );
                         }
                         let temporary = self.temporary_projection(initializer, false)?;
                         let tail = if let Some(temp) = temporary {
@@ -3368,8 +3376,14 @@ impl<'a, 'g> Build<'a, 'g> {
                 let Some(DataExpression::Construction(data)) = facts.data.as_ref() else {
                     return Err(Stop::Pending(node));
                 };
-                if data.base.is_some() || !data.arguments.is_empty() {
+                if !data.arguments.is_empty() {
                     return Err(Stop::Pending(node));
+                }
+                if let Some(base) = data.base {
+                    if !matches!(proof, Some(ExpressionProof::NamedRecordRebuild)) {
+                        return Err(Stop::Pending(node));
+                    }
+                    return self.rebuild_record(node, data, base, into, next, depth + 1);
                 }
                 let nested = matches!(proof, Some(ExpressionProof::NestedRecordConstruction));
                 if nested {
@@ -3402,6 +3416,124 @@ impl<'a, 'g> Build<'a, 'g> {
             _ => return Err(Stop::Pending(node)),
         };
         self.emit(node, action, Edges::Next(next))
+    }
+
+    fn rebuild_record(
+        &mut self,
+        node: NodeId,
+        data: &Construction<'g>,
+        base: NodeId,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let fields = self.record_fields(&data.ty)?.ok_or(Stop::Pending(node))?;
+        let (input, path) = self
+            .whole_named_owned_place(base)?
+            .ok_or(Stop::Pending(node))?;
+        let from = self.resolve_place(base, path)?;
+        self.budget.step(3 + fields.len())?;
+        if input.ty != data.ty
+            || !self.slots[from].moves
+            || self.slots[from].members != fields.len()
+            || self.slots[into].members != fields.len()
+            || !fields
+                .iter()
+                .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(_)))
+        {
+            return Err(Stop::Pending(node));
+        }
+
+        self.budget.reserve(data.fields.len())?;
+        let mut replacements = Vec::with_capacity(data.fields.len());
+        let first_stage = self.slots.len();
+        let mut observable = false;
+        for field in &data.fields {
+            let value = self.ungroup(field.expression)?;
+            self.budget.step(3)?;
+            let facts = self.value(value)?;
+            if !matches!(facts.ty.as_ref(), TypeTerm::Primitive(_)) || facts.access != Access::Owned
+            {
+                return Err(Stop::Pending(value));
+            }
+            let unlowered_read = match self.module.syntax.nodes[value].kind {
+                NodeKind::Literal | NodeKind::ValueReference => None,
+                NodeKind::Field => {
+                    let Some(source) = &facts.path else {
+                        return Err(Stop::Pending(value));
+                    };
+                    let [PathProjection::Field(member)] = source.projections.as_slice() else {
+                        return Err(Stop::Pending(value));
+                    };
+                    if source.root != path.root {
+                        return Err(Stop::Pending(value));
+                    }
+                    // Check the read before blocking an operand that would open
+                    // a hole in the base. Do not actually move the original field.
+                    owns_text(&facts.ty)
+                        .then(|| self.field(value, from, member).map(|slot| (value, slot)))
+                        .transpose()?
+                }
+                _ => return Err(Stop::Pending(value)),
+            };
+            let target = self.field(node, from, &field.field.id)?;
+            // The scoped witness does not settle ordering several observable disposals.
+            if self.slots[target].moves && std::mem::replace(&mut observable, true) {
+                return Err(Stop::Pending(node));
+            }
+            let incoming = self.slot(field.expression, &facts.ty)?;
+            replacements.push((field.expression, target, incoming, unlowered_read));
+        }
+
+        // Commit on the original place, then transfer the completed owner.
+        let mut tail = self.emit(
+            node,
+            Action::Move {
+                from,
+                into: Some(into),
+            },
+            Edges::Next(next),
+        )?;
+        for &(_, target, incoming, _) in replacements.iter().rev() {
+            tail = self.emit(
+                node,
+                Action::Install { target, incoming },
+                Edges::Next(tail),
+            )?;
+            tail = self.emit(
+                node,
+                Action::Displace { target, incoming },
+                Edges::Next(tail),
+            )?;
+        }
+        tail = self.emit(
+            node,
+            Action::CheckRebuild {
+                base: from,
+                staged: Some((first_stage, replacements.len())),
+            },
+            Edges::Next(tail),
+        )?;
+        for (value, _, incoming, unlowered_read) in replacements.into_iter().rev() {
+            tail = if let Some((site, source)) = unlowered_read {
+                self.depth(depth)?;
+                self.emit(
+                    site,
+                    Action::UnloweredRebuildRead(source),
+                    Edges::Next(tail),
+                )?
+            } else {
+                self.expression(value, Some(incoming), tail, depth)?
+            };
+        }
+        self.emit(
+            base,
+            Action::CheckRebuild {
+                base: from,
+                staged: None,
+            },
+            Edges::Next(tail),
+        )
     }
 
     fn check_nested_record_fields(
