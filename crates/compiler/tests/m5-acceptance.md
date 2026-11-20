@@ -1325,6 +1325,14 @@ Review found that admitting the local storage had also admitted returned List ba
 
 The ordinary two-job fixture has an M4 receipt but stops at the M5 call. A standalone pair of List-reading arrows still stops at M4 `Containment`. The canonical shared and erased join fixtures still fail to import `std::routine::join` (`R0400`). This local proof supplies no child-frame, index-read, cancellation, completion or execution evidence.
 
+## Reading a scalar through a shared List view
+
+At `3f397ec`, [`installed_shared_list_literal_reads`](m5/scoped_jobs.rs) verifies a bounds-checked read from a **local** `List<i32>` backing. The typed bracket expression identifies the canonical List and a `u64` literal. The MIR operation `ReadListI32` identifies the actual view, its backing, the linked index provider and the element representation. It is not a call to `get`: only a successful read initializes the copied `i32` and reaches the normal successor. An out-of-bounds index is fatal, not `None`. The checker does not claim that a literal is in bounds when the List length is unknown.
+
+In both modes, `view[0u64]`, `(&numbers)[0u64]` and `(&numbers)[1u64]` produce ordinary MIR through both the targeted and graph queries. Parentheses around a literal selector preserve the read; each group counts toward depth. A temporary shared view ends after the read and before the List is cleaned. Releasing the backing with a future read gives `R0203`; borrowing the already-released owner gives `R0200`. Neither publishes MIR. `u64::MAX` remains a full-width index; a literal above it has no M4 receipt.
+
+In the staged three-function fixture, the second read checks at 2,572 work / 343 entries / depth 6. The installed tests also check independently one-short work, entry and depth limits. Dynamic selectors, incoming shared descriptors with unknown backing, and exclusive descriptors remain `Incomplete` without MIR and fit the pre-change caps. The ordinary two-job call still stops at the call, not the index: its arrow environments have not been checked in M5. Thirteen focused M5 tests, the installed M4 ownership regression, and one Rust backing bounds test passed. The last is not a Rill or scheduler run. No child completion, cancellation, or `std::routine::join` provider is admitted.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
