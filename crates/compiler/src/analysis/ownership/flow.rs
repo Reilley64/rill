@@ -1748,8 +1748,7 @@ pub(super) fn run<'a, 'g>(
         } = code[pc];
         let site = site_at(module, node);
         let local = |slot: Slot| slots[slot].place(module);
-        // Constant-size admission tagging at an already charged ordinary
-        // state visit. No graph walk or allocation on behalf of cancellation.
+        // Tag reached sites during the ordinary visit without a second walk.
         if candidate {
             flat &= flat_action(action, &slots);
             loop_delivery |= matches!(action, Action::BudgetBackedge);
@@ -1757,7 +1756,15 @@ pub(super) fn run<'a, 'g>(
             if let Action::Call(index) = action {
                 calls_reached += 1;
                 call_block = Some(blocks.len());
-                flat &= !return_contract.is_some_and(|(id, _)| calls[index].callee == id);
+                if let Some((id, _)) = return_contract {
+                    let callee = calls[index].callee;
+                    if callee.start == id.start && callee.kind == id.kind {
+                        if indexed_facts.is_some() {
+                            budget.step(id.module.path.len().checked_add(1).ok_or(Stop::Limit)?)?;
+                        }
+                        flat &= callee != id;
+                    }
+                }
             }
         }
         let operation = (|| -> ResultOf<_> {

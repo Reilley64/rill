@@ -656,11 +656,11 @@ fn check_enabled_frames<'g>(
             continue;
         };
         let item = &work[index];
-        if item.ordinary_completion != Completion::Checked {
-            continue;
-        }
+        // A missing ordinary premise prevents proof publication, but a known
+        // earlier checkpoint can still expose an invalid outward store.
+        let ordinary_checked = item.ordinary_completion == Completion::Checked;
         let mut known_entry = false;
-        let mut unknown_entry = false;
+        let mut unknown_entry = !ordinary_checked;
         for &target in item.call_targets.values() {
             budget.step(1)?;
             known_entry |= work[target].empty_entry.is_some();
@@ -698,11 +698,13 @@ fn check_enabled_frames<'g>(
                     finding_id,
                     via_call: None,
                 };
-                work[index].retaining_parameters = trace.retaining_parameters();
+                if ordinary_checked {
+                    work[index].retaining_parameters = trace.retaining_parameters();
+                }
             }
             Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => {}
         }
-        if trace.retaining_call_block().is_some() {
+        if ordinary_checked && trace.retaining_call_block().is_some() {
             work[index].trace = Some(trace);
         }
     }

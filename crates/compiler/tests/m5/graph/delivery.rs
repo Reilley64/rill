@@ -209,6 +209,70 @@ fn installed_selected_delivery_and_unresolved_contexts() {
 }
 
 #[test]
+fn independent_delivery_rejection_survives_an_unresolved_ordinary_edge() {
+    probe_with_typed(
+        "graph::delivery::independent_delivery_rejection_survives_an_unresolved_ordinary_edge",
+        r#"
+function leaf(): void {}
+function pending(): void { let text = "owned"; dispose(text); }
+function before(slot: &mut &bool, input: &bool): void {
+    let flag = true;
+    *slot = &flag;
+    leaf();
+    *slot = input;
+    pending();
+}
+function beyond(slot: &mut &bool, input: &bool): void {
+    let flag = true;
+    *slot = &flag;
+    pending();
+    leaf();
+    *slot = input;
+}
+"#,
+        |_, module, receipt, _| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(report.completion(), GraphCompletion::SourceRejected);
+            let [finding] = report.findings() else {
+                panic!("expected only the independent exit")
+            };
+            let early = root(&report, b"function before(");
+            let late = root(&report, b"function beyond(");
+            for body in [early, late] {
+                assert_eq!(body.ordinary_completion(), Completion::Incomplete);
+                assert_eq!(body.blocked_at().unwrap().span.bytes(), b"dispose(text)");
+                assert!(body.mir().is_none() && body.ordinary_mir().is_none());
+                assert!(matches!(body.selected_call(), Delivery::Unresolved));
+            }
+            assert_eq!(early.completion(), Completion::SourceRejected);
+            assert!(matches!(
+                early.enabled_frame(),
+                Delivery::Rejected {
+                    finding_id: 0,
+                    via_call: None
+                }
+            ));
+            assert_eq!(late.completion(), Completion::Incomplete);
+            assert!(matches!(late.enabled_frame(), Delivery::Unresolved));
+            assert_eq!(finding.code(), "R0202");
+            let edge = finding.cancellation_delivery.unwrap();
+            for (site, spelling) in [
+                (finding.site, b"*slot = &flag;".as_slice()),
+                (finding.related, b"&flag"),
+                (edge, b"leaf()"),
+            ] {
+                assert_eq!(site.module, &module.key);
+                assert_eq!(site.span.bytes(), spelling);
+                assert!(
+                    early.site().span.start() <= site.span.start()
+                        && site.span.end() <= early.site().span.end()
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn good_only_graph_needs_the_complete_work_entry_and_depth_budget() {
     probe_with_typed(
         "graph::delivery::good_only_graph_needs_the_complete_work_entry_and_depth_budget",
