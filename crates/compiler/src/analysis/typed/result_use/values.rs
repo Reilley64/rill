@@ -267,6 +267,22 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
+    pub(super) fn value_root_at(
+        &mut self,
+        mut node: NodeId,
+        mut depth: usize,
+    ) -> Work<(NodeId, usize)> {
+        loop {
+            self.depth(depth)?;
+            let syntax = &self.module.syntax.nodes[node];
+            if syntax.kind != NodeKind::Group {
+                return Ok((node, depth));
+            }
+            node = syntax.children[0];
+            depth += 1;
+        }
+    }
+
     pub(super) fn ungroup_value(&mut self, node: NodeId) -> Work<NodeId> {
         ungroup(self.module, node, self.budget)
     }

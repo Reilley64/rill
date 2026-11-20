@@ -37,34 +37,18 @@ pub(super) struct ReferencePlan<'g> {
 }
 
 impl<'a, 'g> Check<'a, 'g> {
-    pub(super) fn reference_root(
-        &mut self,
-        mut node: NodeId,
-        mut depth: usize,
-    ) -> Work<(NodeId, usize)> {
-        loop {
-            self.depth(depth)?;
-            let syntax = &self.module.syntax.nodes[node];
-            if syntax.kind != NodeKind::Group {
-                return Ok((node, depth));
-            }
-            node = syntax.children[0];
-            depth += 1;
-        }
-    }
-
     pub(super) fn reference_shape(
         &mut self,
         element: NodeId,
         depth: usize,
     ) -> Work<Option<ReferenceShape>> {
-        let (origin, arrow_depth) = self.reference_root(element, depth)?;
+        let (origin, arrow_depth) = self.value_root_at(element, depth)?;
         let nodes = &self.module.syntax.nodes;
         if nodes[origin].kind != NodeKind::Arrow {
             return Ok(None);
         }
         let body = nodes[origin].children[1];
-        let (root, body_depth) = self.reference_root(body, arrow_depth + 1)?;
+        let (root, body_depth) = self.value_root_at(body, arrow_depth + 1)?;
         let (expression, source) = match nodes[root].kind {
             NodeKind::ValueReference => (body, ReferenceSource::Incoming { value: root }),
             NodeKind::Block => {
@@ -83,8 +67,8 @@ impl<'a, 'g> Check<'a, 'g> {
                 ) else {
                     return Ok(None);
                 };
-                let (borrowed, borrow_depth) = self.reference_root(*expression, body_depth + 2)?;
-                let (init, _) = self.reference_root(*initializer, body_depth + 2)?;
+                let (borrowed, borrow_depth) = self.value_root_at(*expression, body_depth + 2)?;
+                let (init, _) = self.value_root_at(*initializer, body_depth + 2)?;
                 if nodes[*name].kind != NodeKind::NamePattern
                     || nodes[init].kind != NodeKind::Literal
                     || nodes[borrowed].kind != NodeKind::Prefix("&")
@@ -92,7 +76,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     return Ok(None);
                 };
                 let (operand, _) =
-                    self.reference_root(nodes[borrowed].children[0], borrow_depth + 1)?;
+                    self.value_root_at(nodes[borrowed].children[0], borrow_depth + 1)?;
                 if nodes[operand].kind != NodeKind::ValueReference {
                     return Ok(None);
                 };

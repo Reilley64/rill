@@ -2036,6 +2036,58 @@ function ordered(input: List<i32>): [i32, bool] {
 }
 "#;
 
+#[test]
+fn unsupported_comparison_operands_keep_their_old_typed_budgets() {
+    installed(
+        "scoped_join::unsupported_comparison_operands_keep_their_old_typed_budgets",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            // Exact a1f4db7 caps on the original result-order capture, changing
+            // only the Boolean child's displayed expression.
+            for (expr, max_work, max_entries, max_depth) in [
+                ("29i32 == (&numbers)[1u64]", 490624, 56179, 12),
+                ("((29i32)) == (((&numbers)[1u64]))", 491529, 56271, 14),
+                ("(&numbers)[1u64] == (2i32+27i32)", 491173, 56245, 12),
+                ("((&numbers)[1u64]+0i32) == 29i32", 491178, 56245, 14),
+            ] {
+                fs::write(
+                    &request.entry,
+                    format!(
+                        "{BASE}{}",
+                        ORDERED.replace("(&numbers)[1u64] == 29i32", expr)
+                    ),
+                )
+                .unwrap();
+                for test_mode in [false, true] {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let report = analyze_typed(
+                        &graph,
+                        AnalysisLimits {
+                            max_work,
+                            max_entries,
+                            max_depth,
+                        },
+                    );
+                    assert_eq!(report.completion(), TypedCompletion::Incomplete, "{expr}");
+                    assert!(report.receipt().is_none());
+                    assert!(
+                        report
+                            .result_use()
+                            .unwrap()
+                            .pending()
+                            .iter()
+                            .any(|p| p.blocker == ResultUseBlocker::CallBoundary)
+                    );
+                }
+            }
+        },
+    );
+}
+
 fn prove_ordered_join(
     mir: &Mir<'_>,
     node: usize,
@@ -2140,6 +2192,53 @@ fn prove_ordered_join(
             );
         }
     }
+}
+
+#[test]
+fn grouped_list_comparison_preserves_the_checked_operands() {
+    use compiler::analysis::ownership::analyze_ownership;
+    let source = ORDERED.replace(
+        "() => (&numbers)[1u64] == 29i32",
+        "(() => { return (( ((&numbers)[((1u64))]) == (((29i32))) )); })",
+    );
+    probe_with_typed(
+        "scoped_join::grouped_list_comparison_preserves_the_checked_operands",
+        &source,
+        |_, module, receipt, typed| {
+            let d = &module.declarations[named(module, "ordered")];
+            let call = call_node(module, "join([");
+            let role = typed.routine_role().unwrap();
+            let local = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let root = graph
+                .roots()
+                .iter()
+                .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                .unwrap();
+            for mir in [local.mir().unwrap(), root.mir().unwrap()] {
+                prove_ordered_join(
+                    mir,
+                    call,
+                    [&role.family.id, &role.implementation.id, &role.bridge.id],
+                    [(0, "numbers"), (1, "numbers")],
+                    29,
+                );
+            }
+            let s = local.statistics();
+            let short = lower_body(
+                receipt,
+                module,
+                &d.id,
+                AnalysisLimits {
+                    max_depth: s.max_depth - 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
+        },
+    );
 }
 
 #[test]
