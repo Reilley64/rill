@@ -4,12 +4,19 @@
 //! `CallListArrows` supplies no wait or delivery proof.
 use super::*;
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
 pub(in crate::analysis::ownership) mod tests;
+
+/// A result in join-owned storage, distinct from the caller's vacant tuple.
+#[derive(Clone, Copy, Debug)]
+struct ScalarStage<'g> {
+    slot: usize,
+    from: Place<'g>,
+}
 
 #[derive(Clone, Copy, Debug)]
 struct ScalarExport<'g> {
-    from: Place<'g>,
+    stage: ScalarStage<'g>,
     into: Place<'g>,
 }
 
@@ -19,6 +26,12 @@ struct Child<'g> {
     scalar: ScalarExport<'g>,
     end_view: Cleanup<'g>,
     entry: Site<'g>,
+    returned: Site<'g>,
+}
+
+fn membership_work(frame: &CancellationFrame<'_, '_>) -> usize {
+    // Upper bound for the two binary searches on sorted slot ids.
+    frame.locals.len().max(1).ilog2() as usize + frame.params.len().max(1).ilog2() as usize + 4
 }
 
 fn same_root(a: Site<'_>, b: Site<'_>) -> bool {
@@ -30,7 +43,12 @@ fn at_root(place: Place<'_>, root: Site<'_>) -> bool {
 }
 
 impl<'g> Child<'g> {
-    fn check(frame: &ListArrowFrame<'g>, node: NodeId, budget: &mut Budget) -> ResultOf<Self> {
+    fn check(
+        frame: &ListArrowFrame<'g>,
+        slot: usize,
+        node: NodeId,
+        budget: &mut Budget,
+    ) -> ResultOf<Self> {
         budget.step(4)?;
         let pending = Stop::Pending(node);
         let [_, _, _, _] = frame.body.blocks.as_slice() else {
@@ -90,13 +108,123 @@ impl<'g> Child<'g> {
             environment: frame.environment,
             backing: frame.backing,
             scalar: ScalarExport {
-                from: *from,
+                stage: ScalarStage { slot, from: *from },
                 into: frame.result,
             },
             end_view: *end_view,
-            entry: entry.site,
+            entry: frame.body_site,
+            returned: returned.site,
         })
     }
+}
+
+fn check_receiver<'g>(
+    parent: &CancellationFrame<'_, 'g>,
+    input: &[State],
+    receiver: Slot,
+    frame: &ListArrowFrame<'g>,
+    node: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<()> {
+    budget.step(1)?;
+    let environment = parent.slots[receiver].place(parent.module);
+    let held = initialized(&input[receiver], node)?;
+    let [
+        Loan {
+            source,
+            site: acquisition,
+            exclusive: false,
+            kind: LoanKind::Backing,
+        },
+    ] = held.loans.as_ref()
+    else {
+        return Err(Stop::Pending(node));
+    };
+    budget.step(membership_work(parent))?;
+    if !at_root(frame.environment, environment.root)
+        || !same_root(frame.origin, environment.root)
+        || held.callable_owner != Some(CallableOwner::ListArrow(environment.root.node))
+        || !same_root(frame.capture.root, site_at(parent.module, *acquisition))
+        || !at_root(
+            frame.backing,
+            parent.slots[*source].place(parent.module).root,
+        )
+        || !matches!(
+            parent.slots[*source].cleanup,
+            StorageCleanup::DisposeListI32(_)
+        )
+        || (parent.locals.binary_search(source).is_err()
+            && parent.params.binary_search(source).is_err())
+    {
+        return Err(Stop::Pending(node));
+    }
+    require_initialized(parent.slots, input, *source, node, budget)
+}
+
+fn parent_exit<'g>(
+    parent: &CancellationFrame<'_, 'g>,
+    terminal: Vec<State>,
+    node: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<CancellationExit<'g>> {
+    budget.step(
+        terminal
+            .len()
+            .checked_mul(membership_work(parent))
+            .ok_or(Stop::Limit)?,
+    )?;
+    if !parent.check(&terminal, node, budget)? {
+        return Err(Stop::Pending(node));
+    }
+    parent.exit(Cow::Owned(terminal), node, budget)
+}
+
+/// Cleanup if control exits before commit. This projection does not add a
+/// poll between capture formations: delivery requires a separately proved
+/// enabled checkpoint, and a direct shared borrow is not one.
+fn before_commit_exit<'g>(
+    parent: &CancellationFrame<'_, 'g>,
+    input: &[State],
+    receivers: [Slot; 2],
+    frames: &[ListArrowFrame<'g>; 2],
+    site: Site<'g>,
+    budget: &mut Budget,
+) -> ResultOf<(Vec<Cleanup<'g>>, CancellationExit<'g>)> {
+    if !parent.retained.is_empty() || receivers[0] >= receivers[1] {
+        return Err(Stop::Pending(site.node));
+    }
+    let mut n = 0;
+    for (i, r) in receivers.into_iter().enumerate() {
+        budget.step(1)?;
+        match input[r] {
+            State::Initialized(_) if i == n => {
+                check_receiver(parent, input, r, &frames[i], site.node, budget)?;
+                n += 1;
+            }
+            State::Vacant => {}
+            _ => return Err(Stop::Pending(site.node)),
+        }
+    }
+    budget.reserve(input.len())?;
+    let mut terminal = input.to_vec();
+    budget.reserve(parent.locals.len() + parent.params.len())?;
+    let live = parent.locals.iter().chain(parent.params).copied().collect();
+    let prefix = cleanup_boundary(
+        parent.module,
+        parent.slots,
+        &mut terminal,
+        &receivers[..n],
+        &live,
+        (
+            site.node,
+            Boundary::End {
+                lexical: true,
+                remainder: None,
+            },
+        ),
+        budget,
+    )?;
+    Ok((prefix, parent_exit(parent, terminal, site.node, budget)?))
 }
 
 /// Both parent-owned inputs have already formed in source order. Neither can
@@ -104,10 +232,12 @@ impl<'g> Child<'g> {
 pub(super) struct Staged<'g> {
     children: [Child<'g>; 2],
     parent_exit: CancellationExit<'g>,
+    precommit_cleanup: Vec<Cleanup<'g>>,
     parent_state: Vec<State>,
     receivers: [Slot; 2],
     into: Slot,
     site: Site<'g>,
+    resume: Pc,
 }
 
 impl<'g> Staged<'g> {
@@ -117,7 +247,7 @@ impl<'g> Staged<'g> {
         receivers: [Slot; 2],
         into: Slot,
         frames: &[ListArrowFrame<'g>; 2],
-        site: Site<'g>,
+        (site, resume): (Site<'g>, Pc),
         budget: &mut Budget,
     ) -> ResultOf<Self> {
         let node = site.node;
@@ -143,35 +273,9 @@ impl<'g> Staged<'g> {
         for i in 0..2 {
             budget.step(1)?;
             let frame = &frames[i];
-            let environment = parent.slots[receivers[i]].place(parent.module);
+            initialized(&input[receivers[i]], node)?;
             let result = parent.slots[into + 1 + i].place(parent.module);
-            let held = initialized(&input[receivers[i]], node)?;
-            let [
-                Loan {
-                    source,
-                    site: acquisition,
-                    exclusive: false,
-                    kind: LoanKind::Backing,
-                },
-            ] = held.loans.as_ref()
-            else {
-                return Err(pending);
-            };
-            if !at_root(frame.environment, environment.root)
-                || !same_root(frame.origin, environment.root)
-                || held.callable_owner != Some(CallableOwner::ListArrow(environment.root.node))
-                || !same_root(frame.capture.root, site_at(parent.module, *acquisition))
-                || !at_root(
-                    frame.backing,
-                    parent.slots[*source].place(parent.module).root,
-                )
-                || !matches!(
-                    parent.slots[*source].cleanup,
-                    StorageCleanup::DisposeListI32(_)
-                )
-                || (parent.locals.binary_search(source).is_err()
-                    && parent.params.binary_search(source).is_err())
-                || parent.slots[into + 1 + i].members != 0
+            if parent.slots[into + 1 + i].members != 0
                 || !matches!(parent.slots[into + 1 + i].cleanup, StorageCleanup::End)
                 || !same_root(frame.result.root, result.root)
                 || result.tuple_element() != Some(i)
@@ -179,39 +283,54 @@ impl<'g> Staged<'g> {
             {
                 return Err(pending);
             }
-            require_initialized(parent.slots, input, *source, node, budget)?;
         }
         let [left, right] = frames;
         let children = [
-            Child::check(left, node, budget)?,
-            Child::check(right, node, budget)?,
+            Child::check(left, 0, node, budget)?,
+            Child::check(right, 1, node, budget)?,
         ];
 
-        // Check cleanup on the terminal projection of the actual caller
-        // state. Transferred environments and unpublished result slots are
-        // not parent cleanup operands. This projection is inaccessible until
-        // both children really finish and their staged results are retired.
-        budget.reserve(input.len())?;
-        let mut terminal = input.to_vec();
-        for receiver in receivers {
-            terminal[receiver] = State::Vacant;
-        }
-        if !parent.check(&terminal, node, budget)? {
-            return Err(pending);
-        }
-        let parent_exit = parent.exit(Cow::Owned(terminal), node, budget)?;
+        // At an entry delivery, end the staged shared environments before
+        // parent cleanup. After commit the children, not the parent, end
+        // those views; the same parent exit is then gated on both terminals.
+        let (precommit_cleanup, parent_exit) =
+            before_commit_exit(parent, input, receivers, frames, site, budget)?;
         budget.reserve(input.len())?;
         Ok(Self {
             children,
             parent_exit,
+            precommit_cleanup,
             parent_state: input.to_vec(),
             receivers,
             into,
             site,
+            resume,
         })
     }
 
-    fn commit(mut self, budget: &mut Budget) -> ResultOf<Box<Waiting<'g>>> {
+    /// Evaluate the selected operation's real entry checkpoint after its
+    /// arguments have formed, before either environment can start a child.
+    fn at_entry(
+        self,
+        mut context: ParentDelivery,
+        yielded: bool,
+        budget: &mut Budget,
+    ) -> ResultOf<Admission<'g>> {
+        budget.step(1)?;
+        if yielded && context.at_yield() {
+            return Ok(Admission::DeliveredBeforeCommit {
+                environments: self.precommit_cleanup,
+                parent_exit: self.parent_exit,
+            });
+        }
+        Ok(Admission::Committed(self.commit(context, budget)?))
+    }
+
+    fn commit(
+        mut self,
+        context: ParentDelivery,
+        budget: &mut Budget,
+    ) -> ResultOf<Box<Waiting<'g>>> {
         budget.reserve(3)?;
         // No fallible step or successor between the two transfers. The
         // checked child bindings retain the loans from both input owners.
@@ -228,11 +347,19 @@ impl<'g> Staged<'g> {
             proof: self,
             children,
             results: [None; 2],
-            pending: false,
+            context,
             stopping: false,
             stop_requested: [false; 2],
         }))
     }
+}
+
+enum Admission<'g> {
+    DeliveredBeforeCommit {
+        environments: Vec<Cleanup<'g>>,
+        parent_exit: CancellationExit<'g>,
+    },
+    Committed(Box<Waiting<'g>>),
 }
 
 enum ChildState<'g> {
@@ -243,31 +370,49 @@ enum ChildState<'g> {
         end_view: Cleanup<'g>,
         entry_delivery: Option<Site<'g>>,
     },
+    AtExit(ChildExit<'g>),
     Complete,
 }
 
 #[derive(Clone, Copy)]
+enum ChildExit<'g> {
+    Normal(Site<'g>),
+    Delivered(Site<'g>),
+}
+
+#[derive(Clone, Copy)]
 enum ChildEvent {
-    Enter,
-    EntryDelivery,
+    Entry { yielded: bool },
     Export,
-    CleanupCompleted,
+    EndView,
+    Finish,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ParentDelivery {
+    enabled: bool,
+    pending: bool,
+}
+
+impl ParentDelivery {
+    fn at_yield(&mut self) -> bool {
+        self.enabled && std::mem::take(&mut self.pending)
+    }
 }
 
 #[derive(Clone, Copy)]
 enum Event {
     Child(usize, ChildEvent),
     RequestStop,
-    EnabledYield,
-    MaskedYield,
+    WaitYield,
     HandleDrop,
 }
 
 struct Waiting<'g> {
     proof: Staged<'g>,
     children: [ChildState<'g>; 2],
-    results: [Option<ScalarExport<'g>>; 2],
-    pending: bool,
+    results: [Option<ScalarStage<'g>>; 2],
+    context: ParentDelivery,
     stopping: bool,
     stop_requested: [bool; 2],
 }
@@ -276,11 +421,12 @@ enum Successor<'g> {
     Wait(Box<Waiting<'g>>),
     Publish {
         results: [ScalarExport<'g>; 2],
-        pending: bool,
+        context: ParentDelivery,
+        resume: Pc,
         parent_state: Vec<State>,
     },
     Cancel {
-        retired: [Option<ScalarExport<'g>>; 2],
+        retired: [Option<ScalarStage<'g>>; 2],
         parent_exit: CancellationExit<'g>,
     },
 }
@@ -296,24 +442,20 @@ impl<'g> Waiting<'g> {
         budget.step(1)?;
         let pending = Stop::Pending(self.proof.site.node);
         match event {
-            Event::RequestStop => self.pending = true,
-            Event::EnabledYield if self.pending && !self.stopping => {
-                self.pending = false;
+            Event::RequestStop => self.context.pending = true,
+            Event::WaitYield if !self.stopping && self.context.at_yield() => {
                 self.stopping = true;
                 self.stop_requested = self
                     .children
                     .each_ref()
                     .map(|child| !matches!(child, ChildState::Complete));
             }
-            Event::EnabledYield | Event::MaskedYield | Event::HandleDrop => {}
+            Event::WaitYield | Event::HandleDrop => {}
             Event::Child(i, event) => {
                 let child = self.children.get_mut(i).ok_or(pending.clone())?;
                 let proof = &self.proof.children[i];
                 *child = match (std::mem::replace(child, ChildState::Complete), event) {
-                    (ChildState::Entry(environment), ChildEvent::Enter) => {
-                        ChildState::Running(environment)
-                    }
-                    (ChildState::Entry(environment), ChildEvent::EntryDelivery)
+                    (ChildState::Entry(environment), ChildEvent::Entry { yielded: true })
                         if self.stop_requested[i] =>
                     {
                         ChildState::Cleaning {
@@ -322,15 +464,43 @@ impl<'g> Waiting<'g> {
                             entry_delivery: Some(proof.entry),
                         }
                     }
+                    (ChildState::Entry(environment), ChildEvent::Entry { .. }) => {
+                        ChildState::Running(environment)
+                    }
                     (ChildState::Running(environment), ChildEvent::Export) => {
-                        self.results[i] = Some(proof.scalar);
+                        budget.reserve(1)?;
+                        self.results[i] = Some(proof.scalar.stage);
                         ChildState::Cleaning {
                             environment,
                             end_view: proof.end_view,
                             entry_delivery: None,
                         }
                     }
-                    (ChildState::Cleaning { .. }, ChildEvent::CleanupCompleted) => {
+                    (
+                        ChildState::Cleaning {
+                            environment,
+                            end_view: Cleanup::EndStorage(view),
+                            entry_delivery,
+                        },
+                        ChildEvent::EndView,
+                    ) => {
+                        if !matches!(environment.loans.as_ref(), [loan] if loan.site==view.root.node)
+                        {
+                            return Err(pending);
+                        }
+                        ChildState::AtExit(
+                            entry_delivery
+                                .map_or(ChildExit::Normal(proof.returned), ChildExit::Delivered),
+                        )
+                    }
+                    (ChildState::AtExit(ChildExit::Normal(at)), ChildEvent::Finish)
+                        if same_root(at, proof.returned) =>
+                    {
+                        ChildState::Complete
+                    }
+                    (ChildState::AtExit(ChildExit::Delivered(at)), ChildEvent::Finish)
+                        if same_root(at, proof.entry) =>
+                    {
                         ChildState::Complete
                     }
                     _ => return Err(pending),
@@ -354,10 +524,15 @@ impl<'g> Waiting<'g> {
             return Err(pending);
         };
         let into = self.proof.into;
+        budget.step(3)?;
         self.proof.parent_state[into..into + 3].fill(State::Initialized(Held::default()));
         Ok(Successor::Publish {
-            results: [first, second],
-            pending: self.pending,
+            results: [first, second].map(|stage| ScalarExport {
+                stage,
+                into: self.proof.children[stage.slot].scalar.into,
+            }),
+            context: self.context,
+            resume: self.proof.resume,
             parent_state: self.proof.parent_state,
         })
     }

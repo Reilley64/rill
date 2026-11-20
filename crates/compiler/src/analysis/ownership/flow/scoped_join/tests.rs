@@ -36,7 +36,10 @@ function parent(input: List<i32>): [i32, i32] {
 // frame bodies. None of its synchronous invocations are advanced as children.
 pub(in crate::analysis::ownership) struct Probe<'g> {
     later: &'g DeclarationId,
-    published_pending: bool,
+    published: Option<ParentDelivery>,
+    resumed: Option<Pc>,
+    before_formation: Option<Vec<State>>,
+    first_formed: Option<Vec<State>>,
     later_exit: Option<CancellationExit<'g>>,
 }
 
@@ -45,26 +48,125 @@ impl<'g> Probe<'g> {
         &mut self,
         parent: &CancellationFrame<'_, 'g>,
         (input, output): (&[State], &[State]),
-        action: Action<'g>,
+        (action, edges): (Action<'g>, Edges),
         operation: &Operation<'g>,
-        site: Site<'g>,
+        (pc, site): (Pc, Site<'g>),
     ) {
         let mut budget = budget(AnalysisLimits::default());
+        if let Some(expected) = self.resumed.take() {
+            assert_eq!(pc, expected, "real published successor");
+        }
         match (action, operation) {
+            (Action::Borrow { .. }, _) if self.before_formation.is_none() => {
+                self.before_formation = Some(input.to_vec())
+            }
+            (Action::FormListArrow { .. }, _) if self.first_formed.is_none() => {
+                self.first_formed = Some(output.to_vec())
+            }
             (
                 Action::CallListArrows {
                     receivers, into, ..
                 },
                 Operation::CallListArrows { slots, .. },
             ) => {
-                assert!(!self.published_pending);
-                let stage = |budget: &mut Budget| {
-                    Staged::check(parent, input, receivers, into, slots, site, budget)
+                assert!(self.published.is_none());
+                let Edges::Next(resume) = edges else {
+                    panic!("ordinary call continuation")
                 };
+                // These actual zero/one/two-prefix states give cleanup if
+                // there is a proved exit. FormClosure itself is not a poll.
+                for (n, state) in [
+                    self.before_formation.as_deref().unwrap(),
+                    self.first_formed.as_deref().unwrap(),
+                    input,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let (prefix, parent_exit) = checked(before_commit_exit(
+                        parent,
+                        state,
+                        receivers,
+                        slots,
+                        site,
+                        &mut budget,
+                    ));
+                    assert_eq!(prefix.len(), n);
+                    for (action, frame) in prefix.iter().zip(slots[..n].iter().rev()) {
+                        assert!(
+                            matches!(action,Cleanup::EndStorage(p) if at_root(*p,frame.environment.root))
+                        );
+                    }
+                    assert!(
+                        matches!(parent_exit.cleanup.as_slice(),[Cleanup::DisposeListI32 {operand,..}] if operand.root.span.bytes()==b"numbers")
+                    );
+                }
+                let stage = |budget: &mut Budget| {
+                    Staged::check(
+                        parent,
+                        input,
+                        receivers,
+                        into,
+                        slots,
+                        (site, resume),
+                        budget,
+                    )
+                };
+                let inherited = ParentDelivery {
+                    pending: true,
+                    ..ENABLED
+                };
+                let Admission::DeliveredBeforeCommit {
+                    environments,
+                    parent_exit,
+                } = checked(checked(stage(&mut budget)).at_entry(inherited, true, &mut budget))
+                else {
+                    panic!("delivery at operation entry cannot commit")
+                };
+                assert!(
+                    matches!(environments.as_slice(),[Cleanup::EndStorage(b),Cleanup::EndStorage(a)] if at_root(*b,slots[1].environment.root) && at_root(*a,slots[0].environment.root))
+                );
+                assert!(
+                    matches!(parent_exit.cleanup.as_slice(),[Cleanup::DisposeListI32{operand,..}] if operand.root.span.bytes()==b"numbers")
+                );
+                let Admission::Committed(masked) = checked(checked(stage(&mut budget)).at_entry(
+                    ParentDelivery {
+                        enabled: false,
+                        ..inherited
+                    },
+                    true,
+                    &mut budget,
+                )) else {
+                    panic!("enclosing deferral must survive entry")
+                };
+                assert!(masked.context.pending && !masked.stopping);
                 check_stop(checked(stage(&mut budget)), &mut budget);
+                let mut running = checked(checked(stage(&mut budget)).commit(ENABLED, &mut budget));
+                // Delivery to the parent does not manufacture a child yield.
+                for event in [
+                    Child(0, ENTER),
+                    RequestStop,
+                    WaitYield,
+                    Child(1, ENTER),
+                    Child(1, Export),
+                    Child(1, EndView),
+                    Child(1, Finish),
+                    Child(0, Export),
+                    Child(0, EndView),
+                ] {
+                    running = wait(running, event, &mut budget);
+                }
+                let Successor::Cancel {
+                    retired: [Some(a), Some(b)],
+                    ..
+                } = checked(running.advance(Child(0, Finish), &mut budget))
+                else {
+                    panic!("stop retires both unpublished scalars, without publishing")
+                };
+                assert_eq!([a.slot, b.slot], [0, 1]);
                 for (order, masked_stop) in [([0, 1], false), ([1, 0], true)] {
                     let proof = checked(stage(&mut budget));
-                    let (results, pending, parent_state) =
+                    let (results, context, next, parent_state) =
                         check_publish(proof, order, masked_stop, &mut budget);
                     assert_eq!(
                         parent_state, output,
@@ -72,17 +174,30 @@ impl<'g> Probe<'g> {
                     );
                     for (i, result) in results.into_iter().enumerate() {
                         let expected: [&[u8]; 2] = [b"(&numbers)[0u64]", b"(&numbers)[1u64]"];
-                        assert_eq!(result.from.root.span.bytes(), expected[i]);
+                        assert_eq!(result.stage.slot, i);
+                        assert_eq!(result.stage.from.root.span.bytes(), expected[i]);
                         assert_eq!(result.into.tuple_element(), Some(i));
                     }
-                    self.published_pending = pending;
+                    assert_eq!(next, resume);
+                    if !masked_stop {
+                        self.published = Some(context);
+                        self.resumed = Some(next);
+                    } else {
+                        let mut carried = context;
+                        assert!(carried.pending);
+                        assert!(!carried.at_yield());
+                        assert!(carried.pending);
+                    }
                 }
                 check_bounds(stage);
             }
             (_, Operation::Call(callee)) if std::ptr::eq(*callee, self.later) => {
-                // The masked request survived publication and the normal
-                // suffix disposed numbers before reaching this enabled entry.
-                assert!(self.published_pending);
+                // The published successor disposed numbers. A fresh request
+                // can deliver at a yield on the checked later entry.
+                let mut context = self.published.take().unwrap();
+                assert!(!context.pending);
+                context.pending = true;
+                assert!(context.at_yield());
                 assert!(checked(parent.check(input, site.node, &mut budget)));
                 self.later_exit = Some(checked(parent.exit(
                     Cow::Borrowed(input),
@@ -123,22 +238,36 @@ fn wait<'g>(state: Box<Waiting<'g>>, event: Event, budget: &mut Budget) -> Box<W
 
 use ChildEvent::*;
 use Event::*;
+const ENABLED: ParentDelivery = ParentDelivery {
+    enabled: true,
+    pending: false,
+};
+const ENTER: ChildEvent = Entry { yielded: false };
+const YIELD_AT_ENTRY: ChildEvent = Entry { yielded: true };
 
 fn check_stop(proof: Staged<'_>, budget: &mut Budget) {
-    let state = checked(proof.commit(budget));
-    let state = wait(state, Child(0, Enter), budget);
+    let Admission::Committed(state) = checked(proof.at_entry(
+        ParentDelivery {
+            pending: true,
+            ..ENABLED
+        },
+        false,
+        budget,
+    )) else {
+        panic!("without an entry yield, the pending request crosses commit")
+    };
+    let state = wait(state, Child(0, ENTER), budget);
     let state = wait(state, Child(0, Export), budget);
-    let state = wait(state, Child(0, CleanupCompleted), budget);
-    let state = wait(state, RequestStop, budget);
+    let state = wait(state, Child(0, EndView), budget);
+    let state = wait(state, Child(0, Finish), budget);
     let state = wait(state, HandleDrop, budget);
-    assert!(!state.stopping && state.pending);
+    assert!(!state.stopping && state.context.pending);
     assert_eq!(state.stop_requested, [false, false]);
-    let state = wait(state, EnabledYield, budget);
+    let state = wait(state, WaitYield, budget);
     assert_eq!(state.stop_requested, [false, true]);
-    let state = wait(state, Child(1, EntryDelivery), budget);
+    let state = wait(state, Child(1, YIELD_AT_ENTRY), budget);
     let state = wait(state, RequestStop, budget);
-    let state = wait(state, MaskedYield, budget);
-    let state = wait(state, EnabledYield, budget); // internal deferral wins
+    let state = wait(state, WaitYield, budget); // internal deferral wins
     assert_eq!(state.stop_requested, [false, true]);
     let [
         ChildState::Complete,
@@ -154,7 +283,7 @@ fn check_stop(proof: Staged<'_>, budget: &mut Budget) {
     assert_eq!(held.loans.len(), 1);
     assert_eq!(entry.span.bytes(), b"(&numbers)[1u64]");
     assert_eq!(view.root.span.bytes(), b"&numbers");
-    assert!(state.stopping && state.pending);
+    assert!(state.stopping && state.context.pending);
     assert!(matches!(state.results, [Some(_), None]));
     assert!(
         state
@@ -162,14 +291,20 @@ fn check_stop(proof: Staged<'_>, budget: &mut Budget) {
             .iter()
             .all(|backing| backing.root.span.bytes() == b"numbers")
     );
+    let state = wait(state, Child(1, EndView), budget);
+    assert!(matches!(
+        state.children[1],
+        ChildState::AtExit(ChildExit::Delivered(_))
+    ));
     let Successor::Cancel {
         retired: [Some(retired), None],
         parent_exit,
-    } = checked(state.advance(Child(1, CleanupCompleted), budget))
+    } = checked(state.advance(Child(1, Finish), budget))
     else {
         panic!("only the initialized, unpublished result is retired");
     };
-    assert_eq!(retired.into.tuple_element(), Some(0));
+    assert_eq!(retired.slot, 0);
+    assert_eq!(retired.from.root.span.bytes(), b"(&numbers)[0u64]");
     assert!(
         matches!(parent_exit.cleanup.as_slice(), [Cleanup::DisposeListI32 { operand, .. }]
         if operand.root.span.bytes() == b"numbers")
@@ -181,7 +316,7 @@ fn check_publish<'g>(
     [first, second]: [usize; 2],
     masked_stop: bool,
     budget: &mut Budget,
-) -> ([ScalarExport<'g>; 2], bool, Vec<State>) {
+) -> ([ScalarExport<'g>; 2], ParentDelivery, Pc, Vec<State>) {
     let receivers = proof.receivers;
     let into = proof.into;
     assert!(
@@ -189,16 +324,23 @@ fn check_publish<'g>(
             .iter()
             .all(|&i| matches!(proof.parent_state[i], State::Initialized(_)))
     );
-    let state = checked(proof.commit(budget));
+    let state = checked(proof.commit(
+        ParentDelivery {
+            enabled: !masked_stop,
+            pending: false,
+        },
+        budget,
+    ));
     assert!(
         receivers
             .iter()
             .all(|&i| matches!(state.proof.parent_state[i], State::Moved(_)))
     );
-    let state = wait(state, Child(first, Enter), budget);
-    let state = wait(state, Child(second, Enter), budget);
+    let state = wait(state, Child(first, ENTER), budget);
+    let state = wait(state, Child(second, ENTER), budget);
     let state = wait(state, Child(first, Export), budget);
-    let state = wait(state, Child(first, CleanupCompleted), budget);
+    let state = wait(state, Child(first, EndView), budget);
+    let state = wait(state, Child(first, Finish), budget);
     let state = wait(state, Child(second, Export), budget);
     assert!(matches!(
         state.children[second],
@@ -222,41 +364,49 @@ fn check_publish<'g>(
     );
     let state = if masked_stop {
         let state = wait(state, RequestStop, budget);
-        wait(state, MaskedYield, budget)
+        wait(state, WaitYield, budget)
     } else {
-        wait(state, EnabledYield, budget)
+        wait(state, WaitYield, budget)
     };
     assert!(!state.stopping);
+    let state = wait(state, Child(second, EndView), budget);
+    assert!(matches!(
+        state.children[second],
+        ChildState::AtExit(ChildExit::Normal(_))
+    ));
     let Successor::Publish {
         results,
-        pending,
+        context,
+        resume,
         parent_state,
-    } = checked(state.advance(Child(second, CleanupCompleted), budget))
+    } = checked(state.advance(Child(second, Finish), budget))
     else {
         panic!("both completed children publish on the ordinary path")
     };
-    assert_eq!(pending, masked_stop);
-    (results, pending, parent_state)
+    assert_eq!(context.pending, masked_stop);
+    (results, context, resume, parent_state)
 }
 
 fn check_bounds<'g>(stage: impl Fn(&mut Budget) -> ResultOf<Staged<'g>>) {
     let replay = |budget: &mut Budget| -> ResultOf<Successor<'g>> {
-        let mut state = stage(budget)?.commit(budget)?;
+        let mut state = stage(budget)?.commit(ENABLED, budget)?;
         for event in [
-            Child(0, Enter),
+            Child(0, ENTER),
             Child(0, Export),
-            Child(0, CleanupCompleted),
+            Child(0, EndView),
+            Child(0, Finish),
             RequestStop,
-            EnabledYield,
-            Child(1, EntryDelivery),
-            MaskedYield,
+            WaitYield,
+            Child(1, YIELD_AT_ENTRY),
+            WaitYield,
+            Child(1, EndView),
         ] {
             let Successor::Wait(next) = state.advance(event, budget)? else {
                 panic!("premature terminal edge");
             };
             state = next;
         }
-        state.advance(Child(1, CleanupCompleted), budget)
+        state.advance(Child(1, Finish), budget)
     };
     let mut check = budget(AnalysisLimits::default());
     assert!(matches!(
@@ -293,12 +443,56 @@ fn check_bounds<'g>(stage: impl Fn(&mut Budget) -> ResultOf<Staged<'g>>) {
     ] {
         assert!(matches!(replay(&mut budget(short)), Err(Stop::Limit)));
     }
-    for event in [
-        Child(2, Enter),
-        Child(0, EntryDelivery),
-        Child(0, CleanupCompleted),
-    ] {
-        let state = checked(checked(stage(&mut check)).commit(&mut check));
+    // Both inserting an unpublished scalar and publishing the full tuple
+    // must fit the same budget as the path that led to that transition.
+    let publish_events = [
+        Child(1, ENTER),
+        Child(1, Export),
+        Child(1, EndView),
+        Child(1, Finish),
+        Child(0, ENTER),
+        Child(0, Export),
+        Child(0, EndView),
+        Child(0, Finish),
+    ];
+    for count in [2, publish_events.len()] {
+        let prefix = |budget: &mut Budget| -> ResultOf<Successor<'g>> {
+            let mut edge = Successor::Wait(stage(budget)?.commit(ENABLED, budget)?);
+            for &event in &publish_events[..count] {
+                let Successor::Wait(state) = edge else {
+                    panic!("early publication")
+                };
+                edge = state.advance(event, budget)?;
+            }
+            Ok(edge)
+        };
+        let mut b = budget(AnalysisLimits::default());
+        let edge = checked(prefix(&mut b));
+        assert_eq!(
+            matches!(edge, Successor::Publish { .. }),
+            count == publish_events.len()
+        );
+        let exact = AnalysisLimits {
+            max_work: b.statistics.work,
+            max_entries: b.statistics.entries,
+            max_depth: b.statistics.max_depth,
+        };
+        assert!(prefix(&mut budget(exact)).is_ok());
+        for short in [
+            AnalysisLimits {
+                max_work: exact.max_work - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_entries: exact.max_entries - 1,
+                ..exact
+            },
+        ] {
+            assert!(matches!(prefix(&mut budget(short)), Err(Stop::Limit)));
+        }
+    }
+    for event in [Child(2, ENTER), Child(0, Finish), Child(0, EndView)] {
+        let state = checked(checked(stage(&mut check)).commit(ENABLED, &mut check));
         assert!(matches!(
             state.advance(event, &mut check),
             Err(Stop::Pending(_))
@@ -348,7 +542,10 @@ fn real_frames_drive_the_unregistered_scoped_join() {
             assert!(leaf.empty_entry.is_some());
             cache.join_probe = Some(Probe {
                 later: &later.declaration.id,
-                published_pending: false,
+                published: None,
+                resumed: None,
+                before_formation: None,
+                first_formed: None,
                 later_exit: None,
             });
             let root = checked(lower(

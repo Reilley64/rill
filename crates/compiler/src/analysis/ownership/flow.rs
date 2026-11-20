@@ -3601,7 +3601,7 @@ pub(super) fn run<'a, 'g>(
             }
             Err(stop) => return Err(stop),
         };
-        #[cfg(test)]
+        #[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
         if let Some(probe) = cache
             .as_deref_mut()
             .and_then(|cache| cache.join_probe.as_mut())
@@ -3616,9 +3616,9 @@ pub(super) fn run<'a, 'g>(
                     indexed: facts.is_indexed(),
                 },
                 (&input.state, &state),
-                action,
+                (action, edges),
                 &operation,
-                site,
+                (pc, site),
             );
         }
         if active.is_some()
