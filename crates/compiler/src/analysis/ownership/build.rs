@@ -4139,18 +4139,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<Pc> {
         let (flow, origin, cause_display) = self.checked_wrap_failure(node, data)?;
         let right = data.value;
-        let payload = flow
-            .normal
+        let (root, root_depth) = self.ungroup_expression_at(right, depth)?;
+        let facts = self.value(root)?;
+        let postfix = self.module.syntax.nodes[root].kind == NodeKind::Propagate
+            && matches!(facts.data, Some(DataExpression::Propagation(_)));
+        // Other RHS forms keep their ordinary staging proof, including its
+        // precise pending site and budget when a nested argument can return.
+        let payload = (!postfix || flow.normal)
             .then(|| self.slot(right, &data.payload))
             .transpose()?;
-        let root = self.ungroup(right)?;
-        self.budget.step(1)?;
-        let facts = self.value(root)?;
-        let (rhs, temporary) = if matches!(facts.data, Some(DataExpression::Propagation(_))) {
-            let (_, depth) = self.ungroup_expression_at(right, depth)?;
+        let (rhs, temporary) = if postfix {
             let checked = self.checked_propagation(root, facts)?;
-            if checked.piped
-                || checked.wrapper != Some(data.wrapper)
+            if checked.wrapper != Some(data.wrapper)
                 || flow.normal != checked.exit.can_continue
                 || flow.returns != checked.exit.can_return
                 || flow.pending
@@ -4160,11 +4160,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             {
                 return Err(Stop::Pending(right));
             }
-            (Some((depth, checked)), None)
+            (Some((root_depth, checked)), None)
         } else {
-            if !flow.normal || flow.returns {
-                return Err(Stop::Pending(right));
-            }
             (
                 None,
                 self.temporary_projection_with_facts(root, facts, false)?,

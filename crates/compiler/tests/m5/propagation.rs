@@ -730,6 +730,91 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
 }
 
 #[test]
+fn wrapping_rhs_keeps_ordinary_and_unadmitted_budgets() {
+    probe(
+        "propagation::wrapping_rhs_keeps_ordinary_and_unadmitted_budgets",
+        r#"
+        function marker(): Result<i32, i32> { return Err(7i32); }
+        function number(value: i32): i32 { return value; }
+        function wrapCall(input: Result<bool, i32>): Result<bool, i32> {
+            let value = input ? (number(3i32)); return Result.Ok(value);
+        }
+        function postfix(input: Result<bool, i32>): Result<bool, i32> {
+            let value = input?; return Result.Ok(value);
+        }
+        function nested(input: Result<bool, i32>): Result<bool, i32> {
+            let value = input ? (number(marker()?)); return Result.Ok(value);
+        }
+        function step(value: i32): Result<i32, i32> { return Result.Ok(value); }
+        function pipe(input: Result<bool, i32>): Result<bool, i32> {
+            let value = input ? (7i32 |> step?); return Result.Ok(value);
+        }
+        function direct(input: Result<bool, i32>): Result<bool, i32> {
+            let value = input ? (marker()?); return Result.Ok(value);
+        }
+        function grouped(input: Result<bool, i32>): Result<bool, i32> {
+            let value = input ? (((((((((marker()?))))))))); return Result.Ok(value);
+        }
+    "#,
+        |_, module, receipt| {
+            let run = |name: &str, limit| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, limit).unwrap()
+            };
+            for (name, work, entries, depth, expected) in [
+                ("wrapCall", 6089, 900, 6, Completion::Checked),
+                ("postfix", 3690, 604, 4, Completion::Checked),
+                ("nested", 3237, 352, 4, Completion::Incomplete),
+                ("pipe", 3237, 352, 4, Completion::Incomplete),
+            ] {
+                let limit = AnalysisLimits {
+                    max_work: work,
+                    max_entries: entries,
+                    max_depth: depth,
+                };
+                let report = run(name, limit);
+                assert_eq!(report.completion(), expected, "{name}");
+                assert_eq!(report.mir().is_some(), expected == Completion::Checked);
+                for short in [
+                    AnalysisLimits {
+                        max_entries: entries - 1,
+                        ..limit
+                    },
+                    AnalysisLimits {
+                        max_work: work - 1,
+                        ..limit
+                    },
+                ] {
+                    let exhausted = run(name, short);
+                    assert_eq!(
+                        exhausted.completion(),
+                        Completion::ResourceLimit,
+                        "{name} one short"
+                    );
+                    assert!(exhausted.mir().is_none());
+                }
+            }
+            let direct = run("direct", AnalysisLimits::default());
+            assert!(direct.mir().is_some());
+            assert!(run("grouped", AnalysisLimits::default()).mir().is_some());
+            let short = run(
+                "grouped",
+                AnalysisLimits {
+                    max_depth: direct.statistics().max_depth,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
+        },
+    );
+}
+
+#[test]
 fn returning_wrap_rhs_forwards_instead_of_wrapping() {
     use compiler::analysis::ownership::{Block, Place};
     use compiler::analysis::scalars::{NodeFactKind, data::DataExpression};
