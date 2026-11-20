@@ -601,10 +601,15 @@ fn incoming_shared_record_copies_carried_field() {
                     .unwrap();
                 assert!(borrow < last_read && last_read < install);
             }
+            for (name, site) in [
+                ("callerEscape", b"return project(&x);".as_slice()),
+                ("callerSlotEscape", b"return slot(&x);"),
+            ] {
+                let report = lower(name);
+                assert_rejected(&report, name, "R0202", site, b"x");
+            }
             for (name, blocked) in [
-                ("callerEscape", b"&x".as_slice()),
-                ("callerSlotEscape", b"slot(&x)"),
-                ("aliasSlot", b"saved.value"),
+                ("aliasSlot", b"saved.value".as_slice()),
                 ("unsupportedSlot", b"x.value"),
                 ("alias", b"saved.value"),
                 ("groupedReceiver", b"(x).value"),
@@ -618,6 +623,457 @@ fn incoming_shared_record_copies_carried_field() {
         },
     );
     assert!(blockers.is_empty(), "{blockers:?}");
+}
+
+fn assert_rejected(report: &Report<'_>, name: &str, code: &str, site: &[u8], related: &[u8]) {
+    assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+    assert!(report.mir().is_none(), "{name}");
+    let [finding] = report.findings() else {
+        panic!("{name}: expected one finding");
+    };
+    assert_eq!(finding.code(), code, "{name}");
+    assert_eq!(finding.site.span.bytes(), site, "{name}: primary");
+    assert_eq!(finding.related.span.bytes(), related, "{name}: related");
+}
+
+#[test]
+fn borrowed_result_calls_forward_and_use_shared_record_inputs() {
+    use compiler::analysis::{DeclarationShape, TypeTerm, scalars::NodeFactKind};
+    probe_with_typed(
+        "field_routes::borrowed_result_calls_forward_and_use_shared_record_inputs",
+        r#"
+            type Holder = { value: &bool; }
+            function project(x: &Holder): &bool { return x.value; }
+            function slot(x: &Holder): &&bool { return &x.value; }
+            function projectIncoming(x: &Holder): &bool { return project(x); }
+            function slotIncoming(x: &Holder): &&bool { return slot(x); }
+            function projectUse(): bool {
+                let flag = true;
+                let x = Holder { value: &flag };
+                let result = project(&x);
+                return *result;
+            }
+            function slotUse(): bool {
+                let flag = true;
+                let x = Holder { value: &flag };
+                let result = slot(&x);
+                let last = result;
+                return true;
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let signature = |id| {
+                typed
+                    .inventory()
+                    .type_facts()
+                    .declarations()
+                    .find(|facts| &facts.declaration.id == id)
+                    .unwrap()
+            };
+            let DeclarationShape::Record { fields } = &signature(&declaration("Holder").id).shape
+            else {
+                panic!("expected the canonical Holder record");
+            };
+            let [field] = fields.as_slice() else {
+                panic!("expected one field")
+            };
+            assert!(
+                matches!(field.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+            );
+            for (name, target, incoming) in [
+                ("projectIncoming", "project", true),
+                ("slotIncoming", "slot", true),
+                ("projectUse", "project", false),
+                ("slotUse", "slot", false),
+            ] {
+                let lower =
+                    |limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+                let report = lower(AnalysisLimits::default());
+                let mir = require_mir(&report, name);
+                assert!(report.findings().is_empty(), "{name}");
+                let blocks = straight_blocks(mir, mir.entry);
+                let calls: Vec<_> = blocks
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, block)| match &block.operation {
+                        Operation::CallBorrowingRecord {
+                            callee,
+                            argument,
+                            into,
+                        } => Some((i, *callee, argument, into)),
+                        _ => None,
+                    })
+                    .collect();
+                let &[(index, callee, argument, into)] = calls.as_slice() else {
+                    panic!("{name}: expected one borrowed-result call");
+                };
+                assert_eq!(callee, &declaration(target).id);
+                let DeclarationShape::Function { parameters, result } = &signature(callee).shape
+                else {
+                    panic!("expected the selected application function");
+                };
+                let [formal] = parameters.as_slice() else {
+                    panic!("expected one shared input")
+                };
+                assert!(
+                    matches!(formal.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                    if matches!(referent.as_ref(), TypeTerm::Nominal { declaration: record, arguments }
+                        if *record == &declaration("Holder").id && arguments.is_empty()))
+                );
+                if target == "project" {
+                    assert_eq!(*result, field.ty);
+                } else {
+                    assert!(
+                        matches!(result.as_ref(), TypeTerm::Reference { mutable: false, referent } if *referent == field.ty)
+                    );
+                }
+                let site = blocks[index].site;
+                let NodeFactKind::Expression(selected) = &typed
+                    .bodies()
+                    .node(module, site.node)
+                    .unwrap()
+                    .unwrap()
+                    .kind
+                else {
+                    panic!("expected typed call evidence");
+                };
+                let call = selected.call.as_deref().unwrap();
+                assert_eq!(call.callee, callee);
+                assert_eq!(selected.ty, *result);
+                assert_eq!(call.arguments.as_slice(), [argument.root.node]);
+                assert!(call.substitution.is_empty() && call.pipe_input.is_none());
+                let NodeFactKind::Expression(actual) = &typed
+                    .bodies()
+                    .node(module, argument.root.node)
+                    .unwrap()
+                    .unwrap()
+                    .kind
+                else {
+                    panic!("expected typed argument evidence");
+                };
+                assert_eq!(actual.ty, formal.ty);
+                assert!(argument.projection.is_none() && into.projection.is_none());
+
+                let stages: Vec<_> = blocks[..index]
+                    .iter()
+                    .filter_map(|block| match &block.operation {
+                        Operation::Copy {
+                            into: Some(place), ..
+                        }
+                        | Operation::Borrow { holder: place, .. }
+                            if place.root.node == argument.root.node =>
+                        {
+                            Some(&block.operation)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let &[stage] = stages.as_slice() else {
+                    panic!("{name}: expected one argument evaluation")
+                };
+                let ended: Vec<_> = blocks[index + 1..]
+                    .iter()
+                    .filter_map(|block| match &block.operation {
+                        Operation::Cleanup(actions) => Some(actions),
+                        _ => None,
+                    })
+                    .flatten()
+                    .filter_map(|op| match op {
+                        Obligation::EndStorage(place) => Some(place),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(
+                    !ended
+                        .iter()
+                        .any(|place| place.root.node == argument.root.node)
+                );
+                if incoming {
+                    let Operation::Copy { from, .. } = stage else {
+                        panic!("expected a descriptor copy")
+                    };
+                    assert_eq!(from.root.span.bytes(), b"x: &Holder");
+                    assert!(
+                        matches!(&blocks[index + 1].operation, Operation::Export(output) if output.root.node == into.root.node)
+                    );
+                    assert_eq!(ended.len(), 1);
+                    assert_eq!(ended[0].root.node, from.root.node);
+                } else {
+                    let Operation::Borrow {
+                        source,
+                        exclusive: false,
+                        ..
+                    } = stage
+                    else {
+                        panic!("expected a whole shared borrow")
+                    };
+                    assert_eq!(source.root.span.bytes(), b"x");
+                    assert!(source.projection.is_none());
+                    assert_eq!(into.root.span.bytes(), b"result");
+                    assert!(match target {
+                        "project" =>
+                            matches!(&blocks[index + 1].operation, Operation::Dereference(from) if from.root.node == into.root.node),
+                        _ =>
+                            matches!(&blocks[index + 1].operation, Operation::Copy { from, into: Some(last) } if from.root.node == into.root.node && last.root.span.bytes() == b"last"),
+                    });
+                    assert!(matches!(ended.as_slice(), [.., result, member, whole, flag]
+                        if result.root.node == into.root.node && member.root.node == source.root.node
+                            && matches!(member.projection, Some(compiler::analysis::ownership::Projection::Field(f)) if f.id == field.declaration.id)
+                            && whole.root.node == source.root.node && whole.projection.is_none()
+                            && flag.root.span.bytes() == b"flag"));
+                }
+                assert!(path_drops(mir, mir.entry).is_empty());
+
+                let stats = report.statistics();
+                let exact = AnalysisLimits {
+                    max_work: stats.work,
+                    max_entries: stats.entries,
+                    max_depth: stats.max_depth,
+                };
+                assert!(lower(exact).mir().is_some(), "{name}: exact bounds");
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ] {
+                    let report = lower(short);
+                    assert_eq!(report.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(report.mir().is_none(), "{name}");
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn borrowed_result_calls_retain_storage_and_all_contained_sources_until_last_use() {
+    probe(
+        "field_routes::borrowed_result_calls_retain_storage_and_all_contained_sources_until_last_use",
+        r#"
+            type Holder = { value: &bool; }
+            function project(x: &Holder): &bool { return x.value; }
+            function slot(x: &Holder): &&bool { return &x.value; }
+            function extract(x: Holder): &bool { return x.value; }
+            function extractIncoming(seed: &bool): &bool {
+                let x = Holder { value: seed };
+                return extract(x);
+            }
+            function extractLocal(): &bool {
+                let flag = true;
+                let x = Holder { value: &flag };
+                return extract(x);
+            }
+            function projectEscape(seed: &bool): &bool {
+                let x = Holder { value: seed };
+                return project(&x);
+            }
+            function slotReplacement(seed: &bool): bool {
+                let mut x = Holder { value: seed };
+                let result = slot(&x);
+                let copy = result;
+                x.value = seed;
+                let last = copy;
+                return true;
+            }
+            function slotReleased(seed: &bool): bool {
+                let mut x = Holder { value: seed };
+                let result = slot(&x);
+                let copy = result;
+                let last = copy;
+                x.value = seed;
+                return true;
+            }
+            function recordExpiry(seed: &bool): bool {
+                let mut result = seed;
+                { let x = Holder { value: seed }; result = project(&x); }
+                return *result;
+            }
+            function carriedExpiry(seed: &bool): bool {
+                let mut x = Holder { value: seed };
+                let mut result = seed;
+                { let flag = true; x.value = &flag; result = project(&x); }
+                return *result;
+            }
+            function carriedReleased(seed: &bool): bool {
+                let mut x = Holder { value: seed };
+                let mut observed = false;
+                {
+                    let flag = true;
+                    x.value = &flag;
+                    let result = project(&x);
+                    observed = *result;
+                }
+                return observed;
+            }
+            type Two = { value: &bool; unused: &bool; }
+            function first(x: &Two): &bool { return x.value; }
+            function firstSlot(x: &Two): &&bool { return &x.value; }
+            function restrictedCopy(seed: &bool): bool {
+                let mut flag = true;
+                let access = &mut flag;
+                let x = Two { value: seed, unused: &*access };
+                let result = first(&x);
+                let read = flag;
+                return *result;
+            }
+            function restrictedSlot(seed: &bool): bool {
+                let mut flag = true;
+                let access = &mut flag;
+                let x = Two { value: seed, unused: &*access };
+                let result = firstSlot(&x);
+                let read = flag;
+                let last = result;
+                return read;
+            }
+            function restrictionReleased(seed: &bool): bool {
+                let mut flag = true;
+                let access = &mut flag;
+                let x = Two { value: seed, unused: &*access };
+                let result = first(&x);
+                let last = *result;
+                return flag;
+            }
+            function invalid(x: &Holder): &&bool {
+                let view = x.value;
+                return &view;
+            }
+            function reachesInvalid(x: &Holder): bool {
+                let unused = invalid(x);
+                return true;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            for (name, code, site, related) in [
+                ("extractLocal", "R0202", "return extract(x);", "flag"),
+                ("projectEscape", "R0202", "return project(&x);", "x"),
+                ("slotReplacement", "R0203", "x.value = seed;", "&x"),
+                (
+                    "recordExpiry",
+                    "R0203",
+                    "{ let x = Holder { value: seed }; result = project(&x); }",
+                    "&x",
+                ),
+                (
+                    "carriedExpiry",
+                    "R0203",
+                    "{ let flag = true; x.value = &flag; result = project(&x); }",
+                    "&flag",
+                ),
+                ("restrictedCopy", "R0201", "flag", "&mut flag"),
+                ("restrictedSlot", "R0201", "flag", "&mut flag"),
+                ("reachesInvalid", "R0202", "return &view;", "view"),
+            ] {
+                assert_rejected(
+                    &lower(name),
+                    name,
+                    code,
+                    site.as_bytes(),
+                    related.as_bytes(),
+                );
+            }
+            for name in ["slotReleased", "carriedReleased", "restrictionReleased"] {
+                let report = lower(name);
+                require_mir(&report, name);
+                assert!(report.findings().is_empty(), "{name}");
+            }
+            let owned = lower("extractIncoming");
+            let mir = require_mir(&owned, "extractIncoming");
+            assert!(owned.findings().is_empty());
+            let ops = linear(mir, mir.entry);
+            assert!(ops.iter().any(|op| matches!(op, Operation::Call(callee)
+                if module.declarations.iter().any(|d| d.name.as_deref() == Some("extract") && d.id == **callee))));
+            assert!(!ops.iter().any(|op| matches!(
+                op,
+                Operation::Borrow { .. } | Operation::CallBorrowingRecord { .. }
+            )));
+        },
+    );
+}
+
+#[test]
+fn borrowed_result_calls_require_the_exact_direct_shared_signature() {
+    probe(
+        "field_routes::borrowed_result_calls_require_the_exact_direct_shared_signature",
+        r#"
+            type Holder = { value: &bool; }
+            type Deep = { value: &bool; sibling: &&bool; }
+            type Custom = { value: &bool; }
+            implement dispose(x: Custom): void {}
+            function project(x: &Holder): &bool { return x.value; }
+            function scalar(x: &Holder): bool { return true; }
+            function extra(x: &Holder, flag: bool): &bool { return x.value; }
+            function generic<T>(x: &Holder): &bool { return x.value; }
+            function writable(x: &mut Holder): &bool { return x.value; }
+            function deep(x: &Deep): &bool { return x.value; }
+            function custom(x: &Custom): &bool { return x.value; }
+            function wrong(x: &Holder): &i32 { let local: i32 = 1; return &local; }
+            function noBorrowResult(x: &Holder): bool { return scalar(x); }
+            function extraInput(x: &Holder): &bool { return extra(x, true); }
+            function genericCall(x: &Holder): &bool { return generic<bool>(x); }
+            function pipe(x: &Holder): &bool { return x |> project(_); }
+            function writableInput(x: &mut Holder): &bool { return writable(x); }
+            function deepInput(x: &Deep): &bool { return deep(x); }
+            function customInput(x: &Custom): &bool { return custom(x); }
+            function wrongResult(x: &Holder): &i32 { return wrong(x); }
+            function alias(x: &Holder): &bool { let saved = x; return project(saved); }
+        "#,
+        |_, module, receipt| {
+            for (name, site) in [
+                ("noBorrowResult", "x"),
+                ("extraInput", "x"),
+                ("genericCall", "generic<bool>(x)"),
+                ("pipe", "x |> project(_)"),
+                ("writableInput", "x"),
+                ("deepInput", "deep(x)"),
+                ("customInput", "custom(x)"),
+                ("wrongResult", "wrong(x)"),
+                ("alias", "saved"),
+            ] {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let report =
+                    lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap();
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(
+                    report.mir().is_none() && report.findings().is_empty(),
+                    "{name}"
+                );
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
+        },
+    );
 }
 
 #[test]

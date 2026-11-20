@@ -1481,7 +1481,9 @@ pub(super) fn run<'g>(
                         require_initialized(&slots, &state, arg, node, budget)?;
                         forbid_active_escape(&state[arg], node)?;
                         let storage = slots[arg].storage(arg);
-                        if call.retains_result && call.into.is_some() {
+                        if call.result != CallResult::Plain && call.into.is_some() {
+                            // A staged record borrow holds both whole access and its
+                            // contained sources; neither is narrowed at the call.
                             include_loans(&mut retained, &state, storage.clone(), budget)?;
                         }
                         budget.step(storage.len())?;
@@ -1528,6 +1530,15 @@ pub(super) fn run<'g>(
                                 destination,
                                 input: local(retention.input),
                             }
+                        }
+                    } else if call.result == CallResult::BorrowsRecord {
+                        let [argument] = call.args.as_slice() else {
+                            return Err(Stop::Pending(node));
+                        };
+                        Operation::CallBorrowingRecord {
+                            callee: call.callee,
+                            argument: local(*argument),
+                            into: local(call.into.ok_or(Stop::Pending(node))?),
                         }
                     } else if let Some(into) = call
                         .into

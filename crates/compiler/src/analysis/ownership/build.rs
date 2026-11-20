@@ -4431,7 +4431,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 callee: call.callee,
                 args: std::mem::take(&mut args),
                 into,
-                retains_result: false,
+                result: CallResult::Plain,
                 destination: None,
             });
             (
@@ -4454,6 +4454,86 @@ impl<'a, 'g> Build<'a, 'g> {
             };
         }
         Ok(entry)
+    }
+
+    fn borrows_record_result(
+        &mut self,
+        node: NodeId,
+        call: &CallFacts<'g>,
+        result: &Type<'g>,
+        depth: usize,
+    ) -> ResultOf<bool> {
+        let (None, &[arg]) = (call.pipe_input, call.arguments.as_slice()) else {
+            return Ok(false);
+        };
+        let TypeTerm::Reference {
+            mutable: false,
+            referent,
+        } = result.as_ref()
+        else {
+            return Ok(false);
+        };
+        if !matches!(referent.as_ref(), TypeTerm::Primitive(_))
+            && !shared_primitive_reference(referent)
+        {
+            return Ok(false);
+        }
+        self.budget.step(1)?;
+        let actual = self.value(arg)?;
+        let TypeTerm::Reference {
+            mutable: false,
+            referent: record,
+        } = actual.ty.as_ref()
+        else {
+            return Ok(false);
+        };
+        if !matches!(record.as_ref(), TypeTerm::Nominal { .. }) {
+            return Ok(false);
+        }
+        if !call.defaults.is_empty() || call.selection.is_some() {
+            return Err(Stop::Pending(node));
+        }
+        let (formals, declared_result) = self.direct_application_signature(node, call)?;
+        let fields = self.shared_record_fields(node, record)?;
+        let [formal] = formals else {
+            return Err(Stop::Pending(node));
+        };
+        self.budget.step(2 + fields.len())?;
+        // Matching a member admits the result shape; it never selects which
+        // contained sources the result keeps.
+        if formal.ty != actual.ty
+            || declared_result != result
+            || !fields.iter().any(|field| {
+                shared_primitive_reference(&field.ty)
+                    && (field.ty == *result || field.ty == *referent)
+            })
+        {
+            return Err(Stop::Pending(node));
+        }
+
+        // Use only an incoming descriptor or a whole borrow of a named owner.
+        // No alias resolution or result-to-field identity is inferred here.
+        self.depth(depth + 1)?;
+        let syntax = &self.module.syntax.nodes[arg];
+        match syntax.kind {
+            NodeKind::ValueReference => {
+                let path = actual.path.as_ref().ok_or(Stop::Pending(arg))?;
+                if path.root.kind != DeclarationKind::Parameter || !path.projections.is_empty() {
+                    return Err(Stop::Pending(arg));
+                }
+            }
+            NodeKind::Prefix("&") => {
+                self.depth(depth + 2)?;
+                let source = syntax.children[0];
+                let (owner, _) = self.named_owned_place(source)?.ok_or(Stop::Pending(arg))?;
+                if owner.ty != *record {
+                    return Err(Stop::Pending(arg));
+                }
+            }
+            _ => return Err(Stop::Pending(arg)),
+        }
+
+        Ok(true)
     }
 
     fn call(
@@ -4502,11 +4582,18 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             return self.emit(node, Action::Dispose(operand), Edges::Next(next));
         }
-        let result = checked_carrier.unwrap_or(&facts.ty);
         if !Self::direct_application_call(call)
-            || !(self.direct_call_type(result)
-                || checked_carrier.is_some() && self.admitted_option(result).is_some())
             || into.is_some_and(|slot| self.slots[slot].contains_guard())
+        {
+            return Err(Stop::Pending(node));
+        }
+        let result = checked_carrier.unwrap_or(&facts.ty);
+        let borrows_record = checked_carrier.is_none()
+            && into.is_some()
+            && self.borrows_record_result(node, call, result, depth)?;
+        if !(borrows_record
+            || self.direct_call_type(result)
+            || checked_carrier.is_some() && self.admitted_option(result).is_some())
         {
             return Err(Stop::Pending(node));
         }
@@ -4569,7 +4656,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if !piped && destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
-            } else if !self.direct_call_type(&ty) && !tuple_or_leaf_admitted {
+            } else if !borrows_record && !self.direct_call_type(&ty) && !tuple_or_leaf_admitted {
                 if !self.admits_direct_tuple_or_leaf_call(call, result)? {
                     return Err(Stop::Pending(arg));
                 }
@@ -4605,7 +4692,13 @@ impl<'a, 'g> Build<'a, 'g> {
             callee: call.callee,
             args,
             into,
-            retains_result,
+            result: if borrows_record {
+                CallResult::BorrowsRecord
+            } else if retains_result {
+                CallResult::RetainsInputs
+            } else {
+                CallResult::Plain
+            },
             destination,
         });
         let mut next = self.emit(node, Action::Call(index), Edges::Next(next))?;

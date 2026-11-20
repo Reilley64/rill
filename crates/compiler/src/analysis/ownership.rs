@@ -186,6 +186,13 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
+    /// Call with a staged shared record descriptor. The result may retain the
+    /// whole record access and the sources carried by its contents.
+    CallBorrowingRecord {
+        callee: &'g DeclarationId,
+        argument: Place<'g>,
+        into: Place<'g>,
+    },
     /// Evaluate a direct producer into the statement's owned backing storage.
     CallIntoTemporary {
         callee: &'g DeclarationId,
@@ -469,6 +476,7 @@ fn checked_graph<'g>(
             budget.step(1)?;
             let call = match block.operation {
                 Operation::Call(callee)
+                | Operation::CallBorrowingRecord { callee, .. }
                 | Operation::CallIntoTemporary { callee, .. }
                 | Operation::CallRetaining { callee, .. }
                 | Operation::CallRetainingPair { callee, .. }
@@ -1018,8 +1026,15 @@ struct Call<'g> {
     callee: &'g DeclarationId,
     args: Vec<Slot>,
     into: Option<Slot>,
-    retains_result: bool,
+    result: CallResult,
     destination: Option<CallDestination>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallResult {
+    Plain,
+    RetainsInputs,
+    BorrowsRecord,
 }
 
 #[derive(Clone, Copy)]
