@@ -1561,6 +1561,36 @@ fn installed_pair_evidence(request: &InstalledRequest) {
             );
         }
 
+        // Same input values; only a requirement tied to a written input occurrence
+        // may use its origin. In particular R can equal W without denoting W.
+        let caller = "function checkJobs(left: List<i32>, right: List<i32>): void { let _ = keepPair(([() => (&left)[0u64], () => (&right)[0u64]])); }";
+        for (header, property, expected, origins) in [
+            (PAIR.to_owned(), "sendable(F)", TypedCompletion::Checked, vec!["() => (&left)[0u64]"]),
+            ("function keepPair<W,R>(jobs: W): R; implement<F> keepPair<[F,() => i32],[F,() => i32]>(jobs: [F,() => i32]): [F,() => i32] where callableOnce(F, [], i32), sendable(F) { return jobs; }".to_owned(), "sendable(F)", TypedCompletion::Checked, vec!["() => (&left)[0u64]"]),
+            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where sendable(W);"), "sendable(W)", TypedCompletion::Checked, vec!["() => (&left)[0u64]", "() => (&right)[0u64]"]),
+            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where sendable(R);"), "sendable(R)", TypedCompletion::Incomplete, vec![]),
+            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where noBorrow(W);"), "noBorrow(W)", TypedCompletion::SourceRejected, vec!["() => (&left)[0u64]", "() => (&right)[0u64]"]),
+            ("function keepPair<W,R>(jobs: W): R; implement<F> keepPair<[F,F],[F,F]>(jobs: [F,F]): [F,F] where callableOnce(F, [], i32), sendable(F) { return jobs; }".to_owned(), "sendable(F)", TypedCompletion::Incomplete, vec![]),
+        ] {
+            let graph = capture(&header, caller);
+            let report = analyze_typed(&graph, AnalysisLimits::default());
+            assert_eq!(report.completion(), expected, "{header}");
+            assert_eq!(report.receipt().is_some(), expected == TypedCompletion::Checked);
+            let bodies = report.bodies();
+            let goal = bodies.goals().iter().find(|g| g.site.span.bytes().starts_with(b"keepPair(([") && g.source.span.bytes() == property.as_bytes()).unwrap();
+            let observed: Vec<_> = if let Some(arrow) = &goal.arrow_origin {
+                vec![arrow.site.span.bytes()]
+            } else {
+                goal.dependencies.iter().filter_map(|id| bodies.goal(id).unwrap().arrow_origin.as_ref().map(|a|a.site.span.bytes())).collect()
+            };
+            assert_eq!(observed, origins.iter().map(|s| s.as_bytes()).collect::<Vec<_>>());
+            match expected {
+                TypedCompletion::Checked => assert_eq!(goal.state, GoalState::Proved),
+                TypedCompletion::SourceRejected => assert_eq!(goal.state, GoalState::Disproved),
+                _ => assert_ne!(goal.state, GoalState::Proved),
+            }
+        }
+
         // Both erased parameters have exactly the other slot's signature.
         for (erased, pair) in ["erased, () => 1i32", "() => 1i32, erased"]
             .into_iter()

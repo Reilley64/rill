@@ -111,8 +111,8 @@ pub struct GoalFacts<'g> {
     pub premise: Option<InputPremise>,
     /// Exact originating arrow, when the source ties this subject to one value.
     pub arrow_origin: Option<Arc<ArrowFacts<'g>>>,
-    // Only a direct source determination has operand occurrences. An
-    // instantiation may reuse its determination's occurrences, not its types.
+    // Direct source occurrences on a determination, or on a property goal
+    // for its written whole input. Equal substituted output types do not inherit them.
     argument_pair: Option<ArgumentPair<'g>>,
     /// A verdict only under the retained role and protection premise.
     pub hypothetical: Option<GoalVerdict>,
@@ -686,12 +686,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 &requirement.routes,
                 false,
             )?;
-            let origin = if let (Some(pair), [formal]) = (&pair, call.parameters.as_slice()) {
-                self.pair_arrow_subject(formal, pair, requirement)?.cloned()
+            if let (Some(pair), [formal]) = (&pair, call.parameters.as_slice()) {
+                self.set_pair_subject(&goal, formal, pair, requirement)?;
             } else {
-                self.arrow_subject(inference, call, requirement)?
-            };
-            self.set_arrow_subject(&goal, origin);
+                let origin = self.arrow_subject(inference, call, requirement)?;
+                self.set_arrow_subject(&goal, origin);
+            }
             match self.solve_goal(&goal)? {
                 GoalState::Proved => (),
                 _ if self.arrow_premise.is_some_and(|p| p.has_conversion())
@@ -841,22 +841,6 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.evidence.goals[goal.index].arrow_origin = origin;
     }
 
-    fn pair_formals(formal: &TypeTerm<'g>) -> Option<[&'g DeclarationId; 2]> {
-        let TypeTerm::Tuple(fields) = formal else {
-            return None;
-        };
-        let [first, second] = fields.as_slice() else {
-            return None;
-        };
-        match (first.as_ref(), second.as_ref()) {
-            (
-                TypeTerm::Parameter { declaration: f, .. },
-                TypeTerm::Parameter { declaration: g, .. },
-            ) if f != g => Some([f, g]),
-            _ => None,
-        }
-    }
-
     pub(super) fn direct_argument_pair(
         &mut self,
         inference: &Inference<'g>,
@@ -866,12 +850,20 @@ impl<'r, 'g> Checker<'r, 'g> {
         let [argument] = call.fact.arguments.as_slice() else {
             return Ok(None);
         };
-        if call.fact.pipe_input.is_some() || Self::pair_formals(formal).is_none() {
+        if call.fact.pipe_input.is_some()
+            || !(matches!(formal, TypeTerm::Tuple(fields) if fields.len() == 2)
+                || matches!(formal, TypeTerm::Parameter { .. }))
+        {
             return Ok(None);
         }
+        if !matches!(inference.slots[argument].ty.as_deref(), Some(TypeTerm::Tuple(fields)) if fields.len() == 2)
+        {
+            return Ok(None);
+        }
+        let leaf = self.source_leaf(inference.module, *argument)?;
         self.elab.step(1)?;
-        let syntax = &inference.module.syntax.nodes[*argument];
-        let tuple = &inference.slots[argument];
+        let syntax = &inference.module.syntax.nodes[leaf];
+        let tuple = &inference.slots[&leaf];
         if syntax.kind != NodeKind::Bracket || tuple.blocked {
             return Ok(None);
         }
@@ -903,27 +895,60 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(pair.iter().any(Option::is_some).then_some(pair))
     }
 
-    fn pair_arrow_subject<'a>(
+    fn mentions_pair_binder(
         &mut self,
+        ty: &TypeTerm<'g>,
+        binder: &DeclarationId,
+        depth: usize,
+    ) -> Work<bool> {
+        self.equation_depth(depth)?;
+        if matches!(ty, TypeTerm::Parameter { declaration, .. } if std::ptr::eq(*declaration, binder))
+        {
+            return Ok(true);
+        }
+        for child in ordinary::shape(ty).1 {
+            if self.mentions_pair_binder(child, binder, depth + 1)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn set_pair_subject(
+        &mut self,
+        goal: &GoalId,
         formal: &TypeTerm<'g>,
-        pair: &'a ArgumentPair<'g>,
+        pair: &ArgumentPair<'g>,
         requirement: &RequirementMetadata<'g>,
-    ) -> Work<Option<&'a Arc<ArrowFacts<'g>>>> {
+    ) -> Work<()> {
         self.elab.step(1)?;
-        let Some([first, second]) = Self::pair_formals(formal) else {
-            return Ok(None);
+        let Some(TypeTerm::Parameter {
+            declaration: subject,
+            ..
+        }) = Self::property_subject(requirement).map(Arc::as_ref)
+        else {
+            return Ok(());
         };
-        // Match the written binder, before substitution can make the two
-        // callable types equal. A missing occurrence has no concrete origin.
-        Ok(match Self::property_subject(requirement).map(Arc::as_ref) {
-            Some(TypeTerm::Parameter { declaration, .. }) if *declaration == first => {
-                pair[0].as_ref()
+        // Match the written input binder before substitution. A property of
+        // the whole tuple expands into its two members; a property of one
+        // uniquely occurring binder gets just that member's origin.
+        if matches!(formal, TypeTerm::Parameter { declaration, .. } if std::ptr::eq(*declaration,*subject))
+        {
+            self.attach_argument_pair(goal, pair.clone())?;
+        } else if let TypeTerm::Tuple(fields) = formal
+            && fields.len() == 2
+        {
+            for (i, field) in fields.iter().enumerate() {
+                self.elab.step(1)?;
+                if matches!(field.as_ref(), TypeTerm::Parameter { declaration, .. } if std::ptr::eq(*declaration,*subject))
+                    && !self.mentions_pair_binder(&fields[1 - i], subject, 1)?
+                {
+                    self.set_arrow_subject(goal, pair[i].clone());
+                    break;
+                }
             }
-            Some(TypeTerm::Parameter { declaration, .. }) if *declaration == second => {
-                pair[1].as_ref()
-            }
-            _ => None,
-        })
+        }
+        Ok(())
     }
 
     pub(super) fn attach_argument_pair(
@@ -1889,10 +1914,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 && let DeclarationShape::Function { parameters, .. } = &declaration.shape
                 && let [formal] = parameters.as_slice()
             {
-                let origin = self
-                    .pair_arrow_subject(&formal.ty, pair, requirement)?
-                    .cloned();
-                self.set_arrow_subject(&child, origin);
+                self.set_pair_subject(&child, &formal.ty, pair, requirement)?;
             }
             self.link_goal(goal, child)?;
         }
@@ -2050,13 +2072,24 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Ok(GoalState::Proved)
             }
             TypeTerm::Tuple(fields) => {
-                for field in fields {
+                let pair = self.evidence.goals[goal].argument_pair.clone();
+                for (i, field) in fields.iter().enumerate() {
                     self.property_dependency(
                         goal,
                         intrinsic,
                         field.clone(),
                         self.evidence.goals[goal].source,
                     )?;
+                    if let Some(pair) = &pair
+                        && let Some(Some(origin)) = pair.get(i)
+                    {
+                        let child = self.evidence.goals[goal]
+                            .dependencies
+                            .last()
+                            .unwrap()
+                            .clone();
+                        self.set_arrow_subject(&child, Some(origin.clone()));
+                    }
                 }
                 Ok(GoalState::Proved)
             }
