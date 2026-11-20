@@ -21,6 +21,10 @@ fn observes_borrowed_scalar_temporary_within_its_statement() {
                 let observed = ( ( * ( ( & ( ( make((flag)) ) ) ) ) ) );
                 return observed;
             }
+            function groupRead(flag: bool): bool { let observed = ((*(&make(flag)))); return observed; }
+            function groupBorrow(flag: bool): bool { let observed = *(((&make(flag)))); return observed; }
+            function groupProducer(flag: bool): bool { let observed = *(&( (make(flag)) )); return observed; }
+            function deepUnsupported(): bool { let observed = *(&((((((true))))))); return observed; }
             function broken(bit: bool): bool {
                 let text = "moved";
                 dispose(text);
@@ -156,6 +160,28 @@ fn observes_borrowed_scalar_temporary_within_its_statement() {
                     }
                 }
             }
+            for name in [
+                "groupRead",
+                "groupBorrow",
+                "groupProducer",
+                "deepUnsupported",
+            ] {
+                let report = check(name, AnalysisLimits::default());
+                if name == "deepUnsupported" {
+                    assert_eq!(report.completion(), Completion::Incomplete);
+                } else {
+                    require_mir(&report, name);
+                }
+                let limited = check(
+                    name,
+                    AnalysisLimits {
+                        max_depth: plain_depth,
+                        ..AnalysisLimits::default()
+                    },
+                );
+                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                assert!(limited.mir().is_none());
+            }
             let reached = check("reached", AnalysisLimits::default());
             assert_eq!(reached.completion(), Completion::SourceRejected);
             assert!(reached.mir().is_none());
@@ -187,6 +213,20 @@ fn later_use_requires_a_named_scalar_owner() {
                 let view = &make(flag);
                 return flag;
             }
+            function maybeRead(flag: bool): bool {
+                let view = &make(flag);
+                if (flag) { return *view; }
+                return flag;
+            }
+            function prunedRead(flag: bool): bool {
+                let view = &make(flag);
+                if (false) { return *view; }
+                return flag;
+            }
+            function returnDescriptor(flag: bool): &bool {
+                let view = &make(flag);
+                return view;
+            }
         "#,
         |_, module, receipt, _| {
             let lower = |name| {
@@ -205,23 +245,24 @@ fn later_use_requires_a_named_scalar_owner() {
                 if source.root.span.bytes() == b"owner" && holder.root.span.bytes() == b"view")
             ));
 
-            let later = lower("later");
-            assert_eq!(
-                later.completion(),
-                Completion::SourceRejected,
-                "{:?}",
-                later
-                    .blocked_at()
-                    .map(|site| site.span.bytes().escape_ascii().to_string())
+            for name in ["later", "maybeRead", "returnDescriptor"] {
+                let later = lower(name);
+                assert_eq!(later.completion(), Completion::SourceRejected, "{name}");
+                assert!(later.mir().is_none() && later.blocked_at().is_none());
+                let [finding] = later.findings() else {
+                    panic!("expected one temporary backing release finding for {name}")
+                };
+                assert_eq!(finding.code(), "R0203");
+                assert_eq!(finding.site.span.bytes(), b"let view = &make(flag);");
+                assert_eq!(finding.related.span.bytes(), b"&make(flag)");
+            }
+            let pruned = lower("prunedRead");
+            let mir = require_mir(&pruned, "prunedRead");
+            assert!(
+                !mir.blocks
+                    .iter()
+                    .any(|block| matches!(block.operation, Operation::CopyReferent { .. }))
             );
-            assert!(later.mir().is_none());
-            assert!(later.blocked_at().is_none());
-            let [finding] = later.findings() else {
-                panic!("expected one temporary backing release finding");
-            };
-            assert_eq!(finding.code(), "R0203");
-            assert_eq!(finding.site.span.bytes(), b"let view = &make(flag);");
-            assert_eq!(finding.related.span.bytes(), b"&make(flag)");
 
             let unused = lower("unused");
             assert!(unused.findings().is_empty());

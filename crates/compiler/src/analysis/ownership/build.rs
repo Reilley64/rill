@@ -926,9 +926,13 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(value)
     }
 
-    fn normal_value(&self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
-        let facts = self.value(node)?;
-        let flow = &self.facts[&node].flow;
+    fn normal_value(&mut self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
+        self.budget.step(1)?;
+        let fact = self.facts.get(&node).ok_or(Stop::Pending(node))?;
+        let NodeFactKind::Expression(facts) = &fact.kind else {
+            return Err(Stop::Pending(node));
+        };
+        let flow = &fact.flow;
         if !flow.normal
             || flow.pending
             || flow.returns
@@ -1376,7 +1380,8 @@ impl<'a, 'g> Build<'a, 'g> {
             NodeKind::Binding { .. } => {
                 let value = *children.last().unwrap();
                 let binding = self.binding(node)?;
-                let initializer = self.ungroup(value)?;
+                let (initializer, initializer_depth) =
+                    self.ungroup_expression_at(value, depth + 1)?;
                 if self.propagates_directly(initializer)? {
                     let into = match binding {
                         Binding::Discard => None,
@@ -1385,13 +1390,19 @@ impl<'a, 'g> Build<'a, 'g> {
                         }
                         _ => return Err(Stop::Pending(node)),
                     };
-                    return self.propagate(initializer, into, next, exits.returning, depth + 1);
+                    return self.propagate(
+                        initializer,
+                        into,
+                        next,
+                        exits.returning,
+                        initializer_depth,
+                    );
                 }
                 if let Some(call) = self.check_value_call_propagation(
                     initializer,
                     false,
                     exits.returning,
-                    depth + 1,
+                    initializer_depth,
                 )? {
                     let into = match binding {
                         Binding::Discard => None,
@@ -1400,7 +1411,13 @@ impl<'a, 'g> Build<'a, 'g> {
                         }
                         _ => return Err(Stop::Pending(node)),
                     };
-                    return self.lower_propagating_value_call(node, call, into, next, depth + 1);
+                    return self.lower_propagating_value_call(
+                        node,
+                        call,
+                        into,
+                        next,
+                        initializer_depth,
+                    );
                 }
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
@@ -1455,9 +1472,13 @@ impl<'a, 'g> Build<'a, 'g> {
                         if matches!(
                             self.module.syntax.nodes[initializer].kind,
                             NodeKind::Prefix("*" | "&")
-                        ) && let Some(entry) =
-                            self.binding_temporary_borrow(node, value, into, next, depth + 1)?
-                        {
+                        ) && let Some(entry) = self.binding_temporary_borrow(
+                            node,
+                            initializer,
+                            into,
+                            next,
+                            initializer_depth,
+                        )? {
                             return Ok(entry);
                         }
                         let temporary = self.temporary_projection(initializer, false)?;
@@ -1478,13 +1499,8 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::ExpressionStatement => {
                 let value = children[0];
-                let mut expression = value;
-                let mut expression_depth = depth + 1;
-                while self.module.syntax.nodes[expression].kind == NodeKind::Group {
-                    self.depth(expression_depth)?;
-                    expression = self.module.syntax.nodes[expression].children[0];
-                    expression_depth += 1;
-                }
+                let (expression, expression_depth) =
+                    self.ungroup_expression_at(value, depth + 1)?;
                 if self.propagates_directly(expression)? {
                     self.propagate(expression, None, next, exits.returning, expression_depth)
                 } else if let Some(call) = self.check_value_call_propagation(
@@ -1652,12 +1668,11 @@ impl<'a, 'g> Build<'a, 'g> {
     fn binding_temporary_borrow(
         &mut self,
         statement: NodeId,
-        value: NodeId,
+        root: NodeId,
         into: Slot,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Option<Pc>> {
-        let (root, depth) = self.ungroup_expression_at(value, depth)?;
         let (read, borrow, depth) = if self.module.syntax.nodes[root].kind == NodeKind::Prefix("*")
         {
             let (borrow, depth) =
@@ -1671,10 +1686,11 @@ impl<'a, 'g> Build<'a, 'g> {
             return Ok(None);
         }
         let producer = syntax.children[0];
-        let call_node = self.ungroup(producer)?;
+        let (call_node, _) = self.ungroup_expression_at(producer, depth + 1)?;
         if self.module.syntax.nodes[call_node].kind != NodeKind::Call {
             return Ok(None);
         }
+        self.budget.step(1)?;
         let produced = self.value(call_node)?;
         let Some(call) = produced.call.as_deref() else {
             return Ok(None);
@@ -1692,7 +1708,6 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return Ok(None);
         }
-        self.depth(depth)?;
         self.check_exact_primitive_call(call_node, call, &produced.ty)?;
         // The pinned Bool disposer has no effect. Do not silently replace a
         // selected user disposer, or assume default cleanup when coverage is pending.
@@ -1747,12 +1762,15 @@ impl<'a, 'g> Build<'a, 'g> {
         mut node: NodeId,
         mut depth: usize,
     ) -> ResultOf<(NodeId, usize)> {
-        while self.module.syntax.nodes[node].kind == NodeKind::Group {
-            self.budget.step(1)?;
-            node = self.module.syntax.nodes[node].children[0];
+        loop {
+            self.depth(depth)?;
+            let syntax = &self.module.syntax.nodes[node];
+            if syntax.kind != NodeKind::Group {
+                return Ok((node, depth));
+            }
+            node = syntax.children[0];
             depth += 1;
         }
-        Ok((node, depth))
     }
 
     fn temporary_projection(

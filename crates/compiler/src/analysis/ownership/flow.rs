@@ -1507,6 +1507,7 @@ pub(super) fn run<'g>(
                         .into
                         .filter(|&slot| slots[slot].scalar_borrow_temporary)
                     {
+                        budget.step(call.args.len())?;
                         budget.reserve(call.args.len())?;
                         Operation::CallIntoTemporary {
                             callee: call.callee,
