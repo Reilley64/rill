@@ -1531,7 +1531,7 @@ pub(super) fn run<'g>(
                                 input: local(retention.input),
                             }
                         }
-                    } else if call.result == CallResult::BorrowsRecord {
+                    } else if call.result == CallResult::RetainsRecordInput {
                         let [argument] = call.args.as_slice() else {
                             return Err(Stop::Pending(node));
                         };

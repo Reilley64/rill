@@ -647,6 +647,20 @@ fn borrowed_result_calls_forward_and_use_shared_record_inputs() {
             function slot(x: &Holder): &&bool { return &x.value; }
             function projectIncoming(x: &Holder): &bool { return project(x); }
             function slotIncoming(x: &Holder): &&bool { return slot(x); }
+            function groupedIncoming(x: &Holder): &bool { return project((x)); }
+            function groupedUse(): bool {
+                let flag = true;
+                let x = Holder { value: &flag };
+                let result = project((&x));
+                return *result;
+            }
+            function groupedOwner(): bool {
+                let flag = true;
+                let x = Holder { value: &flag };
+                let result = slot(&(x));
+                let last = result;
+                return true;
+            }
             function projectUse(): bool {
                 let flag = true;
                 let x = Holder { value: &flag };
@@ -693,6 +707,9 @@ fn borrowed_result_calls_forward_and_use_shared_record_inputs() {
                 ("slotIncoming", "slot", true),
                 ("projectUse", "project", false),
                 ("slotUse", "slot", false),
+                ("groupedIncoming", "project", true),
+                ("groupedUse", "project", false),
+                ("groupedOwner", "slot", false),
             ] {
                 let lower =
                     |limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
@@ -818,13 +835,28 @@ fn borrowed_result_calls_forward_and_use_shared_record_inputs() {
                     assert_eq!(source.root.span.bytes(), b"x");
                     assert!(source.projection.is_none());
                     assert_eq!(into.root.span.bytes(), b"result");
-                    assert!(match target {
-                        "project" =>
-                            matches!(&blocks[index + 1].operation, Operation::Dereference(from) if from.root.node == into.root.node),
-                        _ =>
-                            matches!(&blocks[index + 1].operation, Operation::Copy { from, into: Some(last) } if from.root.node == into.root.node && last.root.span.bytes() == b"last"),
-                    });
-                    assert!(matches!(ended.as_slice(), [.., result, member, whole, flag]
+                    let remaining = if target == "project" {
+                        assert!(
+                            matches!(&blocks[index + 1].operation, Operation::Dereference(from) if from.root.node == into.root.node)
+                        );
+                        ended.as_slice()
+                    } else {
+                        let Operation::Copy {
+                            from,
+                            into: Some(last),
+                        } = &blocks[index + 1].operation
+                        else {
+                            panic!("expected a copy of the slot view");
+                        };
+                        assert_eq!(from.root.node, into.root.node);
+                        assert_eq!(last.root.span.bytes(), b"last");
+                        let (first, rest) =
+                            ended.split_first().expect("last must end before result");
+                        assert_eq!(first.root.node, last.root.node);
+                        assert!(first.projection.is_none());
+                        rest
+                    };
+                    assert!(matches!(remaining, [result, member, whole, flag]
                         if result.root.node == into.root.node && member.root.node == source.root.node
                             && matches!(member.projection, Some(compiler::analysis::ownership::Projection::Field(f)) if f.id == field.declaration.id)
                             && whole.root.node == source.root.node && whole.projection.is_none()
@@ -911,6 +943,13 @@ fn borrowed_result_calls_retain_storage_and_all_contained_sources_until_last_use
                 { let flag = true; x.value = &flag; result = project(&x); }
                 return *result;
             }
+            function slotCarriedExpiry(seed: &bool): bool {
+                let mut x = Holder { value: seed };
+                let mut result = &seed;
+                { let flag = true; x.value = &flag; result = slot(&x); }
+                let last = result;
+                return true;
+            }
             function carriedReleased(seed: &bool): bool {
                 let mut x = Holder { value: seed };
                 let mut observed = false;
@@ -984,17 +1023,36 @@ fn borrowed_result_calls_retain_storage_and_all_contained_sources_until_last_use
                     "{ let flag = true; x.value = &flag; result = project(&x); }",
                     "&flag",
                 ),
+                (
+                    "slotCarriedExpiry",
+                    "R0203",
+                    "{ let flag = true; x.value = &flag; result = slot(&x); }",
+                    "&flag",
+                ),
                 ("restrictedCopy", "R0201", "flag", "&mut flag"),
                 ("restrictedSlot", "R0201", "flag", "&mut flag"),
                 ("reachesInvalid", "R0202", "return &view;", "view"),
             ] {
-                assert_rejected(
-                    &lower(name),
-                    name,
-                    code,
-                    site.as_bytes(),
-                    related.as_bytes(),
-                );
+                let report = lower(name);
+                assert_rejected(&report, name, code, site.as_bytes(), related.as_bytes());
+                if matches!(name, "restrictedCopy" | "restrictedSlot") {
+                    let decl = module
+                        .declarations
+                        .iter()
+                        .find(|d| d.name.as_deref() == Some(name))
+                        .unwrap();
+                    let body = &module.syntax.nodes[decl.node].span;
+                    let statement = b"let read = flag;";
+                    let start = body
+                        .bytes()
+                        .windows(statement.len())
+                        .position(|s| s == statement)
+                        .unwrap();
+                    assert_eq!(
+                        report.findings()[0].site.span.start(),
+                        body.start() + start + b"let read = ".len()
+                    );
+                }
             }
             for name in ["slotReleased", "carriedReleased", "restrictionReleased"] {
                 let report = lower(name);
@@ -1040,6 +1098,11 @@ fn borrowed_result_calls_require_the_exact_direct_shared_signature() {
             function deepInput(x: &Deep): &bool { return deep(x); }
             function customInput(x: &Custom): &bool { return custom(x); }
             function wrongResult(x: &Holder): &i32 { return wrong(x); }
+            type Number = { value: &i32; }
+            function numberProject(x: &Number): &i32 { return x.value; }
+            function numberSlot(x: &Number): &&i32 { return &x.value; }
+            function matchingNonBool(x: &Number): &i32 { return numberProject(x); }
+            function matchingNonBoolSlot(x: &Number): &&i32 { return numberSlot(x); }
             function alias(x: &Holder): &bool { let saved = x; return project(saved); }
         "#,
         |_, module, receipt| {
@@ -1052,6 +1115,8 @@ fn borrowed_result_calls_require_the_exact_direct_shared_signature() {
                 ("deepInput", "deep(x)"),
                 ("customInput", "custom(x)"),
                 ("wrongResult", "wrong(x)"),
+                ("matchingNonBool", "numberProject(x)"),
+                ("matchingNonBoolSlot", "numberSlot(x)"),
                 ("alias", "saved"),
             ] {
                 let decl = module

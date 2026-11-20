@@ -1034,7 +1034,7 @@ struct Call<'g> {
 enum CallResult {
     Plain,
     RetainsInputs,
-    BorrowsRecord,
+    RetainsRecordInput,
 }
 
 #[derive(Clone, Copy)]

@@ -4490,7 +4490,17 @@ impl<'a, 'g> Build<'a, 'g> {
         if !matches!(record.as_ref(), TypeTerm::Nominal { .. }) {
             return Ok(false);
         }
-        if !call.defaults.is_empty() || call.selection.is_some() {
+        let leaf = match referent.as_ref() {
+            TypeTerm::Reference {
+                mutable: false,
+                referent: leaf,
+            } => leaf.as_ref(),
+            ty => ty,
+        };
+        if !matches!(leaf, TypeTerm::Primitive(p) if p.name() == "bool")
+            || !call.defaults.is_empty()
+            || call.selection.is_some()
+        {
             return Err(Stop::Pending(node));
         }
         let (formals, declared_result) = self.direct_application_signature(node, call)?;
@@ -4513,8 +4523,8 @@ impl<'a, 'g> Build<'a, 'g> {
 
         // Use only an incoming descriptor or a whole borrow of a named owner.
         // No alias resolution or result-to-field identity is inferred here.
-        self.depth(depth + 1)?;
-        let syntax = &self.module.syntax.nodes[arg];
+        let (argument, argument_depth) = self.ungroup_expression_at(arg, depth + 1)?;
+        let syntax = &self.module.syntax.nodes[argument];
         match syntax.kind {
             NodeKind::ValueReference => {
                 let path = actual.path.as_ref().ok_or(Stop::Pending(arg))?;
@@ -4523,8 +4533,8 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
             }
             NodeKind::Prefix("&") => {
-                self.depth(depth + 2)?;
-                let source = syntax.children[0];
+                let (source, _) =
+                    self.ungroup_expression_at(syntax.children[0], argument_depth + 1)?;
                 let (owner, _) = self.named_owned_place(source)?.ok_or(Stop::Pending(arg))?;
                 if owner.ty != *record {
                     return Err(Stop::Pending(arg));
@@ -4693,7 +4703,7 @@ impl<'a, 'g> Build<'a, 'g> {
             args,
             into,
             result: if borrows_record {
-                CallResult::BorrowsRecord
+                CallResult::RetainsRecordInput
             } else if retains_result {
                 CallResult::RetainsInputs
             } else {
