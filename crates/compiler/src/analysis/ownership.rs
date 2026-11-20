@@ -17,8 +17,8 @@ mod flow;
 mod graph;
 
 pub use graph::{
-    Dependency, DependencyContract, GraphCompletion, GraphObligation, GraphReport, RootReport,
-    analyze_ownership,
+    Delivery, Dependency, DependencyContract, GraphCompletion, GraphObligation, GraphReport,
+    GraphRetainingCall, RetainingCallSite, RootReport, analyze_ownership,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,7 +38,7 @@ pub struct Finding<'g> {
     kind: Conflict,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Conflict {
     Moved,
     Access,
@@ -156,6 +156,18 @@ pub struct RetainingCallCancellation<'g> {
     /// the exact contents at a single checkpoint. Excludes the access stage.
     pub possible_backing: Vec<Place<'g>>,
     /// Runs only after the callee checks the slot and cleans its frame, for either delivery site.
+    pub caller_cleanup: Vec<Cleanup<'g>>,
+}
+
+/// Caller state for bounded delivery inside the selected callee. The callee
+/// checks its outward slot and cleans its own frame before this cleanup runs.
+#[derive(Debug)]
+pub struct SuspendedRetainingFrame<'g> {
+    /// Formal order; transferred stages are not caller cleanup operands.
+    pub arguments: [CancellationArgument<'g>; 3],
+    pub destination: Place<'g>,
+    /// Conservative old and compatible input backing, excluding the access stage.
+    pub possible_backing: Vec<Place<'g>>,
     pub caller_cleanup: Vec<Cleanup<'g>>,
 }
 
@@ -695,7 +707,7 @@ fn checked_graph<'g>(
                    seen: &mut BTreeMap<&'g DeclarationId, Option<Site<'g>>>,
                    budget: &mut Budget|
      -> ResultOf<()> {
-        graph::visit_dependencies(mir, budget, |edge, budget| {
+        graph::visit_dependencies(mir, budget, |_, edge, budget| {
             let is_disposer = match edge.contract {
                 DependencyContract::OrdinaryCall => false,
                 DependencyContract::ActiveDisposer => true,
@@ -730,7 +742,15 @@ fn checked_graph<'g>(
             seen.insert(&header.declaration.id, None);
             (
                 header.declaration.node,
-                lower(typed, module, header, Frame::Query, None, budget),
+                lower(
+                    typed,
+                    module,
+                    header,
+                    Frame::OrdinaryFunction,
+                    true,
+                    None,
+                    budget,
+                ),
             )
         }
         RootPlan::Implementation(declaration) => (
@@ -783,13 +803,14 @@ fn checked_graph<'g>(
         let frame = if is_disposer {
             Frame::ActiveDisposer
         } else {
-            Frame::ReachedCall { enabled }
+            Frame::OrdinaryFunction
         };
         let Lowered {
             mir,
             empty_entry,
             trace: callee_trace,
-        } = lower(typed, target, selected, frame, None, budget).map_err(|stop| (target, stop))?;
+        } = lower(typed, target, selected, frame, enabled, None, budget)
+            .map_err(|stop| (target, stop))?;
         if direct != 0 {
             direct -= 1;
             known_entry |= empty_entry.is_some();
@@ -810,7 +831,13 @@ fn checked_graph<'g>(
     }
     if let Some(trace) = trace.filter(|_| root.cancellation.is_none()) {
         root.cancellation = trace
-            .finish(&root, &seen, known_entry, unknown_entry, budget)
+            .finish(
+                &root,
+                |_, callee, _| Ok(seen.get(callee).copied().flatten()),
+                known_entry,
+                unknown_entry,
+                budget,
+            )
             .map_err(|stop| (module, stop))?;
     }
     Ok(root)
@@ -823,9 +850,7 @@ struct Lowered<'a, 'g> {
 }
 
 enum Frame {
-    Ordinary,
-    Query,
-    ReachedCall { enabled: bool },
+    OrdinaryFunction,
     PlainImplementation { body: NodeId },
     ActiveDisposer,
 }
@@ -835,6 +860,7 @@ fn lower<'a, 'g>(
     module: &'g Module,
     header: &'a DeclarationFacts<'g>,
     frame: Frame,
+    collect_trace: bool,
     facts: Option<&'a NodeIndex<'a, 'g>>,
     budget: &mut Budget,
 ) -> ResultOf<Lowered<'a, 'g>> {
@@ -947,17 +973,16 @@ fn lower<'a, 'g>(
     )?;
     // Only an empty application frame can contribute its entry and no other
     // delivery point. Ordinary lowering already has its body and signature.
-    let empty_entry = (matches!(frame, Frame::ReachedCall { .. })
+    let empty_entry = (matches!(frame, Frame::OrdinaryFunction)
         && module.key.origin == crate::loader::Origin::Application
         && parameters.is_empty()
         && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
         && module.syntax.nodes[body].kind == crate::parser::NodeKind::Block
         && module.syntax.nodes[body].children.is_empty())
     .then(|| site_at(module, body));
-    // A reached ordinary body alone says nothing about delivery being enabled.
-    // Capture its states only for the exact call from a proved unmasked caller.
-    let check_cancellation = matches!(frame, Frame::Query | Frame::ReachedCall { enabled: true });
-    let (mir, trace) = flow::run(build, entry, params, active, check_cancellation)?;
+    // Capturing pre-states is separate from the ordinary lowering frame and
+    // does not assume delivery is enabled on any ordinary edge.
+    let (mir, trace) = flow::run(build, entry, params, active, collect_trace)?;
     Ok(Lowered {
         mir,
         trace,
@@ -1020,6 +1045,7 @@ fn lower_implementation<'a, 'g>(
         module,
         &implementation.header,
         Frame::PlainImplementation { body },
+        false,
         None,
         budget,
     )

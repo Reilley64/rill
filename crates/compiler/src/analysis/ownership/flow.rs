@@ -1,5 +1,6 @@
 //! Compute loan liveness, initialized states and path-specific cleanup.
 use super::*;
+use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
@@ -1044,7 +1045,8 @@ pub(super) struct CancellationTrace<'a, 'g> {
     locals: Vec<Slot>,
     params: Vec<Slot>,
     retained: BTreeMap<Slot, RetainedContents>,
-    facts: BTreeMap<NodeId, &'a NodeFacts<'g>>,
+    facts: NodeIndex<'a, 'g>,
+    indexed_facts: Option<&'a NodeIndex<'a, 'g>>,
     bindings: BTreeMap<&'g DeclarationId, Slot>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'g>>,
@@ -1059,10 +1061,10 @@ pub(super) struct CancellationTrace<'a, 'g> {
 
 pub(super) struct EnabledRetainingCall<'a, 'g> {
     pub(super) callee: &'g DeclarationId,
+    block: usize,
     frame: CancellationFrame<'a, 'g>,
     body: NodeId,
     entry: &'a [State],
-    block: usize,
     node: NodeId,
     stages: [Place<'g>; 3],
     destination: Slot,
@@ -1076,42 +1078,49 @@ impl<'g> EnabledRetainingCall<'_, 'g> {
         mut body: Mir<'g>,
         budget: &mut Budget,
     ) -> Result<Option<Cancellation<'g>>, (&'g Module, Stop)> {
-        // Only a flat leaf with a possible body checkpoint composes here.
-        // Do not descend into another call, even if its ordinary MIR is known.
-        if !trace.flat || !trace.loop_delivery || trace.calls_reached != 0 {
-            return Ok(None);
-        }
-        let &[slot, input, gate] = trace.params.as_slice() else {
+        let Some(parameters) = trace.retaining_parameters() else {
             return Ok(None);
         };
-        if !matches!(trace.retained.get(&slot), Some(RetainedContents::OneHop(_))) {
-            return Ok(None);
-        }
-        let parameters = [slot, input, gate].map(|slot| trace.slots[slot].place(trace.module));
         let callee = trace.module;
         // Callee ownership states use formal slots. Its incoming shared
         // backing is opaque, not storage owned by that frame. Check its actual
         // feasible exits before retiring any caller storage. Caller loans keep
         // the concrete old and compatible new sources alive across this check.
         let Some(callee_proof) = trace
-            .finish(&body, &BTreeMap::new(), false, false, budget)
+            .finish(&body, |_, _, _| Ok(None), false, false, budget)
             .map_err(|stop| (callee, stop))?
         else {
             return Ok(None);
         };
         body.cancellation = Some(callee_proof);
 
-        self.finish_caller(body, parameters, budget)
-            .map_err(|stop| (self.frame.module, stop))
+        let (module, block, callee) = (self.frame.module, self.block, self.callee);
+        let Some((mut proof, suspended)) = self
+            .finish_caller(parameters, budget)
+            .map_err(|stop| (module, stop))?
+        else {
+            return Ok(None);
+        };
+        proof.successors.insert(
+            block,
+            CancellationSuccessor::RetainingCall(Box::new(RetainingCallCancellation {
+                callee,
+                body,
+                arguments: suspended.arguments,
+                destination: suspended.destination,
+                possible_backing: suspended.possible_backing,
+                caller_cleanup: suspended.caller_cleanup,
+            })),
+        );
+        Ok(Some(proof))
     }
 
-    fn finish_caller(
-        &self,
-        body: Mir<'g>,
+    pub(super) fn finish_caller(
+        self,
         parameters: [Place<'g>; 3],
         budget: &mut Budget,
-    ) -> ResultOf<Option<Cancellation<'g>>> {
-        let Some(mut proof) = self.frame.entry(self.entry, self.body, budget)? else {
+    ) -> ResultOf<Option<(Cancellation<'g>, SuspendedRetainingFrame<'g>)>> {
+        let Some(proof) = self.frame.entry(self.entry, self.body, budget)? else {
             return Ok(None);
         };
         let loans = &initialized(&self.suspended[self.destination], self.node)?.loans;
@@ -1121,27 +1130,33 @@ impl<'g> EnabledRetainingCall<'_, 'g> {
             .iter()
             .map(|loan| self.frame.slots[loan.source].place(self.frame.module))
             .collect();
-        let exit = self.frame.exit(&self.suspended, self.node, budget)?;
+        let exit = self
+            .frame
+            .exit(Cow::Owned(self.suspended), self.node, budget)?;
         let arguments = std::array::from_fn(|i| CancellationArgument {
             staged: self.stages[i],
             parameter: parameters[i],
         });
-        proof.successors.insert(
-            self.block,
-            CancellationSuccessor::RetainingCall(Box::new(RetainingCallCancellation {
-                callee: self.callee,
+        Ok(Some((
+            proof,
+            SuspendedRetainingFrame {
                 arguments,
-                body,
                 destination: self.frame.slots[self.destination].place(self.frame.module),
                 possible_backing,
                 caller_cleanup: exit.cleanup,
-            })),
-        );
-        Ok(Some(proof))
+            },
+        )))
     }
 }
 
 impl<'g> CancellationTrace<'_, 'g> {
+    fn fact_kind(&self, node: NodeId) -> Option<&NodeFactKind<'g>> {
+        self.indexed_facts
+            .unwrap_or(&self.facts)
+            .get(&node)
+            .map(|fact| &fact.kind)
+    }
+
     fn frame(&self) -> CancellationFrame<'_, 'g> {
         CancellationFrame {
             module: self.module,
@@ -1149,6 +1164,32 @@ impl<'g> CancellationTrace<'_, 'g> {
             locals: &self.locals,
             params: &self.params,
             retained: &self.retained,
+            indexed: self.indexed_facts.is_some(),
+        }
+    }
+
+    pub(super) fn retaining_parameters(&self) -> Option<[Place<'g>; 3]> {
+        // Compose only a flat leaf with a possible body checkpoint.
+        if !self.flat || !self.loop_delivery || self.calls_reached != 0 {
+            return None;
+        }
+        let &[slot, input, gate] = self.params.as_slice() else {
+            return None;
+        };
+        matches!(self.retained.get(&slot), Some(RetainedContents::OneHop(_)))
+            .then(|| [slot, input, gate].map(|slot| self.slots[slot].place(self.module)))
+    }
+
+    pub(super) fn retaining_call_block(&self) -> Option<usize> {
+        if self.flat
+            && !self.branching
+            && !self.loop_delivery
+            && self.calls_reached == 1
+            && self.retained.is_empty()
+        {
+            self.call_block
+        } else {
+            None
         }
     }
 
@@ -1157,15 +1198,9 @@ impl<'g> CancellationTrace<'_, 'g> {
         mir: &Mir<'g>,
         budget: &mut Budget,
     ) -> ResultOf<Option<EnabledRetainingCall<'_, 'g>>> {
-        if !self.flat
-            || self.branching
-            || self.loop_delivery
-            || self.calls_reached != 1
-            || !self.retained.is_empty()
-        {
+        let Some(block) = self.retaining_call_block() else {
             return Ok(None);
-        }
-        let block = self.call_block.unwrap();
+        };
         let pc = self.known.blocks[block].pc;
         let Instruction {
             node,
@@ -1196,15 +1231,29 @@ impl<'g> CancellationTrace<'_, 'g> {
         // direct immutable Bool input admits both values, independently of
         // reaching the call. No caller-side correlation is discarded.
         budget.step(1)?;
-        let Some(NodeFactKind::Expression(facts)) = self.facts.get(&node).map(|fact| &fact.kind)
-        else {
+        let Some(NodeFactKind::Expression(facts)) = self.fact_kind(node) else {
             return Ok(None);
         };
         let Some(facts) = &facts.call else {
             return Ok(None);
         };
-        if facts.callee != call.callee
-            || facts.pipe_input.is_some()
+        if !std::ptr::eq(facts.callee, call.callee) {
+            if self.indexed_facts.is_some() {
+                budget.step(
+                    facts
+                        .callee
+                        .module
+                        .path
+                        .len()
+                        .checked_add(1)
+                        .ok_or(Stop::Limit)?,
+                )?;
+            }
+            if facts.callee != call.callee {
+                return Ok(None);
+            }
+        }
+        if facts.pipe_input.is_some()
             || self
                 .branch_parameter(self.slots[gate].node, budget)?
                 .is_none()
@@ -1235,6 +1284,9 @@ impl<'g> CancellationTrace<'_, 'g> {
         // Bound the slot by its old and sole compatible input loans, never by
         // the transient access loan. Entry itself still has the old contents.
         let loans = loan_set(backing, budget)?;
+        if self.indexed_facts.is_some() {
+            budget.step(state.len())?;
+        }
         budget.reserve(state.len())?;
         let mut suspended = state.to_vec();
         for arg in [access, input, gate] {
@@ -1279,8 +1331,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             }
             node = syntax.children[0];
         }
-        let Some(NodeFactKind::Expression(facts)) = self.facts.get(&node).map(|fact| &fact.kind)
-        else {
+        let Some(NodeFactKind::Expression(facts)) = self.fact_kind(node) else {
             return Ok(None);
         };
         let Some(path) = &facts.path else {
@@ -1288,7 +1339,6 @@ impl<'g> CancellationTrace<'_, 'g> {
         };
         if path.root.kind != DeclarationKind::Parameter
             || !path.projections.is_empty()
-            || facts.binding != Some(path.root)
             || facts.refinement.is_some()
             || facts.access != crate::analysis::scalars::data::Access::Owned
             || facts.place != crate::analysis::scalars::Place::ReadOnly
@@ -1296,14 +1346,32 @@ impl<'g> CancellationTrace<'_, 'g> {
         {
             return Ok(None);
         }
+        if self.indexed_facts.is_some() {
+            // Include the binding equality test and all possible map probes.
+            let width = path
+                .root
+                .module
+                .path
+                .len()
+                .checked_add(1)
+                .ok_or(Stop::Limit)?;
+            budget.step(
+                width
+                    .checked_mul(self.bindings.len() + 1)
+                    .ok_or(Stop::Limit)?,
+            )?;
+        }
+        if facts.binding != Some(path.root) {
+            return Ok(None);
+        }
         let slot = self.bindings[path.root];
         Ok((slot < u64::BITS as usize).then_some(slot))
     }
 
     pub(super) fn finish(
-        self,
+        &self,
         mir: &Mir<'g>,
-        entries: &BTreeMap<&DeclarationId, Option<Site<'g>>>,
+        entry_for: impl Fn(usize, &'g DeclarationId, &mut Budget) -> ResultOf<Option<Site<'g>>>,
         known_entry: bool,
         unknown_entry: bool,
         budget: &mut Budget,
@@ -1352,7 +1420,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             }
             let callee = if let Action::Call(index) = action {
                 let callee = self.calls[index].callee;
-                let Some(&Some(site)) = entries.get(callee) else {
+                let Some(site) = entry_for(block, callee, budget)? else {
                     complete = false;
                     continue;
                 };
@@ -1426,8 +1494,11 @@ impl<'g> CancellationTrace<'_, 'g> {
         };
         for (block, callee) in deliveries {
             budget.step(1)?;
-            let on_delivery =
-                frame.exit(self.known.input(block), mir.blocks[block].site.node, budget)?;
+            let on_delivery = frame.exit(
+                self.known.input(block).into(),
+                mir.blocks[block].site.node,
+                budget,
+            )?;
             let successor = match callee {
                 Some(CalleeEntry { callee, site }) => CancellationSuccessor::CalleeEntry {
                     callee,
@@ -1449,6 +1520,7 @@ struct CancellationFrame<'a, 'g> {
     locals: &'a [Slot],
     params: &'a [Slot],
     retained: &'a BTreeMap<Slot, RetainedContents>,
+    indexed: bool,
 }
 
 impl<'g> CancellationFrame<'_, 'g> {
@@ -1464,7 +1536,7 @@ impl<'g> CancellationFrame<'_, 'g> {
         budget.reserve(1)?;
         Ok(Some(Cancellation {
             entry_site: site_at(self.module, body),
-            on_entry_delivery: self.exit(state, body, budget)?,
+            on_entry_delivery: self.exit(state.into(), body, budget)?,
             successors: BTreeMap::new(),
         }))
     }
@@ -1501,7 +1573,7 @@ impl<'g> CancellationFrame<'_, 'g> {
 
     fn exit(
         &self,
-        state: &[State],
+        state: Cow<'_, [State]>,
         node: NodeId,
         budget: &mut Budget,
     ) -> ResultOf<CancellationExit<'g>> {
@@ -1516,8 +1588,13 @@ impl<'g> CancellationFrame<'_, 'g> {
                 _ => None,
             },
         });
+        if self.indexed && matches!(state, Cow::Borrowed(_)) {
+            budget.step(state.len())?;
+        }
+        // Preserve the exit scratch charge even when reusing the suspended
+        // caller's buffer rather than making a second copy.
         budget.reserve(state.len() + usize::from(contents.is_some()))?;
-        let mut abandoned = state.to_vec();
+        let mut abandoned = state.into_owned();
         let mut live = BTreeSet::from_iter(contents);
         // The lexical body ends before parameter storage. Within a boundary
         // all initialized dependents are scheduled before their sources.
@@ -1563,9 +1640,9 @@ pub(super) fn run<'a, 'g>(
     entry: Pc,
     params: Vec<Slot>,
     active: Option<DisposerFrame>,
-    check_cancellation: bool,
+    collect_trace: bool,
 ) -> ResultOf<(Mir<'g>, Option<CancellationTrace<'a, 'g>>)> {
-    let mut candidate = check_cancellation
+    let mut candidate = collect_trace
         && build.module.key.origin == crate::loader::Origin::Application
         && !build.retains_exclusive_bool
         && build.retained.len() <= 1
@@ -1582,6 +1659,7 @@ pub(super) fn run<'a, 'g>(
         module,
         body,
         facts,
+        indexed_facts,
         locals: bindings,
         return_contract,
         slots,
@@ -2623,6 +2701,7 @@ pub(super) fn run<'a, 'g>(
         params,
         retained,
         facts,
+        indexed_facts,
         bindings,
         code,
         calls,

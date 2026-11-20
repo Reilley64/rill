@@ -1,4 +1,4 @@
-//! Ordinary ownership coverage over the loaded graph, not an execution plan.
+//! Ordinary and bounded delivered-exit judgments, not an execution plan.
 use super::*;
 use crate::analysis::{ordinary::ImplementationFacts, scalars::BodyFacts};
 use crate::loader::{GraphId, ModuleKey, Origin};
@@ -39,13 +39,48 @@ pub struct Dependency<'g> {
     pub contract: DependencyContract<'g>,
 }
 
+/// A bounded delivery judgment. Unresolved is not evidence of no delivery.
+#[derive(Debug)]
+pub enum Delivery<'g, Proof> {
+    Unresolved,
+    Proved(Proof),
+    Rejected {
+        /// Index in this report's findings.
+        finding_id: usize,
+        /// Absent for an assumed-enabled frame judgment.
+        via_call: Option<RetainingCallSite<'g>>,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RetainingCallSite<'g> {
+    /// Block in the caller's ordinary MIR; not a delivery checkpoint.
+    pub block: usize,
+    pub site: Site<'g>,
+    /// Index in this graph report's source roots, not an alias or local node ID.
+    pub callee_root: usize,
+}
+
+/// Bounded proof for one selected unmasked call. For delivery after transfer,
+/// use `call.callee_root` to read the callee's enabled-frame proof and ordinary
+/// MIR, then run `suspended.caller_cleanup`. The ordinary suffix does not run.
+#[derive(Debug)]
+pub struct GraphRetainingCall<'g> {
+    pub call: RetainingCallSite<'g>,
+    pub caller_entry_site: Site<'g>,
+    pub on_caller_entry_delivery: CancellationExit<'g>,
+    pub suspended: SuspendedRetainingFrame<'g>,
+}
+
 #[derive(Debug)]
 pub struct RootReport<'g> {
     site: Site<'g>,
     owner: BodyOwner<'g>,
-    completion: Completion,
+    ordinary_completion: Completion,
     blocked_at: Option<Site<'g>>,
-    mir: Option<Mir<'g>>,
+    ordinary_mir: Option<Mir<'g>>,
+    enabled_frame: Delivery<'g, Cancellation<'g>>,
+    selected_call: Delivery<'g, Box<GraphRetainingCall<'g>>>,
     dependencies: Vec<Dependency<'g>>,
 }
 
@@ -56,20 +91,46 @@ impl<'g> RootReport<'g> {
     pub fn owner(&self) -> BodyOwner<'g> {
         self.owner
     }
-    /// Includes the reached ordinary dependency closure, not the separate
-    /// obligations listed by `GraphReport::open_obligations`. `ResourceLimit`
-    /// also covers roots whose ordinary result could not be published.
+    /// Includes the ordinary closure and any recorded delivery rejection.
+    /// `Checked` certifies ordinary MIR, not that delivery has been resolved.
     pub fn completion(&self) -> Completion {
-        self.completion
+        if matches!(self.enabled_frame, Delivery::Rejected { .. })
+            || matches!(self.selected_call, Delivery::Rejected { .. })
+        {
+            return Completion::SourceRejected;
+        }
+        self.ordinary_completion()
+    }
+    /// The ordinary closure alone. `ResourceLimit` can mean its result could
+    /// not be published, even if local work finished.
+    pub fn ordinary_completion(&self) -> Completion {
+        self.ordinary_completion
+    }
+    /// Checks this named source frame assuming delivery is enabled, without
+    /// asserting that any invocation reaches it in that context.
+    pub fn enabled_frame(&self) -> &Delivery<'g, Cancellation<'g>> {
+        &self.enabled_frame
+    }
+    /// The exact #69 retaining call in this root, with its unmasked caller
+    /// and leaf-callee premises checked. Ordinary parents do not inherit it.
+    pub fn selected_call(&self) -> &Delivery<'g, Box<GraphRetainingCall<'g>>> {
+        &self.selected_call
     }
     /// A known blocker, even if exhaustion prevented a closure verdict.
     pub fn blocked_at(&self) -> Option<Site<'g>> {
         self.blocked_at
     }
-    /// Scoped ordinary MIR. Resolve called bodies and active disposers through
-    /// the graph report; they are stored once, not copied into each root MIR.
+    /// Ordinary MIR if no recorded judgment rejects this root.
     pub fn mir(&self) -> Option<&Mir<'g>> {
-        self.mir.as_ref()
+        if self.completion() != Completion::Checked {
+            return None;
+        }
+        self.ordinary_mir()
+    }
+    /// The reusable ordinary contract, even if the delivery judgment rejects.
+    /// Callees and active disposers are stored once, not in each caller's MIR.
+    pub fn ordinary_mir(&self) -> Option<&Mir<'g>> {
+        self.ordinary_mir.as_ref()
     }
     /// Reached edges from successful local lowering. A rejection or exhaustion
     /// may prevent edge discovery; an empty list isn't a coverage claim.
@@ -116,8 +177,8 @@ impl<'g> GraphReport<'g> {
     pub fn active_disposers(&self) -> &[RootReport<'g>] {
         &self.bodies[self.source_roots..]
     }
-    /// Findings follow local checking order, with reached active frames after
-    /// the source roots. Each finding is recorded once, not once per caller.
+    /// Ordinary findings in local checking order, then bounded delivery
+    /// findings. Each canonical witness is recorded once, not once per caller.
     pub fn findings(&self) -> &[Finding<'g>] {
         &self.findings
     }
@@ -133,11 +194,10 @@ impl<'g> GraphReport<'g> {
     }
 }
 
-/// Check loaded source roots and reached ordinary dependencies in one metered
-/// request. A typed receipt binds this report to exactly one capture and mode.
-/// This increment does not issue a full ownership receipt, even if every
-/// ordinary judgment checks: cancellation, masking/join and embedded or
-/// unreached source work still require separate proofs.
+/// Check loaded roots, reached ordinary dependencies and bounded delivered
+/// exits in one metered request, for exactly the receipt's capture and mode.
+/// This does not issue a full ownership receipt. General cancellation,
+/// masking/join, and embedded or unreached source work remain open.
 pub fn analyze_ownership<'g>(
     receipt: &TypedReceipt<'_, 'g>,
     limits: AnalysisLimits,
@@ -189,8 +249,41 @@ struct WorkItem<'a, 'g> {
     facts: RootFacts<'a, 'g>,
     active: Option<usize>,
     parents: Vec<usize>,
-    // Held privately until closure checking is finished, even on exhaustion.
+    // Closure and positive proofs stay private until publication is funded.
+    ordinary_completion: Completion,
+    blocked_at: Option<Site<'g>>,
     ordinary: Option<Mir<'g>>,
+    empty_entry: Option<Site<'g>>,
+    trace: Option<flow::CancellationTrace<'a, 'g>>,
+    call_targets: BTreeMap<usize, usize>,
+    enabled_proof: Option<Cancellation<'g>>,
+    retaining_parameters: Option<[Place<'g>; 3]>,
+    selected_proof: Option<Box<GraphRetainingCall<'g>>>,
+}
+
+type FindingIndex = BTreeMap<(usize, NodeId, NodeId, Conflict), usize>;
+
+fn record_finding<'g>(
+    report: &mut GraphReport<'g>,
+    findings: &mut FindingIndex,
+    item: &WorkItem<'_, 'g>,
+    site: NodeId,
+    related: NodeId,
+    kind: Conflict,
+    budget: &mut Budget,
+) -> Result<usize, ()> {
+    let key = (item.module_index, site, related, kind);
+    budget.step(1)?;
+    if let Some(&index) = findings.get(&key) {
+        return Ok(index);
+    }
+    budget.reserve(2)?;
+    let index = report.findings.len();
+    findings.insert(key, index);
+    report
+        .findings
+        .push(finding(item.module, site, related, kind));
+    Ok(index)
 }
 
 // Modules are already sorted by the loader. Prepay the whole binary search
@@ -245,9 +338,11 @@ fn push_body<'a, 'g>(
     report.bodies.push(RootReport {
         site: site_at(module, declaration.map_or(module.syntax.root, |d| d.node)),
         owner: declaration.map_or(BodyOwner::Startup, |d| BodyOwner::Declaration(&d.id)),
-        completion: Completion::ResourceLimit,
+        ordinary_completion: Completion::ResourceLimit,
         blocked_at: None,
-        mir: None,
+        ordinary_mir: None,
+        enabled_frame: Delivery::Unresolved,
+        selected_call: Delivery::Unresolved,
         dependencies: Vec::new(),
     });
     work.push(WorkItem {
@@ -257,7 +352,15 @@ fn push_body<'a, 'g>(
         facts: RootFacts::default(),
         active: None,
         parents: Vec::new(),
+        ordinary_completion: Completion::ResourceLimit,
+        blocked_at: None,
         ordinary: None,
+        empty_entry: None,
+        trace: None,
+        call_targets: BTreeMap::new(),
+        enabled_proof: None,
+        retaining_parameters: None,
+        selected_proof: None,
     });
     Ok(index)
 }
@@ -376,6 +479,7 @@ fn analyze<'g>(
     // cleanup has a different operand/epilogue, so it has its own work item.
     let dispose = typed.dispose_role().map(|role| &role.id);
     let mut reverse_edges = 0usize;
+    let mut findings = FindingIndex::new();
     let mut index = 0;
     while index < work.len() {
         budget.step(1)?;
@@ -399,12 +503,15 @@ fn analyze<'g>(
                 related,
                 kind,
             }) => {
-                budget.reserve(1)?;
-                report.findings.push(finding(module, site, related, kind));
-                report.bodies[index].completion = Completion::SourceRejected;
+                record_finding(report, &mut findings, item, site, related, kind, budget)?;
+                report.bodies[index].ordinary_completion = Completion::SourceRejected;
             }
-            Ok(Lowered { mir, .. }) => {
-                visit_dependencies(&mir, budget, |edge, budget| {
+            Ok(Lowered {
+                mir,
+                trace,
+                empty_entry,
+            }) => {
+                visit_dependencies(&mir, budget, |block, edge, budget| {
                     budget.reserve(1)?;
                     let id = edge.declaration;
                     let target = match edge.contract {
@@ -454,6 +561,10 @@ fn analyze<'g>(
                         budget.reserve(1)?;
                         work[target].parents.push(index);
                         reverse_edges += 1;
+                        if trace.is_some() && edge.contract == DependencyContract::OrdinaryCall {
+                            budget.reserve(1)?;
+                            work[index].call_targets.insert(block, target);
+                        }
                     } else {
                         let root = &mut report.bodies[index];
                         root.blocked_at.get_or_insert(edge.site);
@@ -461,71 +572,197 @@ fn analyze<'g>(
                     Ok(())
                 })
                 .map_err(|_| ())?;
-                work[index].ordinary = Some(mir);
+                let item = &mut work[index];
+                item.ordinary = Some(mir);
+                item.trace = trace;
+                item.empty_entry = empty_entry;
             }
         }
         index += 1;
     }
 
-    // Charge the complete bounded close before releasing any MIR. Each pass
-    // visits a frame once and traverses each incoming edge at most once.
-    budget.step(work.len().checked_mul(6).ok_or(())?)?;
+    // Close only ordinary dependencies. Keep provisional blockers public but
+    // don't publish the closure until the final pass is funded.
+    budget.step(work.len().checked_mul(5).ok_or(())?)?;
     budget.step(reverse_edges.checked_mul(2).ok_or(())?)?;
     budget.reserve(work.len())?;
     let mut queue = VecDeque::with_capacity(work.len());
-    // Until closure is funded, a pending local edge is not the final result:
-    // a rejected dependency may take precedence over it.
-    for root in &mut report.bodies {
-        if root.blocked_at.is_some() {
-            root.completion = Completion::Incomplete;
-        }
+    for (root, item) in report.bodies.iter().zip(&mut work) {
+        item.blocked_at = root.blocked_at;
+        item.ordinary_completion = if root.ordinary_completion == Completion::SourceRejected {
+            Completion::SourceRejected
+        } else if root.blocked_at.is_some() {
+            Completion::Incomplete
+        } else if item.ordinary.is_some() {
+            Completion::Checked
+        } else {
+            Completion::ResourceLimit
+        };
     }
-    propagate(
-        &mut report.bodies,
-        &work,
-        &mut queue,
-        Completion::SourceRejected,
-    );
-    propagate(
-        &mut report.bodies,
-        &work,
-        &mut queue,
-        Completion::Incomplete,
-    );
+    propagate(&mut work, &mut queue, Completion::SourceRejected);
+    propagate(&mut work, &mut queue, Completion::Incomplete);
+    check_enabled_frames(&mut work, report, &mut findings, budget)?;
+    check_selected_calls(&mut work, report, budget)?;
+
+    budget.step(work.len())?;
+    budget.reserve(work.len())?;
     for (root, item) in report.bodies.iter_mut().zip(work) {
-        if root.completion == Completion::ResourceLimit
-            && let Some(mir) = item.ordinary
-        {
-            root.completion = Completion::Checked;
-            root.mir = Some(mir);
+        root.ordinary_completion = item.ordinary_completion;
+        root.blocked_at = item.blocked_at;
+        if item.ordinary_completion == Completion::Checked {
+            root.ordinary_mir = item.ordinary;
+        }
+        if let Some(proof) = item.enabled_proof {
+            root.enabled_frame = Delivery::Proved(proof);
+        }
+        if let Some(proof) = item.selected_proof {
+            root.selected_call = Delivery::Proved(proof);
         }
     }
     Ok(())
 }
 
-fn propagate(
-    bodies: &mut [RootReport<'_>],
-    work: &[WorkItem<'_, '_>],
-    queue: &mut VecDeque<usize>,
-    completion: Completion,
-) {
+fn propagate(work: &mut [WorkItem<'_, '_>], queue: &mut VecDeque<usize>, completion: Completion) {
     queue.extend(
-        bodies
-            .iter()
+        work.iter()
             .enumerate()
-            .filter_map(|(i, root)| (root.completion == completion).then_some(i)),
+            .filter_map(|(i, item)| (item.ordinary_completion == completion).then_some(i)),
     );
     while let Some(index) = queue.pop_front() {
-        let blocked_at = bodies[index].blocked_at;
-        for &parent in &work[index].parents {
-            let root = &mut bodies[parent];
-            if root.completion != completion && root.completion != Completion::SourceRejected {
-                root.completion = completion;
-                root.blocked_at = blocked_at;
+        let blocked_at = work[index].blocked_at;
+        for i in 0..work[index].parents.len() {
+            let parent = work[index].parents[i];
+            let item = &mut work[parent];
+            if item.ordinary_completion != completion
+                && item.ordinary_completion != Completion::SourceRejected
+            {
+                item.ordinary_completion = completion;
+                item.blocked_at = blocked_at;
                 queue.push_back(parent);
             }
         }
     }
+}
+
+fn check_enabled_frames<'g>(
+    work: &mut [WorkItem<'_, 'g>],
+    report: &mut GraphReport<'g>,
+    findings: &mut FindingIndex,
+    budget: &mut Budget,
+) -> Result<(), ()> {
+    for index in 0..report.source_roots {
+        budget.step(1)?;
+        let Some(trace) = work[index].trace.take() else {
+            continue;
+        };
+        let item = &work[index];
+        if item.ordinary_completion != Completion::Checked {
+            continue;
+        }
+        let mut known_entry = false;
+        let mut unknown_entry = false;
+        for &target in item.call_targets.values() {
+            budget.step(1)?;
+            known_entry |= work[target].empty_entry.is_some();
+            unknown_entry |= work[target].empty_entry.is_none();
+        }
+        // Do not use delivery to discharge an ordinary dependency. Even in
+        // a checked ordinary closure, nonempty calls have unknown delivery.
+        match trace.finish(
+            item.ordinary.as_ref().unwrap(),
+            |block, _, budget| {
+                budget.step(1)?;
+                Ok(item
+                    .call_targets
+                    .get(&block)
+                    .and_then(|&target| work[target].empty_entry))
+            },
+            known_entry,
+            unknown_entry,
+            budget,
+        ) {
+            Ok(Some(proof)) => {
+                work[index].retaining_parameters = trace.retaining_parameters();
+                work[index].enabled_proof = Some(proof);
+            }
+            Err(Stop::Limit) => return Err(()),
+            Err(Stop::Rejected {
+                site,
+                related,
+                kind: kind @ Conflict::CancellationEscape { .. },
+            }) => {
+                budget.reserve(1)?;
+                let finding_id =
+                    record_finding(report, findings, item, site, related, kind, budget)?;
+                report.bodies[index].enabled_frame = Delivery::Rejected {
+                    finding_id,
+                    via_call: None,
+                };
+                work[index].retaining_parameters = trace.retaining_parameters();
+            }
+            Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => {}
+        }
+        if trace.retaining_call_block().is_some() {
+            work[index].trace = Some(trace);
+        }
+    }
+    Ok(())
+}
+
+fn check_selected_calls<'g>(
+    work: &mut [WorkItem<'_, 'g>],
+    report: &mut GraphReport<'g>,
+    budget: &mut Budget,
+) -> Result<(), ()> {
+    for index in 0..report.source_roots {
+        budget.step(1)?;
+        let Some(trace) = work[index].trace.take() else {
+            continue;
+        };
+        let block = trace.retaining_call_block().unwrap();
+        let item = &work[index];
+        budget.step(1)?;
+        let Some(&callee_root) = item.call_targets.get(&block) else {
+            continue;
+        };
+        let Some(parameters) = work[callee_root].retaining_parameters else {
+            continue;
+        };
+        let mir = item.ordinary.as_ref().unwrap();
+        let call = match trace.prepare_retaining_call(mir, budget) {
+            Ok(Some(call)) => call,
+            Err(Stop::Limit) => return Err(()),
+            Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => continue,
+        };
+        let site = RetainingCallSite {
+            block,
+            site: mir.blocks[block].site,
+            callee_root,
+        };
+        // Only this exact context can reuse the enabled result. In particular,
+        // neither an ordinary caller nor a second nested call inherits it.
+        if let Delivery::Rejected { finding_id, .. } = report.bodies[callee_root].enabled_frame {
+            budget.reserve(1)?;
+            report.bodies[index].selected_call = Delivery::Rejected {
+                finding_id,
+                via_call: Some(site),
+            };
+            continue;
+        }
+        match call.finish_caller(parameters, budget) {
+            Ok(Some((entry, suspended))) => {
+                work[index].selected_proof = Some(Box::new(GraphRetainingCall {
+                    call: site,
+                    caller_entry_site: entry.entry_site,
+                    on_caller_entry_delivery: entry.on_entry_delivery,
+                    suspended,
+                }));
+            }
+            Err(Stop::Limit) => return Err(()),
+            Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => {}
+        }
+    }
+    Ok(())
 }
 
 fn lower_indexed<'a, 'g>(
@@ -554,7 +791,11 @@ fn lower_indexed<'a, 'g>(
         }
         return lower_startup_body(typed, module, nodes, budget);
     };
-    let (header, frame) = match declaration.id.kind {
+    if !matches!(body.owner, BodyOwner::Declaration(owner) if std::ptr::eq(owner, &declaration.id))
+    {
+        return Err(pending());
+    }
+    let (header, frame, collect_trace) = match declaration.id.kind {
         DeclarationKind::Expectation => {
             if body.site.node != site {
                 return Err(pending());
@@ -570,7 +811,7 @@ fn lower_indexed<'a, 'g>(
             {
                 return Err(pending());
             }
-            (header, Frame::Ordinary)
+            (header, Frame::OrdinaryFunction, true)
         }
         DeclarationKind::Implementation if module.key.origin == Origin::Application => {
             let (implementation, closed_family) = facts.implementation.ok_or_else(pending)?;
@@ -596,23 +837,24 @@ fn lower_indexed<'a, 'g>(
             } else {
                 return Err(pending());
             };
-            (&implementation.header, frame)
+            (&implementation.header, frame, false)
         }
         _ => return Err(pending()),
     };
-    lower(typed, module, header, frame, nodes, budget)
+    lower(typed, module, header, frame, collect_trace, nodes, budget)
 }
 
 pub(super) fn visit_dependencies<'g>(
     mir: &Mir<'g>,
     budget: &mut Budget,
-    mut visit: impl FnMut(Dependency<'g>, &mut Budget) -> ResultOf<()>,
+    mut visit: impl FnMut(usize, Dependency<'g>, &mut Budget) -> ResultOf<()>,
 ) -> ResultOf<()> {
     use DependencyContract::*;
-    for block in &mir.blocks {
+    for (index, block) in mir.blocks.iter().enumerate() {
         budget.step(1)?;
         let mut emit = |declaration, contract, budget: &mut Budget| {
             visit(
+                index,
                 Dependency {
                     site: block.site,
                     declaration,

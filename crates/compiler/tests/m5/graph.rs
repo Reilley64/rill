@@ -4,12 +4,255 @@ use super::{
 };
 use compiler::analysis::{
     ownership::{
-        DependencyContract, GraphCompletion, GraphObligation, GraphReport, RootReport,
+        Delivery, DependencyContract, GraphCompletion, GraphObligation, GraphReport, RootReport,
         analyze_ownership,
     },
     scalars::BodyOwner,
 };
 use loader::DeclarationKind::{Expectation, Function, Implementation};
+
+#[path = "graph/delivery.rs"]
+mod delivery;
+
+#[test]
+fn uncalled_enabled_frame_rejects_only_the_delivery_judgment() {
+    let source = format!(
+        r#"{HELPER}
+function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {{
+    let flag = true;
+    *slot = &flag;
+    while (enter) {{ continue; }}
+    *slot = input;
+}}
+"#
+    );
+    fixture(
+        "graph::uncalled_enabled_frame_rejects_only_the_delivery_judgment",
+        &[&source],
+        |_, request, _, receipt, _| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(
+                report.completion(),
+                GraphCompletion::SourceRejected,
+                "mode={}",
+                request.test_mode
+            );
+            let unsafe_body = root(&report, b"function unsafeBody(");
+            assert_eq!(unsafe_body.completion(), Completion::SourceRejected);
+            assert!(unsafe_body.mir().is_none());
+            assert_eq!(unsafe_body.ordinary_completion(), Completion::Checked);
+            assert!(unsafe_body.ordinary_mir().unwrap().cancellation().is_none());
+            assert!(matches!(
+                unsafe_body.enabled_frame(),
+                Delivery::Rejected {
+                    finding_id: 0,
+                    via_call: None
+                }
+            ));
+            assert!(matches!(unsafe_body.selected_call(), Delivery::Unresolved));
+            let [finding] = report.findings() else {
+                panic!("expected a direct enabled-frame finding");
+            };
+            assert_eq!(finding.code(), "R0202");
+            assert_eq!(finding.site.span.bytes(), b"*slot = &flag;");
+            assert_eq!(finding.related.span.bytes(), b"&flag");
+            assert_eq!(
+                finding.cancellation_delivery.unwrap().span.bytes(),
+                b"while (enter) { continue; }"
+            );
+            assert_eq!(
+                root(&report, b"function entryControl(").completion(),
+                Completion::Checked
+            );
+        },
+    );
+}
+
+#[test]
+fn selected_alias_calls_share_only_their_canonical_delivery_witness() {
+    installed(
+        "graph::selected_alias_calls_share_only_their_canonical_delivery_witness",
+        |request| {
+            let callee_source = r#"export function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+}
+"#;
+            let mut main = format!(
+                r#"{MAIN}
+import left::unsafeBody as first;
+import left::unsafeBody as again;
+import right::unsafeBody as other;
+"#
+            );
+            for (caller, alias) in [
+                ("firstCaller", "first"),
+                ("secondCaller", "again"),
+                ("otherCaller", "other"),
+            ] {
+                use std::fmt::Write;
+                write!(
+                    main,
+                    r#"
+function {caller}(enter: bool): void {{
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    {alias}(&mut slot, &input, enter);
+}}
+"#
+                )
+                .unwrap();
+            }
+            fs::write(&request.entry, &main).unwrap();
+            for (name, source) in [
+                ("left.rill", callee_source),
+                ("right.rill", callee_source),
+                ("helper.rill", HELPER),
+            ] {
+                fs::write(request.entry.with_file_name(name), source).unwrap();
+            }
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().expect("installed typed receipt");
+                let report = analyze_ownership(&receipt, AnalysisLimits::default());
+                assert_eq!(report.completion(), GraphCompletion::SourceRejected);
+                assert_eq!(
+                    report
+                        .roots()
+                        .iter()
+                        .filter(|root| root.completion() == Completion::SourceRejected)
+                        .count(),
+                    5
+                );
+                let [left, right] = report.findings() else {
+                    panic!("expected one finding per canonical callee");
+                };
+                let module = |path| {
+                    graph
+                        .modules()
+                        .iter()
+                        .find(|module| {
+                            module.key.origin == Origin::Application && module.key.path == path
+                        })
+                        .unwrap()
+                };
+                for (i, (path, finding)) in [("left.rill", left), ("right.rill", right)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let module = module(path);
+                    let declaration = module
+                        .declarations
+                        .iter()
+                        .find(|declaration| declaration.name.as_deref() == Some("unsafeBody"))
+                        .unwrap();
+                    let callee = report
+                        .roots()
+                        .iter()
+                        .find(|root| root.owner() == BodyOwner::Declaration(&declaration.id))
+                        .unwrap();
+                    assert_eq!(callee.completion(), Completion::SourceRejected);
+                    assert_eq!(callee.ordinary_completion(), Completion::Checked);
+                    assert!(callee.mir().is_none() && callee.ordinary_mir().is_some());
+                    assert!(
+                        matches!(callee.enabled_frame(), Delivery::Rejected { finding_id, via_call: None } if *finding_id == i)
+                    );
+                    assert!(matches!(callee.selected_call(), Delivery::Unresolved));
+                    let nodes = &module.syntax.nodes;
+                    let [_, store, backedge, _] =
+                        nodes[nodes[declaration.node].children[1]].children[..]
+                    else {
+                        panic!("expected paired stores around the loop");
+                    };
+                    assert_eq!(finding.code(), "R0202");
+                    for (site, node, text) in [
+                        (finding.site, store, "*slot = &flag;"),
+                        (finding.related, nodes[store].children[1], "&flag"),
+                        (
+                            finding.cancellation_delivery.unwrap(),
+                            backedge,
+                            "while (enter) { continue; }",
+                        ),
+                    ] {
+                        assert_eq!((site.module, site.node), (&module.key, node));
+                        assert_eq!(site.span.bytes(), text.as_bytes());
+                        assert_eq!(site.span.start(), callee_source.find(text).unwrap());
+                    }
+                }
+                for (prefix, text, expected_id) in [
+                    (
+                        b"function firstCaller(".as_slice(),
+                        "first(&mut slot, &input, enter)",
+                        0,
+                    ),
+                    (
+                        b"function secondCaller(",
+                        "again(&mut slot, &input, enter)",
+                        0,
+                    ),
+                    (
+                        b"function otherCaller(",
+                        "other(&mut slot, &input, enter)",
+                        1,
+                    ),
+                ] {
+                    let caller = root(&report, prefix);
+                    assert_eq!(
+                        caller.completion(),
+                        Completion::SourceRejected,
+                        "mode={test_mode}, caller={:?}",
+                        caller.owner()
+                    );
+                    assert!(caller.mir().is_none());
+                    assert_eq!(caller.ordinary_completion(), Completion::Checked);
+                    assert!(matches!(caller.enabled_frame(), Delivery::Unresolved));
+                    let Delivery::Rejected {
+                        finding_id,
+                        via_call: Some(call),
+                    } = caller.selected_call()
+                    else {
+                        panic!("expected a rejection linked to the selected call");
+                    };
+                    let [edge] = caller.dependencies() else {
+                        panic!("expected one ordinary call edge")
+                    };
+                    assert_eq!(*finding_id, expected_id);
+                    assert_eq!(
+                        report.roots()[call.callee_root].owner(),
+                        BodyOwner::Declaration(edge.declaration)
+                    );
+                    let block = &caller.ordinary_mir().unwrap().blocks[call.block];
+                    assert!(
+                        matches!(block.operation, Operation::CallRetainingWithBool { callee, .. } if callee == edge.declaration)
+                    );
+                    assert_eq!(
+                        (call.site.module, call.site.node),
+                        (&module("main.rill").key, edge.site.node)
+                    );
+                    assert_eq!(call.site.node, block.site.node);
+                    assert_eq!(
+                        module("main.rill").syntax.nodes[call.site.node].kind,
+                        compiler::parser::NodeKind::Call
+                    );
+                    assert_eq!(call.site.span.bytes(), text.as_bytes());
+                    assert_eq!(call.site.span.start(), main.find(text).unwrap());
+                }
+                assert_eq!(
+                    root(&report, b"function entryControl(").completion(),
+                    Completion::Checked
+                );
+            }
+        },
+    );
+}
 
 #[test]
 fn installed_inventory_keeps_standard_and_independent_application_roots() {
