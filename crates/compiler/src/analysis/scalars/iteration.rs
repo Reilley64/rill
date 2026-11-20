@@ -29,8 +29,14 @@ pub(in crate::analysis) enum IterationBodyKind {
 
 #[derive(Clone, Copy)]
 pub(super) enum DirectExpression {
-    BindingOrStatement(NodeId),
-    Return(NodeId),
+    BindingOrStatement(NodeId, usize),
+    Postfix {
+        root: NodeId,
+        operand: NodeId,
+        depth: usize,
+        named: bool,
+    },
+    Return(NodeId, usize),
 }
 
 #[derive(Clone, Copy, Default)]
@@ -46,18 +52,67 @@ pub(super) enum IterationBody {
 }
 
 impl IterationBody {
-    fn finish(self) -> Option<IterationBodyKind> {
+    fn finish(self, reached_postfix: bool) -> Option<IterationBodyKind> {
         match self {
-            Self::TextOption { postfix: true, .. } => Some(IterationBodyKind::NamedBoolPostfix),
+            Self::TextOption { postfix: true, .. } if reached_postfix => {
+                Some(IterationBodyKind::NamedBoolPostfix)
+            }
             Self::Ordinary
             | Self::TextOption {
-                constructor: false, ..
+                constructor: false,
+                postfix: false,
+                ..
             } => Some(IterationBodyKind::Ordinary),
             _ => None,
         }
     }
 
-    pub(super) fn statement(&mut self, node: &crate::parser::Node) {
+    // Follow only the direct statement result and its postfix operand during
+    // the existing top-down expression visit. Groups add depth, not new uses.
+    pub(super) fn visit(&mut self, node: NodeId, syntax: &crate::parser::Node) {
+        let Self::TextOption {
+            direct: Some(d), ..
+        } = self
+        else {
+            return;
+        };
+        use DirectExpression::*;
+        match (*d, syntax.kind) {
+            (BindingOrStatement(root, depth), NodeKind::Group) if root == node => {
+                *d = BindingOrStatement(syntax.children[0], depth + 1)
+            }
+            (Return(root, depth), NodeKind::Group) if root == node => {
+                *d = Return(syntax.children[0], depth + 1)
+            }
+            (BindingOrStatement(root, depth), NodeKind::Propagate) if root == node => {
+                *d = Postfix {
+                    root,
+                    operand: syntax.children[0],
+                    depth: depth + 1,
+                    named: false,
+                }
+            }
+            (
+                Postfix {
+                    root,
+                    operand,
+                    depth,
+                    ..
+                },
+                NodeKind::Group,
+            ) if operand == node => {
+                *d = Postfix {
+                    root,
+                    operand: syntax.children[0],
+                    depth: depth + 1,
+                    named: false,
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn statement(&mut self, node: &crate::parser::Node, depth: usize) {
         if !matches!(
             node.kind,
             NodeKind::Block
@@ -76,8 +131,12 @@ impl IterationBody {
                     .children
                     .last()
                     .copied()
-                    .map(DirectExpression::BindingOrStatement),
-                NodeKind::Return => node.children.first().copied().map(DirectExpression::Return),
+                    .map(|root| DirectExpression::BindingOrStatement(root, depth + 1)),
+                NodeKind::Return => node
+                    .children
+                    .first()
+                    .copied()
+                    .map(|root| DirectExpression::Return(root, depth + 1)),
                 _ => None,
             };
         }
@@ -128,7 +187,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         .propagation_target(context)
                         .is_some_and(|(target, result)| {
                             matches!(target, PropagationTarget::Callable(_))
-                                && result.is_some_and(|ty| self.is_iteration_bool_option(ty))
+                                && result.is_some_and(|ty| {
+                                    Self::is_iteration_bool_option(self.option, ty)
+                                })
                         }) =>
             {
                 IterationBody::TextOption {
@@ -143,10 +204,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         let enclosing = std::mem::replace(&mut self.iteration_body, shape);
         let body = self.statement(module, block, depth + 1, context);
         let shape = std::mem::replace(&mut self.iteration_body, enclosing);
-        if let Some(iteration) = &mut handoff {
-            iteration.body = shape.finish();
-        }
         let mut body = body?;
+        if let Some(iteration) = &mut handoff {
+            iteration.body = shape.finish(body.reaches_postfix);
+        }
         if context.scopes.last().is_some_and(|scope| scope.len() == 1)
             && let (Some(iteration), Some(value)) = (&mut handoff, &source)
             && iteration.body.is_some()
@@ -175,8 +236,11 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok((flow, handoff))
     }
 
-    fn is_iteration_bool_option(&self, ty: &Type<'g>) -> bool {
-        let Some(role) = self.option else {
+    fn is_iteration_bool_option(
+        role: Option<crate::analysis::typed::OptionRole<'g>>,
+        ty: &Type<'g>,
+    ) -> bool {
+        let Some(role) = role else {
             return false;
         };
         let ty = match ty.as_ref() {
@@ -199,24 +263,40 @@ impl<'r, 'g> Checker<'r, 'g> {
     // or recursive admission of expressions containing propagation is needed.
     pub(super) fn iteration_expression(
         &mut self,
-        inference: &Inference<'g>,
+        module: &Module,
         node: NodeId,
+        slot: &Slot<'g>,
         data: Option<&data::DataExpression<'g>>,
         call: Option<&CallFacts<'g>>,
-    ) {
+    ) -> Work<()> {
         if matches!(self.iteration_body, IterationBody::Unsupported) {
-            return;
+            return Ok(());
         }
-        let syntax = &inference.module.syntax.nodes;
+        let syntax = &module.syntax.nodes;
+        if let IterationBody::TextOption {
+            direct: Some(DirectExpression::Postfix { operand, named, .. }),
+            ..
+        } = &mut self.iteration_body
+            && *operand == node
+            && syntax[node].kind == NodeKind::ValueReference
+            && slot.access == data::Access::Owned
+            && slot.path.as_ref().is_some_and(|p| p.projections.is_empty())
+            && slot
+                .ty
+                .as_ref()
+                .is_some_and(|ty| Self::is_iteration_bool_option(self.option, ty))
+        {
+            *named = true;
+        }
         match syntax[node].kind {
             NodeKind::Literal
             | NodeKind::ValueReference
             | NodeKind::Group
-            | NodeKind::Prefix("&" | "&mut" | "*") => return,
+            | NodeKind::Prefix("&" | "&mut" | "*") => return Ok(()),
             NodeKind::Call
                 if call.is_some_and(|call| call.callee == &self.input.graph.prelude().dispose) =>
             {
-                return;
+                return Ok(());
             }
             _ => (),
         }
@@ -227,47 +307,45 @@ impl<'r, 'g> Checker<'r, 'g> {
         } = self.iteration_body
         else {
             self.iteration_body = IterationBody::Unsupported;
-            return;
+            return Ok(());
         };
-        match (direct, syntax[node].kind, data) {
+        let depth = match (direct, syntax[node].kind, data) {
             (
-                Some(DirectExpression::BindingOrStatement(root)),
+                Some(DirectExpression::Postfix {
+                    root,
+                    depth,
+                    named: true,
+                    ..
+                }),
                 NodeKind::Propagate,
                 Some(data::DataExpression::Propagation(exit)),
-            ) if root == node
-                && exit.error.is_none()
-                && self.named_iteration_gate(inference, syntax[node].children[0]) =>
-            {
-                postfix = true
+            ) if root == node && exit.error.is_none() => {
+                postfix = true;
+                depth
             }
             (
-                Some(DirectExpression::Return(root)),
+                Some(DirectExpression::Return(root, depth)),
                 NodeKind::Call,
                 Some(data::DataExpression::Construction(value)),
-            ) if root == node && self.is_iteration_bool_option(&value.ty) => constructor = true,
+            ) if root == node && Self::is_iteration_bool_option(self.option, &value.ty) => {
+                constructor = true;
+                depth
+            }
             _ => {
                 self.iteration_body = IterationBody::Unsupported;
-                return;
+                return Ok(());
             }
+        };
+        if depth > self.elab.limits.max_depth.min(64) {
+            return Err(());
         }
+        self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(depth);
         self.iteration_body = IterationBody::TextOption {
             direct,
             constructor,
             postfix,
         };
-    }
-
-    fn named_iteration_gate(&self, inference: &Inference<'g>, operand: NodeId) -> bool {
-        if inference.module.syntax.nodes[operand].kind != NodeKind::ValueReference {
-            return false;
-        }
-        let slot = &inference.slots[&operand];
-        slot.access == data::Access::Owned
-            && slot.path.as_ref().is_some_and(|p| p.projections.is_empty())
-            && slot
-                .ty
-                .as_ref()
-                .is_some_and(|ty| self.is_iteration_bool_option(ty))
+        Ok(())
     }
 
     fn iteration_handoff(

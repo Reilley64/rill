@@ -35,6 +35,8 @@ pub struct Flow {
     /// A reachable prerequisite prevents a complete control-flow judgment.
     pub pending: bool,
     pub returns: bool,
+    /// At least one feasible path evaluates a postfix `?` (including known Some).
+    pub reaches_postfix: bool,
     pub breaks: BTreeSet<NodeId>,
     pub continues: BTreeSet<NodeId>,
     pub diverges: bool,
@@ -1983,6 +1985,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         while let Some(node) = stack.pop() {
             self.elab.step(1)?;
             let syntax = &module.syntax.nodes[node];
+            self.iteration_body.visit(node, syntax);
             self.elab.reserve(1)?;
             inference.slots.insert(
                 node,
@@ -2718,7 +2721,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else {
                     None
                 };
-                self.iteration_expression(&inference, node, data.as_ref(), call.as_deref());
+                self.iteration_expression(module, node, slot, data.as_ref(), call.as_deref())?;
                 let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),
@@ -2846,6 +2849,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             if flow.normal
                 && let Some(propagation) = &inference.slots[&node].propagation
             {
+                flow.reaches_postfix |= n.kind == NodeKind::Propagate;
                 flow.normal = propagation.can_continue;
                 flow.returns |= propagation.can_return;
             }
@@ -2866,6 +2870,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         a.normal |= b.normal;
         a.pending |= b.pending;
         a.returns |= b.returns;
+        a.reaches_postfix |= b.reaches_postfix;
         a.diverges |= b.diverges;
         a.breaks.extend(&b.breaks);
         a.continues.extend(&b.continues);
@@ -2913,7 +2918,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(depth);
         let n = &module.syntax.nodes[node];
-        self.iteration_body.statement(n);
+        self.iteration_body.statement(n, depth);
         let before = self.marks();
         let mut flow = Flow::normal();
         let mut kind = NodeFactKind::Statement;

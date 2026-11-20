@@ -106,12 +106,49 @@ fn unadmitted_text_parameters_keep_their_old_caps() {
                     b"xs: List<string>"
                 );
             }
-            for name in ["works", "postfix"] {
+            for name in ["works", "postfix", "grouped"] {
                 assert!(
                     run(name, AnalysisLimits::default()).mir().is_some(),
                     "{name}"
                 );
             }
+            let grouped = run("grouped", AnalysisLimits::default());
+            let exact = limits(grouped.statistics()).0;
+            assert!(run("grouped", exact).mir().is_some());
+            let short = run(
+                "grouped",
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            );
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let cap = limits(graph.statistics()).0;
+            let at = analyze_ownership(receipt, cap);
+            let d = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("grouped"))
+                .unwrap();
+            assert!(
+                at.roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                    .unwrap()
+                    .ordinary_mir()
+                    .is_some()
+            );
+            let short = analyze_ownership(
+                receipt,
+                AnalysisLimits {
+                    max_depth: cap.max_depth - 1,
+                    ..cap
+                },
+            );
+            assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+            assert!(short.roots().iter().all(|r| r.ordinary_mir().is_none()));
         },
     );
 }

@@ -42,6 +42,145 @@ function afterMove(xs: List<string>, gate: Option<bool>, outer: string): Option<
 "#;
 
 #[test]
+fn postfix_must_be_reachable_in_an_admissible_loop_body() {
+    probe(
+        "iteration::text::postfix::postfix_must_be_reachable_in_an_admissible_loop_body",
+        r#"
+        function dead(xs: List<string>, gate: Option<bool>): Option<bool> {
+            for (let item of xs) { return Option.Some(true); gate?; } return Option.Some(false);
+        }
+        function pruned(xs: List<string>, gate: Option<bool>): Option<bool> {
+            for (let item of xs) { if (false) { gate?; } return Option.Some(true); } return Option.Some(false);
+        }
+        function nested(xs: List<string>, ys: List<i32>, gate: Option<bool>): Option<bool> {
+            for (let item of xs) { let bit = gate?; for (let inner of ys) { break; } } return Option.Some(false);
+        }
+    "#,
+        |_, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            for (name, max_work, max_entries) in [
+                ("dead", 1966, 74),
+                ("pruned", 1966, 74),
+                ("nested", 1968, 75),
+            ] {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                    .unwrap();
+                let local = lower_body(
+                    receipt,
+                    module,
+                    &d.id,
+                    AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth: 0,
+                    },
+                )
+                .unwrap();
+                assert_eq!(local.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(root.ordinary_completion(), Completion::Incomplete);
+                assert_eq!(
+                    local.blocked_at().unwrap().span.bytes(),
+                    b"xs: List<string>"
+                );
+                assert!(
+                    local.findings().is_empty() && local.mir().is_none() && root.mir().is_none()
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn grouped_cursor_postfix_retains_the_two_real_edges() {
+    probe_with_typed(
+        "iteration::text::postfix::grouped_cursor_postfix_retains_the_two_real_edges",
+        r#"
+        function grouped(xs: List<string>, gate: Option<bool>): Option<bool> {
+            for (let item of xs) { let bit = (((((gate)))?)); return ((Option.Some(bit))); }
+            return Option.Some(false);
+        }
+        function bare(xs: List<string>, gate: Option<bool>): Option<bool> {
+            for (let item of xs) { let bit = gate?; return Option.Some(bit); }
+            return Option.Some(false);
+        }
+        function feasible(xs: List<string>, gate: Option<bool>, enter: bool): Option<bool> {
+            for (let item of xs) { if (enter) { gate?; } return Option.Some(true); } return Option.Some(false);
+        }
+    "#,
+        |_, module, receipt, typed| {
+            let d = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("grouped"))
+                .unwrap();
+            let local = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let root = graph
+                .roots()
+                .iter()
+                .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                .unwrap();
+            let other = |name: &str| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, AnalysisLimits::default()).unwrap()
+            };
+            let bare = other("bare");
+            assert!(bare.mir().is_some() && other("feasible").mir().is_some());
+            assert!(local.statistics().max_depth > bare.statistics().max_depth);
+            let limited = lower_body(
+                receipt,
+                module,
+                &d.id,
+                AnalysisLimits {
+                    max_depth: local.statistics().max_depth - 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(limited.completion(), Completion::ResourceLimit);
+            assert!(limited.mir().is_none());
+            let opt = typed.option_role().unwrap();
+            for mir in [local.mir().unwrap(), root.ordinary_mir().unwrap()] {
+                let (yielded, _) = branch_targets(mir);
+                let path = straight_blocks(mir, yielded);
+                let branch = path.last().unwrap();
+                assert!(
+                    matches!(branch.operation,Operation::TestVariant{success,..} if success==&opt.some.id)
+                );
+                let Terminator::Branch { yes, no } = branch.terminator else {
+                    panic!("Option branches")
+                };
+                for (edge, tag) in [(yes, &opt.some.id), (no, &opt.none.id)] {
+                    let suffix = straight_blocks(mir, edge);
+                    let export = suffix
+                        .iter()
+                        .position(|b| matches!(b.operation, Operation::Export(_)))
+                        .unwrap();
+                    assert!(suffix[..export].iter().any(|b|matches!(b.operation,Operation::ConstructVariant{variant,..} if variant==tag)));
+                    assert!(
+                        obligations(&suffix[export + 1..])
+                            .any(|c| matches!(c, Obligation::DisposeOwnedListIterText { .. }))
+                    );
+                    assert_eq!(suffix.last().unwrap().terminator, Terminator::Return);
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_postfix_with_live_string_cursor() {
     probe_with_typed(
         "iteration::text::postfix::installed_postfix_with_live_string_cursor",
