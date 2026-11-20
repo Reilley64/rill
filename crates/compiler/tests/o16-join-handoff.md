@@ -1,6 +1,6 @@
 # O16 List delivery evidence and remaining join checks
 
-The [owner approval](https://github.com/Reilley64/rill/issues/66#issuecomment-7040596504) allows a bounded static check for the canonical two-job operation. This increment does not admit that operation. It checks delivery cleanup for one installed List-backed leaf frame.
+The [owner approval](https://github.com/Reilley64/rill/issues/66#issuecomment-7040596504) allows a bounded static check for the canonical two-job operation. This handoff records the earlier List-backed leaf proof and the blockers at `00e9dca`. The [subsequent installed join evidence](m5-acceptance.md#the-installed-two-job-join-for-shared-list-reads) supersedes the import failure and shared/exclusive capture boundary for the cases it names.
 
 ## Checked source
 
@@ -15,9 +15,9 @@ The ordinary loop exit still reaches the source `dispose(numbers)` once. A secon
 
 The new proof is limited to a top-level `while` whose test reads an immutable Bool parameter and whose body is empty or just `continue`. No other reached conditional, backedge, or ordinary call can contribute a checkpoint in this List proof. The enabled walk must actually reach a backedge: an ordinary CFG backedge alone is insufficient. For example, `while (again) { if (again) { break; } }` cannot reach its backedge when both tests read the same immutable parameter. It keeps ordinary MIR but does not gain an entry-only delivery proof.
 
-## Installed blockers
+## Installed blockers at `00e9dca`
 
-The staged `shared` and `erased-slot` applications that import `std::routine::join` still exit at M3 in both modes with `R0400: import has no public target (import std::routine::join;)`. There is no typed receipt for either. The alias, competing capture, child-local escape, heterogeneous result and caller-backed result fixtures also stop at the import. These are import failures, not `R0201`, `R0202` or a canonical erasure judgment.
+At that revision the staged `shared` and `erased-slot` applications that import `std::routine::join` still exit at M3 in both modes with `R0400: import has no public target (import std::routine::join;)`. There is no typed receipt for either. The alias, competing capture, child-local escape, heterogeneous result and caller-backed result fixtures also stop at the import. These are import failures, not `R0201`, `R0202` or a canonical erasure judgment.
 
 Two independent boundaries remain after removing the import from the experiment:
 
