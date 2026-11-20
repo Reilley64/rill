@@ -1,5 +1,5 @@
 use super::*;
-use compiler::analysis::ownership::Projection;
+use compiler::analysis::ownership::{Projection, RetainedPlace};
 
 #[test]
 fn named_nested_tuple_leaf_transfers_keep_the_sibling_live_at_the_join() {
@@ -3667,8 +3667,34 @@ fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
                 assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
                 assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
+            let retained = check("retained");
+            let mir = retained
+                .mir()
+                .unwrap_or_else(|| panic!("retained: {:?}", retained.completion()));
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| !matches!(op, Operation::None | Operation::Cleanup(_)))
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Copy { from: source, into: Some(source_stage) },
+                Operation::Reborrow { parent, holder: destination_stage, exclusive: true },
+                Operation::Initialize(bool_stage),
+                Operation::CallRetainingWithBool {
+                    callee, destination: RetainedPlace::ThroughParameter(destination),
+                    arguments, input, second_input: None,
+                },
+            ] if source.root.span.bytes() == b"source: &bool" && source_stage.root.span.bytes() == b"source"
+                && parent.root.span.bytes() == b"destination: &mut &bool"
+                && destination_stage.root.span.bytes() == b"destination" && bool_stage.root.span.bytes() == b"true"
+                && **callee == declaration("store").id && destination.root.node == parent.root.node
+                && input.root.node == source_stage.root.node
+                && matches!(arguments.as_slice(), [out, shared, flag]
+                    if out.root.node == destination_stage.root.node && shared.root.node == source_stage.root.node
+                    && flag.root.node == bool_stage.root.node)),
+                "{route:?}"
+            );
             for (name, site) in [
-                ("retained", "source |> store(destination, _, true)"),
                 ("ownedArgument", "second |> owned(first, _)"),
                 ("nestedArgument", "[[true, false], true] |> ownedNested"),
             ] {
