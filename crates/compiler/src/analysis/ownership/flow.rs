@@ -171,8 +171,8 @@ fn liveness(
             | Action::CheckRetained => use_one(None, None),
             Action::CheckScopedReferenceResults { entries, .. } => (entries.map(Some), None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
-            Action::OpenOwnedListI32 { source, cursor, .. } => use_one(Some(source), Some(cursor)),
-            Action::AdvanceOwnedListI32 { cursor, into, .. } => use_one(Some(cursor), into),
+            Action::OpenOwnedList { source, cursor, .. } => use_one(Some(source), Some(cursor)),
+            Action::AdvanceOwnedList { cursor, into, .. } => use_one(Some(cursor), into),
             Action::Read { from, into }
             | Action::Move { from, into }
             | Action::Dereference { from, into, .. } => {
@@ -587,6 +587,20 @@ fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultO
             implementation: disposal.implementation,
             bridge: disposal.bridge,
         }),
+        StorageCleanup::DisposeListText(disposal) => Ok(Cleanup::DisposeListText {
+            operand: place,
+            implementation: disposal.list.implementation,
+            bridge: disposal.list.bridge,
+            element: disposal.element,
+        }),
+        StorageCleanup::DisposeOwnedListIterText(disposal) => {
+            Ok(Cleanup::DisposeOwnedListIterText {
+                cursor: place,
+                implementation: disposal.list.implementation,
+                bridge: disposal.list.bridge,
+                element: disposal.element,
+            })
+        }
         StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
 }
@@ -638,7 +652,9 @@ fn cleanup_operation<'g>(
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
         cleanup @ (Cleanup::DropOptionPayload { .. }
         | Cleanup::DisposeListI32 { .. }
-        | Cleanup::DisposeOwnedListIterI32 { .. }) => {
+        | Cleanup::DisposeOwnedListIterI32 { .. }
+        | Cleanup::DisposeListText { .. }
+        | Cleanup::DisposeOwnedListIterText { .. }) => {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
         }
@@ -2123,7 +2139,12 @@ pub(super) fn run<'a, 'g>(
         .map(|slot| {
             // These transfers have only an ordinary-exit proof.
             if slot.reference_option.is_some()
-                || matches!(slot.cleanup, StorageCleanup::DisposeOwnedListIterI32(_))
+                || matches!(
+                    slot.cleanup,
+                    StorageCleanup::DisposeOwnedListIterI32(_)
+                        | StorageCleanup::DisposeListText(_)
+                        | StorageCleanup::DisposeOwnedListIterText(_)
+                )
             {
                 candidate = false;
                 replacement_candidate = false;
@@ -2353,10 +2374,11 @@ pub(super) fn run<'a, 'g>(
                     state[slot] = State::Initialized(empty.clone());
                     Operation::Initialize(local(slot))
                 }
-                Action::OpenOwnedListI32 {
+                Action::OpenOwnedList {
                     source,
                     cursor,
                     backing,
+                    text_source_backing,
                     provider,
                 } => {
                     require_initialized(&slots, &state, source, node, budget)?;
@@ -2372,14 +2394,24 @@ pub(super) fn run<'a, 'g>(
                     state[source] = State::Moved(node);
                     retire_loans(&slots, &mut state, &[source], budget)?;
                     state[cursor] = State::Initialized(empty.clone());
-                    Operation::OpenOwnedListI32 {
-                        source: local(source),
-                        cursor: local(cursor),
-                        backing,
-                        provider,
+                    if let Some(source_backing) = text_source_backing {
+                        Operation::OpenOwnedListText {
+                            source: local(source),
+                            cursor: local(cursor),
+                            source_backing,
+                            cursor_backing: backing,
+                            provider,
+                        }
+                    } else {
+                        Operation::OpenOwnedListI32 {
+                            source: local(source),
+                            cursor: local(cursor),
+                            backing,
+                            provider,
+                        }
                     }
                 }
-                Action::AdvanceOwnedListI32 {
+                Action::AdvanceOwnedList {
                     cursor,
                     into,
                     some,
@@ -2390,12 +2422,25 @@ pub(super) fn run<'a, 'g>(
                     if into.is_some_and(|slot| !matches!(state[slot], State::Vacant)) {
                         return Err(Stop::Pending(node));
                     }
-                    Operation::AdvanceOwnedListI32 {
-                        cursor: local(cursor),
-                        into: into.map(local),
-                        some,
-                        none,
-                        provider,
+                    if matches!(
+                        slots[cursor].cleanup,
+                        StorageCleanup::DisposeOwnedListIterText(_)
+                    ) {
+                        Operation::AdvanceOwnedListText {
+                            cursor: local(cursor),
+                            into: local(into.ok_or(Stop::Pending(node))?),
+                            some,
+                            none,
+                            provider,
+                        }
+                    } else {
+                        Operation::AdvanceOwnedListI32 {
+                            cursor: local(cursor),
+                            into: into.map(local),
+                            some,
+                            none,
+                            provider,
+                        }
                     }
                 }
                 Action::Read { from, into } | Action::Move { from, into } => {
@@ -3956,7 +4001,7 @@ pub(super) fn run<'a, 'g>(
                 let mut on_yes = state.clone();
                 // Both outcomes retain the unique cursor until lexical cleanup.
                 // Only a successful advance initializes the iteration binder.
-                if let Action::AdvanceOwnedListI32 {
+                if let Action::AdvanceOwnedList {
                     into: Some(item), ..
                 } = action
                 {

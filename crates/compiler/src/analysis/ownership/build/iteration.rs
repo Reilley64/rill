@@ -1,4 +1,4 @@
-//! Ordinary consuming `for` over the installed List<i32> backing.
+//! Ordinary consuming `for` over the installed List<i32> and List<string> backings.
 use super::*;
 use crate::analysis::generics::GoalId;
 use crate::analysis::typed::{CollectionProtection, ListTraversal};
@@ -16,9 +16,10 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         else {
             return Err(pending());
         };
+        let text = owns_text(&iteration.yielded);
         if !iteration.simple_body
             || iteration.traversal != Some(ListTraversal::Owned)
-            || scalar::scalar(&iteration.yielded) != Some(Primitive::I32)
+            || (!text && scalar::scalar(&iteration.yielded) != Some(Primitive::I32))
         {
             return Err(pending());
         }
@@ -33,12 +34,12 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         else {
             return Err(pending());
         };
-        // This slice checks a repeated named binding, or a single advance
-        // with a discarded yield. Do not widen the discard case to traversal.
+        // The scalar discard shortcut cannot retire an owning yield.
         if matches!(binding.pattern.as_ref(), Pattern::Wildcard)
-            && !self.fact(&body).is_some_and(|fact| {
-                !fact.flow.pending && !fact.flow.normal && fact.flow.continues.is_empty()
-            })
+            && (text
+                || !self.fact(&body).is_some_and(|fact| {
+                    !fact.flow.pending && !fact.flow.normal && fact.flow.continues.is_empty()
+                }))
         {
             return Err(pending());
         }
@@ -49,7 +50,12 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let (name, _) = self.ungroup_expression_at(source, depth + 1)?;
         let (named, path) = self.named_owned_place(name)?.ok_or_else(pending)?;
         let actual = self.normal_value(source)?;
-        if !self.is_list_i32(&named.ty)
+        let admitted_source = if text {
+            self.is_list_text(&named.ty)
+        } else {
+            self.is_list_i32(&named.ty)
+        };
+        if !admitted_source
             || actual.ty != named.ty
             || actual.access != Access::Owned
             || !matches!(&actual.path, Some(p) if std::ptr::eq(p.root, path.root) && p.projections.is_empty())
@@ -58,12 +64,11 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending());
         }
         let source_slot = self.resolve_place(name, path)?;
-        if !matches!(
-            self.slots[source_slot].cleanup,
-            StorageCleanup::DisposeListI32(_)
-        ) {
-            return Err(pending());
-        }
+        let text_disposal = match (text, self.slots[source_slot].cleanup) {
+            (false, StorageCleanup::DisposeListI32(_)) => None,
+            (true, StorageCleanup::DisposeListText(disposal)) => Some(disposal),
+            _ => return Err(pending()),
+        };
         let TypeTerm::Nominal {
             declaration: list, ..
         } = actual.ty.as_ref()
@@ -94,6 +99,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             &iteration.iterate,
             iterate,
             [&actual.ty, &iteration.iterator],
+            &iteration.yielded,
             |output| *output == iteration.iterator,
         )?;
         let next_scope = self.iteration_scope(node, cursor, Next(Owned))?;
@@ -102,6 +108,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             &iteration.next,
             next_scope,
             [&iteration.iterator, &iteration.yielded],
+            &iteration.yielded,
             |output| {
                 matches!(output.as_ref(), TypeTerm::Nominal { declaration, arguments }
                 if std::ptr::eq(*declaration, &option.declaration.id)
@@ -118,30 +125,43 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         {
             return Err(pending());
         }
-        let mut backing = None;
-        for repr in self.typed.collection_representations() {
-            self.budget.step(1)?;
-            if std::ptr::eq(&repr.declaration.id, *cursor)
-                && repr.storage == CollectionStorage::UnyieldedElements
-                && std::ptr::eq(repr.artifact.context(), open.artifact.context())
+        let backing = self.iteration_backing(
+            node,
+            cursor,
+            CollectionStorage::UnyieldedElements,
+            open.artifact,
+        )?;
+        let release = ListDisposal {
+            implementation: &release.implementation.id,
+            bridge: &release.bridge.id,
+        };
+        let (text_source_backing, cursor_cleanup) = if let Some(disposal) = text_disposal {
+            let source_release = self
+                .iteration_scope(node, list, CollectionOperation::DisposeList)?
+                .provider
+                .ok_or_else(pending)?;
+            if source_release.artifact != open.artifact
+                || disposal.list.implementation != &source_release.implementation.id
+                || disposal.list.bridge != &source_release.bridge.id
             {
-                backing = Some(repr);
-                break;
+                return Err(pending());
             }
-        }
-        let backing = backing.ok_or_else(pending)?;
-        self.check_i32_element_cleanup(node)?;
+            let list_backing =
+                self.iteration_backing(node, list, CollectionStorage::Elements, open.artifact)?;
+            (
+                Some(list_backing),
+                StorageCleanup::DisposeOwnedListIterText(TextListDisposal {
+                    list: release,
+                    element: disposal.element,
+                }),
+            )
+        } else {
+            self.check_i32_element_cleanup(node)?;
+            (None, StorageCleanup::DisposeOwnedListIterI32(release))
+        };
         let into =
             self.iteration_binder(pattern, binding, source, &iteration.yielded, depth + 1)?;
-        let cursor = self.allocate_slot(
-            node,
-            true,
-            StorageCleanup::DisposeOwnedListIterI32(ListDisposal {
-                implementation: &release.implementation.id,
-                bridge: &release.bridge.id,
-            }),
-            None,
-        )?;
+        let cursor = self.allocate_slot(node, true, cursor_cleanup, None)?;
         let retire = self.cleanup_scope(node, &[cursor], next)?;
         let return_retire = exits
             .returning
@@ -149,7 +169,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             .transpose()?;
         let head = self.emit(
             node,
-            Action::AdvanceOwnedListI32 {
+            Action::AdvanceOwnedList {
                 cursor,
                 into,
                 some: iteration.some,
@@ -176,10 +196,11 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         self.code[head].edges = Edges::Branch { yes, no: retire };
         self.emit(
             name,
-            Action::OpenOwnedListI32 {
+            Action::OpenOwnedList {
                 source: source_slot,
                 cursor,
                 backing,
+                text_source_backing,
                 provider: open,
             },
             Edges::Next(head),
@@ -204,12 +225,33 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         Err(Stop::Pending(node))
     }
 
+    fn iteration_backing(
+        &mut self,
+        node: NodeId,
+        owner: &DeclarationId,
+        storage: CollectionStorage,
+        artifact: CollectionArtifact<'g>,
+    ) -> ResultOf<CollectionRepresentation<'g>> {
+        for repr in self.typed.collection_representations() {
+            self.budget.step(1)?;
+            if std::ptr::eq(&repr.declaration.id, owner)
+                && repr.storage == storage
+                && std::ptr::eq(repr.artifact.context(), artifact.context())
+                && std::ptr::eq(repr.artifact.executable(), artifact.executable())
+            {
+                return Ok(repr);
+            }
+        }
+        Err(Stop::Pending(node))
+    }
+
     fn selected_iteration_step(
         &mut self,
         node: NodeId,
         id: &GoalId,
         scope: CollectionProtection<'g>,
         arguments: [&Type<'g>; 2],
+        yielded: &Type<'g>,
         output_matches: impl Fn(&Type<'g>) -> bool,
     ) -> ResultOf<CollectionProvider<'g>> {
         let pending = || Stop::Pending(node);
@@ -231,7 +273,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             || !goal.selection.as_ref().is_some_and(|selection| {
                 selection.implementation == &provider.implementation.id
                     && matches!(selection.substitution.as_slice(), [element]
-                        if element.position == 0 && scalar::scalar(&element.argument) == Some(Primitive::I32))
+                        if element.position == 0 && &element.argument == yielded)
             })
             || !goal.output.as_ref().is_some_and(|output| {
                 matches!(output.arguments.as_slice(), [input, inferred]
@@ -267,6 +309,42 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(Stop::Pending(node));
         }
         Ok(())
+    }
+
+    pub(super) fn text_element_disposal(
+        &mut self,
+        node: NodeId,
+    ) -> ResultOf<TextElementDisposal<'g>> {
+        let pending = || Stop::Pending(node);
+        let scopes = self.typed.primitive_protection();
+        self.budget.step(scopes.len())?;
+        let winner = scopes
+            .iter()
+            .find(|scope| {
+                Some(scope.family) == self.dispose
+                    && scope.role == PrimitiveRole::Dispose
+                    && scope.primitive == Primitive::String
+                    && scope.coverage == PrimitiveCoverage::Clear
+            })
+            .and_then(|scope| scope.required_winner)
+            .ok_or_else(pending)?;
+        let providers = self.typed.primitive_providers();
+        self.budget.step(providers.len())?;
+        for provider in providers {
+            if Some(provider.family) == self.dispose
+                && provider.role == PrimitiveRole::Dispose
+                && provider.primitive == Primitive::String
+                && std::ptr::eq(&provider.implementation.id, winner)
+                && let Some(binding) = provider.binding
+                && binding.operation == PrimitiveOperation::DisposeText
+            {
+                return Ok(TextElementDisposal {
+                    implementation: winner,
+                    bridge: &binding.declaration.id,
+                });
+            }
+        }
+        Err(pending())
     }
 
     fn iteration_binder(

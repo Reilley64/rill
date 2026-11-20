@@ -429,6 +429,23 @@ pub enum Operation<'g> {
         none: &'g DeclarationId,
         provider: CollectionProvider<'g>,
     },
+    /// Transfer the installed List<string> backing into the sole suffix owner.
+    OpenOwnedListText {
+        source: Place<'g>,
+        cursor: Place<'g>,
+        source_backing: CollectionRepresentation<'g>,
+        cursor_backing: CollectionRepresentation<'g>,
+        provider: CollectionProvider<'g>,
+    },
+    /// Remove one string from the cursor on Some and initialize `into` alone.
+    /// On None the cursor is empty and `into` stays vacant.
+    AdvanceOwnedListText {
+        cursor: Place<'g>,
+        into: Place<'g>,
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+        provider: CollectionProvider<'g>,
+    },
     Borrow {
         source: Place<'g>,
         holder: Place<'g>,
@@ -822,11 +839,33 @@ pub enum Cleanup<'g> {
         implementation: &'g DeclarationId,
         bridge: &'g DeclarationId,
     },
+    /// Consume a whole canonical List<string>, releasing elements in reverse order.
+    DisposeListText {
+        operand: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+        element: TextElementDisposal<'g>,
+    },
+    /// Consume only the unyielded suffix, invoking `element` in reverse position
+    /// order. After None the bridge retires the empty backing with no element calls.
+    DisposeOwnedListIterText {
+        cursor: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+        element: TextElementDisposal<'g>,
+    },
     /// Transfer the initialized remainder to the active disposer's epilogue.
     DeferDisposerFields {
         from: Place<'g>,
         into: Place<'g>,
     },
+}
+
+/// The protected primitive string dispose winner and its DisposeText binding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TextElementDisposal<'g> {
+    pub implementation: &'g DeclarationId,
+    pub bridge: &'g DeclarationId,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1828,6 +1867,14 @@ enum StorageCleanup<'g> {
     ReleaseGuard(GuardRelease<'g>),
     DisposeListI32(ListDisposal<'g>),
     DisposeOwnedListIterI32(ListDisposal<'g>),
+    DisposeListText(TextListDisposal<'g>),
+    DisposeOwnedListIterText(TextListDisposal<'g>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TextListDisposal<'g> {
+    list: ListDisposal<'g>,
+    element: TextElementDisposal<'g>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1859,6 +1906,8 @@ impl<'g> Local<'g> {
                 StorageCleanup::ReleaseGuard(_)
                     | StorageCleanup::DisposeListI32(_)
                     | StorageCleanup::DisposeOwnedListIterI32(_)
+                    | StorageCleanup::DisposeListText(_)
+                    | StorageCleanup::DisposeOwnedListIterText(_)
             )
     }
 
@@ -1910,13 +1959,14 @@ enum Action<'g> {
     None,
     BudgetBackedge,
     Init(Slot),
-    OpenOwnedListI32 {
+    OpenOwnedList {
         source: Slot,
         cursor: Slot,
         backing: CollectionRepresentation<'g>,
+        text_source_backing: Option<CollectionRepresentation<'g>>,
         provider: CollectionProvider<'g>,
     },
-    AdvanceOwnedListI32 {
+    AdvanceOwnedList {
         cursor: Slot,
         into: Option<Slot>,
         some: &'g DeclarationId,

@@ -11,6 +11,9 @@ use compiler::analysis::typed::{
 use compiler::analysis::{Statistics, TypeTerm};
 use compiler::parser::NodeKind;
 
+#[path = "iteration_text.rs"]
+mod text;
+
 const NAME: &str = "iteration::installed_consuming_list_iteration";
 const SOURCE: &str = r#"
 import std::collection::{List as Numbers};

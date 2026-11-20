@@ -749,6 +749,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 true,
                 StorageCleanup::DisposeListI32(self.list_disposal(node)?),
             ),
+            TypeTerm::Nominal { .. } if self.is_list_text(ty) => (
+                true,
+                StorageCleanup::DisposeListText(TextListDisposal {
+                    list: self.list_disposal(node)?,
+                    element: self.text_element_disposal(node)?,
+                }),
+            ),
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
                 if let Some((role, payload)) = self.admitted_option(ty) =>
             {
@@ -848,6 +855,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 && matches!(arguments.as_slice(), [element] if scalar::scalar(element) == Some(Primitive::I32)))
     }
 
+    fn is_list_text(&self, ty: &Type<'g>) -> bool {
+        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if self.typed.list_role().is_some_and(|list| std::ptr::eq(*declaration, &list.declaration.id))
+                && matches!(arguments.as_slice(), [element] if owns_text(element)))
+    }
+
     fn list_disposal(&mut self, node: NodeId) -> ResultOf<ListDisposal<'g>> {
         let pending = || Stop::Pending(node);
         let list = self.typed.list_role().ok_or_else(pending)?;
@@ -868,6 +881,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if repr.storage == CollectionStorage::Elements
                     && std::ptr::eq(repr.declaration, list.declaration)
                     && std::ptr::eq(repr.artifact.context(), provider.artifact.context())
+                    && std::ptr::eq(repr.artifact.executable(), provider.artifact.executable())
                 {
                     return Ok(ListDisposal {
                         implementation: &provider.implementation.id,
@@ -2326,7 +2340,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if self.slots[target].reference_option.is_some()
                     || matches!(
                         self.slots[target].cleanup,
-                        StorageCleanup::DisposeListI32(_)
+                        StorageCleanup::DisposeListI32(_) | StorageCleanup::DisposeListText(_)
                     )
                     || self.slots[target].projection.is_some()
                         && self.slots[target].guard_release().is_some()
@@ -2399,7 +2413,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         return self.stage_named_transfer(value, output, checked, None, depth + 1);
                     }
                     let facts = self.value(value)?;
-                    if self.is_list_i32(result) {
+                    if self.is_list_i32(result) || self.is_list_text(result) {
                         // Local List disposal does not prove a returned backing transfer.
                         return Err(Stop::Pending(value));
                     }
@@ -6686,7 +6700,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let result = checked_carrier.unwrap_or(&facts.ty);
         // A local cleanup or payload transfer does not establish the callee's
         // ownership of a returned backing or its caller retention contract.
-        if self.is_list_i32(result) || self.reference_option(result) {
+        if self.is_list_i32(result) || self.is_list_text(result) || self.reference_option(result) {
             return Err(Stop::Pending(node));
         }
         if checked_carrier.is_none() && matches!(result.as_ref(), TypeTerm::Callable { .. }) {

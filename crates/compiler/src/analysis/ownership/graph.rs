@@ -53,6 +53,15 @@ pub enum DependencyContract<'g> {
         operation: CollectionOperation,
         bridge: &'g DeclarationId,
     },
+    /// Closed List<string> transfer/advance/disposal through the installed bridge.
+    ListTextCollection {
+        operation: CollectionOperation,
+        bridge: &'g DeclarationId,
+    },
+    /// The owning string cleanup supplied to the whole-list or suffix disposer.
+    ListTextElementDisposal {
+        bridge: &'g DeclarationId,
+    },
     ResultConstructor,
     RetainedErrorDisplay,
 }
@@ -560,6 +569,8 @@ fn analyze<'g>(
                             | DependencyContract::ScopedJoin { .. }
                             | DependencyContract::ListI32Disposal { .. }
                             | DependencyContract::ListI32Iteration { .. }
+                            | DependencyContract::ListTextCollection { .. }
+                            | DependencyContract::ListTextElementDisposal { .. }
                     ) {
                         // Specialized evidence closes this ordinary edge,
                         // not the callee's unbound source root.
@@ -996,6 +1007,19 @@ pub(super) fn visit_dependencies<'g>(
                 },
                 budget,
             )?,
+            Operation::OpenOwnedListText { provider, .. }
+            | Operation::AdvanceOwnedListText { provider, .. } => emit(
+                &provider.implementation.id,
+                ListTextCollection {
+                    operation: if matches!(block.operation, Operation::OpenOwnedListText { .. }) {
+                        CollectionOperation::Iterate(Owned)
+                    } else {
+                        CollectionOperation::Next(Owned)
+                    },
+                    bridge: &provider.bridge.id,
+                },
+                budget,
+            )?,
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
             }
@@ -1082,6 +1106,39 @@ pub(super) fn visit_dependencies<'g>(
                             },
                             budget,
                         )?,
+                        Cleanup::DisposeListText {
+                            implementation,
+                            bridge,
+                            element,
+                            ..
+                        }
+                        | Cleanup::DisposeOwnedListIterText {
+                            implementation,
+                            bridge,
+                            element,
+                            ..
+                        } => {
+                            emit(
+                                implementation,
+                                ListTextCollection {
+                                    operation: if matches!(action, Cleanup::DisposeListText { .. })
+                                    {
+                                        CollectionOperation::DisposeList
+                                    } else {
+                                        CollectionOperation::DisposeIterator(Owned)
+                                    },
+                                    bridge,
+                                },
+                                budget,
+                            )?;
+                            emit(
+                                element.implementation,
+                                ListTextElementDisposal {
+                                    bridge: element.bridge,
+                                },
+                                budget,
+                            )?;
+                        }
                         _ => {}
                     }
                 }
