@@ -124,7 +124,7 @@ fn liveness(
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
             Action::Read { from, into }
             | Action::Move { from, into }
-            | Action::Dereference { from, into } => {
+            | Action::Dereference { from, into, .. } => {
                 use_one(Some(slots[from].carried_loan_root(from)), into)
             }
             Action::CheckRebuild { base, .. }
@@ -2124,7 +2124,11 @@ pub(super) fn run<'a, 'g>(
                         exclusive,
                     }
                 }
-                Action::Dereference { from, into } => {
+                Action::Dereference {
+                    from,
+                    into,
+                    explicit_copy,
+                } => {
                     initialized(&state[from], node)?;
                     conflict(
                         &slots,
@@ -2138,7 +2142,7 @@ pub(super) fn run<'a, 'g>(
                     if let Some(into) = into {
                         state[into] = State::Initialized(empty.clone());
                     }
-                    if let Some(into) = into.filter(|_| slots[from].scalar_borrow_temporary) {
+                    if let Some(into) = into.filter(|_| explicit_copy) {
                         Operation::CopyReferent {
                             from: local(from),
                             into: local(into),
@@ -2267,7 +2271,11 @@ pub(super) fn run<'a, 'g>(
                         require_initialized(&slots, &state, arg, node, budget)?;
                         forbid_active_escape(&state[arg], node)?;
                         let storage = slots[arg].storage(arg);
-                        if call.result != CallResult::Plain && call.into.is_some() {
+                        if matches!(
+                            call.result,
+                            CallResult::RetainsInputs | CallResult::RetainsRecordInput
+                        ) && call.into.is_some()
+                        {
                             // A staged record borrow holds both whole access and its
                             // contained sources; neither is narrowed at the call.
                             include_loans(&mut retained, &state, storage.clone(), budget)?;
@@ -2316,6 +2324,15 @@ pub(super) fn run<'a, 'g>(
                                 destination,
                                 input: local(retention.input),
                             }
+                        }
+                    } else if call.result == CallResult::ScalarCopy {
+                        let [argument] = call.args.as_slice() else {
+                            return Err(Stop::Pending(node));
+                        };
+                        Operation::CallScalarCopy {
+                            implementation: call.callee,
+                            argument: local(*argument),
+                            into: call.into.map(local),
                         }
                     } else if call.result == CallResult::RetainsRecordInput {
                         let [argument] = call.args.as_slice() else {

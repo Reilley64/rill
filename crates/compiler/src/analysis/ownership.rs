@@ -15,6 +15,7 @@ use std::ops::Range;
 mod build;
 mod flow;
 mod graph;
+mod scalar;
 
 pub use graph::{
     Delivery, Dependency, DependencyContract, GraphCompletion, GraphObligation, GraphReport,
@@ -264,7 +265,7 @@ pub enum Operation<'g> {
         exclusive: bool,
     },
     Dereference(Place<'g>),
-    /// Copy a scalar through a statement-local borrow into its destination.
+    /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
         into: Place<'g>,
@@ -289,6 +290,12 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
+    /// Call the selected scalar copy body, ending only the argument stage.
+    CallScalarCopy {
+        implementation: &'g DeclarationId,
+        argument: Place<'g>,
+        into: Option<Place<'g>>,
+    },
     /// Call with a staged shared record descriptor. The result may retain the
     /// whole record access and the sources carried by its contents.
     CallBorrowingRecord {
@@ -782,35 +789,53 @@ fn checked_graph<'g>(
     while let Some((target, id, is_disposer)) = pending.pop_front() {
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
         let missing = (module, Stop::Pending(root_site));
-        let selected = if is_disposer {
-            let family = typed
-                .dispose_role()
-                .and_then(|role| typed.inventory().captured_family(&role.id))
-                .ok_or((module, Stop::Pending(root_site)))?;
-            budget
-                .step(family.implementations.len())
-                .map_err(|()| (target, Stop::Limit))?;
-            family
-                .implementations
-                .iter()
-                .find(|body| body.source.declaration == *id)
-                .map(|body| &body.header)
-        } else {
-            typed.inventory().type_facts().declarations.get(id)
-        }
-        .ok_or(missing)?;
         let enabled = !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
-        let frame = if is_disposer {
-            Frame::ActiveDisposer
+        let lowered = if !is_disposer && id.kind == DeclarationKind::Implementation {
+            // Scalar-copy ordinary edges reach the same source body as lower_root.
+            budget
+                .step(2 + target.declarations.len().max(1).ilog2() as usize)
+                .map_err(|()| (target, Stop::Limit))?;
+            let index = target
+                .declarations
+                .binary_search_by(|declaration| declaration.id.cmp(id))
+                .map_err(|_| missing)?;
+            lower_implementation(typed, target, &target.declarations[index], budget)
         } else {
-            Frame::OrdinaryFunction
+            let (selected, frame) = if is_disposer {
+                let family = typed
+                    .dispose_role()
+                    .and_then(|role| typed.inventory().captured_family(&role.id))
+                    .ok_or((module, Stop::Pending(root_site)))?;
+                budget
+                    .step(family.implementations.len())
+                    .map_err(|()| (target, Stop::Limit))?;
+                let selected = family
+                    .implementations
+                    .iter()
+                    .find(|body| body.source.declaration == *id)
+                    .map(|body| &body.header);
+                (selected, Frame::ActiveDisposer)
+            } else {
+                (
+                    typed.inventory().type_facts().declarations.get(id),
+                    Frame::OrdinaryFunction,
+                )
+            };
+            lower(
+                typed,
+                target,
+                selected.ok_or(missing)?,
+                frame,
+                enabled,
+                None,
+                budget,
+            )
         };
         let Lowered {
             mir,
             empty_entry,
             trace: callee_trace,
-        } = lower(typed, target, selected, frame, enabled, None, budget)
-            .map_err(|stop| (target, stop))?;
+        } = lowered.map_err(|stop| (target, stop))?;
         if direct != 0 {
             direct -= 1;
             known_entry |= empty_entry.is_some();
@@ -852,6 +877,7 @@ struct Lowered<'a, 'g> {
 enum Frame {
     OrdinaryFunction,
     PlainImplementation { body: NodeId },
+    ScalarCopy { body: NodeId },
     ActiveDisposer,
 }
 
@@ -869,7 +895,7 @@ fn lower<'a, 'g>(
         return Err(Stop::Pending(entry_site));
     };
     let body = match frame {
-        Frame::PlainImplementation { body } => body,
+        Frame::PlainImplementation { body } | Frame::ScalarCopy { body } => body,
         _ => *module.syntax.nodes[entry_site]
             .children
             .get(1)
@@ -896,6 +922,12 @@ fn lower<'a, 'g>(
         facts,
         budget,
     )?;
+    if matches!(frame, Frame::ScalarCopy { .. }) {
+        let [formal] = parameters.as_slice() else {
+            return Err(Stop::Pending(entry_site));
+        };
+        build.check_scalar_copy_body(formal, result)?;
+    }
     build.retains_exclusive_bool = retains_exclusive_bool;
     build.budget.reserve(parameters.len())?;
     let mut params = Vec::with_capacity(parameters.len());
@@ -1000,7 +1032,8 @@ fn lower_implementation<'a, 'g>(
 
     let site = declaration.node;
     budget.step(1)?;
-    if module.key.origin != Origin::Application {
+    let standard = module.key.origin == Origin::Standard && module.key.path == "core.rill";
+    if module.key.origin != Origin::Application && !standard {
         return Err(Stop::Pending(site));
     }
     let inventory = typed.inventory();
@@ -1015,9 +1048,9 @@ fn lower_implementation<'a, 'g>(
     let source = attachment.ok_or(Stop::Pending(site))?;
     // In the installed typed receipt the closed protection catalogue is keyed
     // by canonical standard family, including its implementations on app types.
-    // Do not use an ordinary frame for any such family: active disposers and
-    // standard/protected providers need separate root contracts.
-    if source.family.module.origin != Origin::Application
+    // Application registrations of those families are not plain bodies here.
+    // Standard scalar copy requires the separate proof below.
+    if (!standard && source.family.module.origin != Origin::Application)
         || source.family.kind != DeclarationKind::Family
     {
         return Err(Stop::Pending(site));
@@ -1026,7 +1059,7 @@ fn lower_implementation<'a, 'g>(
     let family = inventory
         .captured_family(&source.family)
         .ok_or(Stop::Pending(site))?;
-    if !family.header.binders.is_empty() {
+    if !standard && !family.header.binders.is_empty() {
         return Err(Stop::Pending(site));
     }
     budget.step(family.implementations.len())?;
@@ -1036,15 +1069,20 @@ fn lower_implementation<'a, 'g>(
         .find(|body| std::ptr::eq(body.source, source))
         .ok_or(Stop::Pending(site))?;
     let body = concrete_implementation_body(implementation)?;
-    typed
+    let facts = typed
         .bodies()
         .checked_body(module, BodyOwner::Declaration(&declaration.id), budget)?
         .ok_or(Stop::Pending(site))?;
+    let frame = if standard {
+        scalar::implementation_frame(typed, module, declaration, implementation, facts, budget)?
+    } else {
+        Frame::PlainImplementation { body }
+    };
     lower(
         typed,
         module,
         &implementation.header,
-        Frame::PlainImplementation { body },
+        frame,
         false,
         None,
         budget,
@@ -1363,6 +1401,7 @@ enum Action<'g> {
     Dereference {
         from: Slot,
         into: Option<Slot>,
+        explicit_copy: bool,
     },
     BindBorrowedMember {
         descriptor: Slot,
@@ -1506,6 +1545,7 @@ struct Build<'a, 'g, 'b> {
     calls: Vec<Call<'g>>,
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
+    scalar_copy_read: Option<NodeId>,
     dispose: Option<&'g DeclarationId>,
     return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
     proved_variant_cleanup: Vec<Type<'g>>,
@@ -1545,6 +1585,7 @@ struct Call<'g> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CallResult {
     Plain,
+    ScalarCopy,
     RetainsInputs,
     RetainsRecordInput,
 }

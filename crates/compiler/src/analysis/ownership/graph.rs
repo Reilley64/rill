@@ -516,7 +516,10 @@ fn analyze<'g>(
                     let id = edge.declaration;
                     let target = match edge.contract {
                         DependencyContract::OrdinaryCall
-                            if id.kind == DeclarationKind::Function =>
+                            if matches!(
+                                id.kind,
+                                DeclarationKind::Function | DeclarationKind::Implementation
+                            ) =>
                         {
                             find_root(modules, &by_declaration, id, budget)?
                         }
@@ -841,6 +844,20 @@ fn lower_indexed<'a, 'g>(
             };
             (&implementation.header, frame, false)
         }
+        DeclarationKind::Implementation
+            if module.key.origin == Origin::Standard && module.key.path == "core.rill" =>
+        {
+            let (implementation, _) = facts.implementation.ok_or_else(pending)?;
+            let frame = scalar::implementation_frame(
+                typed,
+                module,
+                declaration,
+                implementation,
+                body,
+                budget,
+            )?;
+            (&implementation.header, frame, false)
+        }
         _ => return Err(pending()),
     };
     lower(typed, module, header, frame, collect_trace, nodes, budget)
@@ -874,6 +891,9 @@ pub(super) fn visit_dependencies<'g>(
             | Operation::CallRetainingWithBool { callee, .. }
             | Operation::CallRetainingWithOptionBool { callee, .. } => {
                 emit(callee, OrdinaryCall, budget)?
+            }
+            Operation::CallScalarCopy { implementation, .. } => {
+                emit(implementation, OrdinaryCall, budget)?
             }
             Operation::Dispose { callee, .. } => emit(callee, BuiltinDispose, budget)?,
             Operation::ConstructResultError { constructor, .. } => {

@@ -266,6 +266,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             calls: Vec::new(),
             cleanups: Vec::new(),
             body_scope: None,
+            scalar_copy_read: None,
             dispose: typed.dispose_role().map(|d| &d.id),
             return_contract,
             proved_variant_cleanup: Vec::new(),
@@ -275,6 +276,64 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
 
     fn fact(&self, node: &NodeId) -> Option<&'a NodeFacts<'g>> {
         self.indexed_facts.unwrap_or(&self.facts).get(node).copied()
+    }
+
+    pub(super) fn check_scalar_copy_body(
+        &mut self,
+        formal: &MemberType<'g>,
+        result: &Type<'g>,
+    ) -> ResultOf<()> {
+        let body = self.body;
+        let pending = Stop::Pending(body);
+        let nodes = &self.module.syntax.nodes;
+        self.budget.step(7)?;
+        let (NodeKind::Block, [statement]) = (nodes[body].kind, nodes[body].children.as_slice())
+        else {
+            return Err(pending);
+        };
+        let (NodeKind::Return, [read]) = (
+            nodes[*statement].kind,
+            nodes[*statement].children.as_slice(),
+        ) else {
+            return Err(pending);
+        };
+        let (NodeKind::Prefix("*"), [operand]) =
+            (nodes[*read].kind, nodes[*read].children.as_slice())
+        else {
+            return Err(pending);
+        };
+        let formal = &formal.declaration.id;
+        if !matches!(self.fact(statement).map(|fact| &fact.kind),
+            Some(NodeFactKind::Return { target }) if self.return_contract.is_some_and(|(owner, _)| std::ptr::eq(*target, owner)))
+        {
+            return Err(pending);
+        }
+        let descriptor = self.normal_value(*operand)?;
+        let value = self.normal_value(*read)?;
+        if nodes[*operand].kind != NodeKind::ValueReference
+            || !descriptor
+                .binding
+                .is_some_and(|binding| std::ptr::eq(binding, formal))
+            || !matches!(&descriptor.path, Some(path) if std::ptr::eq(path.root, formal) && path.projections.is_empty())
+            || descriptor.access != Access::Owned
+            || scalar::shared_input(&descriptor.ty, result).is_none()
+            || &value.ty != result
+            || value.access != Access::ReadOnly
+            || value.place != TypedPlace::ReadOnly
+            || !value.read_only_projection
+            || !matches!(&value.path, Some(path) if std::ptr::eq(path.root, formal)
+                && path.projections.as_slice() == [PathProjection::Dereference])
+            || descriptor.call.is_some()
+            || descriptor.data.is_some()
+            || descriptor.admission.is_some()
+            || value.call.is_some()
+            || value.data.is_some()
+            || value.admission.is_some()
+        {
+            return Err(pending);
+        }
+        self.scalar_copy_read = Some(*read);
+        Ok(())
     }
 
     fn depth(&mut self, depth: usize) -> ResultOf<()> {
@@ -2084,6 +2143,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 Action::Dereference {
                     from: holder,
                     into: Some(into),
+                    explicit_copy: true,
                 },
                 Edges::Next(finish),
             )?;
@@ -4084,7 +4144,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if self.slots[from].guard_release().is_some() {
                     return Err(Stop::Pending(node));
                 }
-                Action::Dereference { from, into }
+                Action::Dereference {
+                    from,
+                    into,
+                    explicit_copy: self.scalar_copy_read == Some(node),
+                }
             }
             NodeKind::Prefix("*") => {
                 let Some(path) = &facts.path else {
@@ -4968,6 +5032,81 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(true)
     }
 
+    fn written_scalar_copy(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let syntax = &self.module.syntax.nodes[node];
+        let (NodeKind::Call, [callee, argument], [typed_argument]) = (
+            syntax.kind,
+            syntax.children.as_slice(),
+            call.arguments.as_slice(),
+        ) else {
+            return Err(pending());
+        };
+        self.budget.step(1)?;
+        if argument != typed_argument
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || facts.admission.is_some()
+            || facts.ordinary_context.is_some()
+            || into.is_some_and(|slot| self.slots[slot].contains_guard())
+            || !matches!(self.fact(callee).map(|fact| &fact.kind),
+                Some(NodeFactKind::Callee { declaration }) if *declaration == call.callee)
+        {
+            return Err(pending());
+        }
+
+        let input = &self.normal_value(*argument)?.ty;
+        let implementation = scalar::call_target(
+            self.typed,
+            self.module,
+            node,
+            call,
+            facts,
+            input,
+            self.budget,
+        )?;
+        let root = self.ungroup(*argument)?;
+        let syntax = &self.module.syntax.nodes[root];
+        match syntax.kind {
+            NodeKind::ValueReference if self.named_owned_place(root)?.is_some() => {}
+            NodeKind::Prefix("&") => {
+                let [owner] = syntax.children.as_slice() else {
+                    return Err(pending());
+                };
+                let Some((owner, _)) = self.whole_named_owned_place(*owner)? else {
+                    return Err(pending());
+                };
+                if owner.ty != facts.ty {
+                    return Err(pending());
+                }
+            }
+            _ => return Err(pending()),
+        }
+
+        // Stage the input using the ordinary descriptor copy or borrow. The
+        // call consumes only that stage and the scalar result has no loans.
+        let stage = self.slot(*argument, input)?;
+        self.budget.reserve(2)?;
+        let index = self.calls.len();
+        self.calls.push(Call {
+            callee: implementation,
+            args: vec![stage],
+            into,
+            result: CallResult::ScalarCopy,
+            destination: None,
+        });
+        let invoke = self.emit(node, Action::Call(index), Edges::Next(next))?;
+        self.expression(*argument, Some(stage), invoke, depth + 1)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -5013,6 +5152,16 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 next
             };
             return self.emit(node, Action::Dispose(operand), Edges::Next(next));
+        }
+        if self
+            .typed
+            .copy_role()
+            .is_some_and(|copy| call.callee == &copy.id)
+        {
+            if checked_carrier.is_some() {
+                return Err(Stop::Pending(node));
+            }
+            return self.written_scalar_copy(node, facts, call, into, next, depth);
         }
         if !Self::direct_application_call(call)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())

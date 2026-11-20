@@ -446,7 +446,16 @@ expect ((Decision {{ allowed: false, text: "scratch" }}).allowed);
                 .iter()
                 .find(|body| body.family == *dispose && body.declaration.module == helper.key)
                 .unwrap();
-            let provider = typed.primitive_providers().first().unwrap().implementation;
+            let provider = typed
+                .primitive_providers()
+                .iter()
+                .find(|provider| {
+                    provider.binding.is_some_and(|binding| {
+                        binding.operation == compiler::analysis::typed::PrimitiveOperation::CopyText
+                    })
+                })
+                .unwrap()
+                .implementation;
             let std_module = graph
                 .modules()
                 .iter()
@@ -494,7 +503,7 @@ fn rejects_foreign_modules_and_body_ids_even_at_zero_budget() {
     fixture(
         "roots::rejects_foreign_modules_and_body_ids_even_at_zero_budget",
         &[HELPER],
-        |_, request, graph, receipt, _| {
+        |_, request, graph, receipt, typed| {
             let (main, helper) = app_modules(graph);
             let foreign = loader::load_installed(request.clone()).unwrap();
             let (foreign_main, foreign_helper) = app_modules(&foreign);
@@ -503,6 +512,21 @@ fn rejects_foreign_modules_and_body_ids_even_at_zero_budget() {
             let entry = named(main, "entryControl");
             let foreign_entry = named(foreign_main, "entryControl");
             assert_ne!(entry.id.context, foreign_entry.id.context);
+            let scalar = &typed
+                .primitive_providers()
+                .iter()
+                .find(|provider| {
+                    provider.role == compiler::analysis::typed::PrimitiveRole::Copy
+                        && provider.primitive == compiler::analysis::typed::Primitive::Bool
+                })
+                .unwrap()
+                .implementation
+                .id;
+            let foreign_core = foreign
+                .modules()
+                .iter()
+                .find(|m| m.key == scalar.module)
+                .unwrap();
             let zero = AnalysisLimits {
                 max_work: 0,
                 max_entries: 0,
@@ -514,6 +538,7 @@ fn rejects_foreign_modules_and_body_ids_even_at_zero_budget() {
                     (foreign_helper, BodyOwner::Startup),
                     (foreign_helper, BodyOwner::Declaration(&expectation.id)),
                     (main, BodyOwner::Declaration(&expectation.id)),
+                    (foreign_core, BodyOwner::Declaration(scalar)),
                 ] {
                     assert!(matches!(
                         lower_root(receipt, module, owner, limits),

@@ -13,6 +13,8 @@ use loader::DeclarationKind::{Expectation, Function, Implementation};
 
 #[path = "graph/delivery.rs"]
 mod delivery;
+#[path = "graph/scalar.rs"]
+mod scalar;
 
 #[test]
 fn uncalled_enabled_frame_rejects_only_the_delivery_judgment() {
@@ -345,25 +347,28 @@ fn installed_inventory_keeps_standard_and_independent_application_roots() {
                 17
             );
             assert_eq!(
+                report
+                    .roots()
+                    .iter()
+                    .filter(|root| root.ordinary_completion() == Completion::Checked)
+                    .count(),
+                39
+            );
+            assert_eq!(
                 standard
                     .iter()
                     .filter(|root| root.completion() == Completion::Incomplete
                         && root.blocked_at().is_some()
                         && root.mir().is_none())
                     .count(),
-                148
+                134
             );
             for (kind, count) in [(Function, 18), (Implementation, 130)] {
                 assert_eq!(standard.iter().filter(|root| matches!(root.owner(), BodyOwner::Declaration(id) if id.kind == kind)).count(), count);
             }
-            let native = &typed.primitive_providers()[0].implementation.id;
-            let provider = standard
-                .iter()
-                .find(|root| root.owner() == BodyOwner::Declaration(native))
-                .unwrap();
-            assert_eq!(provider.completion(), Completion::Incomplete);
-            assert_eq!(provider.blocked_at().unwrap().node, provider.site().node);
-            assert!(provider.mir().is_none());
+            assert_eq!(standard.iter().filter(|root| root.completion() == Completion::Incomplete
+                && matches!(root.owner(), BodyOwner::Declaration(id) if id.kind == Implementation)).count(), 116);
+            scalar::assert_standard_bodies(&report, typed);
 
             let expectation = app[4].mir().unwrap();
             assert_eq!(
@@ -478,7 +483,7 @@ fn one_budget_leaves_unfinished_work_unproved() {
                     .iter()
                     .filter(|root| root.mir().is_some())
                     .count(),
-                24
+                38
             );
             for short in [
                 AnalysisLimits {
