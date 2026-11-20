@@ -3971,6 +3971,111 @@ fn propagating_calls_create_owning_results_only_on_success() {
 }
 
 #[test]
+fn discarded_string_result_is_distinct_from_the_staged_option_payload() {
+    probe_with_typed(
+        "propagation::discarded_string_result_is_distinct_from_the_staged_option_payload",
+        r#"
+            function text(value: string, bit: bool): string { return value; }
+            function after(owner: string): bool { dispose(owner); return true; }
+            function complete(input: Option<string>, gate: Option<bool>, keep: string): Option<bool> {
+                text(input?, gate?);
+                let bit = after(keep);
+                return Option.Some(bit);
+            }
+            function reused(input: Option<string>, gate: Option<bool>, keep: string): Option<bool> {
+                text(input?, gate?);
+                let _ = input?;
+                let bit = after(keep);
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower =
+                |name| lower_body(receipt, module, id(name), AnalysisLimits::default()).unwrap();
+            let option = typed.option_role().unwrap();
+            let complete = lower("complete");
+            let mir = complete
+                .mir()
+                .unwrap_or_else(|| panic!("complete: {:?}", complete.completion()));
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let (both, gate_no) = variant_edges(mir, yes, &option.some.id, b"gate");
+            let staged = straight_blocks(mir, yes)
+                .into_iter()
+                .find_map(|block| match &block.operation {
+                    Operation::TakeOptionPayload { operand, into }
+                        if operand.root.span.bytes() == b"input"
+                            && into.root.span.bytes() == b"input?" =>
+                    {
+                        Some(into.root.node)
+                    }
+                    _ => None,
+                })
+                .expect("stage the owned payload before testing gate");
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert!(calls_on_path(mir, [true, false]).is_empty());
+            assert_return(&linear(mir, no), &option.none.id, false, &[b"keep: string"]);
+            assert_return(
+                &linear(mir, gate_no),
+                &option.none.id,
+                false,
+                &[b"input?", b"keep: string"],
+            );
+            assert!(matches!(path_drops(mir, gate_no).first(),
+                Some(Obligation::Drop(place)) if place.root.node == staged));
+
+            assert_eq!(calls_on_path(mir, [true, true]), [id("text"), id("after")]);
+            let success: Vec<_> = straight_blocks(mir, both)
+                .into_iter()
+                .filter(|block| match &block.operation {
+                    Operation::Call(_) | Operation::Drop(_) => true,
+                    Operation::Move { from, .. } => from.root.span.bytes() == b"keep: string",
+                    Operation::Cleanup(actions) => {
+                        actions.iter().any(|op| matches!(op, Obligation::Drop(_)))
+                    }
+                    _ => false,
+                })
+                .collect();
+            let [call, cleanup, stage_keep, after] = success.as_slice() else {
+                panic!("expected call, discard cleanup, and continuation: {success:?}");
+            };
+            assert!(matches!(&call.operation, Operation::Call(callee) if *callee == id("text")));
+            assert_eq!(call.site.span.bytes(), b"text(input?, gate?)");
+            assert!(matches!(&cleanup.operation, Operation::Cleanup(actions)
+                if matches!(actions.as_slice(), [Obligation::Drop(place)]
+                    if place.root.node == call.site.node && place.projection.is_none())));
+            assert!(
+                matches!(&stage_keep.operation, Operation::Move { into: Some(into), .. }
+                if into.root.span.bytes() == b"keep")
+            );
+            assert!(matches!(&after.operation, Operation::Call(callee) if *callee == id("after")));
+            let Terminator::Goto(suffix) = after.terminator else {
+                panic!("the continuation call must reach the return");
+            };
+            assert_return(&linear(mir, suffix), &option.some.id, true, &[]);
+
+            let reused = lower("reused");
+            assert_eq!(reused.completion(), Completion::SourceRejected);
+            assert!(reused.mir().is_none());
+            let [finding] = reused.findings() else {
+                panic!("expected one moved-carrier finding");
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"input");
+            assert_eq!(finding.related.span.bytes(), b"input");
+            assert!(finding.related.span.start() < finding.site.span.start());
+        },
+    );
+}
+
+#[test]
 fn option_text_propagation_moves_or_drops_the_owned_payload() {
     probe_with_typed(
         "propagation::option_text_propagation_moves_or_drops_the_owned_payload",
