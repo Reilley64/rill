@@ -592,12 +592,12 @@ fn analyze<'g>(
                         if let Some(candidate) = &replacement {
                             match edge.contract {
                                 DependencyContract::ActiveDisposer
-                                    if block == candidate.displacement =>
+                                    if block == candidate.site.displacement =>
                                 {
                                     displaced_body = Some(target);
                                 }
                                 DependencyContract::OrdinaryCall
-                                    if block == candidate.post_install_call =>
+                                    if block == candidate.site.post_install_call =>
                                 {
                                     post_install_leaf = Some(target);
                                 }
@@ -709,7 +709,12 @@ fn check_enabled_frames<'g>(
             && let Some(entry) = work[leaf].empty_entry
         {
             work[index].replacement_proof = candidate
-                .finish(work[body].ordinary.as_ref().unwrap(), entry, budget)
+                .finish(
+                    work[index].ordinary.as_ref().unwrap(),
+                    work[body].ordinary.as_ref().unwrap(),
+                    entry,
+                    budget,
+                )
                 .map_err(|_| ())?;
         }
         let Some(trace) = work[index].trace.take() else {

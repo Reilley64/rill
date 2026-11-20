@@ -169,9 +169,31 @@ fn installed_replacement_without_the_proved_leaf_stays_unresolved() {
         "cancellation::replacement::installed_replacement_without_the_proved_leaf_stays_unresolved",
         &source,
         |_, module, receipt, _| {
-            let graph = analyze_ownership(receipt, AnalysisLimits::default());
-            for name in ["replaceInitialized", "replaceNoEntry"] {
-                let report = query(receipt, module, name);
+            // Exact ordinary bounds on the unchanged negative capture at c75d294.
+            let graph = analyze_ownership(
+                receipt,
+                AnalysisLimits {
+                    max_work: 201439,
+                    max_entries: 7762,
+                    max_depth: 3,
+                },
+            );
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            for (name, work, entries) in [
+                ("replaceInitialized", 12804, 1835),
+                ("replaceNoEntry", 12872, 1871),
+            ] {
+                let report = lower_body(
+                    receipt,
+                    module,
+                    &declaration(module, name).id,
+                    AnalysisLimits {
+                        max_work: work,
+                        max_entries: entries,
+                        max_depth: 3,
+                    },
+                )
+                .unwrap();
                 assert_eq!(report.completion(), Completion::Checked);
                 assert!(report.mir().unwrap().replacement_cancellation().is_none());
                 let root = graph_root(&graph, &declaration(module, name).id);
@@ -284,10 +306,54 @@ fn assert_initialized(
         Terminator::Return
     );
 
-    // Delivery selects a terminal exit, not the ordinary return suffix. The
-    // same checked active body above runs on the installed owner under deferral.
-    assert_dispose_actions(&proof.on_delivery.cleanup, target, proof.implementation);
-    assert!(proof.on_delivery.retained.is_none());
+    use compiler::analysis::ownership::{
+        ReplacementRequest::{Clear, Pending},
+        ReplacementSuccessor, ReplacementTrigger,
+    };
+    let resumed = masked.after_masked_yield(Pending);
+    assert_eq!((resumed.block, resumed.request), (masked.resume, Pending));
+    // At unmask a pending request requires no second yield. Fresh delivery
+    // instead uses the later actual yield. Both exits dispose the new owner
+    // under deferral, with no normal successor to export it or redeliver.
+    for (step, cause) in [
+        (
+            proof.after_install(resumed.request, true),
+            ReplacementTrigger::UnmaskAfterInstall,
+        ),
+        (
+            proof.at_post_install_check(Pending, true, true),
+            ReplacementTrigger::PostInstallYield,
+        ),
+    ] {
+        let ReplacementSuccessor::DisposeInstalledAndExit {
+            trigger,
+            cleanup,
+            deferred,
+        } = step
+        else {
+            panic!("expected terminal cleanup")
+        };
+        assert_eq!(trigger, cause);
+        assert_dispose_actions(cleanup, target, proof.implementation);
+        assert!(std::ptr::eq(deferred, masked));
+    }
+    assert!(
+        matches!(proof.after_install(resumed.request, false), ReplacementSuccessor::Continue {block,request:Pending} if block==proof.post_install_call)
+    );
+    let none = masked.after_masked_yield(Clear);
+    assert!(
+        matches!(proof.after_install(none.request, true), ReplacementSuccessor::Continue {block,request:Clear} if block==proof.post_install_call)
+    );
+    let suffix = goto(post_install.terminator);
+    for (request, yielded, enabled) in [
+        (Pending, false, true),
+        (Pending, true, false),
+        (Clear, true, true),
+    ] {
+        assert!(
+            matches!(proof.at_post_install_check(request,yielded,enabled), ReplacementSuccessor::Continue {block,request:held} if block==suffix && held==request)
+        );
+    }
     assert!(path_drops(mir, proof.post_install_call).is_empty());
     assert_export(mir, target);
 }

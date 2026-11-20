@@ -1694,15 +1694,24 @@ impl<'g> CancellationFrame<'_, 'g> {
     }
 }
 
-pub(super) struct ReplacementCandidate<'g> {
+pub(super) struct ReplacementSite<'g> {
     pub displacement: usize,
     pub post_install_call: usize,
     pub implementation: &'g DeclarationId,
     pub callee: &'g DeclarationId,
     installation: usize,
-    staged: Place<'g>,
-    installed: Place<'g>,
-    on_delivery: CancellationExit<'g>,
+    target: Slot,
+    incoming: Slot,
+}
+
+pub(super) struct ReplacementCandidate<'g> {
+    pub site: ReplacementSite<'g>,
+    module: &'g Module,
+    slots: Vec<Local<'g>>,
+    locals: Vec<Slot>,
+    params: Vec<Slot>,
+    known: KnownStates,
+    indexed: bool,
 }
 
 impl<'g> ReplacementCandidate<'g> {
@@ -1713,11 +1722,15 @@ impl<'g> ReplacementCandidate<'g> {
     // the leaf's enabled-frame judgment to exit this active frame.
     pub(super) fn finish(
         self,
+        caller: &Mir<'g>,
         body: &Mir<'g>,
         entry: Site<'g>,
         budget: &mut Budget,
     ) -> ResultOf<Option<Box<ReplacementCancellation<'g>>>> {
-        if body.active_backedge {
+        if !body
+            .active_leaf
+            .is_some_and(|leaf| std::ptr::eq(leaf, self.site.callee))
+        {
             return Ok(None);
         }
         let mut index = body.entry;
@@ -1734,8 +1747,7 @@ impl<'g> ReplacementCandidate<'g> {
                     into: Some(into),
                 } if transfer.is_none() && from.field().is_some() && into.projection.is_none() => {}
                 Operation::Call(callee) if checkpoint.is_none() && transfer.is_none() => {
-                    graph::charge_key(&self.callee.module, 1, budget)?;
-                    if *callee != self.callee {
+                    if !std::ptr::eq(*callee, self.site.callee) {
                         return Ok(None);
                     }
                     let Terminator::Goto(resume) = block.terminator else {
@@ -1785,13 +1797,21 @@ impl<'g> ReplacementCandidate<'g> {
         else {
             return Ok(None);
         };
+        let Some(on_delivery) = self.installed_exit(caller, budget)? else {
+            return Ok(None);
+        };
+        let Terminator::Goto(ordinary_suffix) =
+            caller.blocks[self.site.post_install_call].terminator
+        else {
+            return Ok(None);
+        };
         budget.reserve(1)?;
         Ok(Some(Box::new(ReplacementCancellation {
-            displacement: self.displacement,
-            installation: self.installation,
-            staged: self.staged,
-            installed: self.installed,
-            implementation: self.implementation,
+            displacement: self.site.displacement,
+            installation: self.site.installation,
+            staged: self.slots[self.site.incoming].place(self.module),
+            installed: self.slots[self.site.target].place(self.module),
+            implementation: self.site.implementation,
             deferred: DeferredDisposerCheckpoint {
                 call,
                 resume,
@@ -1799,10 +1819,11 @@ impl<'g> ReplacementCandidate<'g> {
                 operand,
                 remainder,
             },
-            callee: self.callee,
+            callee: self.site.callee,
             entry,
-            post_install_call: self.post_install_call,
-            on_delivery: self.on_delivery,
+            post_install_call: self.site.post_install_call,
+            ordinary_suffix,
+            installed_cleanup: on_delivery.cleanup,
         })))
     }
 }
@@ -1829,123 +1850,151 @@ fn replacement_state(
     Ok(true)
 }
 
-fn prepare_replacement<'g>(
-    frame: &CancellationFrame<'_, 'g>,
+// Read the adjacent ordinary successors without another CFG walk or state copy.
+fn replacement_site<'g>(
     blocks: &[Block<'g>],
     code: &[Instruction<'g>],
     known: &KnownStates,
     displacement: usize,
-    budget: &mut Budget,
-) -> ResultOf<Option<ReplacementCandidate<'g>>> {
-    budget.step(1)?;
+) -> Option<ReplacementSite<'g>> {
     let Action::Displace { target, incoming } = code[known.blocks[displacement].pc].action else {
-        return Ok(None);
+        return None;
     };
     let [Cleanup::InvokeDisposer { implementation, .. }] = (match &blocks[displacement].operation {
         Operation::Cleanup(actions) => actions.as_slice(),
-        _ => return Ok(None),
+        _ => return None,
     }) else {
-        return Ok(None);
+        return None;
     };
     let Terminator::Goto(installation) = blocks[displacement].terminator else {
-        return Ok(None);
+        return None;
     };
     let Action::Install {
         target: dest,
         incoming: stage,
     } = code[known.blocks[installation].pc].action
     else {
-        return Ok(None);
+        return None;
     };
+    if dest != target || stage != incoming {
+        return None;
+    }
     let Terminator::Goto(post_install_call) = blocks[installation].terminator else {
-        return Ok(None);
+        return None;
     };
     let Operation::Call(callee) = blocks[post_install_call].operation else {
-        return Ok(None);
+        return None;
     };
-    // Admit a reached, move-only prefix. An ordinary call contract would
-    // not establish that an arbitrary operation before the region returns.
-    for (index, block) in blocks[..displacement].iter().enumerate() {
-        budget.step(1)?;
-        if !matches!(block.operation, Operation::Move { from, into: Some(into) }
-            if from.projection.is_none() && into.projection.is_none())
-            || block.terminator != Terminator::Goto(index + 1)
-        {
-            return Ok(None);
-        }
-    }
-    let slots = frame.slots;
-    let old = slots[target].storage(target);
-    let staged = slots[incoming].storage(incoming);
-    budget.step(frame.locals.len())?;
-    if dest != target
-        || stage != incoming
-        || old.contains(&incoming)
-        || staged.contains(&target)
-        || frame.locals.binary_search(&target).is_err()
-        || slots[target].members == 0
-        || slots[target].owner != target
-        || slots[incoming].owner != incoming
-        || slots[target].cleanup != StorageCleanup::End
-    {
-        return Ok(None);
-    }
-    for field in old.clone().skip(1) {
-        budget.step(1)?;
-        let local = slots[field];
-        // Field + primitive Drop is an owned string in this storage model.
-        if !matches!(local.projection, Some(Projection::Field(_)))
-            || local.cleanup != StorageCleanup::Drop
-            || local.custom_disposer.is_some()
-        {
-            return Ok(None);
-        }
-    }
-    let installed = known.input(post_install_call);
-    if !replacement_state(
-        known.input(displacement),
-        old.clone(),
-        staged.clone(),
-        budget,
-    )? || !replacement_state(known.input(installation), staged, 0..0, budget)?
-        || !replacement_state(installed, old, 0..0, budget)?
-    {
-        return Ok(None);
-    }
-    // Build the exit from the post-install OWNER STATE, not from a normal
-    // suffix or from the old displacement action. No other storage is live.
-    let on_delivery = match frame.exit(
-        installed.into(),
-        blocks[post_install_call].site.node,
-        budget,
-    ) {
-        Ok(exit) => exit,
-        Err(Stop::Limit) => return Err(Stop::Limit),
-        Err(Stop::Pending(_) | Stop::Rejected { .. }) => return Ok(None),
-    };
-    let [
-        Cleanup::InvokeDisposer {
-            implementation: installed_impl,
-            ..
-        },
-    ] = on_delivery.cleanup.as_slice()
-    else {
-        return Ok(None);
-    };
-    if !std::ptr::eq(*implementation, *installed_impl) {
-        return Ok(None);
-    }
-    budget.reserve(1)?;
-    Ok(Some(ReplacementCandidate {
+    Some(ReplacementSite {
         displacement,
         installation,
         post_install_call,
+        target,
+        incoming,
         implementation,
         callee,
-        staged: slots[incoming].place(frame.module),
-        installed: slots[target].place(frame.module),
-        on_delivery,
-    }))
+    })
+}
+
+impl<'g> ReplacementCandidate<'g> {
+    // Only after the two canonical entry contexts are established is there
+    // a delivery exit to construct. All inputs were moved from ordinary flow.
+    fn installed_exit(
+        &self,
+        caller: &Mir<'g>,
+        budget: &mut Budget,
+    ) -> ResultOf<Option<CancellationExit<'g>>> {
+        let ReplacementSite {
+            displacement,
+            installation,
+            post_install_call,
+            target,
+            incoming,
+            implementation,
+            ..
+        } = self.site;
+        let blocks = &caller.blocks;
+        let known = &self.known;
+        let frame = CancellationFrame {
+            module: self.module,
+            slots: &self.slots,
+            locals: &self.locals,
+            params: &self.params,
+            retained: &BTreeMap::new(),
+            indexed: self.indexed,
+        };
+        // Admit a reached, move-only prefix. An ordinary call contract would
+        // not establish that an arbitrary operation before the region returns.
+        for (index, block) in blocks[..displacement].iter().enumerate() {
+            budget.step(1)?;
+            if !matches!(block.operation, Operation::Move { from, into: Some(into) }
+            if from.projection.is_none() && into.projection.is_none())
+                || block.terminator != Terminator::Goto(index + 1)
+            {
+                return Ok(None);
+            }
+        }
+        let slots = frame.slots;
+        let old = slots[target].storage(target);
+        let staged = slots[incoming].storage(incoming);
+        budget.step(frame.locals.len())?;
+        if old.contains(&incoming)
+            || staged.contains(&target)
+            || frame.locals.binary_search(&target).is_err()
+            || slots[target].members == 0
+            || slots[target].owner != target
+            || slots[incoming].owner != incoming
+            || slots[target].cleanup != StorageCleanup::End
+        {
+            return Ok(None);
+        }
+        for field in old.clone().skip(1) {
+            budget.step(1)?;
+            let local = slots[field];
+            // Field + primitive Drop is an owned string in this storage model.
+            if !matches!(local.projection, Some(Projection::Field(_)))
+                || local.cleanup != StorageCleanup::Drop
+                || local.custom_disposer.is_some()
+            {
+                return Ok(None);
+            }
+        }
+        let installed = known.input(post_install_call);
+        if !replacement_state(
+            known.input(displacement),
+            old.clone(),
+            staged.clone(),
+            budget,
+        )? || !replacement_state(known.input(installation), staged, 0..0, budget)?
+            || !replacement_state(installed, old, 0..0, budget)?
+        {
+            return Ok(None);
+        }
+        // Build the exit from the post-install OWNER STATE, not from a normal
+        // suffix or from the old displacement action. No other storage is live.
+        let on_delivery = match frame.exit(
+            installed.into(),
+            blocks[post_install_call].site.node,
+            budget,
+        ) {
+            Ok(exit) => exit,
+            Err(Stop::Limit) => return Err(Stop::Limit),
+            Err(Stop::Pending(_) | Stop::Rejected { .. }) => return Ok(None),
+        };
+        let [
+            Cleanup::InvokeDisposer {
+                implementation: installed_impl,
+                ..
+            },
+        ] = on_delivery.cleanup.as_slice()
+        else {
+            return Ok(None);
+        };
+        if !std::ptr::eq(implementation, *installed_impl) {
+            return Ok(None);
+        }
+        Ok(Some(on_delivery))
+    }
 }
 
 pub(super) fn run<'a, 'g>(
@@ -1971,7 +2020,8 @@ pub(super) fn run<'a, 'g>(
     let mut calls_reached = 0;
     let mut call_block = None;
     let mut displacement = None;
-    let mut active_backedge = false;
+    let mut active_leaf = None;
+    let mut single_active_call = true;
     let mut replacement_candidate = application_function && build.retained.is_empty();
     let Build {
         typed,
@@ -2096,7 +2146,9 @@ pub(super) fn run<'a, 'g>(
         let local = |slot: Slot| slots[slot].place(module);
         // Budget backedges have no ordinary MIR operation. Don't mistake
         // one with a fresh successor state for a straight-line disposer.
-        active_backedge |= active.is_some() && matches!(action, Action::BudgetBackedge);
+        if active.is_some() && matches!(action, Action::BudgetBackedge) {
+            single_active_call = false;
+        }
         // Tag reached sites during the ordinary visit without a second walk.
         if candidate {
             flat &= flat_action(action, &slots);
@@ -3191,6 +3243,11 @@ pub(super) fn run<'a, 'g>(
             }
             Err(stop) => return Err(stop),
         };
+        if active.is_some()
+            && let Operation::Call(id) = operation
+        {
+            single_active_call &= active_leaf.replace(id).is_none();
+        }
         if replacement_candidate
             && matches!(action, Action::Displace { .. })
             && matches!(&operation, Operation::Cleanup(actions)
@@ -3224,40 +3281,48 @@ pub(super) fn run<'a, 'g>(
     if callable_frame.is_some() && !callable_exported {
         return Err(Stop::Pending(body));
     }
-    let replacement = if let (true, Some(displacement), Some(scope)) =
-        (replacement_candidate, displacement, body_scope)
+    let (trace, replacement) = if candidate {
+        (
+            Some(CancellationTrace {
+                module,
+                body,
+                slots,
+                locals: body_scope.map_or_else(Vec::new, |index| cleanups.swap_remove(index)),
+                params,
+                retained,
+                facts,
+                bindings,
+                code,
+                calls,
+                known,
+                live,
+                flat,
+                loop_delivery,
+                branching,
+                calls_reached,
+                call_block,
+            }),
+            None,
+        )
+    } else if replacement_candidate
+        && let (Some(displacement), Some(scope)) = (displacement, body_scope)
+        && let Some(site) = replacement_site(&blocks, &code, &known, displacement)
     {
-        let frame = CancellationFrame {
-            module,
-            slots: &slots,
-            locals: &cleanups[scope],
-            params: &params,
-            retained: &retained,
-            indexed: facts.is_indexed(),
-        };
-        prepare_replacement(&frame, &blocks, &code, &known, displacement, budget)?
+        (
+            None,
+            Some(ReplacementCandidate {
+                site,
+                module,
+                slots,
+                locals: cleanups.swap_remove(scope),
+                params,
+                known,
+                indexed: facts.is_indexed(),
+            }),
+        )
     } else {
-        None
+        (None, None)
     };
-    let trace = candidate.then(|| CancellationTrace {
-        module,
-        body,
-        slots,
-        locals: body_scope.map_or_else(Vec::new, |index| cleanups.swap_remove(index)),
-        params,
-        retained,
-        facts,
-        bindings,
-        code,
-        calls,
-        known,
-        live,
-        flat,
-        loop_delivery,
-        branching,
-        calls_reached,
-        call_block,
-    });
     Ok(Lowered {
         mir: Mir {
             entry,
@@ -3265,7 +3330,7 @@ pub(super) fn run<'a, 'g>(
             disposer_bodies: BTreeMap::new(),
             cancellation: None,
             replacement: None,
-            active_backedge,
+            active_leaf: active_leaf.filter(|_| single_active_call),
         },
         trace,
         replacement,

@@ -96,7 +96,8 @@ pub struct Mir<'g> {
     disposer_bodies: BTreeMap<&'g DeclarationId, Mir<'g>>,
     cancellation: Option<Cancellation<'g>>,
     replacement: Option<Box<ReplacementCancellation<'g>>>,
-    active_backedge: bool,
+    /// Sole direct call in a checked active frame with no reached budget backedge.
+    active_leaf: Option<&'g DeclarationId>,
 }
 
 impl<'g> Mir<'g> {
@@ -134,12 +135,87 @@ pub struct ReplacementCancellation<'g> {
     pub callee: &'g DeclarationId,
     pub entry: Site<'g>,
     pub post_install_call: usize,
-    /// Terminal exit for a pending request when deferral ends and delivery is
-    /// enabled, or for a request delivered at the post-install callee yield.
-    /// Install is not a poll. An enclosing mask keeps the request pending.
-    /// Cleanup invokes `implementation` on the installed value and runs its
-    /// active body and epilogue under deferral, without taking this exit again.
-    pub on_delivery: CancellationExit<'g>,
+    ordinary_suffix: usize,
+    installed_cleanup: Vec<Cleanup<'g>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReplacementRequest {
+    Clear,
+    Pending,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReplacementTrigger {
+    UnmaskAfterInstall,
+    PostInstallYield,
+}
+
+/// Continue in the active disposer; the request survives its suffix and epilogue.
+#[derive(Clone, Copy, Debug)]
+pub struct DeferredResume {
+    pub block: usize,
+    pub request: ReplacementRequest,
+}
+
+#[derive(Debug)]
+pub enum ReplacementSuccessor<'a, 'g> {
+    Continue {
+        block: usize,
+        request: ReplacementRequest,
+    },
+    /// Terminal: run installed-owner cleanup under disposal deferral. There
+    /// is no ordinary successor or second delivery from this cleanup.
+    DisposeInstalledAndExit {
+        trigger: ReplacementTrigger,
+        cleanup: &'a [Cleanup<'g>],
+        deferred: &'a DeferredDisposerCheckpoint<'g>,
+    },
+}
+
+impl<'g> ReplacementCancellation<'g> {
+    fn terminal(&self, trigger: ReplacementTrigger) -> ReplacementSuccessor<'_, 'g> {
+        ReplacementSuccessor::DisposeInstalledAndExit {
+            trigger,
+            cleanup: &self.installed_cleanup,
+            deferred: &self.deferred,
+        }
+    }
+
+    /// After the active disposer returns and installation consumes the stage,
+    /// unmasking can deliver a request already pending. Install is not a poll.
+    pub fn after_install(
+        &self,
+        request: ReplacementRequest,
+        delivery_enabled: bool,
+    ) -> ReplacementSuccessor<'_, 'g> {
+        if delivery_enabled && request == ReplacementRequest::Pending {
+            self.terminal(ReplacementTrigger::UnmaskAfterInstall)
+        } else {
+            ReplacementSuccessor::Continue {
+                block: self.post_install_call,
+                request,
+            }
+        }
+    }
+
+    /// Only on a continuing path: a *new* request at the following budget
+    /// check can deliver at an enabled actual yield, not at a non-yielding check.
+    pub fn at_post_install_check(
+        &self,
+        request: ReplacementRequest,
+        yielded: bool,
+        delivery_enabled: bool,
+    ) -> ReplacementSuccessor<'_, 'g> {
+        if yielded && delivery_enabled && request == ReplacementRequest::Pending {
+            self.terminal(ReplacementTrigger::PostInstallYield)
+        } else {
+            ReplacementSuccessor::Continue {
+                block: self.ordinary_suffix,
+                request,
+            }
+        }
+    }
 }
 
 /// A yield with a request at this callee entry leaves the request pending.
@@ -155,6 +231,15 @@ pub struct DeferredDisposerCheckpoint<'g> {
     pub defer_fields: usize,
     pub operand: Place<'g>,
     pub remainder: Place<'g>,
+}
+
+impl DeferredDisposerCheckpoint<'_> {
+    pub fn after_masked_yield(&self, request: ReplacementRequest) -> DeferredResume {
+        DeferredResume {
+            block: self.resume,
+            request,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -889,6 +974,8 @@ fn checked_graph<'g>(
     // All direct dependencies of the root are queued before transitive ones.
     let mut direct = pending.len();
     let mut scalar_targets = None;
+    let mut replacement_entry = None;
+    let mut matching_active = false;
     let mut known_entry = false;
     let mut unknown_entry = false;
     while let Some((target, id, is_disposer)) = pending.pop_front() {
@@ -950,6 +1037,16 @@ fn checked_graph<'g>(
             trace: callee_trace,
             ..
         } = lowered.map_err(|stop| (target, stop))?;
+        if let Some(candidate) = &replacement {
+            if std::ptr::eq(id, candidate.site.callee) {
+                replacement_entry = empty_entry;
+            }
+            if is_disposer && std::ptr::eq(id, candidate.site.implementation) {
+                matching_active = mir
+                    .active_leaf
+                    .is_some_and(|leaf| std::ptr::eq(leaf, candidate.site.callee));
+            }
+        }
         if direct != 0 {
             direct -= 1;
             known_entry |= empty_entry.is_some();
@@ -979,22 +1076,18 @@ fn checked_graph<'g>(
             )
             .map_err(|stop| (module, stop))?;
     }
-    if let Some(candidate) = replacement {
-        // Both premises come from the ordinary closure above, not from a
-        // standalone delivery judgment for an active or masked frame.
+    if matching_active && let (Some(candidate), Some(entry)) = (replacement, replacement_entry) {
+        // The reached direct frames established both entry identities before
+        // any replacement-only scan, lookup or cleanup allocation.
         graph::charge_key(
-            &candidate.implementation.module,
+            &candidate.site.implementation.module,
             root.disposer_bodies.len(),
             budget,
         )
-        .and_then(|()| graph::charge_key(&candidate.callee.module, seen.len(), budget))
         .map_err(|()| (module, Stop::Limit))?;
-        if let (Some(body), Some(entry)) = (
-            root.disposer_bodies.get(candidate.implementation),
-            seen.get(candidate.callee).copied().flatten(),
-        ) {
+        if let Some(body) = root.disposer_bodies.get(candidate.site.implementation) {
             root.replacement = candidate
-                .finish(body, entry, budget)
+                .finish(&root, body, entry, budget)
                 .map_err(|stop| (module, stop))?;
         }
     }
