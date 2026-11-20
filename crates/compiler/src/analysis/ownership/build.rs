@@ -24,7 +24,9 @@ use crate::parser::NodeKind;
 use std::sync::Arc;
 
 mod list_arrows;
+mod reference_results;
 pub(super) use list_arrows::ListArrowPair;
+pub(super) use reference_results::check_scoped_reference_results;
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
@@ -6618,6 +6620,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 return self.copy_closure(node, facts, call, into, next, depth);
             }
             return self.written_scalar_copy(node, facts, call, into, next, depth);
+        }
+        if checked_carrier.is_none()
+            && call.scoped_join.as_ref().is_some_and(|join| {
+                join.slots
+                    .iter()
+                    .all(|slot| slot.reference_result.is_some())
+            })
+        {
+            return self.emit(node, Action::CheckScopedReferenceResults, Edges::End);
         }
         if checked_carrier.is_none() && list_arrows::scalar_pair(&facts.ty) {
             let route = if let Some(join) = call.scoped_join.as_deref() {

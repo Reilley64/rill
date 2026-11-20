@@ -1306,14 +1306,247 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
 }
 
 #[test]
+fn installed_join_checks_reference_result_escape_per_slot() {
+    use compiler::analysis::ownership::{GraphCompletion, GraphObligation, analyze_ownership};
+    use compiler::analysis::scalars::generics::{GoalId, GoalJudgment, callables::CaptureForm};
+    use compiler::analysis::typed::ScopedJoinReference;
+    use compiler::analysis::{
+        DeclarationShape, InvocationMode, Statistics, TypeTerm, ordinary::RequirementTarget,
+    };
+
+    let caps = |stats: Statistics| {
+        let exact = AnalysisLimits {
+            max_work: stats.work,
+            max_entries: stats.entries,
+            max_depth: stats.max_depth,
+        };
+        let short = AnalysisLimits {
+            max_work: exact.max_work - 1,
+            ..exact
+        };
+        (exact, short)
+    };
+
+    installed(
+        "scoped_join::installed_join_checks_reference_result_escape_per_slot",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            for (parameters, second, expected) in [
+                (
+                    "input: &i32",
+                    "{ let local = 2i32; return &local; }",
+                    Completion::SourceRejected,
+                ),
+                ("input: &i32, other: &i32", "other", Completion::Incomplete),
+            ] {
+                fs::write(
+                    &request.entry,
+                    format!("{BASE}\nimport std::routine::join;\nfunction joined({parameters}): [&i32, &i32] {{\n    return join([() => input, () => {second}]);\n}}\n"),
+                )
+                .unwrap();
+                for test_mode in [false, true] {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    captured_keys(&graph, true);
+                    let limits = AnalysisLimits::default();
+                    let typed = analyze_typed(&graph, limits);
+                    assert_eq!(typed.completion(), TypedCompletion::Checked, "{second}");
+                    let residence = typed.result_use().unwrap();
+                    assert!(residence.pending().is_empty() && residence.discards().is_empty());
+                    let receipt = typed.receipt().unwrap();
+                    let module = app(&graph);
+                    let caller = &module.declarations[named(module, "joined")];
+                    let call = call_node(module, "join([");
+                    let proof = receipt.scoped_join(module, call).unwrap().unwrap();
+                    let ordinary = typed.bodies().ordinary_call(module, call).unwrap().unwrap();
+                    let selection = typed
+                        .bodies()
+                        .goal(ordinary.goal.as_ref().unwrap())
+                        .unwrap();
+                    let selected = selection.selection.as_ref().unwrap();
+                    assert_eq!(selected.implementation, &proof.role.implementation.id);
+                    assert_eq!(selected.alternative, proof.alternative);
+                    assert!(ordinary.checked && ordinary.premise.is_none());
+                    assert_eq!(selection.dependencies.len(), 6);
+                    let proved = |id: &GoalId, name: &str| {
+                        let goal = typed.bodies().goal(id).unwrap();
+                        let intrinsic = graph
+                            .prelude()
+                            .intrinsics
+                            .iter()
+                            .find(|id| id.name() == name)
+                            .unwrap();
+                        assert_eq!(goal.state, GoalState::Proved);
+                        assert!(goal.premise.is_none());
+                        assert!(matches!(&goal.judgment, GoalJudgment::Requirement {
+                            target: RequirementTarget::Predicate(id), ..
+                        } if *id == intrinsic));
+                        goal
+                    };
+                    let signature = typed
+                        .inventory()
+                        .type_facts()
+                        .declarations()
+                        .find(|facts| facts.declaration.id == caller.id)
+                        .unwrap();
+                    let DeclarationShape::Function { parameters, .. } = &signature.shape else {
+                        panic!("checked caller signature")
+                    };
+                    let mut requirements = Vec::new();
+                    for (i, slot) in proof.slots.iter().enumerate() {
+                        let arrow = slot.arrow();
+                        assert_eq!(slot.path, [i]);
+                        assert_eq!(arrow.mode, Some(InvocationMode::ReadOnly));
+                        assert!(arrow.premise.is_none() && arrow.parameters.is_empty());
+                        assert_eq!(selected.substitution[2 + i].argument, arrow.result);
+                        let TypeTerm::Reference {
+                            mutable: false,
+                            referent,
+                        } = arrow.result.as_ref()
+                        else {
+                            panic!("shared descriptor")
+                        };
+                        assert!(
+                            matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+                        );
+                        for id in [&slot.callable_once, &slot.send_job, &slot.send_result] {
+                            assert!(
+                                selection.dependencies.contains(id) && !requirements.contains(&id)
+                            );
+                            requirements.push(id);
+                        }
+                        let invoke = proved(&slot.callable_once, "callableOnce");
+                        assert!(
+                            matches!(&invoke.judgment, GoalJudgment::Requirement { arguments, .. }
+                            if matches!(arguments.as_slice(), [job, input, result]
+                                if job == &selected.substitution[i].argument && result == &arrow.result
+                                    && matches!(input.as_ref(), TypeTerm::Tuple(xs) if xs.is_empty())))
+                        );
+                        let job = proved(&slot.send_job, "sendable");
+                        assert!(std::ptr::eq(job.arrow_origin.as_deref().unwrap(), arrow));
+                        let result = proved(&slot.send_result, "sendable");
+                        assert!(result.arrow_origin.is_none());
+                        assert!(
+                            matches!(&result.judgment, GoalJudgment::Requirement { arguments, .. }
+                            if arguments == std::slice::from_ref(&arrow.result))
+                        );
+                        let body = module.syntax.nodes[arrow.site.node].children[1];
+                        match slot.reference_result.unwrap() {
+                            ScopedJoinReference::Incoming { parameter, value } => {
+                                assert!(i == 0 || expected == Completion::Incomplete);
+                                let wanted = if i == 0 { "input" } else { "other" };
+                                assert_eq!(parameter, &parameters[i].declaration.id);
+                                assert_eq!(value.node, body);
+                                assert_eq!(value.span.bytes(), wanted.as_bytes());
+                                let [capture] = arrow.captures.as_slice() else {
+                                    panic!("one carried descriptor")
+                                };
+                                assert_eq!(capture.path.root, parameter);
+                                assert_eq!(capture.site.span, value.span);
+                                assert_eq!(
+                                    capture.form,
+                                    CaptureForm::CarriedReference { mutable: false }
+                                );
+                                assert_eq!(capture.storage.as_ref(), Some(&arrow.result));
+                                let [property] = job.dependencies.as_slice() else {
+                                    panic!("one capture proof")
+                                };
+                                let property = proved(property, "sendable");
+                                assert_eq!(property.source.span, value.span);
+                                assert!(
+                                    matches!(&property.judgment, GoalJudgment::Requirement { arguments, .. }
+                                    if arguments == std::slice::from_ref(&arrow.result))
+                                );
+                            }
+                            ScopedJoinReference::ChildLocal { binding, returning } => {
+                                assert_eq!((i, expected), (1, Completion::SourceRejected));
+                                assert!(arrow.captures.is_empty() && job.dependencies.is_empty());
+                                assert_eq!(
+                                    module.syntax.nodes[body].children,
+                                    [binding.node, returning.node]
+                                );
+                                assert_eq!(binding.span.bytes(), b"let local = 2i32;");
+                                assert_eq!(returning.span.bytes(), b"return &local;");
+                            }
+                        }
+                    }
+                    assert_ne!(
+                        proof.slots[0].arrow().site.node,
+                        proof.slots[1].arrow().site.node
+                    );
+                    let local = lower_body(&receipt, module, &caller.id, limits).unwrap();
+                    assert_eq!(local.completion(), expected);
+                    assert!(local.mir().is_none());
+                    let owned = analyze_ownership(&receipt, limits);
+                    let root = owned
+                        .roots()
+                        .iter()
+                        .find(|r| r.site().module == &module.key && r.site().node == caller.node)
+                        .unwrap();
+                    assert_eq!(root.completion(), expected);
+                    assert_eq!(root.ordinary_completion(), expected);
+                    assert!(root.mir().is_none() && root.ordinary_mir().is_none());
+                    assert!(root.dependencies().is_empty());
+                    assert!(
+                        owned
+                            .open_obligations()
+                            .contains(&GraphObligation::MaskingAndJoin)
+                    );
+                    if expected == Completion::SourceRejected {
+                        assert_eq!(owned.completion(), GraphCompletion::SourceRejected);
+                        for findings in [local.findings(), owned.findings()] {
+                            let [finding] = findings else {
+                                panic!("one child-local escape")
+                            };
+                            assert_eq!(finding.code(), "R0202");
+                            assert_eq!(finding.site.span.bytes(), b"return &local;");
+                            assert_eq!(finding.related.span.bytes(), b"local");
+                        }
+                    } else {
+                        assert_eq!(owned.completion(), GraphCompletion::Incomplete);
+                        assert!(local.findings().is_empty() && owned.findings().is_empty());
+                        assert_eq!(local.blocked_at().unwrap().node, call);
+                        assert_eq!(root.blocked_at().unwrap().node, call);
+                    }
+                    check_typed_budget(&graph, &typed);
+                    let (exact, short) = caps(local.statistics());
+                    let replay = lower_body(&receipt, module, &caller.id, exact).unwrap();
+                    assert_eq!(replay.statistics(), local.statistics());
+                    assert_eq!(replay.completion(), expected);
+                    assert_eq!(replay.findings().len(), local.findings().len());
+                    let exhausted = lower_body(&receipt, module, &caller.id, short).unwrap();
+                    assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+                    assert!(exhausted.mir().is_none());
+                    let (exact, short) = caps(owned.statistics());
+                    let replay = analyze_ownership(&receipt, exact);
+                    assert_eq!(replay.statistics(), owned.statistics());
+                    assert_eq!(replay.completion(), owned.completion());
+                    let exhausted = analyze_ownership(&receipt, short);
+                    assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
+                    assert!(
+                        exhausted
+                            .roots()
+                            .iter()
+                            .all(|r| r.mir().is_none() && r.ordinary_mir().is_none())
+                    );
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_join_keeps_unproved_capture_and_result_shapes_incomplete() {
     installed(
         "scoped_join::installed_join_keeps_unproved_capture_and_result_shapes_incomplete",
         |request| {
             fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
             for source in [
-                "import std::routine::join; function escaping(input: &i32): [&i32, &i32] { return join([() => input, () => { let local = 2i32; return &local; }]); }",
                 "import std::routine::join; function erased(numbers: List<i32>, work: () => i32): [i32, i32] { return join([() => (&numbers)[0u64], work]); }",
+                "import std::routine::join; function erased(input: &i32, work: () => &i32): [&i32, &i32] { return join([() => input, work]); }",
                 "import std::routine::join; function resultJobs(): void { let _ = join([() => Result.Ok(true), () => false]); }",
                 "import std::routine::join; function mixed(numbers: List<i32>): [i32, bool] { return join([() => (&numbers)[0u64], () => true]); }",
             ] {

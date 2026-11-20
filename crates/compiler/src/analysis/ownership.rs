@@ -1993,6 +1993,7 @@ enum Action<'g> {
         receivers: [Slot; 2],
         into: Slot,
     },
+    CheckScopedReferenceResults,
     FormClosure {
         capture: Slot,
         second: Option<Slot>,

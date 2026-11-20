@@ -163,7 +163,8 @@ fn liveness(
             | Action::BudgetBackedge
             | Action::Cleanup(_)
             | Action::EndScope(_)
-            | Action::CheckRetained => use_one(None, None),
+            | Action::CheckRetained
+            | Action::CheckScopedReferenceResults => use_one(None, None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
             Action::Read { from, into }
             | Action::Move { from, into }
@@ -2967,6 +2968,16 @@ pub(super) fn run<'a, 'g>(
                         capture: local(capture).root,
                         mode,
                     }
+                }
+                Action::CheckScopedReferenceResults => {
+                    build::check_scoped_reference_results(
+                        typed,
+                        module,
+                        facts.nodes(),
+                        node,
+                        budget,
+                    )?;
+                    return Err(Stop::Pending(node));
                 }
                 Action::UnprovedScopedJoin { .. } => return Err(Stop::Pending(node)),
                 Action::ScopedJoin {

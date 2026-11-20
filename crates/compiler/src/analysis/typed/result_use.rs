@@ -74,7 +74,7 @@ pub struct PendingResultUse<'g> {
 }
 
 pub(in crate::analysis) use pairs::{PairCall, PairChild};
-pub use pairs::{ScopedJoinCall, ScopedJoinSlot};
+pub use pairs::{ScopedJoinCall, ScopedJoinReference, ScopedJoinSlot};
 
 #[derive(Debug, Default)]
 pub struct ResultUseReport<'g> {

@@ -7,6 +7,9 @@ use crate::analysis::generics::{
 use crate::analysis::ordinary::RequirementTarget;
 use crate::analysis::scalars::CallFacts;
 
+mod references;
+use references::shared_i32;
+
 pub(super) type PairBodies<'g> = BTreeMap<&'g DeclarationId, PairBody<'g>>;
 
 #[derive(Clone, Copy)]
@@ -50,7 +53,23 @@ pub struct ScopedJoinSlot<'g> {
     pub callable_once: GoalId,
     pub send_job: GoalId,
     pub send_result: GoalId,
+    /// Exact source for a checked shared descriptor result, if this is a reference pair.
+    pub reference_result: Option<ScopedJoinReference<'g>>,
     pub(in crate::analysis) child: PairChild<'g>,
+}
+
+/// Source of a returned shared descriptor, not an environment loan or a
+/// proof that the descriptor can leave the child frame.
+#[derive(Clone, Copy, Debug)]
+pub enum ScopedJoinReference<'g> {
+    Incoming {
+        parameter: &'g DeclarationId,
+        value: Site<'g>,
+    },
+    ChildLocal {
+        binding: Site<'g>,
+        returning: Site<'g>,
+    },
 }
 
 impl<'g> ScopedJoinSlot<'g> {
@@ -500,6 +519,7 @@ impl<'a, 'g> Check<'a, 'g> {
         else {
             return Ok(false);
         };
+        let references = scoped.is_some() && shared_i32(out0) && shared_i32(out1);
         let root = Root::Temporary(*argument);
         let stored = state.contents(root, &[], self.budget)?;
         self.budget.step(stored.len())?;
@@ -546,9 +566,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 || arrow.site.node != origin
                 || arrow.premise.is_some()
                 || !arrow.parameters.is_empty()
-                || !self.same_job(job, job_sub, depth + 1)?
-                || !self.result_agrees(output, result_sub, depth + 1)?
-                || !self.result_agrees(output, &arrow.result, depth + 1)?
+                || !self.same_job(job, job_sub, references, depth + 1)?
+                || !self.result_agrees(output, result_sub, references, depth + 1)?
+                || !self.result_agrees(output, &arrow.result, references, depth + 1)?
             {
                 return Ok(false);
             }
@@ -585,16 +605,27 @@ impl<'a, 'g> Check<'a, 'g> {
                 return Ok(false);
             };
             let slot_path = ResultComponent::TupleElement(i);
-            let Some((expression, result)) = self.pair_child(
-                origin,
-                arrow,
-                (&stored, slot_path),
-                state,
-                scoped.is_some(),
-                depth + 1,
-            )?
-            else {
-                return Ok(false);
+            let (expression, result, reference_result) = if references {
+                let Some((expression, reference)) =
+                    self.reference_child(origin, arrow, (&stored, slot_path), state, depth + 1)?
+                else {
+                    return Ok(false);
+                };
+                self.budget.reserve(1)?;
+                (Some(expression), Vec::new(), Some(reference))
+            } else {
+                let Some((expression, result)) = self.pair_child(
+                    origin,
+                    arrow,
+                    (&stored, slot_path),
+                    state,
+                    scoped.is_some(),
+                    depth + 1,
+                )?
+                else {
+                    return Ok(false);
+                };
+                (expression, result, None)
             };
             outputs[i] = result;
             let child = expression.map(|expression| PairChild {
@@ -615,6 +646,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     callable_once: callable_once.clone(),
                     send_job: send_job.clone(),
                     send_result: send_result.clone(),
+                    reference_result,
                 });
             } else {
                 children[i] = child;
@@ -668,7 +700,13 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(true)
     }
 
-    fn same_job(&mut self, left: &Type<'g>, right: &Type<'g>, depth: usize) -> Work<bool> {
+    fn same_job(
+        &mut self,
+        left: &Type<'g>,
+        right: &Type<'g>,
+        references: bool,
+        depth: usize,
+    ) -> Work<bool> {
         let (
             TypeTerm::Callable {
                 mode: left_mode,
@@ -687,20 +725,29 @@ impl<'a, 'g> Check<'a, 'g> {
         if left_mode != right_mode || !left.is_empty() || !right.is_empty() {
             return Ok(false);
         }
-        self.result_agrees(a, b, depth)
+        self.result_agrees(a, b, references, depth)
     }
 
-    // Only primitive leaves and closed products of those leaves can be
-    // forwarded by this slice. No assumption on nominal or erased storage.
-    fn result_agrees(&mut self, left: &Type<'g>, right: &Type<'g>, depth: usize) -> Work<bool> {
+    // Closed scalar products, or the exact reference pair with a separate
+    // origin check for each descriptor. No nominal or erased storage.
+    fn result_agrees(
+        &mut self,
+        left: &Type<'g>,
+        right: &Type<'g>,
+        references: bool,
+        depth: usize,
+    ) -> Work<bool> {
         self.depth(depth)?;
+        if references {
+            return Ok(shared_i32(left) && shared_i32(right));
+        }
         match (left.as_ref(), right.as_ref()) {
             (TypeTerm::Primitive(a), TypeTerm::Primitive(b)) => {
                 Ok(a == b && !matches!(a.name(), "void" | "never"))
             }
             (TypeTerm::Tuple(a), TypeTerm::Tuple(b)) if a.len() == b.len() => {
                 for (a, b) in a.iter().zip(b) {
-                    if !self.result_agrees(a, b, depth + 1)? {
+                    if !self.result_agrees(a, b, false, depth + 1)? {
                         return Ok(false);
                     }
                 }
@@ -755,32 +802,7 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             _ => return Ok(None),
         };
-        let mut marker = false;
-        let mut alias = false;
-        let mut callable = false;
-        for stored in stored {
-            self.budget.step(1)?;
-            if stored.component != [slot] {
-                continue;
-            }
-            match &stored.content {
-                Content::Callable(found) if *found == origin && !callable => callable = true,
-                Content::Unclassified(found)
-                    if capture.is_some() && *found == origin && !marker =>
-                {
-                    marker = true
-                }
-                Content::PossibleAlias((Root::Local(root), path))
-                    if !alias
-                        && path.is_empty()
-                        && capture.is_some_and(|(c, _)| c.path.root == *root) =>
-                {
-                    alias = true
-                }
-                _ => return Ok(None),
-            }
-        }
-        if !callable || marker != capture.is_some() || alias != capture.is_some() {
+        if !self.pair_environment(origin, (stored, slot), capture.map(|(c, _)| c.path.root))? {
             return Ok(None);
         }
         let list = if let Some((capture, exclusive)) = capture {
@@ -833,7 +855,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let Some(value) = self.expression_facts(body)? else {
             return Ok(None);
         };
-        if !self.result_agrees(&arrow.result, &value.ty, depth + 1)? {
+        if !self.result_agrees(&arrow.result, &value.ty, false, depth + 1)? {
             return Ok(None);
         }
         // The restricted child can only read its proved Result-free List
@@ -852,6 +874,40 @@ impl<'a, 'g> Check<'a, 'g> {
                 .iter()
                 .all(|v| matches!(v.content, Content::Test(_, _))))
         .then_some((list_read, result)))
+    }
+
+    fn pair_environment(
+        &mut self,
+        origin: NodeId,
+        (stored, slot): (&[Located<'g>], ResultComponent<'g>),
+        capture: Option<&'g DeclarationId>,
+    ) -> Work<bool> {
+        let mut marker = false;
+        let mut alias = false;
+        let mut callable = false;
+        for stored in stored {
+            self.budget.step(1)?;
+            if stored.component != [slot] {
+                continue;
+            }
+            match &stored.content {
+                Content::Callable(found) if *found == origin && !callable => callable = true,
+                Content::Unclassified(found)
+                    if capture.is_some() && *found == origin && !marker =>
+                {
+                    marker = true
+                }
+                Content::PossibleAlias((Root::Local(root), path))
+                    if !alias
+                        && path.is_empty()
+                        && capture.is_some_and(|id| std::ptr::eq(id, *root)) =>
+                {
+                    alias = true
+                }
+                _ => return Ok(false),
+            }
+        }
+        Ok(callable && marker == capture.is_some() && alias == capture.is_some())
     }
 
     fn closed_child_expression(

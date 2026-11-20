@@ -44,7 +44,7 @@ pub use primitive::{Primitive, PrimitiveOperation, PrimitiveValue};
 pub(in crate::analysis) use result_use::{PairCall, PairChild};
 pub use result_use::{
     PendingResultUse, ResultComponent, ResultDiscard, ResultDiscardKind, ResultUseBlocker,
-    ResultUseReport, ScopedJoinCall, ScopedJoinSlot,
+    ResultUseReport, ScopedJoinCall, ScopedJoinReference, ScopedJoinSlot,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
