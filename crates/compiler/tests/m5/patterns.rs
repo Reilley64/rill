@@ -760,6 +760,15 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
                 .unwrap()
             };
             let report = lower("unpack");
+            // Unchanged flat pattern budget measured in both modes at 904433f.
+            let flat = AnalysisLimits {
+                max_work: 7279,
+                max_entries: 1200,
+                ..AnalysisLimits::default()
+            };
+            let bounded = lower_body(receipt, module, &declaration("unpack").id, flat).unwrap();
+            assert_eq!(bounded.completion(), Completion::Checked);
+            assert!(bounded.mir().is_some());
             let mir = report
                 .mir()
                 .unwrap_or_else(|| panic!("unpack: {:?}", report.completion()));
@@ -2815,6 +2824,50 @@ fn named_owned_record_pattern_transfers_whole_child() {
 }
 
 #[test]
+fn whole_record_child_preflight_counts_grouped_sources() {
+    probe(
+        "patterns::whole_record_child_preflight_counts_grouped_sources",
+        r#"
+        type Inner = { text: string; }
+        type Outer = { child: Inner; flag: bool; }
+        function bare(input: Outer): string { let Outer { child: whole } = input; return whole.text; }
+        function grouped(input: Outer): string { let Outer { child: whole } = ((((((((((input)))))))))); return whole.text; }
+        function constructed(input: Outer, seed: Inner): string {
+            let Outer { child: whole } = ((((((((((Outer { child: seed, flag: true })))))))))); return whole.text;
+        }
+    "#,
+        |_, module, receipt| {
+            let lower = |name: &str, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            let bare = lower("bare", default);
+            assert!(bare.mir().is_some());
+            assert!(lower("grouped", default).mir().is_some());
+            assert_eq!(
+                lower("constructed", default).completion(),
+                Completion::Incomplete
+            );
+            let limits = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..default
+            };
+            assert!(lower("bare", limits).mir().is_some());
+            for name in ["grouped", "constructed"] {
+                let short = lower(name, limits);
+                assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
+                assert!(short.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn named_owned_tuple_pattern_transfers_whole_child() {
     use compiler::analysis::ownership::Projection;
 
@@ -2982,11 +3035,21 @@ fn named_owned_tuple_pattern_transfers_whole_child() {
                     && end.root.node == tail.root.node && end.projection.is_none())
                 );
                 let after = ops.iter().position(|op| matches!(op, Operation::Initialize(place) if place.root.span.bytes() == b"after")).unwrap();
-                let cleanup = |root| {
-                    ops.iter().position(|op| matches!(op, Operation::Cleanup(actions)
-                    if actions.iter().any(|action| matches!(action, Obligation::Drop(place) if place.root.node == root)))).unwrap()
-                };
-                assert!(cleanup(stage.root.node) < after && after < cleanup(tail.root.node));
+                let last_bind = ops.iter().position(|op| matches!(op, Operation::Move { into: Some(dest), .. } if dest.root.node == tail.root.node)).unwrap();
+                for (i, op) in ops.iter().enumerate() {
+                    if let Operation::Cleanup(actions) = op {
+                        for action in actions {
+                            if let Obligation::Drop(place) = action {
+                                if place.root.node == stage.root.node {
+                                    assert!(last_bind < i && i < after);
+                                }
+                                if place.root.node == tail.root.node {
+                                    assert!(after < i);
+                                }
+                            }
+                        }
+                    }
+                }
                 let exact = AnalysisLimits {
                     max_work: report.statistics().work,
                     max_entries: report.statistics().entries,

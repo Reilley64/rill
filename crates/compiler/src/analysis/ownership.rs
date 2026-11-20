@@ -9,7 +9,7 @@ use super::{
 };
 use crate::loader::{Declaration, DeclarationId, DeclarationKind};
 use crate::source::Span;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
 
 mod build;
@@ -1576,6 +1576,7 @@ struct Build<'a, 'g, 'b> {
     nested_tuple_parameters: BTreeMap<&'g DeclarationId, Slot>,
     /// Exact named tuple bindings with their proved initializer slot.
     nested_tuple_bindings: BTreeMap<&'g DeclarationId, (Slot, Slot)>,
+    whole_child_patterns: BTreeSet<NodeId>,
     /// Separate contents of checked caller destinations from the access descriptors.
     retained: BTreeMap<Slot, RetainedContents>,
     retains_exclusive_bool: bool,

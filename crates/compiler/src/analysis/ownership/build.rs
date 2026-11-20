@@ -266,6 +266,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             nested_record_values: BTreeMap::new(),
             nested_tuple_parameters: BTreeMap::new(),
             nested_tuple_bindings: BTreeMap::new(),
+            whole_child_patterns: BTreeSet::new(),
             retained: BTreeMap::new(),
             retains_exclusive_bool: false,
             incoming_exclusive_bools: Vec::new(),
@@ -2541,7 +2542,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 let mut binders = facts.binders.iter();
                 self.budget.reserve(binders.len())?;
                 if syntax.kind == NodeKind::RecordPattern {
-                    self.declare_record_pattern(shape, access, false, &mut binders, locals)?;
+                    self.declare_record_pattern(node, shape, access, false, &mut binders, locals)?;
                     return if binders.next().is_none() {
                         Ok(())
                     } else {
@@ -2568,7 +2569,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                             {
                                 return Err(Stop::Pending(leaf));
                             }
-                            self.declare_product_local(leaf, binder, locals)?;
+                            self.declare_product_local(node, leaf, binder, locals)?;
                         }
                         continue;
                     }
@@ -2583,7 +2584,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     {
                         return Err(Stop::Pending(name));
                     }
-                    self.declare_product_local(name, binder, locals)?;
+                    self.declare_product_local(node, name, binder, locals)?;
                 }
                 if binders.next().is_some() {
                     return Err(Stop::Pending(pattern));
@@ -2595,6 +2596,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
 
     fn declare_record_pattern(
         &mut self,
+        node: NodeId,
         shape: NodeId,
         access: Access,
         nested: bool,
@@ -2618,7 +2620,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let kind = self.module.syntax.nodes[name].kind;
             // Only one nested record level: deeper constructors stay incomplete.
             if kind == NodeKind::RecordPattern && access == Access::Owned && !nested {
-                self.declare_record_pattern(name, access, true, binders, locals)?;
+                self.declare_record_pattern(node, name, access, true, binders, locals)?;
             } else if kind != NodeKind::Wildcard {
                 if !shorthand && kind != NodeKind::NamePattern {
                     return Err(Stop::Pending(name));
@@ -2631,7 +2633,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 ) {
                     return Err(Stop::Pending(name));
                 }
-                self.declare_product_local(name, binder, locals)?;
+                self.declare_product_local(node, name, binder, locals)?;
             }
         }
         Ok(())
@@ -2639,6 +2641,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
 
     fn declare_product_local(
         &mut self,
+        node: NodeId,
         name: NodeId,
         binder: &PatternBinder<'g>,
         locals: &mut Vec<Slot>,
@@ -2646,6 +2649,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.budget.step(1)?;
         if binder.declaration.start != self.module.syntax.nodes[name].span.start() {
             return Err(Stop::Pending(name));
+        }
+        // This binder visit is already metered. Record only patterns needing
+        // a whole-child region; flat products need no extra pass or index entry.
+        if whole_product_child(binder) {
+            self.budget.reserve(1)?;
+            self.whole_child_patterns.insert(node);
         }
         locals.push(self.local(binder.declaration, name, &binder.ty)?);
         Ok(())
@@ -2698,8 +2707,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if access == Access::Owned
             && let Pattern::Constructor(kind, children, _) = facts.pattern.as_ref()
         {
-            self.budget.step(facts.binders.len())?;
-            whole_child = facts.binders.iter().any(whole_product_child);
+            if !self.whole_child_patterns.is_empty() {
+                self.budget.step(1)?;
+                whole_child = self.whole_child_patterns.contains(&node);
+            }
             nested_record = whole_child && matches!(kind, Constructor::Record(_));
             nested_tuple = whole_child && matches!(kind, Constructor::Tuple(_));
             self.budget.step(children.len())?;
