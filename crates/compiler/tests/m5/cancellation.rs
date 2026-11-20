@@ -748,6 +748,9 @@ function diamonds8(b0: bool, b1: bool, b2: bool, b3: bool, b4: bool, b5: bool, b
     );
 }
 
+#[path = "cancellation/replacement.rs"]
+mod replacement;
+
 fn declaration<'g>(module: &'g loader::Module, name: &str) -> &'g loader::Declaration {
     module
         .declarations

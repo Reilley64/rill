@@ -95,6 +95,8 @@ pub struct Mir<'g> {
     pub blocks: Vec<Block<'g>>,
     disposer_bodies: BTreeMap<&'g DeclarationId, Mir<'g>>,
     cancellation: Option<Cancellation<'g>>,
+    replacement: Option<Box<ReplacementCancellation<'g>>>,
+    active_backedge: bool,
 }
 
 impl<'g> Mir<'g> {
@@ -104,6 +106,11 @@ impl<'g> Mir<'g> {
         self.disposer_bodies.get(implementation)
     }
 
+    /// A checked disposal-through-install interval, not a whole-frame proof.
+    pub fn replacement_cancellation(&self) -> Option<&ReplacementCancellation<'g>> {
+        self.replacement.as_deref()
+    }
+
     /// Intrinsic cancellation proof for a supported flat frame, including
     /// its suspended state at an admitted retaining call into a second frame.
     /// `None` means unknown, not that cancellation is impossible. `Some` does
@@ -111,6 +118,43 @@ impl<'g> Mir<'g> {
     pub fn cancellation(&self) -> Option<&Cancellation<'g>> {
         self.cancellation.as_ref()
     }
+}
+
+/// A reached initialized replacement under ADR 0009. The two uses of the
+/// destination denote different owners: displacement consumes the old value;
+/// installation consumes the separate stage and initializes the destination.
+#[derive(Debug)]
+pub struct ReplacementCancellation<'g> {
+    pub displacement: usize,
+    pub installation: usize,
+    pub staged: Place<'g>,
+    pub installed: Place<'g>,
+    pub implementation: &'g DeclarationId,
+    pub deferred: DeferredDisposerCheckpoint<'g>,
+    pub callee: &'g DeclarationId,
+    pub entry: Site<'g>,
+    pub post_install_call: usize,
+    /// Terminal exit for a pending request when deferral ends and delivery is
+    /// enabled, or for a request delivered at the post-install callee yield.
+    /// Install is not a poll. An enclosing mask keeps the request pending.
+    /// Cleanup invokes `implementation` on the installed value and runs its
+    /// active body and epilogue under deferral, without taking this exit again.
+    pub on_delivery: CancellationExit<'g>,
+}
+
+/// A yield with a request at this callee entry leaves the request pending.
+/// There is no lexical exit: the caller keeps its stage and the active frame
+/// keeps its live locals and remaining initialized fields as in ordinary MIR.
+/// Resume the active body, including its field transfer and epilogue, before
+/// continuing at the caller's installation block.
+#[derive(Debug)]
+pub struct DeferredDisposerCheckpoint<'g> {
+    /// Indices in the checked active disposer MIR, not in the caller.
+    pub call: usize,
+    pub resume: usize,
+    pub defer_fields: usize,
+    pub operand: Place<'g>,
+    pub remainder: Place<'g>,
 }
 
 #[derive(Debug)]
@@ -832,6 +876,7 @@ fn checked_graph<'g>(
     let Lowered {
         mir: mut root,
         trace,
+        replacement,
         ..
     } = lowered.map_err(|stop| (module, stop))?;
     reached(&root, &mut pending, &mut seen, budget).map_err(|stop| (module, stop))?;
@@ -865,6 +910,7 @@ fn checked_graph<'g>(
                 .map(|mir| Lowered {
                     mir,
                     trace: None,
+                    replacement: None,
                     empty_entry: None,
                 })
         } else {
@@ -902,6 +948,7 @@ fn checked_graph<'g>(
             mir,
             empty_entry,
             trace: callee_trace,
+            ..
         } = lowered.map_err(|stop| (target, stop))?;
         if direct != 0 {
             direct -= 1;
@@ -932,12 +979,32 @@ fn checked_graph<'g>(
             )
             .map_err(|stop| (module, stop))?;
     }
+    if let Some(candidate) = replacement {
+        // Both premises come from the ordinary closure above, not from a
+        // standalone delivery judgment for an active or masked frame.
+        graph::charge_key(
+            &candidate.implementation.module,
+            root.disposer_bodies.len(),
+            budget,
+        )
+        .and_then(|()| graph::charge_key(&candidate.callee.module, seen.len(), budget))
+        .map_err(|()| (module, Stop::Limit))?;
+        if let (Some(body), Some(entry)) = (
+            root.disposer_bodies.get(candidate.implementation),
+            seen.get(candidate.callee).copied().flatten(),
+        ) {
+            root.replacement = candidate
+                .finish(body, entry, budget)
+                .map_err(|stop| (module, stop))?;
+        }
+    }
     Ok(root)
 }
 
 struct Lowered<'a, 'g> {
     mir: Mir<'g>,
     trace: Option<flow::CancellationTrace<'a, 'g>>,
+    replacement: Option<flow::ReplacementCandidate<'g>>,
     empty_entry: Option<Site<'g>>,
 }
 
@@ -1191,12 +1258,9 @@ fn lower<'a, 'g>(
     .then(|| site_at(module, body));
     // Capturing pre-states is separate from the ordinary lowering frame and
     // does not assume delivery is enabled on any ordinary edge.
-    let (mir, trace) = flow::run(build, entry, params, active, collect_trace, cache)?;
-    Ok(Lowered {
-        mir,
-        trace,
-        empty_entry,
-    })
+    let mut lowered = flow::run(build, entry, params, active, collect_trace, cache)?;
+    lowered.empty_entry = empty_entry;
+    Ok(lowered)
 }
 
 fn lower_implementation<'a, 'g>(
@@ -1306,12 +1370,7 @@ fn lower_expectation_body<'a, 'g>(
 ) -> ResultOf<Lowered<'a, 'g>> {
     let mut build = Build::new(typed, module, root, None, facts, cache.as_deref(), budget)?;
     let entry = build.expectation(result)?;
-    let (mir, trace) = flow::run(build, entry, Vec::new(), None, false, cache)?;
-    Ok(Lowered {
-        mir,
-        trace,
-        empty_entry: None,
-    })
+    flow::run(build, entry, Vec::new(), None, false, cache)
 }
 
 fn lower_startup<'a, 'g>(
@@ -1343,12 +1402,7 @@ fn lower_startup_body<'a, 'g>(
         budget,
     )?;
     let entry = build.startup()?;
-    let (mir, trace) = flow::run(build, entry, Vec::new(), None, false, cache)?;
-    Ok(Lowered {
-        mir,
-        trace,
-        empty_entry: None,
-    })
+    flow::run(build, entry, Vec::new(), None, false, cache)
 }
 
 fn retained_two_hop_bool_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {

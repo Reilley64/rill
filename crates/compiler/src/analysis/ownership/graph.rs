@@ -85,6 +85,7 @@ pub struct RootReport<'g> {
     ordinary_mir: Option<Mir<'g>>,
     enabled_frame: Delivery<'g, Cancellation<'g>>,
     selected_call: Delivery<'g, Box<GraphRetainingCall<'g>>>,
+    replacement: Delivery<'g, Box<ReplacementCancellation<'g>>>,
     dependencies: Vec<Dependency<'g>>,
 }
 
@@ -119,6 +120,11 @@ impl<'g> RootReport<'g> {
     /// and leaf-callee premises checked. Ordinary parents do not inherit it.
     pub fn selected_call(&self) -> &Delivery<'g, Box<GraphRetainingCall<'g>>> {
         &self.selected_call
+    }
+    /// The checked disposal-through-install interval, separate from an
+    /// enabled-frame judgment. Resolve its body in `GraphReport::active_disposers`.
+    pub fn replacement_cancellation(&self) -> &Delivery<'g, Box<ReplacementCancellation<'g>>> {
+        &self.replacement
     }
     /// A known blocker, even if exhaustion prevented a closure verdict.
     pub fn blocked_at(&self) -> Option<Site<'g>> {
@@ -259,6 +265,8 @@ struct WorkItem<'a, 'g> {
     ordinary: Option<Mir<'g>>,
     empty_entry: Option<Site<'g>>,
     trace: Option<flow::CancellationTrace<'a, 'g>>,
+    replacement: Option<(flow::ReplacementCandidate<'g>, usize, usize)>,
+    replacement_proof: Option<Box<ReplacementCancellation<'g>>>,
     call_targets: BTreeMap<usize, usize>,
     enabled_proof: Option<Cancellation<'g>>,
     retaining_parameters: Option<[Place<'g>; 3]>,
@@ -347,6 +355,7 @@ fn push_body<'a, 'g>(
         ordinary_mir: None,
         enabled_frame: Delivery::Unresolved,
         selected_call: Delivery::Unresolved,
+        replacement: Delivery::Unresolved,
         dependencies: Vec::new(),
     });
     work.push(WorkItem {
@@ -361,6 +370,8 @@ fn push_body<'a, 'g>(
         ordinary: None,
         empty_entry: None,
         trace: None,
+        replacement: None,
+        replacement_proof: None,
         call_targets: BTreeMap::new(),
         enabled_proof: None,
         retaining_parameters: None,
@@ -514,8 +525,11 @@ fn analyze<'g>(
             Ok(Lowered {
                 mir,
                 trace,
+                replacement,
                 empty_entry,
             }) => {
+                let mut displaced_body = None;
+                let mut post_install_leaf = None;
                 visit_dependencies(&mir, budget, |block, edge, budget| {
                     budget.reserve(1)?;
                     if matches!(edge.contract, DependencyContract::CallableTransfer(_)) {
@@ -575,6 +589,21 @@ fn analyze<'g>(
                         budget.reserve(1)?;
                         work[target].parents.push(index);
                         reverse_edges += 1;
+                        if let Some(candidate) = &replacement {
+                            match edge.contract {
+                                DependencyContract::ActiveDisposer
+                                    if block == candidate.displacement =>
+                                {
+                                    displaced_body = Some(target);
+                                }
+                                DependencyContract::OrdinaryCall
+                                    if block == candidate.post_install_call =>
+                                {
+                                    post_install_leaf = Some(target);
+                                }
+                                _ => {}
+                            }
+                        }
                         if trace.is_some() && edge.contract == DependencyContract::OrdinaryCall {
                             budget.reserve(1)?;
                             work[index].call_targets.insert(block, target);
@@ -589,6 +618,10 @@ fn analyze<'g>(
                 let item = &mut work[index];
                 item.ordinary = Some(mir);
                 item.trace = trace;
+                item.replacement = replacement
+                    .zip(displaced_body)
+                    .zip(post_install_leaf)
+                    .map(|((candidate, body), leaf)| (candidate, body, leaf));
                 item.empty_entry = empty_entry;
             }
         }
@@ -632,6 +665,9 @@ fn analyze<'g>(
         if let Some(proof) = item.selected_proof {
             root.selected_call = Delivery::Proved(proof);
         }
+        if let Some(proof) = item.replacement_proof {
+            root.replacement = Delivery::Proved(proof);
+        }
     }
     Ok(())
 }
@@ -666,6 +702,16 @@ fn check_enabled_frames<'g>(
 ) -> Result<(), ()> {
     for index in 0..report.source_roots {
         budget.step(1)?;
+        // Close the local interval using the active ordinary body and the
+        // qualified leaf entry, not the leaf's enabled-frame disposition.
+        if let Some((candidate, body, leaf)) = work[index].replacement.take()
+            && work[index].ordinary_completion == Completion::Checked
+            && let Some(entry) = work[leaf].empty_entry
+        {
+            work[index].replacement_proof = candidate
+                .finish(work[body].ordinary.as_ref().unwrap(), entry, budget)
+                .map_err(|_| ())?;
+        }
         let Some(trace) = work[index].trace.take() else {
             continue;
         };
