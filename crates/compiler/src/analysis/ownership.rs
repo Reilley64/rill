@@ -555,7 +555,7 @@ pub enum Operation<'g> {
         operand: Place<'g>,
         into: Place<'g>,
     },
-    /// Consume a proved Some carrier and move its owning payload into a slot.
+    /// Consume a proved Some carrier and transfer its payload into a slot.
     TakeOptionPayload {
         operand: Place<'g>,
         into: Place<'g>,
@@ -1707,8 +1707,15 @@ struct Local<'g> {
     custom_disposer: Option<&'g DeclarationId>,
     /// Materialized backing or descriptor of a computed scalar borrow.
     scalar_borrow_temporary: bool,
+    shared_option: Option<SharedOption>,
     moves: bool,
     cleanup: StorageCleanup<'g>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SharedOption {
+    MayCarry,
+    Empty,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

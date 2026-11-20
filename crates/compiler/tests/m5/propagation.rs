@@ -1,6 +1,257 @@
 use super::*;
 
 #[test]
+fn owned_option_postfix_preserves_shared_text_backing() {
+    probe_with_typed(
+        "propagation::owned_option_postfix_preserves_shared_text_backing",
+        r#"
+            function forward(input: Option<&string>, tail: string): Option<&string> {
+                let refValue = input?;
+                return Option.Some(refValue);
+            }
+            function escaped(local: string): Option<&string> {
+                let input: Option<&string> = Option.Some(&local);
+                let refValue = input?;
+                return Option.Some(refValue);
+            }
+            function ended(local: string): Option<bool> {
+                let input: Option<&string> = Option.Some(&local);
+                let _ = input?;
+                dispose(local);
+                return Option.Some(true);
+            }
+            function releaseLive(local: string): Option<&string> {
+                let input: Option<&string> = Option.Some(&local);
+                let refValue = input?;
+                dispose(local);
+                return Option.Some(refValue);
+            }
+            function forwardExclusive(input: Option<&mut bool>): Option<&mut bool> {
+                let refValue = input?;
+                return Option.Some(refValue);
+            }
+        "#,
+        |request, module, receipt, typed| {
+            use compiler::analysis::ownership::Place;
+            let check = |name, limits| {
+                let function = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &function.id, limits).unwrap()
+            };
+            let lower = |name| check(name, AnalysisLimits::default());
+            let option = typed.option_role().unwrap();
+            let same = |left: Place<'_>, right: Place<'_>| {
+                left.projection.is_none()
+                    && right.projection.is_none()
+                    && left.root.node == right.root.node
+            };
+            let forward = lower("forward");
+            assert_eq!(
+                forward.completion(),
+                Completion::Checked,
+                "test_mode={}; blocked at {:?}",
+                request.test_mode,
+                forward.blocked_at().map(|s| s.span.bytes())
+            );
+            let mir = forward.mir().unwrap();
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let prefix = straight_blocks(mir, mir.entry);
+            let [moved, test] = prefix.as_slice() else {
+                panic!("stage one carrier and branch on it");
+            };
+            let Operation::Move {
+                from,
+                into: Some(carrier),
+            } = moved.operation
+            else {
+                panic!("the by-value parameter is consumed, not borrowed");
+            };
+            assert_eq!(from.root.span.bytes(), b"input: Option<&string>");
+            assert!(!same(from, carrier));
+            assert!(
+                matches!(test.operation, Operation::TestVariant { operand, .. }
+                if same(operand, carrier))
+            );
+            let success = linear(mir, yes);
+            let [
+                Operation::TakeOptionPayload {
+                    operand,
+                    into: binding,
+                },
+                Operation::Copy {
+                    from,
+                    into: Some(descriptor),
+                },
+                Operation::ConstructVariant {
+                    variant,
+                    payload: Some(payload),
+                    into,
+                },
+                Operation::Export(out),
+                ..,
+            ] = success.as_slice()
+            else {
+                panic!("take, copy and reconstruct the shared descriptor before export");
+            };
+            assert!(same(*operand, carrier));
+            assert_eq!(binding.root.span.bytes(), b"refValue");
+            assert!(same(*from, *binding) && same(*descriptor, *payload) && same(*into, *out));
+            assert_eq!(*variant, &option.some.id);
+            assert_return(&success, &option.some.id, true, &[b"tail: string"]);
+            let failure = linear(mir, no);
+            assert!(matches!(failure.as_slice(),
+                [Operation::EndEmptyOption(operand), Operation::ConstructVariant { payload: None, .. },
+                 Operation::Export(_), ..] if same(*operand, carrier)));
+            assert_return(&failure, &option.none.id, false, &[b"tail: string"]);
+
+            let ended = lower("ended");
+            let mir = ended
+                .mir()
+                .expect("discarded descriptor releases its backing");
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let prefix = straight_blocks(mir, mir.entry);
+            let [borrow, build, moved, test] = prefix.as_slice() else {
+                panic!("borrow the actual local owner before staging its carrier");
+            };
+            let Operation::Borrow {
+                source: backing,
+                holder,
+                exclusive: false,
+            } = borrow.operation
+            else {
+                panic!("shared loan of the owned string");
+            };
+            assert_eq!(backing.root.span.bytes(), b"local: string");
+            assert_eq!(borrow.site.span.bytes(), b"&local");
+            let Operation::ConstructVariant {
+                variant,
+                payload: Some(payload),
+                into: input,
+            } = build.operation
+            else {
+                panic!("store the view in canonical Some");
+            };
+            assert_eq!(variant, &option.some.id);
+            assert!(same(holder, payload));
+            let Operation::Move {
+                from,
+                into: Some(carrier),
+            } = moved.operation
+            else {
+                panic!("consume the local carrier");
+            };
+            assert!(same(from, input));
+            assert!(
+                matches!(test.operation, Operation::TestVariant { operand, .. }
+                if same(operand, carrier))
+            );
+            let success = linear(mir, yes);
+            assert!(matches!(success.as_slice(),
+                [Operation::TakeOptionPayload { operand, into }, Operation::Cleanup(cleanup),
+                 Operation::Dispose { operand: released, .. }, ..]
+                if same(*operand, carrier) && same(*released, backing)
+                    && matches!(cleanup.as_slice(), [Obligation::EndStorage(view)] if same(*view, *into))));
+            assert_return(&success, &option.some.id, true, &[]);
+            let failure = linear(mir, no);
+            assert!(matches!(failure.as_slice(),
+                [Operation::EndEmptyOption(operand), Operation::ConstructVariant { payload: None, .. },
+                 Operation::Export(_), ..] if same(*operand, carrier)));
+            assert!(
+                !failure
+                    .iter()
+                    .any(|op| matches!(op, Operation::Dispose { .. }))
+            );
+            assert_return(&failure, &option.none.id, false, &[b"local: string"]);
+
+            for (name, code, site, related) in [
+                (
+                    "escaped",
+                    "R0202",
+                    b"return Option.Some(refValue);".as_slice(),
+                    b"local: string".as_slice(),
+                ),
+                (
+                    "releaseLive",
+                    "R0203",
+                    b"dispose(local)".as_slice(),
+                    b"&local".as_slice(),
+                ),
+            ] {
+                let rejected = lower(name);
+                assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                assert!(rejected.mir().is_none());
+                let [finding] = rejected.findings() else {
+                    panic!("one finding for {name}");
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), related);
+            }
+            let exclusive = lower("forwardExclusive");
+            assert_eq!(exclusive.completion(), Completion::Incomplete);
+            assert!(exclusive.mir().is_none() && exclusive.findings().is_empty());
+            assert_eq!(
+                exclusive.blocked_at().unwrap().span.bytes(),
+                b"input: Option<&mut bool>"
+            );
+
+            for (name, report) in [("forward", forward), ("ended", ended)] {
+                let stats = report.statistics();
+                let exact = AnalysisLimits {
+                    max_work: stats.work,
+                    max_entries: stats.entries,
+                    max_depth: stats.max_depth,
+                };
+                assert_eq!(check(name, exact).completion(), Completion::Checked);
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = check(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn borrowing_the_whole_shared_text_option_is_not_a_postfix_target() {
+    use compiler::analysis::scalars::ScalarFindingKind;
+    probe_report(
+        "propagation::borrowing_the_whole_shared_text_option_is_not_a_postfix_target",
+        r#"
+            function borrowed(input: &Option<&string>): Option<&string> {
+                let refValue = input?;
+                return Option.Some(refValue);
+            }
+        "#,
+        |_, module, typed| {
+            assert!(typed.receipt().is_none());
+            assert!(typed.bodies().findings().iter().any(|finding| {
+                finding.kind == ScalarFindingKind::InvalidTarget
+                    && finding.site.module == &module.key
+                    && finding.site.span.bytes() == b"input?"
+            }));
+        },
+    );
+}
+
+#[test]
 fn option_postfix_returns_through_initialized_cleanup() {
     probe_with_typed(
         "propagation::option_postfix_returns_through_initialized_cleanup",

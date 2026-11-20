@@ -88,10 +88,11 @@ struct PropagatingArgument {
 enum OptionPayload<'t, 'g> {
     Bool,
     Text(&'t Type<'g>),
+    SharedText(&'t Type<'g>),
 }
 
 #[derive(Clone, Copy)]
-enum OptionTextSource {
+enum OptionTakeSource {
     Move(Slot),
     Constructor,
     Factory,
@@ -108,7 +109,7 @@ struct CheckedPropagation<'a, 'g> {
     source: NodeId,
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
-    option_text: Option<(&'a Type<'g>, OptionTextSource)>,
+    option_take: Option<(&'a Type<'g>, OptionTakeSource)>,
 }
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
@@ -683,6 +684,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     }
 
     pub(super) fn slot(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Slot> {
+        let mut shared_option = None;
         let (moves, cleanup) = match ty.as_ref() {
             TypeTerm::Primitive(_) if owns_text(ty) => (true, StorageCleanup::Drop),
             TypeTerm::Primitive(_) => (false, StorageCleanup::End),
@@ -702,6 +704,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     }
                     OptionPayload::Text(_) => {
                         (true, StorageCleanup::DropOptionPayload(&role.some.id))
+                    }
+                    OptionPayload::SharedText(_) => {
+                        let may_carry = !matches!(ty.as_ref(), TypeTerm::Variant { declaration, .. } if *declaration == &role.none.id);
+                        shared_option = Some(if may_carry {
+                            SharedOption::MayCarry
+                        } else {
+                            SharedOption::Empty
+                        });
+                        (may_carry, StorageCleanup::End)
                     }
                 }
             }
@@ -754,6 +765,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             has_guard_field: false,
             custom_disposer: None,
             scalar_borrow_temporary: false,
+            shared_option,
             moves,
             cleanup,
         });
@@ -1015,15 +1027,23 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if *declaration != &role.declaration.id {
             return None;
         }
-        let TypeTerm::Primitive(primitive) = payload.as_ref() else {
-            return None;
-        };
-        let payload = match primitive.name() {
-            "bool" => OptionPayload::Bool,
-            "string" => OptionPayload::Text(payload),
+        let payload = match payload.as_ref() {
+            TypeTerm::Primitive(p) if p.name() == "bool" => OptionPayload::Bool,
+            TypeTerm::Primitive(p) if p.name() == "string" => OptionPayload::Text(payload),
+            TypeTerm::Reference {
+                mutable: false,
+                referent,
+            } if owns_text(referent) => OptionPayload::SharedText(payload),
             _ => return None,
         };
         Some((role, payload))
+    }
+
+    fn shared_option(&self, ty: &TypeTerm<'g>) -> bool {
+        matches!(
+            self.admitted_option(ty),
+            Some((_, OptionPayload::SharedText(_)))
+        )
     }
 
     fn scalar_result_role(
@@ -1067,9 +1087,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             TypeTerm::Variant { parent, .. } => parent,
             _ => ty,
         };
-        // The admitted parents have only scalar arguments, so comparison
-        // is bounded. A successful proof covers both variants of this exact
-        // instantiation, not other success or error types.
+        // The admitted arguments have bounded shape. A successful proof
+        // covers both variants of this exact instantiation, not other types.
         for proved in &self.proved_variant_cleanup {
             self.budget.step(1)?;
             if proved == parent {
@@ -1111,6 +1130,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             has_guard_field: false,
             custom_disposer,
             scalar_borrow_temporary: false,
+            shared_option: None,
             moves: custom_disposer.is_some(),
             cleanup: StorageCleanup::End,
         });
@@ -1153,6 +1173,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 has_guard_field: false,
                 custom_disposer: None,
                 scalar_borrow_temporary: false,
+                shared_option: None,
                 moves,
                 cleanup,
             });
@@ -2162,8 +2183,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     return self.terminal_two_hop_store(node, left, value, next, depth);
                 }
                 let (target, source) = self.assignment_target(left, facts, value, depth + 1)?;
-                if self.slots[target].projection.is_some()
-                    && self.slots[target].guard_release().is_some()
+                if self.slots[target].shared_option.is_some()
+                    || self.slots[target].projection.is_some()
+                        && self.slots[target].guard_release().is_some()
                 {
                     return Err(Stop::Pending(left));
                 }
@@ -3350,7 +3372,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             (source, &operand.ty, Some(operand))
         };
-        let (wrapper, option_text) = if let Some(error) = &exit.error {
+        let (wrapper, option_take) = if let Some(error) = &exit.error {
             let (role, _) = self
                 .scalar_result_role(operand)
                 .ok_or(Stop::Pending(node))?;
@@ -3366,17 +3388,27 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         } else {
             let (role, payload) = self.admitted_option(operand).ok_or(Stop::Pending(node))?;
             if wrap.is_some()
-                || self.bool_option_role(result).is_none()
                 || exit.success != &role.some.id
                 || exit.failure != &role.none.id
+                || !(self.bool_option_role(result).is_some()
+                    || matches!(payload, OptionPayload::SharedText(_))
+                        && matches!(result.as_ref(), TypeTerm::Nominal { .. })
+                        && self.shared_option(result))
             {
                 return Err(Stop::Pending(node));
             }
-            let text = match payload {
+            let take = match payload {
                 OptionPayload::Bool => None,
+                OptionPayload::SharedText(ty) if syntax.kind == NodeKind::Propagate => {
+                    // Only a named whole carrier supplies a checked source on this route.
+                    let (_, path) = self.named_owned_place(source)?.ok_or(Stop::Pending(node))?;
+                    let from = self.resolve_place(source, path)?;
+                    Some((ty, OptionTakeSource::Move(from)))
+                }
+                OptionPayload::SharedText(_) => return Err(Stop::Pending(node)),
                 OptionPayload::Text(ty) => {
                     let source = if piped {
-                        OptionTextSource::PipeStep
+                        OptionTakeSource::PipeStep
                     } else if syntax.kind == NodeKind::Propagate {
                         self.check_option_text_source(
                             node,
@@ -3390,7 +3422,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     Some((ty, source))
                 }
             };
-            (None, text)
+            (None, take)
         };
         Ok(CheckedPropagation {
             facts,
@@ -3401,7 +3433,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             source,
             operand,
             wrapper,
-            option_text,
+            option_take,
         })
     }
 
@@ -3411,7 +3443,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         source: NodeId,
         operand: &Type<'g>,
         facts: &'a ExpressionFacts<'g>,
-    ) -> ResultOf<OptionTextSource> {
+    ) -> ResultOf<OptionTakeSource> {
         self.budget.step(1)?;
         if let Some(path) = facts
             .path
@@ -3419,7 +3451,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .filter(|path| path.projections.is_empty())
         {
             self.budget.step(1)?;
-            return Ok(OptionTextSource::Move(self.resolve_place(source, path)?));
+            return Ok(OptionTakeSource::Move(self.resolve_place(source, path)?));
         }
         let root = self.ungroup(source)?;
         let origin = if root == source {
@@ -3429,7 +3461,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             self.value(root)?
         };
         if matches!(origin.data, Some(DataExpression::Construction(_))) {
-            return Ok(OptionTextSource::Constructor);
+            return Ok(OptionTakeSource::Constructor);
         }
         self.budget.step(1)?;
         let call = origin.call.as_deref().ok_or(Stop::Pending(node))?;
@@ -3437,7 +3469,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(Stop::Pending(node));
         }
         self.check_exact_primitive_call(node, call, operand)?;
-        Ok(OptionTextSource::Factory)
+        Ok(OptionTakeSource::Factory)
     }
 
     fn propagate(
@@ -3472,7 +3504,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             source,
             operand,
             wrapper,
-            option_text,
+            option_take,
         } = checked;
         let pipe_arguments = if piped
             && fresh.is_none()
@@ -3481,8 +3513,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 node,
                 PropagatingCallOutput::CheckedPipeCarrier {
                     primitive_arguments_checked: matches!(
-                        option_text,
-                        Some((_, OptionTextSource::PipeStep))
+                        option_take,
+                        Some((_, OptionTakeSource::PipeStep))
                     ),
                 },
                 call,
@@ -3560,7 +3592,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         } else {
             let success = if !exit.can_continue {
                 None
-            } else if let Some((ty, _)) = option_text {
+            } else if let Some((ty, _)) = option_take {
                 let (into, next) = if let Some(into) = into {
                     (into, next)
                 } else {
@@ -3600,7 +3632,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     },
                     Edges::Next(export),
                 )?;
-                let end = if option_text.is_some() {
+                let end = if option_take.is_some() {
                     Action::EndEmptyOption(scratch)
                 } else {
                     Action::End(scratch)
@@ -3629,7 +3661,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             self.call_with_propagating_arguments(node, call, Some(scratch), split, depth, arguments)
         } else if piped {
             self.call(node, facts, Some(scratch), split, depth, Some(operand))
-        } else if let Some((_, OptionTextSource::Factory)) = option_text {
+        } else if let Some((_, OptionTakeSource::Factory)) = option_take {
             self.expression_with_proof(
                 source,
                 Some(scratch),
@@ -3637,7 +3669,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 depth,
                 Some(ExpressionProof::CallCarrier(operand)),
             )
-        } else if let Some((_, OptionTextSource::Move(from))) = option_text {
+        } else if let Some((_, OptionTakeSource::Move(from))) = option_take {
             self.depth(depth)?;
             self.emit(
                 source,
@@ -3707,7 +3739,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     enclosing,
                     root,
                     call,
-                    checked.option_text.is_some(),
+                    checked.option_take.is_some(),
                     depth,
                 );
             }
@@ -4059,7 +4091,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // The declared result is the carrier to stage before branching.
         let (parameters, result) = self.direct_application_signature(node, call)?;
         let option = self.admitted_option(result);
-        if !(option.is_some() || self.scalar_result_role(result).is_some()) {
+        if matches!(option, Some((_, OptionPayload::SharedText(_))))
+            || !(option.is_some() || self.scalar_result_role(result).is_some())
+        {
             return Err(Stop::Pending(node));
         }
         let owns_payload = matches!(option, Some((_, OptionPayload::Text(_))));
@@ -4690,7 +4724,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     }
                     if matches!(
                         self.admitted_option(&operand_facts.ty),
-                        Some((_, OptionPayload::Text(_)))
+                        Some((_, OptionPayload::Text(_) | OptionPayload::SharedText(_)))
                     ) {
                         return Err(Stop::Pending(node));
                     }
@@ -6270,6 +6304,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(Stop::Pending(node));
         }
         let result = checked_carrier.unwrap_or(&facts.ty);
+        // The local payload transfer does not prove a caller retention contract.
+        if self.shared_option(result) {
+            return Err(Stop::Pending(node));
+        }
         if checked_carrier.is_none() && matches!(result.as_ref(), TypeTerm::Callable { .. }) {
             return self.call_callable_transfer(node, call, result, into, next, depth);
         }
@@ -6338,6 +6376,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 pipe_formal = Some(position);
             }
             let ty = self.value(arg)?.ty.clone();
+            if self.shared_option(&ty) {
+                return Err(Stop::Pending(arg));
+            }
             if retained_two_hop_bool_type(&ty).is_some() {
                 if position != 0 || checked_carrier.is_some() {
                     return Err(Stop::Pending(arg));

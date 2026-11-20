@@ -87,6 +87,8 @@ enum LoanKind {
     // Shared access to a caller-owned field slot, keyed conservatively by
     // the incoming parameter, not by the parameter's local storage.
     IncomingSharedSlot,
+    // Backing carried by an incoming owned Option<&string>, not its slot.
+    IncomingSharedOptionBacking,
     // Opaque caller backing, not a loan of the formal's storage.
     IncomingCallableBacking,
 }
@@ -95,7 +97,10 @@ impl LoanKind {
     fn is_incoming(self) -> bool {
         matches!(
             self,
-            Self::IncomingExclusive | Self::IncomingSharedSlot | Self::IncomingCallableBacking
+            Self::IncomingExclusive
+                | Self::IncomingSharedSlot
+                | Self::IncomingSharedOptionBacking
+                | Self::IncomingCallableBacking
         )
     }
 
@@ -2056,6 +2061,11 @@ pub(super) fn run<'a, 'g>(
     let mut state: Vec<_> = slots
         .iter()
         .map(|slot| {
+            // The shared Option transfer has only an ordinary-exit proof.
+            if slot.shared_option.is_some() {
+                candidate = false;
+                replacement_candidate = false;
+            }
             candidate = candidate
                 && slot.projection.is_none()
                 && !slot.needs_boundary_cleanup()
@@ -2067,6 +2077,18 @@ pub(super) fn run<'a, 'g>(
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
+        if slots[slot].shared_option == Some(SharedOption::MayCarry) {
+            budget.reserve(1)?;
+            state[slot] = State::Initialized(Held {
+                loans: Arc::from([Loan {
+                    source: slot,
+                    site: slots[slot].node,
+                    exclusive: false,
+                    kind: LoanKind::IncomingSharedOptionBacking,
+                }]),
+                ..Held::default()
+            });
+        }
     }
     let mut callable_exported = false;
     let mut unsupported_cleanup = Vec::new();
@@ -2329,8 +2351,14 @@ pub(super) fn run<'a, 'g>(
                 }
                 Action::TakeOptionPayload { operand, into } => {
                     initialized(&state[operand], node)?;
-                    state[operand] = State::Vacant;
-                    state[into] = State::Initialized(empty.clone());
+                    let value = std::mem::replace(&mut state[operand], State::Vacant);
+                    // On the Some edge, take the descriptor and its backing,
+                    // not a reference to the staged carrier slot.
+                    state[into] = if slots[operand].shared_option == Some(SharedOption::MayCarry) {
+                        value
+                    } else {
+                        State::Initialized(empty.clone())
+                    };
                     Operation::TakeOptionPayload {
                         operand: local(operand),
                         into: local(into),
@@ -2346,11 +2374,17 @@ pub(super) fn run<'a, 'g>(
                     payload,
                     into,
                 } => {
-                    if let Some(payload) = payload {
+                    state[into] = if let Some(payload) = payload {
                         initialized(&state[payload], node)?;
-                        state[payload] = State::Vacant;
-                    }
-                    state[into] = State::Initialized(empty.clone());
+                        let value = std::mem::replace(&mut state[payload], State::Vacant);
+                        if slots[into].shared_option == Some(SharedOption::MayCarry) {
+                            value
+                        } else {
+                            State::Initialized(empty.clone())
+                        }
+                    } else {
+                        State::Initialized(empty.clone())
+                    };
                     Operation::ConstructVariant {
                         variant,
                         payload: payload.map(local),
