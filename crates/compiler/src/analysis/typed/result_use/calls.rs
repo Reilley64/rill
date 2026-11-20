@@ -63,10 +63,14 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             return Ok(states);
         }
-        let scoped = self
-            .core
-            .routine
-            .is_some_and(|role| &role.family.id == call.callee);
+        // Only the designated winner can transfer work to children. A legal
+        // application winner in this family keeps its ordinary call contract.
+        let scoped = self.core.routine.is_some_and(|role| {
+            role.needs_scoped_evidence(
+                call.callee,
+                call.selection.as_ref().map(|s| s.implementation),
+            )
+        });
         let boundary = if scoped {
             self.scoped
                 .map(|(role, slots)| pairs::PairBoundary::Scoped(role, slots))

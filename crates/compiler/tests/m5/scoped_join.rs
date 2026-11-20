@@ -95,6 +95,91 @@ fn call_node(module: &Module, prefix: &str) -> usize {
 }
 
 #[test]
+fn cancellation_only_disposer_is_not_a_checked_join_exit() {
+    use compiler::analysis::ownership::analyze_ownership;
+    probe(
+        "scoped_join::cancellation_only_disposer_is_not_a_checked_join_exit",
+        r#"
+            import std::routine::join as scoped;
+            type Bag = {}
+            implement dispose(bag: Bag): void { let values: List<i32> = [1i32]; dispose(values); }
+            function delivered(input: List<i32>, bag: Bag): Bag {
+                let [a, b] = scoped([() => (&input)[0u64], () => (&input)[1u64]]);
+                dispose(input); return bag;
+            }
+            function plain(input: List<i32>): [i32, i32] {
+                return scoped([() => (&input)[0u64], () => (&input)[1u64]]);
+            }
+        "#,
+        |_, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            for (name, expected) in [
+                ("delivered", Completion::Incomplete),
+                ("plain", Completion::Checked),
+            ] {
+                let d = &module.declarations[named(module, name)];
+                let local = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                    .unwrap();
+                assert_eq!(local.completion(), expected, "{name}");
+                assert_eq!(root.completion(), expected);
+                assert_eq!(local.mir().is_some(), expected == Completion::Checked);
+                assert_eq!(root.mir().is_some(), expected == Completion::Checked);
+                assert!(local.findings().is_empty());
+                if expected == Completion::Incomplete {
+                    assert!(
+                        local
+                            .blocked_at()
+                            .unwrap()
+                            .span
+                            .bytes()
+                            .starts_with(b"scoped([")
+                    );
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn grouped_ordinary_call_keeps_its_cap_with_the_join_group_loaded() {
+    probe_report_with_modules(
+        "scoped_join::grouped_ordinary_call_keeps_its_cap_with_the_join_group_loaded",
+        r#"
+            import selectionBudgetAcrossAnUnrelatedModule::identity as plain;
+            import std::routine::join as scoped;
+            function untouched(n: i32): i32 { return (plain)(((n))); }
+            function selected(xs: List<i32>): [i32, i32] { return scoped([() => (&xs)[0u64], () => (&xs)[1u64]]); }
+        "#,
+        &[(
+            "selectionBudgetAcrossAnUnrelatedModule.rill",
+            "export function identity(n: i32): i32 { return n; }",
+        )],
+        |_, module, typed| {
+            assert!(typed.routine_role().is_some());
+            let receipt = typed.receipt().unwrap();
+            let d = &module.declarations[named(module, "untouched")];
+            // Measured with the extension in the capture before the exit-scope correction.
+            let cap = AnalysisLimits {
+                max_work: 4126,
+                max_entries: 179,
+                max_depth: 7,
+            };
+            let local = lower_body(&receipt, module, &d.id, cap).unwrap();
+            assert!(local.mir().is_some());
+            let s = local.statistics();
+            assert_eq!(
+                (s.work, s.entries, s.max_depth),
+                (cap.max_work, cap.max_entries, cap.max_depth)
+            );
+        },
+    );
+}
+
+#[test]
 fn installed_routine_selects_but_does_not_admit_an_ineligible_operation() {
     installed(
         "scoped_join::installed_routine_selects_but_does_not_admit_an_ineligible_operation",
@@ -318,6 +403,58 @@ fn installed_routine_pin_and_origin_are_independent_of_spelling() {
                     Origin::Application
                 );
             }
+        },
+    );
+}
+
+#[test]
+fn application_winner_in_the_join_family_is_an_ordinary_contract() {
+    probe_report(
+        "scoped_join::application_winner_in_the_join_family_is_an_ordinary_contract",
+        r#"
+        import std::routine::join;
+        type Marker = { flag: bool; }
+        implement join<[Marker,i32], [i32,i32]>(work:[Marker,i32]): [i32,i32] { return [4i32,7i32]; }
+        function ordinary(m: Marker): [i32,i32] { return join([m,2i32]); }
+        function store(): void { let held: ([Marker,i32]) => [i32,i32] = join; let _ = held; }
+    "#,
+        |_, module, typed| {
+            let receipt = typed
+                .receipt()
+                .expect("the application winner has no child-frame obligations");
+            let node = call_node(module, "join([m,");
+            let ordinary = typed.bodies().ordinary_call(module, node).unwrap().unwrap();
+            let goal = typed
+                .bodies()
+                .goal(ordinary.goal.as_ref().unwrap())
+                .unwrap();
+            let winner = goal.selection.as_ref().unwrap().implementation;
+            assert!(ordinary.checked && goal.premise.is_none());
+            assert_eq!(winner.module.origin, Origin::Application);
+            assert_ne!(winner, &typed.routine_role().unwrap().implementation.id);
+            assert!(receipt.scoped_join(module, node).unwrap().is_none());
+            let selected = module
+                .syntax
+                .nodes
+                .iter()
+                .enumerate()
+                .find_map(|(node, n)| {
+                    (n.span.bytes() == b"join")
+                        .then(|| typed.bodies().ordinary_value(module, node).unwrap())
+                        .flatten()
+                })
+                .unwrap();
+            assert_eq!(
+                typed
+                    .bodies()
+                    .goal(&selected.goal)
+                    .unwrap()
+                    .selection
+                    .as_ref()
+                    .unwrap()
+                    .implementation,
+                winner
+            );
         },
     );
 }

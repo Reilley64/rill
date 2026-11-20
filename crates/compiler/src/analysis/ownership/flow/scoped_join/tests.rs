@@ -511,7 +511,7 @@ fn check_bounds<'g>(stage: impl Fn(&mut Budget) -> ResultOf<Staged<'g>>) {
 }
 
 #[test]
-fn real_frames_drive_the_unregistered_scoped_join() {
+fn real_frames_drive_the_scoped_join_transitions() {
     if let Some(root) = std::env::var_os("RILL_JOIN_PROBE_ROOT") {
         for test_mode in [false, true] {
             let graph = loader::load_installed(InstalledRequest {
@@ -629,7 +629,7 @@ fn real_frames_drive_the_unregistered_scoped_join() {
     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
     let test = concat!(
         module_path!(),
-        "::real_frames_drive_the_unregistered_scoped_join"
+        "::real_frames_drive_the_scoped_join_transitions"
     );
     let output = Command::new(executable)
         .env("RILL_JOIN_PROBE_ROOT", &root)

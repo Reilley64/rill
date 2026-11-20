@@ -1,4 +1,4 @@
-//! Result-use transfer for one closed source pattern, not a scoped-work operation.
+//! Result-use transfers for an ordinary two-invocation body and the distinct installed join.
 use super::*;
 use crate::analysis::InvocationMode;
 use crate::analysis::generics::{
@@ -299,25 +299,38 @@ pub(super) fn scoped_summary<'g>(
     let Some(module) = inventory.graph().installed_routine_source() else {
         return Ok(None);
     };
+    // Each comparison against the captured routine key has bounded width;
+    // the maps it is looked up in can grow with the application, however.
+    let width = module.key.path.len() + 4;
+    budget.step(width.checked_mul(inventory.headers().len() + 1).ok_or(())?)?;
     let Some(metadata) = inventory.headers().get(&role.implementation.id) else {
         return Ok(None);
     };
-    budget.step(8 + metadata.requirements.len())?;
+    if metadata.requirements.len() != 6 {
+        return Ok(None);
+    }
+    let lookup = width.checked_mul(nodes.len() + 1).ok_or(())?;
+    // Three node lookups below; each slot scans the six written requirements
+    // for its callable goal and its two sendability goals.
+    budget.step(lookup.checked_mul(3).ok_or(())?)?;
+    budget.step(8 + 6 * metadata.requirements.len())?;
     let checked = || {
         let body = *module.syntax.nodes[role.implementation.node]
             .children
             .get(1)?;
         let (returned, operation) = single_return(module, body)?;
         let fact = |n| nodes.get(&(&module.key, n)).map(|&(_, f)| f);
-        let expression = |n| match &fact(n)?.kind {
-            NodeFactKind::Expression(value) if value.ordinary_context.is_none() => Some(value),
-            _ => None,
-        };
         if !matches!(fact(returned)?.kind, NodeFactKind::Return { target } if *target == role.implementation.id)
         {
             return None;
         }
-        let returned = expression(operation)?;
+        let operation = fact(operation)?;
+        let NodeFactKind::Expression(returned) = &operation.kind else {
+            return None;
+        };
+        if returned.ordinary_context.is_some() {
+            return None;
+        }
         let call = returned.call.as_ref()?;
         let [argument] = call.arguments.as_slice() else {
             return None;
@@ -333,8 +346,12 @@ pub(super) fn scoped_summary<'g>(
         else {
             return None;
         };
-        let input = expression(*argument)?;
-        if call.callee != &role.bridge.id
+        let arg = fact(*argument)?;
+        let NodeFactKind::Expression(input) = &arg.kind else {
+            return None;
+        };
+        if input.ordinary_context.is_some()
+            || call.callee != &role.bridge.id
             || call.selection.is_some()
             || call.pipe_input.is_some()
             || !call.defaults.is_empty()
@@ -347,7 +364,6 @@ pub(super) fn scoped_summary<'g>(
             || jobs.len() != 2
             || results.len() != 2
             || signature.binders.len() != 4
-            || metadata.requirements.len() != 6
         {
             return None;
         }
@@ -360,7 +376,7 @@ pub(super) fn scoped_summary<'g>(
                 return None;
             }
         }
-        let operation = fact(operation)?.site;
+        let operation = operation.site;
         let slot = |i: usize| {
             let requirement = |name: &str, arguments: &[&Type<'g>]| {
                 let mut requirements = metadata.requirements.iter().filter(|req| {

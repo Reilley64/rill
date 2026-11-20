@@ -1294,6 +1294,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                 None,
             )?;
             let selection = self.evidence.get(&goal).unwrap().selection.as_ref();
+            let scoped = self
+                .ordinary_scope
+                .as_ref()
+                .and_then(|scope| scope.routine())
+                .is_some_and(|role| {
+                    role.needs_scoped_evidence(
+                        written.declaration,
+                        selection.map(|s| s.implementation),
+                    )
+                });
             let selected = if let Some(selection) = selection {
                 self.elab.step(family.implementations.len())?;
                 let body = family
@@ -1319,14 +1329,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 required,
                 None,
             )?;
-            // The scoped operation requires actual argument occurrences at
-            // its direct call. A selected family value cannot carry that proof.
-            let routine = self
-                .ordinary_scope
-                .as_ref()
-                .and_then(|scope| scope.routine());
+            // The compiler operation needs actual argument occurrences at a
+            // direct call; ordinary winners of the same family do not.
             let formed = self.has_installed_ordinary_scope(written.declaration)
-                && !routine.is_some_and(|role| &role.family.id == written.declaration)
+                && !scoped
                 && self.form_ordinary_value(inference, node, written, &goal, &output)?;
             self.elab.reserve(1)?;
             self.ordinary_values.insert(

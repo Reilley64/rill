@@ -322,6 +322,7 @@ pub struct Graph {
     id: GraphId,
     request: Request,
     modules: Vec<Module>,
+    routine_index: Option<usize>,
     prelude: PreludeIdentities,
     bindings: Vec<Binding>,
     imports: Vec<ImportOutcome>,
@@ -361,15 +362,7 @@ impl Graph {
 
     /// This group is required only when captured by ordinary import discovery.
     pub(crate) fn installed_routine_source(&self) -> Option<&Module> {
-        self.installed?;
-        let index = self
-            .modules
-            .binary_search_by(|module| {
-                (module.key.origin, module.key.path.as_str())
-                    .cmp(&(Origin::Standard, "routine.rill"))
-            })
-            .ok()?;
-        self.modules.get(index)
+        self.routine_index.map(|index| &self.modules[index])
     }
 
     /// The baseline source keys, not a discovery request.

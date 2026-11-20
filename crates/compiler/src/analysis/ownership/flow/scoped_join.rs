@@ -24,7 +24,6 @@ struct ScalarExport<'g> {
 
 #[derive(Clone, Copy)]
 struct Child<'g> {
-    environment: Place<'g>,
     backing: Place<'g>,
     scalar: ScalarExport<'g>,
     end_view: Cleanup<'g>,
@@ -108,7 +107,6 @@ impl<'g> Child<'g> {
         // the scalar is vacant; after export it is gone. Thus the checked
         // EndStorage is also the entire cleanup on delivery at child entry.
         Ok(Self {
-            environment: frame.environment,
             backing: frame.backing,
             scalar: ScalarExport {
                 stage: ScalarStage { slot, from: *from },
@@ -179,7 +177,20 @@ fn parent_exit<'g>(
     if !parent.check(&terminal, node, budget)? {
         return Err(Stop::Pending(node));
     }
-    parent.exit(Cow::Owned(terminal), node, budget)
+    let exit = parent.exit(Cow::Owned(terminal), node, budget)?;
+    // Ordinary return can export an owner whose disposer is needed only on
+    // delivery. Do not certify that disposer from the ordinary call graph.
+    // The scoped edge closes only end-storage and pinned scalar-List release.
+    budget.step(exit.cleanup.len())?;
+    if exit.cleanup.iter().any(|action| {
+        !matches!(
+            action,
+            Cleanup::EndStorage(_) | Cleanup::DisposeListI32 { .. }
+        )
+    }) {
+        return Err(Stop::Pending(node));
+    }
+    Ok(exit)
 }
 
 /// Cleanup if control exits before commit. This projection does not add a

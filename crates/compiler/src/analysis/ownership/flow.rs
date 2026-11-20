@@ -4,11 +4,6 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
-// Unregistered until the installed provider and role can supply these premises.
-#[allow(
-    dead_code,
-    reason = "scoped join is not yet admitted by the installed checker"
-)]
 pub(super) mod scoped_join;
 
 // Retain distinct continuing states at a join. Every feasible incoming state

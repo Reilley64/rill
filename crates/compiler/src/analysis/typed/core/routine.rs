@@ -1,6 +1,7 @@
 //! Identity of the conditional installed scoped-work group.
 use super::*;
 use crate::analysis::ordinary::{Compatibility, Placement};
+use crate::loader::DeclarationId;
 
 /// The exact source declarations. Neither wrapper nor bridge identity proves
 /// that the compiler operation is available or that an ordinary call chose it.
@@ -9,6 +10,18 @@ pub struct RoutineRole<'g> {
     pub family: &'g Declaration,
     pub implementation: &'g Declaration,
     pub bridge: &'g Declaration,
+}
+
+impl RoutineRole<'_> {
+    /// A different settled winner gets no scoped-operation behavior. With no
+    /// winner the operation cannot fall back to an unchecked ordinary call.
+    pub(in crate::analysis) fn needs_scoped_evidence(
+        self,
+        family: &DeclarationId,
+        winner: Option<&DeclarationId>,
+    ) -> bool {
+        family == &self.family.id && winner.is_none_or(|id| id == &self.implementation.id)
+    }
 }
 
 pub(in crate::analysis::typed) fn check<'g>(
