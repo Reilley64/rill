@@ -1327,6 +1327,20 @@ At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github
 
 Native `test:runtime` is separate, unrun execution evidence. The hosted job reaches the unimplemented task; it does not run a Rill program. No work on M6 or #78 is part of this plan.
 
+## When an initializer returns before an irrefutable binding
+
+[`patterns/commitment.rs`](m5/patterns/commitment.rs) checks one flat, default-cleanup record with a single canonical `Option<bool>` postfix. Both installed load modes issue M4 receipts. At `ff8f725`, M5 could lower the named initializer followed by the binding, but not the same initializer written directly in the pattern. At `8eea08e` the direct binding has these ownership MIR paths:
+
+| Reached edge | What owns the strings |
+| --- | --- |
+| `gate?` returns `None` | Export `None`, then drop `first`, `second` (reverse written order), followed by live lexical owners. No record header, binder, remainder cleanup, `pass(b)` or `event()`. |
+| `gate?` continues | `pass(b)` runs once. Initialize the header, move `first` to `selected`, copy `check` to `bit`, then drop `last`, `second` (reverse declaration order) before `event()`. Move `selected` to `tail`; export `Some(bit)` before dropping `tail` and `kept`. |
+| `gate?` occurs **after** the binding | The remainder has already dropped. The failure edge drops `selected`, not a partially constructed `first`. |
+
+Known `None` skips a previously moved suffix. Known `Some` that reaches it and a moved prefix each give `R0200` at the reached read, related to the prior move; neither publishes MIR. Independently lowering the positive body still gives MIR when a one-short graph entry cap withholds every graph-root MIR. The test pins the old work and entry caps for ordinary direct and named initializers; a grouped named field preserves its old 4,187/720 caps. A depth limit is not a language rejection.
+
+This completes the interrupted-initializer contrast for ordinary irrefutable `let`, not guard fallthrough, iteration, general propagation, protected cleanup, cancellation or native execution. The wider graph still includes unresolved standard roots.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
