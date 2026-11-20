@@ -1454,6 +1454,161 @@ fn nested_record_initializers_transfer_written_fields_into_canonical_storage() {
 }
 
 #[test]
+fn named_nested_record_cleanup_after_one_edge_child_move() {
+    use compiler::analysis::ownership::{Place, Projection};
+    use compiler::parser::NodeKind;
+
+    probe_with_typed(
+        "records::named_nested_record_cleanup_after_one_edge_child_move",
+        r#"
+            import std::core::dispose as release;
+            type Inner = { text: string; }
+            type Outer = { child: Inner; sibling: string; }
+            function defaultCleanup(flag: bool, incoming: Inner, text: string): void {
+                let saved = Outer { sibling: text, child: incoming };
+                if (flag) { let taken = saved.child; }
+            }
+            type CustomInner = { text: string; }
+            type WithCustomChild = { child: CustomInner; sibling: string; }
+            implement release(value: CustomInner): void {}
+            function innerDisposer(flag: bool, incoming: CustomInner, text: string): void {
+                let saved = WithCustomChild { sibling: text, child: incoming };
+                if (flag) { let taken = saved.child; }
+            }
+            type CustomOuter = { child: Inner; sibling: string; }
+            implement release(value: CustomOuter): void {}
+            function outerDisposer(flag: bool, incoming: Inner, text: string): void {
+                let saved = CustomOuter { sibling: text, child: incoming };
+                if (flag) { let taken = saved.child; }
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower = |name| {
+                lower_body(
+                    receipt,
+                    module,
+                    &declaration(name).id,
+                    AnalysisLimits::default(),
+                )
+                .unwrap()
+            };
+            let report = lower("defaultCleanup");
+            let mir = report.mir().expect("default nested cleanup after a split");
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
+            let is_field = |place: &Place<'_>, root: &Place<'_>, id| {
+                place.root.node == root.root.node && place.field().is_some_and(|f| &f.id == id)
+            };
+            let is_root = |place: &Place<'_>, root: &Place<'_>| {
+                place.root.node == root.root.node && place.projection.is_none()
+            };
+            let prefix: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| !matches!(op, Operation::None | Operation::Copy { .. }))
+                .collect();
+            let [
+                Operation::Move {
+                    from: text,
+                    into: Some(sibling),
+                },
+                Operation::Move {
+                    from: incoming,
+                    into: Some(child),
+                },
+                Operation::Initialize(saved),
+            ] = prefix.as_slice()
+            else {
+                panic!("expected two field transfers and root initialization before the split")
+            };
+            assert_eq!(text.root.span.bytes(), b"text: string");
+            assert_eq!(incoming.root.span.bytes(), b"incoming: Inner");
+            assert_eq!(saved.root.span.bytes(), b"saved");
+            assert!(
+                [text, incoming, saved]
+                    .iter()
+                    .all(|p| p.projection.is_none())
+            );
+            assert!(is_field(sibling, saved, field("Outer", "sibling")));
+            assert!(is_field(child, saved, field("Outer", "child")));
+
+            let (yes, no) = branch_targets(mir);
+            let effects = |entry| {
+                let path = straight_blocks(mir, entry);
+                assert_eq!(path.last().unwrap().terminator, Terminator::Return);
+                path.into_iter()
+                    .filter(|block| !matches!(block.operation, Operation::None))
+                    .collect::<Vec<_>>()
+            };
+            let yes_path = effects(yes);
+            let [transfer, arm_exit, moved_exit, yes_parameters] = yes_path.as_slice() else {
+                panic!("expected the transfer, then arm, owner and parameter cleanup")
+            };
+            let Operation::Move {
+                from: child,
+                into: Some(taken),
+            } = transfer.operation
+            else {
+                panic!("expected the child to move into the branch-local binding")
+            };
+            assert!(is_field(&child, saved, field("Outer", "child")));
+            assert_eq!(taken.root.span.bytes(), b"taken");
+            assert!(taken.projection.is_none());
+            assert_eq!(arm_exit.site.span.bytes(), b"{ let taken = saved.child; }");
+            assert!(matches!(&arm_exit.operation, Operation::Cleanup(actions)
+                if matches!(actions.as_slice(), [Obligation::Drop(text), Obligation::EndStorage(root)]
+                    if is_field(text, &taken, field("Inner", "text")) && is_root(root, &taken))));
+            assert!(matches!(&moved_exit.operation, Operation::Cleanup(actions)
+                if matches!(actions.as_slice(), [Obligation::Drop(sibling), Obligation::EndStorage(root)]
+                    if is_field(sibling, saved, field("Outer", "sibling")) && is_root(root, saved))));
+
+            let no_path = effects(no);
+            let [whole_exit, no_parameters] = no_path.as_slice() else {
+                panic!("expected only owner and parameter cleanup on the non-moving edge")
+            };
+            assert_eq!(whole_exit.site.node, moved_exit.site.node);
+            assert!(whole_exit.site.span.start() < saved.root.span.start());
+            assert!(arm_exit.site.span.end() < whole_exit.site.span.end());
+            assert!(matches!(&whole_exit.operation, Operation::Cleanup(actions)
+                if matches!(actions.as_slice(), [Obligation::Drop(sibling), Obligation::Drop(text), Obligation::EndStorage(child), Obligation::EndStorage(root)]
+                    if is_field(sibling, saved, field("Outer", "sibling")) && is_field(child, saved, field("Outer", "child"))
+                        && is_root(root, saved) && text.root.node == saved.root.node
+                        && matches!(text.projection, Some(Projection::NestedField { outer, inner })
+                            if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "text")))));
+            for end in [yes_parameters, no_parameters] {
+                assert!(matches!(&end.operation, Operation::Cleanup(actions)
+                    if matches!(actions.as_slice(), [Obligation::EndStorage(flag)]
+                        if flag.root.span.bytes() == b"flag: bool" && flag.projection.is_none())));
+            }
+
+            for name in ["innerDisposer", "outerDisposer"] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(
+                    report.mir().is_none() && report.findings().is_empty(),
+                    "{name}"
+                );
+                let blocker = report.blocked_at().expect("expected named storage blocker");
+                let body = &module.syntax.nodes[declaration(name).node].span;
+                assert_eq!(blocker.module, &module.key);
+                assert!(body.start() <= blocker.span.start() && blocker.span.end() <= body.end());
+                assert_eq!(blocker.span.bytes(), b"saved", "{name}");
+                assert_eq!(
+                    module.syntax.nodes[blocker.node].kind,
+                    NodeKind::NamePattern
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn owned_record_projections() {
     probe(
         "records::owned_record_projections",
