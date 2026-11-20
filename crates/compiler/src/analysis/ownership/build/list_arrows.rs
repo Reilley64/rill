@@ -28,8 +28,15 @@ pub(in crate::analysis::ownership) struct ListArrow<'g> {
     pub body_site: Site<'g>,
     pub source: Slot,
     pub capture: Place<'g>,
-    pub incoming_backing: Place<'g>,
-    pub body: Arc<Mir<'g>>,
+    pub body: ArrowBody<'g>,
+}
+
+pub(in crate::analysis::ownership) enum ArrowBody<'g> {
+    List {
+        incoming_backing: Place<'g>,
+        mir: Arc<Mir<'g>>,
+    },
+    Reference(Type<'g>),
 }
 
 pub(super) fn scalar_pair(ty: &Type<'_>) -> bool {
@@ -307,8 +314,10 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 body_site: child.body,
                 source,
                 capture,
-                incoming_backing,
-                body: Arc::new(body),
+                body: ArrowBody::List {
+                    incoming_backing,
+                    mir: Arc::new(body),
+                },
             }),
         ))
     }

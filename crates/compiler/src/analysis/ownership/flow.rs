@@ -89,6 +89,8 @@ enum LoanKind {
     // External backing carried by an incoming exclusive Bool descriptor,
     // not a borrow of the parameter's local storage.
     IncomingExclusive,
+    // Carried by an incoming shared i32 descriptor, not a loan of its slot.
+    IncomingSharedI32,
     // Shared access to a caller-owned field slot, keyed conservatively by
     // the incoming parameter, not by the parameter's local storage.
     IncomingSharedSlot,
@@ -103,6 +105,7 @@ impl LoanKind {
         matches!(
             self,
             Self::IncomingExclusive
+                | Self::IncomingSharedI32
                 | Self::IncomingSharedSlot
                 | Self::IncomingSharedOptionBacking
                 | Self::IncomingCallableBacking
@@ -2079,6 +2082,7 @@ pub(super) fn run<'a, 'g>(
         retained,
         retains_exclusive_bool,
         incoming_exclusive_bools,
+        incoming_shared_i32,
         budget,
         ..
     } = build;
@@ -2127,6 +2131,22 @@ pub(super) fn run<'a, 'g>(
                 ..Held::default()
             });
         }
+    }
+    for source in incoming_shared_i32 {
+        budget.step(1 + params.len().max(1).ilog2() as usize)?;
+        if params.binary_search(&source).is_err() {
+            return Err(Stop::Pending(body));
+        }
+        budget.reserve(1)?;
+        state[source] = State::Initialized(Held {
+            loans: Arc::from([Loan {
+                source,
+                site: slots[source].node,
+                exclusive: false,
+                kind: LoanKind::IncomingSharedI32,
+            }]),
+            ..Held::default()
+        });
     }
     if let Some((view, backing)) = incoming_list_arrow {
         budget.reserve(1)?;
@@ -3005,6 +3025,10 @@ pub(super) fn run<'a, 'g>(
                     let frames = &list_arrow_pairs[pair];
                     budget.reserve(2)?;
                     for (receiver, child) in receivers.into_iter().zip(&frames.children) {
+                        if matches!(child.body, build::ArrowBody::Reference(_)) {
+                            budget.step(1)?;
+                            initialized(&state[receiver], node)?;
+                        }
                         for (slot, access) in [
                             (receiver, Access::Exclusive),
                             (child.source, Access::Observe),
@@ -3020,21 +3044,41 @@ pub(super) fn run<'a, 'g>(
                             )?;
                         }
                     }
-                    let frames = std::array::from_fn(|i| {
+                    // Both reached capture copies have formed before probing
+                    // either reference child. The scalar frames are prebuilt.
+                    let mut frame = |i: usize| -> ResultOf<_> {
                         let child = &frames.children[i];
                         let environment = local(receivers[i]);
-                        ListArrowFrame {
+                        let (incoming_list_backing, body) = match &child.body {
+                            build::ArrowBody::List {
+                                incoming_backing,
+                                mir,
+                            } => (Some(*incoming_backing), Arc::clone(mir)),
+                            build::ArrowBody::Reference(ty) => (
+                                None,
+                                build::lower_reference_child(
+                                    typed,
+                                    module,
+                                    child,
+                                    environment.root.node,
+                                    ty,
+                                    budget,
+                                )?,
+                            ),
+                        };
+                        Ok(ScopedJoinFrame {
                             origin: environment.root,
                             invocation: child.invocation,
                             body_site: child.body_site,
                             environment,
                             capture: child.capture,
                             backing: local(child.source),
-                            incoming_backing: child.incoming_backing,
+                            incoming_list_backing,
                             result: local(into + 1 + i),
-                            body: Arc::clone(&child.body),
-                        }
-                    });
+                            body,
+                        })
+                    };
+                    let frames = [frame(0)?, frame(1)?];
                     let parent = CancellationFrame {
                         module,
                         slots: &slots,
@@ -3066,6 +3110,13 @@ pub(super) fn run<'a, 'g>(
                     let mut invoke = |position: usize| -> ResultOf<ListArrowFrame<'g>> {
                         let receiver = receivers[position];
                         let body = &pair.children[position];
+                        let build::ArrowBody::List {
+                            incoming_backing,
+                            mir,
+                        } = &body.body
+                        else {
+                            return Err(Stop::Pending(node));
+                        };
                         let environment = local(receiver);
                         let origin = environment.root;
                         let held = initialized(&state[receiver], node)?;
@@ -3104,9 +3155,9 @@ pub(super) fn run<'a, 'g>(
                             environment,
                             capture: body.capture,
                             backing: local(body.source),
-                            incoming_backing: body.incoming_backing,
+                            incoming_backing: *incoming_backing,
                             result: local(into + 1 + position),
-                            body: Arc::clone(&body.body),
+                            body: Arc::clone(mir),
                         })
                     };
                     let slots = Box::new([invoke(0)?, invoke(1)?]);

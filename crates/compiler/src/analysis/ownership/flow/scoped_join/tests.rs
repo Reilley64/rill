@@ -73,6 +73,17 @@ impl<'g> Probe<'g> {
                 let Edges::Next(resume) = edges else {
                     panic!("ordinary call continuation")
                 };
+                let scoped = slots.each_ref().map(|frame| ScopedJoinFrame {
+                    origin: frame.origin,
+                    invocation: frame.invocation,
+                    body_site: frame.body_site,
+                    environment: frame.environment,
+                    capture: frame.capture,
+                    backing: frame.backing,
+                    incoming_list_backing: Some(frame.incoming_backing),
+                    result: frame.result,
+                    body: Arc::clone(&frame.body),
+                });
                 // These actual zero/one/two-prefix states give cleanup if
                 // there is a proved exit. FormClosure itself is not a poll.
                 for (n, state) in [
@@ -87,7 +98,7 @@ impl<'g> Probe<'g> {
                         parent,
                         state,
                         receivers,
-                        slots,
+                        &scoped,
                         site,
                         &mut budget,
                     ));
@@ -107,7 +118,7 @@ impl<'g> Probe<'g> {
                         input,
                         receivers,
                         into,
-                        slots,
+                        &scoped,
                         (site, resume),
                         budget,
                     )
@@ -316,7 +327,7 @@ fn check_publish<'g>(
     [first, second]: [usize; 2],
     masked_stop: bool,
     budget: &mut Budget,
-) -> ([ScalarExport<'g>; 2], ParentDelivery, Pc, Vec<State>) {
+) -> ([ResultExport<'g>; 2], ParentDelivery, Pc, Vec<State>) {
     let receivers = proof.receivers;
     let into = proof.into;
     assert!(
@@ -376,6 +387,7 @@ fn check_publish<'g>(
     ));
     let Successor::Publish {
         results,
+        retained_results: [None, None],
         context,
         resume,
         parent_state,

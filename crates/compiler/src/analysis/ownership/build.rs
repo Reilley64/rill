@@ -25,8 +25,8 @@ use std::sync::Arc;
 
 mod list_arrows;
 mod reference_results;
-pub(super) use list_arrows::ListArrowPair;
-pub(super) use reference_results::check_scoped_reference_results;
+pub(super) use list_arrows::{ArrowBody, ListArrowPair};
+pub(super) use reference_results::{check_scoped_reference_results, lower_reference_child};
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
@@ -402,6 +402,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             retained: BTreeMap::new(),
             retains_exclusive_bool: false,
             incoming_exclusive_bools: Vec::new(),
+            incoming_shared_i32: BTreeSet::new(),
             slots: Vec::new(),
             code: Vec::new(),
             calls: Vec::new(),
@@ -6628,7 +6629,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 .iter()
                 .all(|slot| slot.reference_result.is_some())
         {
-            return self.stage_scoped_reference_results(node, join, next, depth);
+            return self.stage_scoped_reference_results(node, join, into, next, depth);
         }
         if checked_carrier.is_none() && list_arrows::scalar_pair(&facts.ty) {
             let route = if let Some(join) = call.scoped_join.as_deref() {

@@ -24,7 +24,8 @@ pub use graph::{
     GraphRetainingCall, RetainingCallSite, RootReport, analyze_ownership,
 };
 pub use join::{
-    JoinChildState, JoinDelivery, JoinEntry, JoinEvent, JoinNext, JoinWait, ScopedJoinProof,
+    JoinChildState, JoinDelivery, JoinEntry, JoinEvent, JoinNext, JoinWait, ScopedJoinFrame,
+    ScopedJoinProof,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2109,6 +2110,8 @@ struct Build<'a, 'g, 'b> {
     retained: BTreeMap<Slot, RetainedContents>,
     retains_exclusive_bool: bool,
     incoming_exclusive_bools: Vec<Slot>,
+    /// Incoming shared descriptors used by the exact scoped-join route.
+    incoming_shared_i32: BTreeSet<Slot>,
     slots: Vec<Local<'g>>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'a, 'g>>,

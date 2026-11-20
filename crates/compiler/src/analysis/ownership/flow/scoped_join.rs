@@ -1,4 +1,4 @@
-//! Ownership transitions for the two-List-arrow scoped compiler operation.
+//! Ownership transitions for the two-child scoped compiler operation.
 //!
 //! These are static edges, not scheduling events. In particular, ordinary
 //! `CallListArrows` supplies no wait or delivery proof.
@@ -11,21 +11,22 @@ pub(in crate::analysis::ownership) mod tests;
 
 /// A result in join-owned storage, distinct from the caller's vacant tuple.
 #[derive(Clone, Copy, Debug)]
-struct ScalarStage<'g> {
+struct ResultSlot<'g> {
     slot: usize,
     from: Place<'g>,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct ScalarExport<'g> {
-    stage: ScalarStage<'g>,
+struct ResultExport<'g> {
+    stage: ResultSlot<'g>,
     into: Place<'g>,
 }
 
 #[derive(Clone, Copy)]
 struct Child<'g> {
     backing: Place<'g>,
-    scalar: ScalarExport<'g>,
+    export: ResultExport<'g>,
+    reference: bool,
     end_view: Cleanup<'g>,
     entry: Site<'g>,
     returned: Site<'g>,
@@ -46,7 +47,7 @@ fn at_root(place: Place<'_>, root: Site<'_>) -> bool {
 
 impl<'g> Child<'g> {
     fn check(
-        frame: &ListArrowFrame<'g>,
+        frame: &ScopedJoinFrame<'g>,
         slot: usize,
         node: NodeId,
         budget: &mut Budget,
@@ -65,14 +66,24 @@ impl<'g> Child<'g> {
             .blocks
             .get(frame.body.entry)
             .ok_or(pending.clone())?;
-        let Operation::ReadListI32 {
-            view,
-            backing,
-            into: Some(output),
-            ..
-        } = entry.operation
-        else {
-            return Err(pending);
+        let (view, output) = match (&entry.operation, frame.incoming_list_backing) {
+            (
+                Operation::ReadListI32 {
+                    view,
+                    backing,
+                    into: Some(output),
+                    ..
+                },
+                Some(incoming),
+            ) if at_root(*backing, incoming.root) => (*view, *output),
+            (
+                Operation::Copy {
+                    from,
+                    into: Some(output),
+                },
+                None,
+            ) if !same_root(from.root, output.root) => (*from, *output),
+            _ => return Err(pending),
         };
         let export = successor(entry)?;
         let end = successor(export)?;
@@ -95,7 +106,6 @@ impl<'g> Child<'g> {
             return Err(pending);
         };
         if !at_root(view, frame.capture.root)
-            || !at_root(backing, frame.incoming_backing.root)
             || output.projection.is_some()
             || !at_root(*from, output.root)
             || !at_root(*ended, frame.capture.root)
@@ -103,13 +113,14 @@ impl<'g> Child<'g> {
             return Err(pending);
         }
         // This entry has exactly one owned initialized input: the transferred
-        // view. The incoming backing is a non-owning proxy. Before the read,
-        // the scalar is vacant; after export it is gone. Thus the checked
+        // capture. A List backing proxy is non-owning. The result is vacant
+        // before the read or copy and leaves the frame at export. Thus this
         // EndStorage is also the entire cleanup on delivery at child entry.
         Ok(Self {
             backing: frame.backing,
-            scalar: ScalarExport {
-                stage: ScalarStage { slot, from: *from },
+            reference: frame.incoming_list_backing.is_none(),
+            export: ResultExport {
+                stage: ResultSlot { slot, from: *from },
                 into: frame.result,
             },
             end_view: *end_view,
@@ -123,7 +134,7 @@ fn check_receiver<'g>(
     parent: &CancellationFrame<'_, 'g>,
     input: &[State],
     receiver: Slot,
-    frame: &ListArrowFrame<'g>,
+    frame: &ScopedJoinFrame<'g>,
     node: NodeId,
     budget: &mut Budget,
 ) -> ResultOf<()> {
@@ -135,7 +146,7 @@ fn check_receiver<'g>(
             source,
             site: acquisition,
             exclusive: false,
-            kind: LoanKind::Backing,
+            kind,
         },
     ] = held.loans.as_ref()
     else {
@@ -145,19 +156,31 @@ fn check_receiver<'g>(
     if !at_root(frame.environment, environment.root)
         || !same_root(frame.origin, environment.root)
         || held.callable_owner != Some(CallableOwner::ListArrow(environment.root.node))
-        || !same_root(frame.capture.root, site_at(parent.module, *acquisition))
         || !at_root(
             frame.backing,
             parent.slots[*source].place(parent.module).root,
         )
-        || !matches!(
-            parent.slots[*source].cleanup,
-            StorageCleanup::DisposeListI32(_)
-        )
-        || (parent.locals.binary_search(source).is_err()
-            && parent.params.binary_search(source).is_err())
     {
         return Err(Stop::Pending(node));
+    }
+    match (frame.incoming_list_backing, kind) {
+        (Some(_), LoanKind::Backing)
+            if same_root(frame.capture.root, site_at(parent.module, *acquisition))
+                && matches!(
+                    parent.slots[*source].cleanup,
+                    StorageCleanup::DisposeListI32(_)
+                )
+                && (parent.locals.binary_search(source).is_ok()
+                    || parent.params.binary_search(source).is_ok()) => {}
+        (None, LoanKind::IncomingSharedI32)
+            if *acquisition == parent.slots[*source].node
+                && parent.params.binary_search(source).is_ok() =>
+        {
+            // This key is not a loan of the parameter slot. The source was
+            // checked by the copy; ending that slot cannot end its referent.
+            return Ok(());
+        }
+        _ => return Err(Stop::Pending(node)),
     }
     require_initialized(parent.slots, input, *source, node, budget)
 }
@@ -200,7 +223,7 @@ fn before_commit_exit<'g>(
     parent: &CancellationFrame<'_, 'g>,
     input: &[State],
     receivers: [Slot; 2],
-    frames: &[ListArrowFrame<'g>; 2],
+    frames: &[ScopedJoinFrame<'g>; 2],
     site: Site<'g>,
     budget: &mut Budget,
 ) -> ResultOf<(Vec<Cleanup<'g>>, CancellationExit<'g>)> {
@@ -260,7 +283,7 @@ impl<'g> Staged<'g> {
         input: &[State],
         receivers: [Slot; 2],
         into: Slot,
-        frames: &[ListArrowFrame<'g>; 2],
+        frames: &[ScopedJoinFrame<'g>; 2],
         (site, resume): (Site<'g>, Pc),
         budget: &mut Budget,
     ) -> ResultOf<Self> {
@@ -360,7 +383,7 @@ impl<'g> Staged<'g> {
         Ok(Box::new(Waiting {
             proof: self,
             children,
-            results: [None; 2],
+            results: [None, None],
             context,
             stopping: false,
             stop_requested: [false; 2],
@@ -427,31 +450,55 @@ enum Event {
 struct Waiting<'g> {
     proof: Staged<'g>,
     children: [ChildState<'g>; 2],
-    results: [Option<ScalarStage<'g>>; 2],
+    results: [Option<StagedResult<'g>>; 2],
     context: ParentDelivery,
     stopping: bool,
     stop_requested: [bool; 2],
 }
 
+#[derive(Clone)]
+struct StagedResult<'g> {
+    place: ResultSlot<'g>,
+    loans: Arc<[Loan]>,
+}
+
 enum Successor<'g> {
     Wait(Box<Waiting<'g>>),
     Publish {
-        results: [ScalarExport<'g>; 2],
+        results: [ResultExport<'g>; 2],
+        retained_results: [Option<Place<'g>>; 2],
         context: ParentDelivery,
         resume: Pc,
         parent_state: Vec<State>,
     },
     Cancel {
-        retired: [Option<ScalarStage<'g>>; 2],
+        retired: [Option<ResultSlot<'g>>; 2],
         parent_exit: CancellationExit<'g>,
     },
 }
 
 impl<'g> Waiting<'g> {
-    /// Keep both backing dependencies through the wait, including the one
-    /// for a child whose own captured view has already ended.
     fn backings(&self) -> [Place<'g>; 2] {
         self.proof.children.each_ref().map(|child| child.backing)
+    }
+
+    fn environment_backings(&self) -> [Option<Place<'g>>; 2] {
+        std::array::from_fn(|i| {
+            matches!(
+                self.children[i],
+                ChildState::Entry(_) | ChildState::Running(_) | ChildState::Cleaning { .. }
+            )
+            .then_some(self.proof.children[i].backing)
+        })
+    }
+
+    fn retained_results(&self) -> [Option<Place<'g>>; 2] {
+        self.results.each_ref().map(|stage| {
+            let stage = stage.as_ref()?;
+            // The checked copy admits only the immutable caller source
+            // carried by this slot's actual environment.
+            (!stage.loans.is_empty()).then_some(self.proof.children[stage.place.slot].backing)
+        })
     }
 
     fn advance(mut self: Box<Self>, event: Event, budget: &mut Budget) -> ResultOf<Successor<'g>> {
@@ -487,7 +534,14 @@ impl<'g> Waiting<'g> {
                     }
                     (ChildState::Running(environment), ChildEvent::Export) => {
                         budget.reserve(1)?;
-                        self.results[i] = Some(proof.scalar.stage);
+                        self.results[i] = Some(StagedResult {
+                            place: proof.export.stage,
+                            loans: if proof.reference {
+                                environment.loans.clone()
+                            } else {
+                                Arc::default()
+                            },
+                        });
                         ChildState::Cleaning {
                             environment,
                             end_view: proof.end_view,
@@ -502,7 +556,9 @@ impl<'g> Waiting<'g> {
                         },
                         ChildEvent::EndView,
                     ) => {
-                        if !matches!(environment.loans.as_ref(), [loan] if loan.site==view.root.node)
+                        if !matches!(environment.loans.as_ref(), [loan]
+                            if if proof.reference { loan.kind == LoanKind::IncomingSharedI32 }
+                            else { loan.site == view.root.node })
                         {
                             return Err(pending);
                         }
@@ -528,13 +584,13 @@ impl<'g> Waiting<'g> {
         if !matches!(self.children, [ChildState::Complete, ChildState::Complete]) {
             return Ok(Successor::Wait(self));
         }
-        // This is the only point at which the source dependencies can end.
-        // Scalar retirement consumes only the initialized stages, without a
-        // disposer. The checked parent exit follows, never the normal suffix.
+        // On stop, consume only initialized unpublished stages, including
+        // their loans, before the checked parent exit. On ordinary completion
+        // their loans move into the destination instead of ending here.
         budget.reserve(2)?;
         if self.stopping {
             return Ok(Successor::Cancel {
-                retired: self.results,
+                retired: self.results.map(|stage| stage.map(|stage| stage.place)),
                 parent_exit: self.proof.parent_exit,
             });
         }
@@ -543,12 +599,30 @@ impl<'g> Waiting<'g> {
         };
         let into = self.proof.into;
         budget.step(3)?;
-        self.proof.parent_state[into..into + 3].fill(State::Initialized(Held::default()));
+        self.proof.parent_state[into] = State::Initialized(Held::default());
+        let results = [first, second].map(|stage| {
+            let i = stage.place.slot;
+            self.proof.parent_state[into + 1 + i] = State::Initialized(Held {
+                loans: stage.loans,
+                ..Held::default()
+            });
+            self.proof.children[i].export
+        });
+        let mut retained_results = [None; 2];
+        for (i, child) in self.proof.children.iter().enumerate() {
+            if child.reference {
+                budget.step(1)?;
+                let value =
+                    initialized(&self.proof.parent_state[into + 1 + i], self.proof.site.node)?;
+                if !matches!(value.loans.as_ref(), [loan] if loan.site == child.backing.root.node) {
+                    return Err(pending);
+                }
+                retained_results[i] = Some(child.backing);
+            }
+        }
         Ok(Successor::Publish {
-            results: [first, second].map(|stage| ScalarExport {
-                stage,
-                into: self.proof.children[stage.slot].scalar.into,
-            }),
+            results,
+            retained_results,
             context: self.context,
             resume: self.proof.resume,
             parent_state: self.proof.parent_state,

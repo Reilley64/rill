@@ -614,6 +614,7 @@ fn prove_join(mir: &Mir<'_>, node: usize, ids: [&loader::DeclarationId; 3]) {
         let JoinNext::Publish {
             transfers,
             delivery,
+            retained_results: [None, None],
         } = step(ready, FinishChild(second))
         else {
             panic!("no ordered publication")
@@ -1305,6 +1306,132 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
     );
 }
 
+fn check_reference_lifecycle(module: &Module, mir: &Mir<'_>, sources: [&str; 2]) {
+    use compiler::analysis::ownership::{JoinChildState::*, JoinEvent, JoinNext, Place};
+
+    let path = straight_blocks(mir, mir.entry);
+    let [copy_a, form_a, copy_b, form_b, call, export, ..] = path.as_slice() else {
+        panic!("staged descriptors followed by canonical join and tuple export")
+    };
+    let Operation::ScopedJoin(join) = &call.operation else {
+        panic!("selected call must use the checked join transitions")
+    };
+    let Operation::Export(result) = export.operation else {
+        panic!("ordinary successor exports the published tuple")
+    };
+    let places = |places: [Option<Place<'_>>; 2]| places.map(|place| place.map(|p| p.root.node));
+    let export_roots = std::array::from_fn(|i| {
+        let frame = &join.frames[i];
+        let Operation::Copy {
+            from,
+            into: Some(staged),
+        } = [copy_a, copy_b][i].operation
+        else {
+            panic!("capture formation copies the incoming descriptor, not its address")
+        };
+        assert_eq!(
+            from.root.span.bytes(),
+            format!("{}: &i32", sources[i]).as_bytes()
+        );
+        assert!(std::ptr::eq(from.root.module, &module.key));
+        assert_eq!(from.root.node, frame.backing.root.node);
+        assert_eq!(staged.root.node, frame.capture.root.node);
+        assert!(
+            matches!([form_a, form_b][i].operation, Operation::FormClosure { closure, capture, .. }
+            if closure.node == frame.environment.root.node && capture.node == staged.root.node)
+        );
+        assert!(frame.incoming_list_backing.is_none());
+        assert_eq!(frame.result.tuple_element(), Some(i));
+        assert_eq!(frame.result.root.node, result.root.node);
+        let body = straight_blocks(&frame.body, frame.body.entry);
+        let [copy, export, cleanup, returned] = body.as_slice() else {
+            panic!("child copies its capture, exports the stage, cleans up and returns")
+        };
+        let Operation::Copy {
+            from,
+            into: Some(output),
+        } = copy.operation
+        else {
+            panic!("no child descriptor copy")
+        };
+        assert_eq!(from.root.node, frame.capture.root.node);
+        assert_ne!(from.root.node, output.root.node);
+        assert!(
+            matches!(export.operation, Operation::Export(p) if p.root.node == output.root.node)
+        );
+        assert!(matches!(&cleanup.operation, Operation::Cleanup(actions)
+            if matches!(actions.as_slice(), [Obligation::EndStorage(p)] if p.root.node == from.root.node)));
+        assert!(matches!(returned.terminator, Terminator::Return));
+        output.root.node
+    });
+    let keys = join
+        .frames
+        .each_ref()
+        .map(|frame| Some(frame.backing.root.node));
+    assert!(
+        matches!(join.before_commit.as_slice(), [Obligation::EndStorage(b), Obligation::EndStorage(a)]
+        if [a.root.node, b.root.node] == join.frames.each_ref().map(|frame| frame.environment.root.node))
+    );
+    assert!(
+        matches!(join.parent_exit.cleanup.as_slice(), [Obligation::EndStorage(b), Obligation::EndStorage(a)]
+        if a.root.span.bytes() == b"input: &i32" && b.root.span.bytes() == b"other: &i32")
+    );
+    let mut cancel_prefixes = [false; 4];
+    let mut publish_last = [false; 2];
+    for wait in &join.waiting {
+        let stages = std::array::from_fn(|i| keys[i].filter(|_| wait.initialized_results[i]));
+        let environments = std::array::from_fn(|i| {
+            keys[i].filter(|_| matches!(wait.children[i], Entry | Running | Cleaning))
+        });
+        assert_eq!(places(wait.retained_results), stages);
+        assert_eq!(places(wait.environment_backings), environments);
+        for (event, next) in &wait.successors {
+            match next {
+                JoinNext::Publish {
+                    transfers,
+                    retained_results,
+                    ..
+                } => {
+                    let JoinEvent::FinishChild(i) = *event else {
+                        panic!("publication before child finish")
+                    };
+                    assert!(!wait.deferred);
+                    assert_eq!(wait.children[1 - i], Complete);
+                    assert_eq!(wait.children[i], AtNormalReturn);
+                    assert_eq!(places(*retained_results), keys);
+                    assert_eq!(transfers.map(|(from, _)| from.root.node), export_roots);
+                    assert_eq!(
+                        transfers.map(|(_, into)| into.tuple_element()),
+                        [Some(0), Some(1)]
+                    );
+                    publish_last[i] = true;
+                }
+                JoinNext::Cancel { retired } => {
+                    let JoinEvent::FinishChild(i) = *event else {
+                        panic!("stop before child finish")
+                    };
+                    assert!(wait.deferred);
+                    assert_eq!(wait.children[1 - i], Complete);
+                    assert!(matches!(wait.children[i], AtNormalReturn | AtDeliveredExit));
+                    assert_eq!(
+                        places(*retired),
+                        std::array::from_fn(
+                            |i| wait.initialized_results[i].then_some(export_roots[i])
+                        )
+                    );
+                    let prefix = usize::from(wait.initialized_results[0])
+                        + 2 * usize::from(wait.initialized_results[1]);
+                    cancel_prefixes[prefix] = true;
+                }
+                JoinNext::Waiting(_) => {}
+                JoinNext::CancelBeforeCommit => panic!("entry-only edge after commit"),
+            }
+        }
+    }
+    assert_eq!(publish_last, [true; 2]);
+    assert_eq!(cancel_prefixes, [true; 4]);
+}
+
 #[test]
 fn grouped_reference_children_charge_depth_and_keep_the_written_escape() {
     probe(
@@ -1448,10 +1575,20 @@ fn installed_join_checks_reference_result_escape_per_slot() {
             max_entries: stats.entries,
             max_depth: stats.max_depth,
         };
-        let short = AnalysisLimits {
-            max_work: exact.max_work - 1,
-            ..exact
-        };
+        let short = [
+            AnalysisLimits {
+                max_work: exact.max_work - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_entries: exact.max_entries - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_depth: exact.max_depth - 1,
+                ..exact
+            },
+        ];
         (exact, short)
     };
 
@@ -1459,17 +1596,35 @@ fn installed_join_checks_reference_result_escape_per_slot() {
         "scoped_join::installed_join_checks_reference_result_escape_per_slot",
         |request| {
             fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
-            for (parameters, second, expected) in [
+            for (parameters, first, second, expected) in [
                 (
                     "input: &i32",
+                    "input",
                     "{ let local = 2i32; return &local; }",
                     Completion::SourceRejected,
                 ),
-                ("input: &i32, other: &i32", "other", Completion::Incomplete),
+                (
+                    "input: &i32, other: &i32",
+                    "input",
+                    "other",
+                    Completion::Checked,
+                ),
+                (
+                    "input: &i32, other: &i32",
+                    "other",
+                    "input",
+                    Completion::Checked,
+                ),
+                (
+                    "input: &i32, other: &i32",
+                    "input",
+                    "input",
+                    Completion::Checked,
+                ),
             ] {
                 fs::write(
                     &request.entry,
-                    format!("{BASE}\nimport std::routine::join;\nfunction joined({parameters}): [&i32, &i32] {{\n    return join([() => input, () => {second}]);\n}}\n"),
+                    format!("{BASE}\nimport std::routine::join;\nfunction joined({parameters}): [&i32, &i32] {{\n    return join([() => {first}, () => {second}]);\n}}\n"),
                 )
                 .unwrap();
                 for test_mode in [false, true] {
@@ -1564,9 +1719,10 @@ fn installed_join_checks_reference_result_escape_per_slot() {
                         let body = module.syntax.nodes[arrow.site.node].children[1];
                         match slot.reference_result.unwrap() {
                             ScopedJoinReference::Incoming { parameter, value } => {
-                                assert!(i == 0 || expected == Completion::Incomplete);
-                                let wanted = if i == 0 { "input" } else { "other" };
-                                assert_eq!(parameter, &parameters[i].declaration.id);
+                                assert!(i == 0 || expected == Completion::Checked);
+                                let wanted = [first, second][i];
+                                let formal = usize::from(wanted == "other");
+                                assert_eq!(parameter, &parameters[formal].declaration.id);
                                 assert_eq!(value.node, body);
                                 assert_eq!(value.span.bytes(), wanted.as_bytes());
                                 let [capture] = arrow.captures.as_slice() else {
@@ -1607,7 +1763,7 @@ fn installed_join_checks_reference_result_escape_per_slot() {
                     );
                     let local = lower_body(&receipt, module, &caller.id, limits).unwrap();
                     assert_eq!(local.completion(), expected);
-                    assert!(local.mir().is_none());
+                    assert_eq!(local.mir().is_some(), expected == Completion::Checked);
                     let owned = analyze_ownership(&receipt, limits);
                     let root = owned
                         .roots()
@@ -1616,8 +1772,11 @@ fn installed_join_checks_reference_result_escape_per_slot() {
                         .unwrap();
                     assert_eq!(root.completion(), expected);
                     assert_eq!(root.ordinary_completion(), expected);
-                    assert!(root.mir().is_none() && root.ordinary_mir().is_none());
-                    assert!(root.dependencies().is_empty());
+                    assert_eq!(root.mir().is_some(), expected == Completion::Checked);
+                    assert_eq!(
+                        root.ordinary_mir().is_some(),
+                        expected == Completion::Checked
+                    );
                     assert!(
                         owned
                             .open_obligations()
@@ -1625,6 +1784,7 @@ fn installed_join_checks_reference_result_escape_per_slot() {
                     );
                     if expected == Completion::SourceRejected {
                         assert_eq!(owned.completion(), GraphCompletion::SourceRejected);
+                        assert!(root.dependencies().is_empty());
                         for findings in [local.findings(), owned.findings()] {
                             let [finding] = findings else {
                                 panic!("one child-local escape")
@@ -1636,8 +1796,29 @@ fn installed_join_checks_reference_result_escape_per_slot() {
                     } else {
                         assert_eq!(owned.completion(), GraphCompletion::Incomplete);
                         assert!(local.findings().is_empty() && owned.findings().is_empty());
-                        assert_eq!(local.blocked_at().unwrap().node, call);
-                        assert_eq!(root.blocked_at().unwrap().node, call);
+                        assert!(local.blocked_at().is_none() && root.blocked_at().is_none());
+                        for mir in [local.mir().unwrap(), root.mir().unwrap()] {
+                            check_reference_lifecycle(module, mir, [first, second]);
+                        }
+                        assert!(matches!(root.dependencies(), [dependency] if matches!(
+                            dependency.contract,
+                            compiler::analysis::ownership::DependencyContract::ScopedJoin { bridge, .. }
+                                if bridge == &proof.role.bridge.id
+                        )));
+                        let foreign = loader::load_installed(InstalledRequest {
+                            test_mode,
+                            ..request.clone()
+                        })
+                        .unwrap();
+                        let other = app(&foreign);
+                        assert_eq!(
+                            receipt.scoped_join(other, call).unwrap_err(),
+                            QueryError::InvalidRequest
+                        );
+                        assert_eq!(
+                            lower_body(&receipt, other, &caller.id, limits).unwrap_err(),
+                            QueryError::InvalidRequest,
+                        );
                     }
                     check_typed_budget(&graph, &typed);
                     let (exact, short) = caps(local.statistics());
@@ -1645,21 +1826,99 @@ fn installed_join_checks_reference_result_escape_per_slot() {
                     assert_eq!(replay.statistics(), local.statistics());
                     assert_eq!(replay.completion(), expected);
                     assert_eq!(replay.findings().len(), local.findings().len());
-                    let exhausted = lower_body(&receipt, module, &caller.id, short).unwrap();
-                    assert_eq!(exhausted.completion(), Completion::ResourceLimit);
-                    assert!(exhausted.mir().is_none());
+                    for short in short {
+                        let exhausted = lower_body(&receipt, module, &caller.id, short).unwrap();
+                        assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+                        assert!(exhausted.mir().is_none());
+                    }
                     let (exact, short) = caps(owned.statistics());
                     let replay = analyze_ownership(&receipt, exact);
                     assert_eq!(replay.statistics(), owned.statistics());
                     assert_eq!(replay.completion(), owned.completion());
-                    let exhausted = analyze_ownership(&receipt, short);
-                    assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
-                    assert!(
-                        exhausted
-                            .roots()
-                            .iter()
-                            .all(|r| r.mir().is_none() && r.ordinary_mir().is_none())
-                    );
+                    for short in short {
+                        let exhausted = analyze_ownership(&receipt, short);
+                        assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
+                        assert!(
+                            exhausted
+                                .roots()
+                                .iter()
+                                .all(|r| r.mir().is_none() && r.ordinary_mir().is_none())
+                        );
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_join_does_not_weaken_the_callers_retained_alias() {
+    use compiler::analysis::ownership::{GraphCompletion, analyze_ownership};
+
+    installed(
+        "scoped_join::installed_join_does_not_weaken_the_callers_retained_alias",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            for (statements, expected) in [
+                (
+                    "dispose(first); return *retained;",
+                    Completion::SourceRejected,
+                ),
+                (
+                    "let value = *retained; dispose(first); return value;",
+                    Completion::Checked,
+                ),
+            ] {
+                fs::write(
+                    &request.entry,
+                    format!("{BASE}\nimport std::routine::join;\nfunction joined(input: &i32, other: &i32): [&i32,&i32] {{ return join([() => input, () => other]); }}\nfunction caller(first: i32, second: i32): i32 {{ let [a,b] = joined(&first, &second); let retained = b; {statements} }}"),
+                ).unwrap();
+                for test_mode in [false, true] {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let limits = AnalysisLimits::default();
+                    let typed = analyze_typed(&graph, limits);
+                    let receipt = typed
+                        .receipt()
+                        .expect("the ordinary caller has a typed receipt");
+                    let module = app(&graph);
+                    let caller = &module.declarations[named(module, "caller")];
+                    let joined = &module.declarations[named(module, "joined")].id;
+                    let target = lower_body(&receipt, module, &caller.id, limits).unwrap();
+                    let owned = analyze_ownership(&receipt, limits);
+                    let root = owned
+                        .roots()
+                        .iter()
+                        .find(|r| r.site().module == &module.key && r.site().node == caller.node)
+                        .unwrap();
+                    assert_eq!(target.completion(), expected, "{:?}", target.blocked_at());
+                    assert_eq!(root.completion(), expected, "{:?}", root.blocked_at());
+                    if expected == Completion::SourceRejected {
+                        assert_eq!(owned.completion(), GraphCompletion::SourceRejected);
+                        assert!(target.mir().is_none() && root.mir().is_none());
+                        for findings in [target.findings(), owned.findings()] {
+                            let [finding] = findings else {
+                                panic!("one caller-restriction finding")
+                            };
+                            assert_eq!(finding.code(), "R0203");
+                            assert_eq!(finding.site.span.bytes(), b"dispose(first)");
+                            assert_eq!(finding.related.span.bytes(), b"&first");
+                        }
+                    } else {
+                        assert_eq!(owned.completion(), GraphCompletion::Incomplete);
+                        for mir in [target.mir().unwrap(), root.mir().unwrap()] {
+                            assert!(mir.blocks.iter().any(|block| matches!(block.operation, Operation::Call(callee) if callee == joined)));
+                            assert!(
+                                !mir.blocks.iter().any(|block| matches!(
+                                    block.operation,
+                                    Operation::ScopedJoin(_)
+                                ))
+                            );
+                        }
+                    }
                 }
             }
         },

@@ -34,7 +34,7 @@ impl<'g> Waiting<'g> {
                 ChildState::Complete => JoinChildState::Complete,
             }),
             stop_requested: self.stop_requested,
-            stages: self.results.map(|result| result.is_some()),
+            stages: self.results.each_ref().map(Option::is_some),
         }
     }
 
@@ -43,7 +43,7 @@ impl<'g> Waiting<'g> {
         Ok(Box::new(Self {
             proof: self.proof.fork(budget)?,
             children: self.children.clone(),
-            results: self.results,
+            results: self.results.clone(),
             context: self.context,
             stopping: self.stopping,
             stop_requested: self.stop_requested,
@@ -112,6 +112,7 @@ impl<'g> Successors<'g> {
             Successor::Wait(next) => self.intern(next, budget),
             Successor::Publish {
                 results,
+                retained_results,
                 context,
                 resume,
                 parent_state,
@@ -127,6 +128,7 @@ impl<'g> Successors<'g> {
                 Ok(JoinNext::Publish {
                     delivery: context.into(),
                     transfers: results.map(|result| (result.stage.from, result.into)),
+                    retained_results,
                 })
             }
             // The exit is the same checked projection for all post-commit
@@ -149,7 +151,7 @@ pub(in crate::analysis::ownership::flow) fn check<'g>(
     parent: &CancellationFrame<'_, 'g>,
     input: &[State],
     (receivers, into): ([Slot; 2], Slot),
-    frames: [ListArrowFrame<'g>; 2],
+    frames: [ScopedJoinFrame<'g>; 2],
     site: (Site<'g>, Pc),
     role: RoutineRole<'g>,
     budget: &mut Budget,
@@ -228,6 +230,8 @@ pub(in crate::analysis::ownership::flow) fn check<'g>(
             stop_requested: key.stop_requested,
             initialized_results: key.stages,
             retained_backings: waiting.backings(),
+            environment_backings: waiting.environment_backings(),
+            retained_results: waiting.retained_results(),
             successors: edges,
         });
     }

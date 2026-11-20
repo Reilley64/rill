@@ -35,8 +35,10 @@ pub enum JoinNext<'g> {
     Publish {
         delivery: JoinDelivery,
         transfers: [(Place<'g>, Place<'g>); 2],
+        /// Caller input keys carried into the corresponding tuple members.
+        retained_results: [Option<Place<'g>>; 2],
     },
-    /// Discard these unexported scalar stages (no disposer), then run the
+    /// End these initialized, unpublished stages (no disposer), then run the
     /// proof's parent exit. There is no ordinary successor on this edge.
     Cancel {
         retired: [Option<Place<'g>>; 2],
@@ -59,8 +61,31 @@ pub struct JoinWait<'g> {
     pub children: [JoinChildState; 2],
     pub stop_requested: [bool; 2],
     pub initialized_results: [bool; 2],
+    /// Backing keys the parent preserves throughout the wait, independently
+    /// of the live environments and initialized results.
     pub retained_backings: [Place<'g>; 2],
+    /// Each live environment carries its input dependency until its storage ends.
+    pub environment_backings: [Option<Place<'g>>; 2],
+    /// Initialized reference stages carry their own dependencies independently.
+    pub retained_results: [Option<Place<'g>>; 2],
     pub successors: Vec<(JoinEvent, JoinNext<'g>)>,
+}
+
+/// Body and bindings of a child at one selected scoped call.
+#[derive(Debug)]
+pub struct ScopedJoinFrame<'g> {
+    pub origin: Site<'g>,
+    pub invocation: Site<'g>,
+    pub body_site: Site<'g>,
+    pub environment: Place<'g>,
+    pub capture: Place<'g>,
+    /// The caller's List owner, or the incoming descriptor's caller-dependency
+    /// key. A descriptor key does not denote its local storage or exact referent.
+    pub backing: Place<'g>,
+    /// The non-owning List proxy. Reference children instead use their capture.
+    pub incoming_list_backing: Option<Place<'g>>,
+    pub result: Place<'g>,
+    pub body: Arc<Mir<'g>>,
 }
 
 /// Closed ownership transitions at one selected source call. The parent
@@ -72,7 +97,7 @@ pub struct ScopedJoinProof<'g> {
     pub family: &'g DeclarationId,
     pub implementation: &'g DeclarationId,
     pub bridge: &'g DeclarationId,
-    pub frames: [ListArrowFrame<'g>; 2],
+    pub frames: [ScopedJoinFrame<'g>; 2],
     pub entries: Vec<JoinEntry<'g>>,
     pub waiting: Vec<JoinWait<'g>>,
     pub before_commit: Vec<Cleanup<'g>>,
