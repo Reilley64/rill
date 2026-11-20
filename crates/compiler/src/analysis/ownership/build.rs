@@ -6682,12 +6682,19 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         if checked_carrier.is_none()
             && let Some(join) = call.scoped_join.as_deref()
-            && join
+        {
+            // Result-use transfers the occurrence, not its initialized owner.
+            // Result stages need checked publication and cancellation cleanup.
+            if join.slots.iter().any(|slot| slot.result_origin.is_some()) {
+                return Err(Stop::Pending(node));
+            }
+            if join
                 .slots
                 .iter()
                 .all(|slot| slot.reference_result.is_some())
-        {
-            return self.stage_scoped_reference_results(node, join, into, next, depth);
+            {
+                return self.stage_scoped_reference_results(node, join, into, next, depth);
+            }
         }
         if checked_carrier.is_none()
             && list_arrows::list_arrow_result_pair(&facts.ty, call.scoped_join.is_some())

@@ -2887,6 +2887,329 @@ fn installed_join_does_not_reorder_results_to_fit_an_expected_type() {
 }
 
 #[test]
+fn installed_result_transfer_proves_the_actual_error_wrapper() {
+    use compiler::analysis::generics::GoalJudgment;
+    use compiler::analysis::ordinary::RequirementTarget;
+    use compiler::analysis::{Type, TypeTerm};
+
+    probe_with_typed(
+        "scoped_join::installed_result_transfer_proves_the_actual_error_wrapper",
+        r#"
+            function require<T>(value: T): bool where sendable(T) { let _ = value; return true; }
+            function whole(value: Result<bool, i32>): bool { return require(value); }
+            function ok(): bool { return require(Result<bool, i32>.Ok(true)); }
+            function err(): bool { return require(Err<bool, i32>(7i32)); }
+        "#,
+        |request, module, _, typed| {
+            let installed = loader::load_installed(request.clone()).unwrap();
+            let source = loader::load(installed.request().clone()).unwrap();
+            let unpinned = analyze_typed(&source, AnalysisLimits::default());
+            assert!(unpinned.error_representation().is_none() && unpinned.receipt().is_none());
+            let role = typed.result_role().unwrap();
+            let representation = role.representation.unwrap();
+            let send = |id| {
+                let goal = typed.bodies().goal(id).unwrap();
+                let GoalJudgment::Requirement {
+                    target: RequirementTarget::Predicate(predicate),
+                    arguments,
+                } = &goal.judgment
+                else {
+                    panic!("not a transfer-property goal: {goal:?}");
+                };
+                assert_eq!(predicate.name(), "sendable");
+                assert_eq!(goal.state, GoalState::Proved);
+                assert!(goal.premise.is_none() && goal.assumptions.is_empty());
+                (goal, &arguments[0])
+            };
+            let primitive = |ty: &Type<'_>, name| {
+                assert!(matches!(ty.as_ref(), TypeTerm::Primitive(p) if p.name() == name));
+            };
+            for call in ["require(value)", "require(Result", "require(Err"] {
+                let node = call_node(module, call);
+                let result = typed
+                    .bodies()
+                    .goals()
+                    .iter()
+                    .find(|goal| goal.site.module == &module.key && goal.site.node == node)
+                    .unwrap();
+                let (result, ty) = send(&result.id);
+                if call == "require(Result" {
+                    assert!(
+                        matches!(ty.as_ref(), TypeTerm::Variant { declaration, parent }
+                        if *declaration == &role.ok.id && matches!(parent.as_ref(), TypeTerm::Nominal { declaration, .. }
+                            if *declaration == &role.declaration.id))
+                    );
+                    let [success] = result.dependencies.as_slice() else {
+                        panic!("the exact Ok variant stores only the success payload");
+                    };
+                    primitive(send(success).1, "bool");
+                    continue;
+                }
+                assert!(matches!(ty.as_ref(), TypeTerm::Nominal { declaration, .. }
+                    if *declaration == &role.declaration.id));
+                let [success, error] = result.dependencies.as_slice() else {
+                    panic!("expected both payload alternatives of the whole Result");
+                };
+                primitive(send(success).1, "bool");
+                let (wrapper, ty) = send(error);
+                assert!(
+                    matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                    if *declaration == &representation.wrapper.id
+                        && matches!(arguments.as_slice(), [e] if matches!(e.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")))
+                );
+                let [payload] = wrapper.dependencies.as_slice() else {
+                    panic!("expected the actual typed primary error payload");
+                };
+                primitive(send(payload).1, "i32");
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_result_transfer_does_not_supply_other_properties_or_error_types() {
+    use compiler::analysis::generics::{GoalBlocker, GoalJudgment};
+    use compiler::analysis::ordinary::RequirementTarget;
+
+    probe_report(
+        "scoped_join::installed_result_transfer_does_not_supply_other_properties_or_error_types",
+        r#"
+            function transmit<T>(value: T): bool where sendable(T) { let _ = value; return true; }
+            function share<T>(value: T): bool where shareable(T) { let _ = value; return true; }
+            function noLoan<T>(value: T): bool where noBorrow(T) { let _ = value; return true; }
+            function other(value: Result<bool, LockGuard<i32>>): bool { return transmit(value); }
+            function probe(value: Result<bool, i32>): bool { return share(value) || noLoan(value); }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            for (call, predicate) in [
+                ("transmit(", "sendable"),
+                ("share(", "shareable"),
+                ("noLoan(", "noBorrow"),
+            ] {
+                let node = call_node(module, call);
+                let goal = typed
+                    .bodies()
+                    .goals()
+                    .iter()
+                    .find(|goal| {
+                        goal.site.module == &module.key
+                            && goal.site.node == node
+                            && matches!(&goal.judgment, GoalJudgment::Requirement {
+                        target: RequirementTarget::Predicate(id), ..
+                    } if id.name() == predicate)
+                    })
+                    .unwrap();
+                assert_eq!(
+                    goal.state,
+                    GoalState::Unresolved(GoalBlocker::Representation)
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_join_fresh_results_keep_the_written_occurrence() {
+    use compiler::analysis::ownership::{GraphCompletion, GraphObligation, analyze_ownership};
+    use compiler::analysis::scalars::data::DataExpression;
+
+    probe_with_typed(
+        "scoped_join::installed_join_fresh_results_keep_the_written_occurrence",
+        r#"
+            import std::routine::join;
+            function success(): [Result<bool, i32>, bool] {
+                return join([(): Result<bool, i32> => Result.Ok(true), () => false]);
+            }
+            function failure(flag: bool): [bool, Result<bool, i32>] {
+                return join([() => flag, () => Err<bool, i32>(7i32)]);
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert!(
+                graph
+                    .open_obligations()
+                    .contains(&GraphObligation::MaskingAndJoin)
+            );
+            for (name, prefix, slot, origin) in [
+                ("success", "join([():", 0, "Result.Ok(true)"),
+                ("failure", "join([() => flag", 1, "Err<bool, i32>(7i32)"),
+            ] {
+                let call = call_node(module, prefix);
+                let join = receipt.scoped_join(module, call).unwrap().unwrap();
+                let site = join.slots[slot].result_origin.unwrap();
+                assert_eq!(site.span.bytes(), origin.as_bytes());
+                assert_eq!(join.slots[slot].path, [slot]);
+                assert_eq!(join.slots[1 - slot].path, [1 - slot]);
+                assert!(join.slots[1 - slot].result_origin.is_none());
+                assert!(
+                    join.slots
+                        .iter()
+                        .all(|slot| slot.reference_result.is_none())
+                );
+                for slot in &join.slots {
+                    for id in [&slot.callable_once, &slot.send_job, &slot.send_result] {
+                        let goal = typed.bodies().goal(id).unwrap();
+                        assert_eq!(goal.state, GoalState::Proved);
+                        assert!(goal.premise.is_none() && goal.assumptions.is_empty());
+                    }
+                }
+                if name == "failure" {
+                    let facts = typed.bodies().node(module, site.node).unwrap().unwrap();
+                    let NodeFactKind::Expression(value) = &facts.kind else {
+                        panic!("missing original error expression");
+                    };
+                    let Some(DataExpression::ErrorConstruction(error)) = &value.data else {
+                        panic!("missing closed Err construction");
+                    };
+                    let role = typed.result_role().unwrap();
+                    let start = site.span.start();
+                    assert_eq!(
+                        error.origin,
+                        site.span.snapshot().span(start, start).unwrap()
+                    );
+                    assert_eq!(error.failure, &role.err.id);
+                    assert_eq!(error.wrapper, &role.wrapper.id);
+                    assert!(error.retained.is_none());
+                }
+                let d = &module.declarations[named(module, name)];
+                let local = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                    .unwrap();
+                assert_eq!(local.completion(), Completion::Incomplete);
+                assert_eq!(root.completion(), Completion::Incomplete);
+                assert_eq!(local.blocked_at().unwrap().node, call);
+                assert_eq!(root.blocked_at().unwrap().node, call);
+                assert!(local.mir().is_none() && root.mir().is_none());
+                assert!(local.findings().is_empty());
+                let (exact, short) = budget_caps(local.statistics());
+                let replay = lower_body(receipt, module, &d.id, exact).unwrap();
+                assert_eq!(replay.completion(), Completion::Incomplete);
+                assert_eq!(replay.statistics(), local.statistics());
+                for cap in short {
+                    let limited = lower_body(receipt, module, &d.id, cap).unwrap();
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none());
+                }
+            }
+            let (exact, short) = budget_caps(graph.statistics());
+            let replay = analyze_ownership(receipt, exact);
+            assert_eq!(replay.completion(), GraphCompletion::Incomplete);
+            assert_eq!(replay.statistics(), graph.statistics());
+            for cap in short {
+                assert_eq!(
+                    analyze_ownership(receipt, cap).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+            let loaded = loader::load_installed(request.clone()).unwrap();
+            let (exact, short) = budget_caps(typed.statistics());
+            assert!(analyze_typed(&loaded, exact).receipt().is_some());
+            for cap in short {
+                let limited = analyze_typed(&loaded, cap);
+                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
+                assert!(limited.receipt().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_join_checks_observation_in_the_result_slot() {
+    use compiler::analysis::typed::ResultComponent;
+
+    let source = r#"
+        import std::routine::join;
+        function probe(flag: bool): bool {
+            let pair = join([() => flag, () => Err<bool, i32>(7i32)]);
+            return REPLACE;
+        }
+    "#;
+    for (returning, expected) in [
+        ("pair[0]", TypedCompletion::SourceRejected),
+        ("isOk(&pair[1])", TypedCompletion::Checked),
+    ] {
+        probe_report(
+            "scoped_join::installed_join_checks_observation_in_the_result_slot",
+            &source.replace("REPLACE", returning),
+            |_, _, typed| {
+                assert_eq!(typed.completion(), expected);
+                let uses = typed.result_use().unwrap();
+                assert!(uses.pending().is_empty());
+                if expected == TypedCompletion::SourceRejected {
+                    assert!(typed.receipt().is_none());
+                    let [discard] = uses.discards() else {
+                        panic!("expected the unobserved slot's original Result");
+                    };
+                    assert_eq!(discard.code(), "R0103");
+                    assert_eq!(discard.origin.span.bytes(), b"Err<bool, i32>(7i32)");
+                    assert!(discard.component.is_empty());
+                    assert_eq!(
+                        discard.storage_component,
+                        [ResultComponent::TupleElement(1)]
+                    );
+                } else {
+                    assert!(uses.discards().is_empty());
+                    assert!(typed.receipt().is_some());
+                }
+            },
+        );
+    }
+}
+
+#[test]
+fn installed_join_requires_a_real_fresh_canonical_result() {
+    const JOIN: &str = "import std::routine::join;";
+    for (source, blocked) in [
+        (
+            "function probe(): void { join([(): Result<bool, i32> => Result.Ok(true), () => !false]); }",
+            true,
+        ),
+        (
+            "function probe(input: Result<bool, i32>): [Result<bool, i32>, bool] { return join([() => input, () => false]); }",
+            true,
+        ),
+        (
+            "function probe(job: () => Result<bool, i32>): [Result<bool, i32>, bool] { return join([job, () => false]); }",
+            false,
+        ),
+        (
+            "enum Fake<T,E> { Ok(T), Err(E) } function probe(): [Fake<bool,i32>, bool] { return join([(): Fake<bool,i32> => Fake.Ok(true), () => false]); }",
+            true,
+        ),
+    ] {
+        probe_report(
+            "scoped_join::installed_join_requires_a_real_fresh_canonical_result",
+            &format!("{JOIN}\n{source}"),
+            |_, _, typed| {
+                assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+                assert!(typed.receipt().is_none());
+                let uses = typed.result_use().unwrap();
+                assert_eq!(
+                    uses.pending().iter().any(|pending| {
+                        pending.blocker == ResultUseBlocker::CallBoundary
+                            && pending.site.span.bytes().starts_with(b"join([")
+                    }),
+                    blocked
+                );
+                assert!(
+                    !uses
+                        .discards()
+                        .iter()
+                        .any(|d| d.origin.span.bytes() == b"Result.Ok(true)")
+                );
+            },
+        );
+    }
+}
+
+#[test]
 fn installed_join_keeps_unproved_capture_and_result_shapes_incomplete() {
     installed(
         "scoped_join::installed_join_keeps_unproved_capture_and_result_shapes_incomplete",

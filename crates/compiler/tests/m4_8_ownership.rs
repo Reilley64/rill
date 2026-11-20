@@ -1920,9 +1920,12 @@ fn installed_pair_invocation(request: &InstalledRequest) {
         ("function escaping(input: List<i32>): [&i32, i32] {
             return join([() => { let child = 1i32; return &child; }, () => (&input)[0u64]]);
         }", TypedCompletion::Incomplete, true, None),
+        // Transfer properties now prove, but the unsupported serial boundary
+        // still reports only its provisional output, not the child occurrence.
         ("function nested(): void {
             let outputs = join([(): [Result<bool, i32>, i32] => [Result.Ok(true), 1i32], () => false]);
-        }", TypedCompletion::Incomplete, false, None),
+        }", TypedCompletion::Incomplete, true,
+            Some(b"join([(): [Result<bool, i32>, i32] => [Result.Ok(true), 1i32], () => false])".as_slice())),
         ("function childOwes(): void {
             let _ = join([() => {
                 let nested: [Result<bool>, i32] = [Result.Ok(true), 1i32];

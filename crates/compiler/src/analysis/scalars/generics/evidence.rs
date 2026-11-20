@@ -2178,7 +2178,42 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             return Ok(GoalState::Proved);
         }
-        if let Some(repr) = self.result.and_then(|r| r.representation) {
+        if let Some(role) = self.result
+            && let Some(repr) = role.representation
+        {
+            if Predicate::of(intrinsic) == Predicate::Sendable
+                && **declaration == role.declaration.id
+                && variant.is_none_or(|id| *id == role.ok.id)
+                && let [ok, error] = arguments.as_slice()
+                && primitive_name(ok) == Some("bool")
+                && primitive_name(error) == Some("i32")
+            {
+                // The installed role checks both payload layouts, and its
+                // pinned error storage seals the origin and retained cause.
+                // Only the exact Ok variant lacks storage for an Err wrapper.
+                let module = self.evidence_module(&declaration.module)?;
+                self.property_dependency(
+                    goal,
+                    intrinsic,
+                    ok.clone(),
+                    Self::site(module, role.ok.node),
+                )?;
+                if variant.is_some() {
+                    return Ok(GoalState::Proved);
+                }
+                self.elab.reserve(2)?;
+                let wrapper = Arc::new(TypeTerm::Nominal {
+                    declaration: &repr.wrapper.id,
+                    arguments: vec![error.clone()],
+                });
+                self.property_dependency(
+                    goal,
+                    intrinsic,
+                    wrapper,
+                    Self::site(module, role.err.node),
+                )?;
+                return Ok(GoalState::Proved);
+            }
             if **declaration == repr.cause.id
                 || **declaration == repr.source_location.id
                 || **declaration == repr.message.id
