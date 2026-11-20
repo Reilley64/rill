@@ -151,9 +151,19 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                     && staged.root.node == output.root.node && output.root.span.bytes() == b"value")
             );
             assert!(path_drops(mir, mir.entry).is_empty());
+            let constructed = lower("construct", default);
+            let mir = constructed
+                .mir()
+                .expect("a named initializer can build the admitted nested layout");
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(sibling), Obligation::Drop(text)]
+                if sibling.root.span.bytes() == b"value" && sibling.root.node == text.root.node
+                    && sibling.field().is_some_and(|member| &member.id == field("Outer", "sibling"))
+                    && matches!(text.projection, Some(Projection::NestedField { outer, inner })
+                        if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "text")))
+            );
             for (name, at) in [
                 ("borrow", b"value".as_slice()),
-                ("construct", b"value"),
                 ("protectedSibling", b"value: GuardRoot"),
                 ("customChild", b"value: CustomChild"),
                 ("customRoot", b"value: CustomRoot"),
@@ -1193,6 +1203,194 @@ fn owned_nested_record_pattern_transfers_exact_leaves_and_cleans_the_remainder()
                 },
             ] {
                 let report = lower("unpack", short);
+                assert_eq!(report.completion(), Completion::ResourceLimit);
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn nested_record_initializers_transfer_written_fields_into_canonical_storage() {
+    use compiler::analysis::ownership::Projection;
+
+    probe_with_typed(
+        "records::nested_record_initializers_transfer_written_fields_into_canonical_storage",
+        r#"
+            type Inner = { first: string; mark: bool; last: string; }
+            type Outer = { first: Inner; sibling: string; last: Inner; }
+            function cleanup(early: Inner, late: Inner, text: string): void {
+                let saved = (Outer { last: (late), sibling: text, first: early });
+            }
+            function split(early: Inner, late: Inner): string {
+                let saved = Outer { last: late, sibling: "sibling", first: early };
+                let taken = saved.last;
+                return saved.sibling;
+            }
+            function duplicate(seed: Inner, text: string): void {
+                let saved = Outer { last: seed, sibling: text, first: seed };
+            }
+            function partial(early: Inner, late: Inner): void {
+                let gone = late.last;
+                let saved = Outer { first: early, sibling: "sibling", last: late };
+            }
+            function returned(early: Inner, late: Inner): Outer {
+                return Outer { first: early, sibling: "sibling", last: late };
+            }
+            function inline(early: Inner, text: string): void {
+                let saved = Outer { first: early, sibling: "sibling", last: Inner { first: text, mark: true, last: "last" } };
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            let clean = lower("cleanup", default);
+            let mir = clean.mir().unwrap_or_else(|| {
+                panic!(
+                    "named nested construction: {:?} at {:?}",
+                    clean.completion(),
+                    clean.blocked_at().map(|site| site.span.bytes())
+                )
+            });
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Initialize(_)
+                            | Operation::Cleanup(_)
+                            | Operation::Drop(_)
+                    )
+                })
+                .collect();
+            let [
+                Operation::Move {
+                    from: late,
+                    into: Some(last),
+                },
+                Operation::Move {
+                    from: text,
+                    into: Some(sibling),
+                },
+                Operation::Move {
+                    from: early,
+                    into: Some(first),
+                },
+                Operation::Initialize(owner),
+                Operation::Cleanup(remaining),
+                Operation::Cleanup(parameters),
+            ] = route.as_slice()
+            else {
+                panic!(
+                    "expected field moves in written order, root initialization, then lexical cleanup"
+                )
+            };
+            assert_eq!(late.root.span.bytes(), b"late: Inner");
+            assert_eq!(text.root.span.bytes(), b"text: string");
+            assert_eq!(early.root.span.bytes(), b"early: Inner");
+            assert_eq!(owner.root.span.bytes(), b"saved");
+            assert!(
+                owner.projection.is_none()
+                    && [late, text, early]
+                        .iter()
+                        .all(|place| place.projection.is_none())
+            );
+            for (place, name) in [(last, "last"), (sibling, "sibling"), (first, "first")] {
+                assert_eq!(place.root.node, owner.root.node);
+                assert_eq!(&place.field().unwrap().id, field("Outer", name));
+            }
+            let child = |place: &compiler::analysis::ownership::Place<'_>, parent, leaf| {
+                place.root.node == owner.root.node
+                    && matches!(place.projection, Some(Projection::NestedField { outer, inner }) if &outer.id == field("Outer", parent) && &inner.id == field("Inner", leaf))
+            };
+            let direct = |place: &compiler::analysis::ownership::Place<'_>, name| {
+                place.root.node == owner.root.node
+                    && place
+                        .field()
+                        .is_some_and(|member| &member.id == field("Outer", name))
+            };
+            assert!(
+                matches!(remaining.as_slice(), [Obligation::Drop(last), Obligation::EndStorage(last_bit), Obligation::Drop(last_first), Obligation::EndStorage(last_header), Obligation::Drop(sibling), Obligation::Drop(first_last), Obligation::EndStorage(first_bit), Obligation::Drop(first), Obligation::EndStorage(first_header), Obligation::EndStorage(root)]
+                if child(last, "last", "last") && child(last_bit, "last", "mark") && child(last_first, "last", "first") && direct(last_header, "last")
+                    && direct(sibling, "sibling") && child(first_last, "first", "last") && child(first_bit, "first", "mark")
+                    && child(first, "first", "first") && direct(first_header, "first") && root.root.node == owner.root.node && root.projection.is_none())
+            );
+            assert!(
+                parameters.is_empty(),
+                "the incoming fields transferred into the named local"
+            );
+            let split = lower("split", default);
+            let mir = split.mir().expect("direct reads work after initialization");
+            let ops = linear(mir, mir.entry);
+            let export = ops
+                .iter()
+                .position(|op| matches!(op, Operation::Export(_)))
+                .unwrap();
+            assert!(ops[export + 1..].iter().any(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::Drop(place) if place.root.span.bytes() == b"taken")))));
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(a), Obligation::Drop(b), Obligation::Drop(c), Obligation::Drop(d)]
+                if a.root.span.bytes() == b"taken" && b.root.node == a.root.node && c.root.span.bytes() == b"saved" && d.root.node == c.root.node
+                    && a.field().is_some_and(|member| &member.id == field("Inner", "last")) && b.field().is_some_and(|member| &member.id == field("Inner", "first"))
+                    && matches!(c.projection, Some(Projection::NestedField { outer, inner }) if &outer.id == field("Outer", "first") && &inner.id == field("Inner", "last"))
+                    && matches!(d.projection, Some(Projection::NestedField { outer, inner }) if &outer.id == field("Outer", "first") && &inner.id == field("Inner", "first")))
+            );
+            for (name, site, related) in [
+                ("duplicate", b"seed".as_slice(), b"seed".as_slice()),
+                ("partial", b"late", b"late.last"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected a moved initializer finding")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), related);
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+            for (name, site) in [
+                (
+                    "returned",
+                    b"Outer { first: early, sibling: \"sibling\", last: late }".as_slice(),
+                ),
+                (
+                    "inline",
+                    b"Inner { first: text, mark: true, last: \"last\" }",
+                ),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete);
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
+            }
+            let exact = AnalysisLimits {
+                max_work: clean.statistics().work,
+                max_entries: clean.statistics().entries,
+                ..default
+            };
+            assert!(lower("cleanup", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let report = lower("cleanup", short);
                 assert_eq!(report.completion(), Completion::ResourceLimit);
                 assert!(report.mir().is_none());
             }

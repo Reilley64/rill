@@ -32,6 +32,7 @@ enum ExpressionProof<'t, 'g> {
     CallCarrier(&'t Type<'g>),
     NestedTupleParent(&'t PlacePath<'g>),
     NestedTuplePatternSource(Slot),
+    NestedRecordConstruction,
 }
 
 struct PropagatingValueCall<'a, 'g> {
@@ -224,7 +225,7 @@ impl<'a, 'g> Build<'a, 'g> {
     pub(super) fn parameter(&mut self, parameter: &MemberType<'g>) -> ResultOf<Slot> {
         let node = parameter.declaration.node;
         let ty = &parameter.ty;
-        if let Some(slot) = self.nested_record_parameter(node, ty)? {
+        if let Some(slot) = self.nested_record_region(node, ty)? {
             self.budget.reserve(1)?;
             self.nested_record_values
                 .insert(&parameter.declaration.id, slot);
@@ -276,7 +277,7 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(Some(root))
     }
 
-    fn nested_record_parameter(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Option<Slot>> {
+    fn nested_record_region(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Option<Slot>> {
         let Some(fields) = self.record_fields(ty.as_ref())? else {
             return Ok(None);
         };
@@ -1009,15 +1010,39 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(owner)
     }
 
-    fn binding_destination(&mut self, node: NodeId, id: &DeclarationId) -> ResultOf<Slot> {
+    fn nested_construction_slot(
+        &mut self,
+        value: NodeId,
+        dest: NodeId,
+        expected: &Type<'g>,
+    ) -> ResultOf<Option<Slot>> {
+        if !matches!(expected.as_ref(), TypeTerm::Nominal { arguments, .. } if arguments.is_empty())
+        {
+            return Ok(None);
+        }
+        let source = self.ungroup(value)?;
+        self.budget.step(2)?;
+        if self.module.syntax.nodes[source].kind != NodeKind::Construction {
+            return Ok(None);
+        }
+        let Some(DataExpression::Construction(data)) = &self.value(source)?.data else {
+            return Ok(None);
+        };
+        if data.base.is_some() || !data.arguments.is_empty() || data.ty != *expected {
+            return Ok(None);
+        }
+        self.nested_record_region(dest, expected)
+    }
+
+    fn binding_destination(&mut self, node: NodeId, id: &DeclarationId) -> ResultOf<(Slot, bool)> {
         self.budget.step(1)?;
         if let Some(&slot) = self.locals.get(id) {
-            return Ok(slot);
+            return Ok((slot, false));
         }
         self.budget.step(1)?;
         self.nested_record_values
             .get(id)
-            .copied()
+            .map(|&slot| (slot, true))
             .ok_or(Stop::Pending(node))
     }
 
@@ -1216,7 +1241,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     let into = match binding {
                         Binding::Discard => None,
                         Binding::Name { declaration, .. } => {
-                            Some(self.binding_destination(node, declaration)?)
+                            Some(self.binding_destination(node, declaration)?.0)
                         }
                         _ => return Err(Stop::Pending(node)),
                     };
@@ -1228,7 +1253,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     let into = match binding {
                         Binding::Discard => None,
                         Binding::Name { declaration, .. } => {
-                            Some(self.binding_destination(node, declaration)?)
+                            Some(self.binding_destination(node, declaration)?.0)
                         }
                         _ => return Err(Stop::Pending(node)),
                     };
@@ -1237,7 +1262,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
                     Binding::Name { declaration, .. } => {
-                        let into = self.binding_destination(node, declaration)?;
+                        let (into, nested) = self.binding_destination(node, declaration)?;
+                        if nested {
+                            return self.expression_with_proof(
+                                value,
+                                Some(into),
+                                next,
+                                depth + 1,
+                                Some(ExpressionProof::NestedRecordConstruction),
+                            );
+                        }
                         let temporary = self.temporary_projection(initializer, false)?;
                         let tail = if let Some(temp) = temporary {
                             self.cleanup(node, &[temp.scratch], next)?
@@ -1680,7 +1714,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 ty,
                 site,
             } => {
-                let local = if let Some(slot) = self.nested_transfer_slot(initializer, site, ty)? {
+                let nested = match self.nested_transfer_slot(initializer, site, ty)? {
+                    Some(slot) => Some(slot),
+                    None => self.nested_construction_slot(initializer, site, ty)?,
+                };
+                let local = if let Some(slot) = nested {
                     self.budget.reserve(1)?;
                     self.nested_record_values.insert(declaration, slot);
                     slot
@@ -3109,10 +3147,12 @@ impl<'a, 'g> Build<'a, 'g> {
                 let Some(DataExpression::Construction(data)) = facts.data.as_ref() else {
                     return Err(Stop::Pending(node));
                 };
-                if data.base.is_some()
-                    || !data.arguments.is_empty()
-                    || self.slots[into].members != data.fields.len()
-                {
+                if data.base.is_some() || !data.arguments.is_empty() {
+                    return Err(Stop::Pending(node));
+                }
+                if matches!(proof, Some(ExpressionProof::NestedRecordConstruction)) {
+                    self.check_nested_record_fields(node, data)?;
+                } else if self.slots[into].members != data.fields.len() {
                     return Err(Stop::Pending(node));
                 }
                 let initializers = data
@@ -3140,6 +3180,36 @@ impl<'a, 'g> Build<'a, 'g> {
             _ => return Err(Stop::Pending(node)),
         };
         self.emit(node, action, Edges::Next(next))
+    }
+
+    fn check_nested_record_fields(
+        &mut self,
+        node: NodeId,
+        data: &Construction<'g>,
+    ) -> ResultOf<()> {
+        let fields = self.record_fields(&data.ty)?.ok_or(Stop::Pending(node))?;
+        if data.fields.len() != fields.len() {
+            return Err(Stop::Pending(node));
+        }
+        for written in &data.fields {
+            self.budget.step(1 + fields.len())?;
+            let member = fields
+                .iter()
+                .find(|member| member.declaration.id == written.field.id)
+                .ok_or(Stop::Pending(written.expression))?;
+            if matches!(member.ty.as_ref(), TypeTerm::Primitive(_)) {
+                continue;
+            }
+            // The flat child moves or copies as one region from a named owner.
+            let (source, _) = self
+                .whole_named_owned_place(written.expression)?
+                .ok_or(Stop::Pending(written.expression))?;
+            self.budget.step(1)?;
+            if source.ty != member.ty {
+                return Err(Stop::Pending(written.expression));
+            }
+        }
+        Ok(())
     }
 
     fn initialize_members(
