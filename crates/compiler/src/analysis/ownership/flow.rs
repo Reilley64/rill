@@ -19,11 +19,20 @@ struct Held {
     capture_drops: [Option<NodeId>; 2],
     /// A checked pair body acquired at this local arrow, not just a callable type.
     pair_origin: Option<(NodeId, InvocationMode)>,
+    /// The checked single-cell body of the environment currently in this slot.
+    mutable_cell: Option<MutableCell>,
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
     stored_at: Option<NodeId>,
     /// Identity of the stored descriptor, independent of the access loans.
     exact_target: Option<ExactTarget>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MutableCell {
+    origin: NodeId,
+    field: NodeId,
+    addend: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -151,7 +160,10 @@ fn liveness(
                 ..
             } => ([Some(capture), second], Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
-            Action::InvokeClosurePair { receiver, into, .. } => use_one(Some(receiver), Some(into)),
+            Action::InvokeClosurePair { receiver, into, .. }
+            | Action::InvokeMutableI32Cell { receiver, into } => {
+                use_one(Some(receiver), Some(into))
+            }
             // External contents are already live at every instruction.
             Action::CopyThrough {
                 descriptor, into, ..
@@ -2363,6 +2375,7 @@ pub(super) fn run<'a, 'g>(
                     second,
                     into,
                     mode,
+                    cell_addend,
                 } => {
                     let first = initialized(&state[capture], node)?;
                     let loans = if let Some(second) = second {
@@ -2382,6 +2395,11 @@ pub(super) fn run<'a, 'g>(
                         loans,
                         capture_drops: [drop_of(capture), second.and_then(drop_of)],
                         pair_origin: second.map(|_| (node, mode)),
+                        mutable_cell: cell_addend.map(|addend| MutableCell {
+                            origin: node,
+                            field: slots[capture].node,
+                            addend,
+                        }),
                         ..Held::default()
                     });
                     state[capture] = State::Vacant;
@@ -2399,6 +2417,30 @@ pub(super) fn run<'a, 'g>(
                             capture: local(capture).root,
                             mode,
                         }
+                    }
+                }
+                Action::InvokeMutableI32Cell { receiver, into } => {
+                    let cell = initialized(&state[receiver], node)?
+                        .mutable_cell
+                        .ok_or(Stop::Pending(node))?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        receiver,
+                        (node, Conflict::Access),
+                        Access::Exclusive,
+                        budget,
+                    )?;
+                    // The cell contains only a scalar. The access ends before
+                    // the continuation and no receiver loan escapes in the result.
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::InvokeMutableI32Cell {
+                        receiver: local(receiver),
+                        origin: site_at(module, cell.origin),
+                        field: site_at(module, cell.field),
+                        addend: cell.addend,
+                        into: local(into),
                     }
                 }
                 Action::InvokeClosurePair {

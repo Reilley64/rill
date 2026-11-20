@@ -8,10 +8,10 @@ use crate::analysis::scalars::data::{
 };
 use crate::analysis::scalars::generics::{
     GoalState,
-    callables::{CaptureFact, CaptureForm},
+    callables::{ArrowFacts, CaptureFact, CaptureForm, InvocationFacts},
 };
 use crate::analysis::scalars::{
-    CallFacts, ErrorConstruction, ExpressionFacts, Place as TypedPlace, Propagation,
+    CallFacts, ErrorConstruction, ExpressionFacts, LiteralValue, Place as TypedPlace, Propagation,
     PropagationTarget,
 };
 use crate::analysis::typed::{
@@ -4511,6 +4511,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if arrow.premise.is_some() || !arrow.parameters.is_empty() {
             return Err(Stop::Pending(node));
         }
+        if mode == InvocationMode::Mutable
+            && matches!(arrow.result.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+        {
+            return self.mutable_i32_cell(node, body, arrow, into, next, depth);
+        }
         // Admit only direct stable sources, either the entire body or a
         // written pair. A tuple of these sources adds no body computation
         // to run at formation.
@@ -4558,6 +4563,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 second: second.map(|(_, slot)| slot),
                 into,
                 mode,
+                cell_addend: None,
             },
             Edges::Next(next),
         )?;
@@ -4567,6 +4573,105 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             form
         };
         self.expression(first.site.node, Some(capture), tail, depth + 1)
+    }
+
+    fn mutable_i32_cell(
+        &mut self,
+        node: NodeId,
+        body: NodeId,
+        arrow: &ArrowFacts<'g>,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        // The update and returned value are two source occurrences of one
+        // captured binding. Only the initial scalar copy runs at formation.
+        self.budget.step(8)?;
+        let pending = Stop::Pending(node);
+        let syntax = &self.module.syntax.nodes;
+        let (NodeKind::Block, [update, returning]) =
+            (syntax[body].kind, syntax[body].children.as_slice())
+        else {
+            return Err(pending);
+        };
+        let (NodeKind::Assignment("+="), [write, operand]) =
+            (syntax[*update].kind, syntax[*update].children.as_slice())
+        else {
+            return Err(pending);
+        };
+        let (NodeKind::Return, [read]) = (
+            syntax[*returning].kind,
+            syntax[*returning].children.as_slice(),
+        ) else {
+            return Err(pending);
+        };
+        if arrow.site.module != &self.module.key
+            || arrow.site.node != node
+            || !matches!(self.fact(returning).map(|f| &f.kind),
+                Some(NodeFactKind::ArrowReturn { target }) if *target == node)
+        {
+            return Err(pending);
+        }
+        let (write, write_depth) = self.ungroup_expression_at(*write, depth + 2)?;
+        let (read, _) = self.ungroup_expression_at(*read, depth + 2)?;
+        let (operand, _) = self.ungroup_expression_at(*operand, depth + 2)?;
+        let [first, second] = arrow.captures.as_slice() else {
+            return Err(pending);
+        };
+        let capture = if [first.site.node, second.site.node] == [write, read] {
+            first
+        } else if [second.site.node, first.site.node] == [write, read] {
+            second
+        } else {
+            return Err(pending);
+        };
+        if capture.path.root.kind != DeclarationKind::Binding {
+            return Err(pending);
+        }
+        for use_ in [first, second] {
+            let value = self.normal_value(use_.site.node)?;
+            if use_.site.module != &self.module.key
+                || !use_.reachable
+                || use_.through.is_some()
+                || use_.form != CaptureForm::Value
+                || use_.access != Access::Owned
+                || use_.ty != arrow.result
+                || use_.storage.as_ref() != Some(&arrow.result)
+                || use_.path.root != capture.path.root
+                || !use_.path.projections.is_empty()
+                || syntax[use_.site.node].kind != NodeKind::ValueReference
+                || value.binding != Some(capture.path.root)
+                || value.ty != arrow.result
+                || (use_.site.node == write && value.place != TypedPlace::Writable)
+            {
+                return Err(pending);
+            }
+        }
+        let literal = self.normal_value(operand)?;
+        let Some(LiteralValue::Integer {
+            magnitude,
+            negative: false,
+        }) = literal.literal.map(|e| e.value)
+        else {
+            return Err(pending);
+        };
+        if syntax[operand].kind != NodeKind::Literal || literal.ty != arrow.result {
+            return Err(pending);
+        }
+        let addend = i32::try_from(magnitude).map_err(|_| pending)?;
+        let stage = self.capture_slot(capture)?;
+        let form = self.emit(
+            node,
+            Action::FormClosure {
+                capture: stage,
+                second: None,
+                into,
+                mode: InvocationMode::Mutable,
+                cell_addend: Some(addend),
+            },
+            Edges::Next(next),
+        )?;
+        self.expression(write, Some(stage), form, write_depth)
     }
 
     fn capture_slot(&mut self, capture: &CaptureFact<'g>) -> ResultOf<Slot> {
@@ -5167,6 +5272,51 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(*argument, Some(stage), invoke, depth + 1)
     }
 
+    fn invoke_mutable_cell(
+        &mut self,
+        node: NodeId,
+        invocation: &InvocationFacts<'g>,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        self.budget.step(2)?;
+        let pending = Stop::Pending(node);
+        let syntax = &self.module.syntax.nodes[node];
+        let Some(path) = &invocation.path else {
+            return Err(pending);
+        };
+        if syntax.kind != NodeKind::Call
+            || syntax.children.as_slice() != [invocation.receiver]
+            || invocation.access != Access::Owned
+            || invocation.assumption.is_some()
+            || path.root.kind != DeclarationKind::Binding
+            || !path.projections.is_empty()
+        {
+            return Err(pending);
+        }
+        let (receiver, _) = self.ungroup_expression_at(invocation.receiver, depth + 1)?;
+        let value = self.normal_value(receiver)?;
+        if self.module.syntax.nodes[receiver].kind != NodeKind::ValueReference
+            || value.place != TypedPlace::Writable
+            || value.binding != Some(path.root)
+            || !matches!(value.ty.as_ref(), TypeTerm::Callable {
+                mode: InvocationMode::Mutable, parameters, result,
+            } if parameters.is_empty() && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+                && *result == self.value(node)?.ty)
+        {
+            return Err(pending);
+        }
+        // The writable binding's arrow fact is absent. The reaching
+        // ownership state must supply a checked environment instead.
+        let receiver = self.resolve_place(receiver, path)?;
+        self.emit(
+            node,
+            Action::InvokeMutableI32Cell { receiver, into },
+            Edges::Next(next),
+        )
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -5177,7 +5327,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         checked_carrier: Option<&Type<'g>>,
     ) -> ResultOf<Pc> {
         let Some(call) = facts.call.as_deref() else {
-            return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next, depth);
+            let into = into.ok_or(Stop::Pending(node))?;
+            if matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32") {
+                self.budget.step(1)?;
+                let invocation = self
+                    .fact(&node)
+                    .and_then(|fact| fact.callable.as_ref()?.invocation.as_deref())
+                    .filter(|invocation| invocation.mode == InvocationMode::Mutable)
+                    .ok_or(Stop::Pending(node))?;
+                return self.invoke_mutable_cell(node, invocation, into, next, depth);
+            }
+            return self.invoke_closure_pair(node, into, next, depth);
         };
         if Some(call.callee) == self.dispose {
             if call.pipe_input.is_some() {

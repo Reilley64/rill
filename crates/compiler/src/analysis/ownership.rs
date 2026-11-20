@@ -325,6 +325,17 @@ pub enum Operation<'g> {
         origin: Site<'g>,
         into: Place<'g>,
     },
+    /// Exclusively access the receiver for this operation. Update its sole
+    /// owned capture with checked i32 addition, then copy the updated cell
+    /// into the result. Overflow panics before the store. `field` identifies
+    /// the capture stage of the forming arrow, not the outer scalar's storage.
+    InvokeMutableI32Cell {
+        receiver: Place<'g>,
+        origin: Site<'g>,
+        field: Site<'g>,
+        addend: i32,
+        into: Place<'g>,
+    },
     /// A direct call may retain an input's backing in the destination's
     /// contents, including the exclusive restriction on a shared view.
     CallRetaining {
@@ -1438,6 +1449,10 @@ enum Action<'g> {
         into: Slot,
         call: PairCall,
     },
+    InvokeMutableI32Cell {
+        receiver: Slot,
+        into: Slot,
+    },
     TestVariant {
         operand: Slot,
         success: &'g DeclarationId,
@@ -1487,6 +1502,7 @@ enum Action<'g> {
         second: Option<Slot>,
         into: Slot,
         mode: InvocationMode,
+        cell_addend: Option<i32>,
     },
     Dispose(Slot),
     Displace {

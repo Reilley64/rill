@@ -986,6 +986,324 @@ fn invokes_a_known_read_only_scalar_pair_twice() {
 }
 
 #[test]
+fn invokes_a_known_mutable_scalar_cell_twice() {
+    use compiler::analysis::InvocationMode;
+
+    probe_with_typed(
+        "captures::invokes_a_known_mutable_scalar_cell_twice",
+        r#"
+            function counter(): [i32, i32, i32] {
+                let mut initial = 0i32;
+                let mut next: mut () => i32 = () => {
+                    initial += 1i32;
+                    return initial;
+                };
+                let first = next();
+                let second = next();
+                return [first, second, initial];
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let report = lower_capture_root(module, receipt, "counter");
+            let mir = report.mir().unwrap_or_else(|| {
+                panic!(
+                    "mode {}: {:?} at {:?}",
+                    request.test_mode,
+                    report.completion(),
+                    report
+                        .blocked_at()
+                        .map(|s| s.span.bytes().escape_ascii().to_string())
+                )
+            });
+            assert_eq!(report.completion(), Completion::Checked);
+            let path = straight_blocks(mir, mir.entry);
+            assert!(matches!(
+                path.last().unwrap().terminator,
+                Terminator::Return
+            ));
+            let formations: Vec<_> = path
+                .iter()
+                .enumerate()
+                .filter_map(|(index, block)| match block.operation {
+                    Operation::FormClosure {
+                        closure,
+                        capture,
+                        mode: InvocationMode::Mutable,
+                    } => Some((index, block.site, closure, capture)),
+                    _ => None,
+                })
+                .collect();
+            let &[(formed_at, origin, closure, capture)] = formations.as_slice() else {
+                panic!("expected one mutable environment");
+            };
+            let Operation::Copy {
+                from: initial,
+                into: Some(stage),
+            } = path[formed_at - 1].operation
+            else {
+                panic!("expected formation to copy the outer scalar");
+            };
+            assert_eq!(initial.root.span.bytes(), b"initial");
+            assert_eq!(stage.root.node, capture.node);
+            assert_ne!(initial.root.node, capture.node);
+            let fact = |node| typed.bodies().node(module, node).unwrap().unwrap();
+            let calls: Vec<_> = path[formed_at + 1..]
+                .iter()
+                .filter_map(|block| {
+                    let Operation::InvokeMutableI32Cell {
+                        receiver,
+                        origin: actual,
+                        field,
+                        addend,
+                        into,
+                    } = block.operation
+                    else {
+                        return None;
+                    };
+                    assert_eq!(receiver.root.node, closure.node);
+                    assert_eq!((actual.module, actual.node), (origin.module, origin.node));
+                    assert_eq!((field.module, field.node), (capture.module, capture.node));
+                    assert_eq!(addend, 1);
+                    let call = fact(block.site.node);
+                    let invocation = call.callable.as_ref().unwrap().invocation.as_ref().unwrap();
+                    assert_eq!(invocation.mode, InvocationMode::Mutable);
+                    assert_eq!(invocation.access, Access::Owned);
+                    assert!(
+                        fact(invocation.receiver)
+                            .callable
+                            .as_ref()
+                            .and_then(|f| f.arrow.as_ref())
+                            .is_none()
+                    );
+                    Some(into)
+                })
+                .collect();
+            let [first, second] = calls.as_slice() else {
+                panic!("expected two exclusive updates")
+            };
+            assert_ne!(first.root.node, second.root.node);
+            assert_eq!(first.root.span.bytes(), b"first");
+            assert_eq!(second.root.span.bytes(), b"second");
+            let output = path
+                .iter()
+                .find_map(|block| match block.operation {
+                    Operation::Export(output) => Some(output),
+                    _ => None,
+                })
+                .unwrap();
+            let members: Vec<_> = path
+                .iter()
+                .filter_map(|block| match block.operation {
+                    Operation::Copy {
+                        from,
+                        into: Some(into),
+                    } if into.root.node == output.root.node => {
+                        Some((from.root.node, into.tuple_element().unwrap()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                members,
+                [
+                    (first.root.node, 0),
+                    (second.root.node, 1),
+                    (initial.root.node, 2)
+                ]
+            );
+            assert!(path.iter().all(|block| !matches!(block.operation,
+                Operation::Move { from, .. } if [closure.node, initial.root.node].contains(&from.root.node)
+            ) && !matches!(block.operation,
+                Operation::Install { target, .. } if target.root.node == initial.root.node
+            )));
+            let ends = path.iter().flat_map(|block| match &block.operation {
+                Operation::Cleanup(actions) => actions.as_slice(),
+                _ => &[],
+            }).filter(|action| matches!(action, Obligation::EndStorage(place) if place.root.node == closure.node));
+            assert_eq!(ends.count(), 1);
+            assert!(path_drops(mir, mir.entry).is_empty());
+        },
+    );
+}
+
+fn lower_capture_root<'g>(
+    module: &'g loader::Module,
+    receipt: &TypedReceipt<'_, 'g>,
+    name: &str,
+) -> compiler::analysis::ownership::Report<'g> {
+    let declaration = module
+        .declarations
+        .iter()
+        .find(|d| d.name.as_deref() == Some(name))
+        .unwrap();
+    lower_body(receipt, module, &declaration.id, AnalysisLimits::default()).unwrap()
+}
+
+#[test]
+fn mutable_cell_receiver_checks_and_arithmetic_limit() {
+    probe(
+        "captures::mutable_cell_receiver_checks_and_arithmetic_limit",
+        r#"
+            function lastUse(): i32 {
+                let mut seed = 4i32;
+                let mut job: mut () => i32 = () => { seed += 3i32; return seed; };
+                let unused = &job;
+                let first = job();
+                let view = &job;
+                let used = view;
+                return job();
+            }
+            function overlap(): i32 {
+                let mut seed = 4i32;
+                let mut job: mut () => i32 = () => { seed += 3i32; return seed; };
+                let view = &job;
+                let value = job();
+                let used = view;
+                return value;
+            }
+            function retarget(): [i32, i32, i32] {
+                let mut seed = 4i32;
+                let mut job: mut () => i32 = () => { seed += 3i32; return seed; };
+                let a = job();
+                let mut other = job;
+                let b = other();
+                other = () => { seed += 5i32; return seed; };
+                return [a, b, other()];
+            }
+            function lostOrigin(): i32 {
+                let mut seed = 4i32;
+                let mut job: mut () => i32 = () => { seed += 3i32; return seed; };
+                job = () => seed;
+                return job();
+            }
+            function onceInterface(): i32 {
+                let mut seed = 4i32;
+                let mut job: mut () => i32 = () => { seed += 3i32; return seed; };
+                let other: once () => i32 = job;
+                return other();
+            }
+            function originalCounter(): i32 {
+                let mut initial = 0i32;
+                let mut next: mut () => i32 = () => { initial += 1i32; return initial; };
+                let first = next();
+                let second = next();
+                return first * 10i32 + second;
+            }
+            expect originalCounter() == 12i32;
+        "#,
+        |_, module, receipt| {
+            let lower = |name| lower_capture_root(module, receipt, name);
+            let last_use = lower("lastUse");
+            assert_eq!(last_use.completion(), Completion::Checked);
+            let mir = last_use.mir().unwrap();
+            assert_eq!(
+                linear(mir, mir.entry)
+                    .iter()
+                    .filter(|op| matches!(op, Operation::InvokeMutableI32Cell { .. }))
+                    .count(),
+                2
+            );
+
+            let overlap = lower("overlap");
+            assert_eq!(overlap.completion(), Completion::SourceRejected);
+            assert!(overlap.mir().is_none());
+            let [finding] = overlap.findings() else {
+                panic!("expected the live receiver borrow to conflict")
+            };
+            assert_eq!(finding.code(), "R0201");
+            assert_eq!(finding.site.span.bytes(), b"job()");
+            assert_eq!(finding.related.span.bytes(), b"&job");
+
+            let retarget = lower("retarget");
+            let mir = retarget
+                .mir()
+                .expect("the cell follows the move and replacement");
+            let path = straight_blocks(mir, mir.entry);
+            let origins: Vec<_> = path
+                .iter()
+                .filter_map(|block| match block.operation {
+                    Operation::FormClosure {
+                        closure, capture, ..
+                    } => Some((closure.node, block.site.node, capture.node)),
+                    _ => None,
+                })
+                .collect();
+            let [
+                (source, original, original_field),
+                (_, replacement, replacement_field),
+            ] = origins.as_slice()
+            else {
+                panic!("expected the original and replacement environments")
+            };
+            assert_ne!(original, replacement);
+            let calls: Vec<_> = path
+                .iter()
+                .filter_map(|block| match block.operation {
+                    Operation::InvokeMutableI32Cell {
+                        receiver,
+                        origin,
+                        field,
+                        addend,
+                        ..
+                    } => Some((receiver.root.node, origin.node, field.node, addend)),
+                    _ => None,
+                })
+                .collect();
+            let [first, second, third] = calls.as_slice() else {
+                panic!("expected three cell calls")
+            };
+            let destination = second.0;
+            assert_ne!(*source, destination);
+            assert_eq!(*first, (*source, *original, *original_field, 3));
+            assert_eq!(*second, (destination, *original, *original_field, 3));
+            assert_eq!(*third, (destination, *replacement, *replacement_field, 5));
+            assert!(path.iter().any(|block| matches!(block.operation,
+                Operation::Move { from, into: Some(into) } if from.root.node == *source && into.root.node == destination
+            )));
+
+            // M4 admits all three roots. M5 cannot invoke a ReadOnly formation
+            // as a mutable cell, lower its once interface, or lower ordinary arithmetic.
+            for (name, site) in [
+                ("lostOrigin", b"job()".as_slice()),
+                ("onceInterface", b"other()"),
+                ("originalCounter", b"first * 10i32 + second"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
+            }
+        },
+    );
+}
+
+#[test]
+fn moved_mutable_cell_has_no_typed_receipt() {
+    use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
+
+    probe_report(
+        "captures::moved_mutable_cell_has_no_typed_receipt",
+        r#"
+            function moved(): i32 {
+                let mut seed = 4i32;
+                let mut job: mut () => i32 = () => { seed += 3i32; return seed; };
+                let other = job;
+                return job();
+            }
+        "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            let [pending] = typed.result_use().unwrap().pending() else {
+                panic!("expected M4 to block invocation of the moved receiver")
+            };
+            assert_eq!(pending.blocker, ResultUseBlocker::CallBoundary);
+            assert_eq!(pending.site.span.bytes(), b"job()");
+        },
+    );
+}
+
+#[test]
 fn repeated_descriptor_pairs_keep_backing_through_last_use() {
     probe_with_typed(
         "captures::repeated_descriptor_pairs_keep_backing_through_last_use",
