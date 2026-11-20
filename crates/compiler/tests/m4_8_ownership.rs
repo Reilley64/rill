@@ -1861,7 +1861,24 @@ fn installed_pair_invocation(request: &InstalledRequest) {
                 .iter()
                 .find(|d| d.name.as_deref() == Some(name))
                 .unwrap();
-            let local = lower_body(&receipt, app, &user.id, AnalysisLimits::default()).unwrap();
+            // Local scalar index support does not do any child-frame work at
+            // these unrelated blockers. Both fit the 9b020d1 caps.
+            let (max_work, max_entries, max_depth) = if name == "shared" {
+                (3338, 467, 5)
+            } else {
+                (2462, 300, 0)
+            };
+            let local = lower_body(
+                &receipt,
+                app,
+                &user.id,
+                AnalysisLimits {
+                    max_work,
+                    max_entries,
+                    max_depth,
+                },
+            )
+            .unwrap();
             assert_eq!(local.completion(), Completion::Incomplete);
             assert!(local.mir().is_none());
             if name == "shared" {
