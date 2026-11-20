@@ -172,22 +172,72 @@ pub fn analyze_ownership<'g>(
 #[derive(Default)]
 struct ModuleFacts<'a, 'g> {
     nodes: NodeIndex<'a, 'g>,
-    bodies: BTreeMap<BodyOwner<'g>, &'a BodyFacts<'g>>,
+    startup: usize,
 }
 
-struct WorkItem<'g> {
+#[derive(Clone, Copy, Default)]
+struct RootFacts<'a, 'g> {
+    body: Option<&'a BodyFacts<'g>>,
+    header: Option<&'a DeclarationFacts<'g>>,
+    implementation: Option<(&'a ImplementationFacts<'g>, bool)>,
+}
+
+struct WorkItem<'a, 'g> {
     module: &'g Module,
+    module_index: usize,
     declaration: Option<&'g Declaration>,
+    facts: RootFacts<'a, 'g>,
+    active: Option<usize>,
     parents: Vec<usize>,
     // Held privately until closure checking is finished, even on exhaustion.
     ordinary: Option<Mir<'g>>,
 }
 
-fn push_body<'g>(
+// Modules are already sorted by the loader. Prepay the whole binary search
+// (one comparison per halving, plus the final equality check). Each comparison
+// can inspect at most the query path's byte length, even for a shared prefix.
+fn module_index(
+    modules: &[Module],
+    key: &ModuleKey,
+    budget: &mut Budget,
+) -> Result<Option<usize>, ()> {
+    let probes = usize::BITS - modules.len().leading_zeros() + 1;
+    charge_key(key, probes as usize, budget)?;
+    Ok(modules.binary_search_by(|module| module.key.cmp(key)).ok())
+}
+
+fn charge_key(key: &ModuleKey, probes: usize, budget: &mut Budget) -> Result<(), ()> {
+    let width = key.path.len().checked_add(1).ok_or(())?;
+    budget.step(width.checked_mul(probes).ok_or(())?)
+}
+
+// All keys below come from this receipt. After resolving a module by its
+// canonical value, graph indexes need only fixed-width capture-local keys.
+type RootIndex = BTreeMap<(usize, usize, DeclarationKind), usize>;
+
+fn local_key(module: usize, id: &DeclarationId) -> (usize, usize, DeclarationKind) {
+    (module, id.start, id.kind)
+}
+
+fn find_root(
+    modules: &[Module],
+    roots: &RootIndex,
+    id: &DeclarationId,
+    budget: &mut Budget,
+) -> Result<Option<usize>, ()> {
+    let Some(module) = module_index(modules, &id.module, budget)? else {
+        return Ok(None);
+    };
+    budget.step(1)?;
+    Ok(roots.get(&local_key(module, id)).copied())
+}
+
+fn push_body<'a, 'g>(
     module: &'g Module,
+    module_index: usize,
     declaration: Option<&'g Declaration>,
     report: &mut GraphReport<'g>,
-    work: &mut Vec<WorkItem<'g>>,
+    work: &mut Vec<WorkItem<'a, 'g>>,
     budget: &mut Budget,
 ) -> Result<usize, ()> {
     budget.reserve(2)?;
@@ -202,7 +252,10 @@ fn push_body<'g>(
     });
     work.push(WorkItem {
         module,
+        module_index,
         declaration,
+        facts: RootFacts::default(),
+        active: None,
         parents: Vec::new(),
         ordinary: None,
     });
@@ -216,88 +269,122 @@ fn analyze<'g>(
 ) -> Result<(), ()> {
     let inventory = typed.inventory();
     let graph = inventory.graph();
+    let modules = graph.modules();
     let mut work = Vec::new();
     let mut by_declaration = BTreeMap::new();
-    let mut facts = BTreeMap::<&ModuleKey, ModuleFacts<'_, 'g>>::new();
+    let mut facts = Vec::new();
+    let mut family_count = 0usize;
     // The loader stores modules in key order and declarations in id order
     // (within a module: source offset, then kind). No typed facts define membership.
-    for module in graph.modules() {
+    for (module_index, module) in modules.iter().enumerate() {
         budget.reserve(1)?;
-        facts.insert(&module.key, ModuleFacts::default());
-        push_body(module, None, report, &mut work, budget)?;
+        let startup = push_body(module, module_index, None, report, &mut work, budget)?;
+        facts.push(ModuleFacts {
+            startup,
+            ..ModuleFacts::default()
+        });
         report.source_roots += 1;
         for declaration in &module.declarations {
             budget.step(1)?;
-            if !matches!(
-                declaration.id.kind,
+            match declaration.id.kind {
+                DeclarationKind::Family if declaration.scope.is_none() => {
+                    family_count = family_count.checked_add(1).ok_or(())?;
+                    continue;
+                }
                 DeclarationKind::Function
-                    | DeclarationKind::Implementation
-                    | DeclarationKind::Expectation
-            ) {
-                continue;
+                | DeclarationKind::Implementation
+                | DeclarationKind::Expectation => {}
+                _ => continue,
             }
             budget.reserve(1)?;
-            let index = push_body(module, Some(declaration), report, &mut work, budget)?;
-            by_declaration.insert(&declaration.id, index);
+            let index = push_body(
+                module,
+                module_index,
+                Some(declaration),
+                report,
+                &mut work,
+                budget,
+            )?;
+            by_declaration.insert(local_key(module_index, &declaration.id), index);
             report.source_roots += 1;
         }
     }
     report.inventory_complete = true;
     for node in typed.bodies().typed_nodes() {
         budget.step(1)?;
-        if let Some(module) = facts.get_mut(node.site.module) {
+        if let Some(module) = module_index(modules, node.site.module, budget)? {
             budget.reserve(1)?;
-            module.nodes.insert(node.site.node, node);
+            facts[module].nodes.insert(node.site.node, node);
         }
     }
     for body in typed.bodies().checked_bodies() {
         budget.step(1)?;
-        if let Some(module) = facts.get_mut(body.site.module) {
-            budget.reserve(1)?;
-            module.bodies.insert(body.owner, body);
+        // BodyFacts pairs the canonical owner with a site in its own module.
+        if let Some(module) = module_index(modules, body.site.module, budget)? {
+            let index = match body.owner {
+                BodyOwner::Startup => Some(facts[module].startup),
+                BodyOwner::Declaration(id) => {
+                    budget.step(1)?;
+                    by_declaration.get(&local_key(module, id)).copied()
+                }
+            };
+            if let Some(index) = index {
+                work[index].facts.body = Some(body);
+            }
+        }
+    }
+    for header in inventory.type_facts().declarations() {
+        budget.step(1)?;
+        let id = &header.declaration.id;
+        if id.kind == DeclarationKind::Function
+            && let Some(index) = find_root(modules, &by_declaration, id, budget)?
+        {
+            work[index].facts.header = Some(header);
         }
     }
     let mut families = BTreeSet::new();
-    let mut implementations = BTreeMap::new();
     for source in graph.implementations() {
         budget.step(1)?;
-        if families.contains(&source.family) {
+        let id = &source.family;
+        let Some(module) = module_index(modules, &id.module, budget)? else {
+            continue;
+        };
+        let key = local_key(module, id);
+        budget.step(1)?;
+        if families.contains(&key) {
             continue;
         }
         budget.reserve(1)?;
-        families.insert(&source.family);
-        if let Some(family) = inventory.captured_family(&source.family) {
+        families.insert(key);
+        // The borrowed M4 map has at most one entry per module-scope family.
+        // Bound all its candidate comparisons without relying on tree fanout.
+        charge_key(&id.module, family_count, budget)?;
+        if let Some(family) = inventory.captured_family(id) {
             for body in &family.implementations {
-                budget.reserve(1)?;
-                implementations.insert(
-                    &body.source.declaration,
-                    (body, family.header.binders.is_empty()),
-                );
+                budget.step(1)?;
+                if let Some(index) =
+                    find_root(modules, &by_declaration, &body.source.declaration, budget)?
+                {
+                    work[index].facts.implementation =
+                        Some((body, family.header.binders.is_empty()));
+                }
             }
         }
     }
 
     // An ordinary direct call reuses its symbolic named-function check. Active
     // cleanup has a different operand/epilogue, so it has its own work item.
-    let mut active = BTreeMap::new();
     let dispose = typed.dispose_role().map(|role| &role.id);
     let mut reverse_edges = 0usize;
     let mut index = 0;
     while index < work.len() {
         budget.step(1)?;
-        let WorkItem {
-            module,
-            declaration,
-            ..
-        } = work[index];
-        // Module, implementation and body fact lookups are indexed, not scans.
-        budget.step(3)?;
+        let item = &work[index];
+        let module = item.module;
         let lowered = lower_indexed(
             typed,
-            module,
-            declaration,
-            &facts[&module.key],
-            declaration.and_then(|d| implementations.get(&d.id).copied()),
+            item,
+            &facts[item.module_index].nodes,
             index >= report.source_roots,
             budget,
         );
@@ -324,34 +411,41 @@ fn analyze<'g>(
                         DependencyContract::OrdinaryCall
                             if id.kind == DeclarationKind::Function =>
                         {
-                            budget.step(1)?;
-                            by_declaration.get(id).copied()
+                            find_root(modules, &by_declaration, id, budget)?
                         }
                         DependencyContract::ActiveDisposer
-                            if id.kind == DeclarationKind::Implementation =>
-                        {
-                            budget.step(3)?;
-                            if let Some(target) = active.get(id) {
-                                Some(*target)
-                            } else if let Some(source) = by_declaration.get(id).copied()
-                                && let Some((body, _)) = implementations.get(id)
-                                && Some(&body.source.family) == dispose
-                                && id.module.origin == Origin::Application
-                            {
-                                budget.reserve(1)?;
-                                let item = &work[source];
-                                let target = push_body(
-                                    item.module,
-                                    item.declaration,
-                                    report,
-                                    &mut work,
-                                    budget,
-                                )?;
-                                active.insert(id, target);
-                                Some(target)
-                            } else {
-                                None
+                            if id.kind == DeclarationKind::Implementation
+                                && id.module.origin == Origin::Application =>
+                        'active: {
+                            let Some(source) = find_root(modules, &by_declaration, id, budget)?
+                            else {
+                                break 'active None;
+                            };
+                            let item = &work[source];
+                            if let Some(target) = item.active {
+                                break 'active Some(target);
                             }
+                            let (Some((body, _)), Some(dispose)) =
+                                (item.facts.implementation, dispose)
+                            else {
+                                break 'active None;
+                            };
+                            charge_key(&body.source.family.module, 1, budget)?;
+                            if &body.source.family != dispose {
+                                break 'active None;
+                            }
+                            let source_facts = item.facts;
+                            let target = push_body(
+                                item.module,
+                                item.module_index,
+                                item.declaration,
+                                report,
+                                &mut work,
+                                budget,
+                            )?;
+                            work[target].facts = source_facts;
+                            work[source].active = Some(target);
+                            Some(target)
                         }
                         _ => None,
                     };
@@ -411,7 +505,7 @@ fn analyze<'g>(
 
 fn propagate(
     bodies: &mut [RootReport<'_>],
-    work: &[WorkItem<'_>],
+    work: &[WorkItem<'_, '_>],
     queue: &mut VecDeque<usize>,
     completion: Completion,
 ) {
@@ -436,22 +530,24 @@ fn propagate(
 
 fn lower_indexed<'a, 'g>(
     typed: &'a TypedReport<'g>,
-    module: &'g Module,
-    declaration: Option<&'g Declaration>,
-    facts: &'a ModuleFacts<'a, 'g>,
-    implementation: Option<(&'a ImplementationFacts<'g>, bool)>,
+    item: &WorkItem<'a, 'g>,
+    nodes: &'a NodeIndex<'a, 'g>,
     active: bool,
     budget: &mut Budget,
 ) -> ResultOf<Lowered<'a, 'g>> {
+    let WorkItem {
+        module,
+        declaration,
+        facts,
+        ..
+    } = *item;
     let site = declaration.map_or(module.syntax.root, |d| d.node);
-    let owner = declaration.map_or(BodyOwner::Startup, |d| BodyOwner::Declaration(&d.id));
     let pending = || Stop::Pending(site);
     let body = facts
-        .bodies
-        .get(&owner)
+        .body
         .filter(|body| !body.flow.pending)
         .ok_or_else(pending)?;
-    let nodes = Some(&facts.nodes);
+    let nodes = Some(nodes);
     let Some(declaration) = declaration else {
         if body.site.node != site {
             return Err(pending());
@@ -467,13 +563,7 @@ fn lower_indexed<'a, 'g>(
             return lower_expectation_body(typed, module, site, result, nodes, budget);
         }
         DeclarationKind::Function => {
-            budget.step(1)?;
-            let header = typed
-                .inventory()
-                .type_facts()
-                .declarations
-                .get(&declaration.id)
-                .ok_or_else(pending)?;
+            let header = facts.header.ok_or_else(pending)?;
             if !std::ptr::eq(header.declaration, declaration)
                 || !header.binders.is_empty()
                 || module.syntax.nodes[site].children.get(1) != Some(&body.site.node)
@@ -483,7 +573,7 @@ fn lower_indexed<'a, 'g>(
             (header, Frame::Ordinary)
         }
         DeclarationKind::Implementation if module.key.origin == Origin::Application => {
-            let (implementation, closed_family) = implementation.ok_or_else(pending)?;
+            let (implementation, closed_family) = facts.implementation.ok_or_else(pending)?;
             let source = implementation.source;
             if !std::ptr::eq(implementation.header.declaration, declaration)
                 || source.body_node != body.site.node

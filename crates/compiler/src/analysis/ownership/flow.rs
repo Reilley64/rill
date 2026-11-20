@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 // Retain distinct continuing states at a join. Every feasible incoming state
 // must authorize a read, and each MIR successor cleans only what it still owns.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum State {
     Vacant,
     Initialized(Held),
     Moved(NodeId),
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct Held {
     loans: Arc<[Loan]>,
     capture_drops: [Option<NodeId>; 2],
@@ -25,7 +25,7 @@ struct Held {
     exact_target: Option<ExactTarget>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ExactTarget {
     Local(Slot),
     Caller { parameter: Slot, contents: Slot },
@@ -967,7 +967,72 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
     }
 }
 
-type KnownStates = BTreeMap<Pc, BTreeMap<Vec<State>, usize>>;
+struct BlockInput {
+    pc: Pc,
+    state: Vec<State>,
+    previous: Option<usize>,
+}
+
+// Index the most recent input per PC. Alternate inputs use links in the
+// worklist itself; they do not grow a second map of wide keys.
+#[derive(Default)]
+struct KnownStates {
+    heads: BTreeMap<Pc, usize>,
+    blocks: Vec<BlockInput>,
+}
+
+impl KnownStates {
+    fn add(&mut self, pc: Pc, state: Vec<State>, budget: &mut Budget) -> ResultOf<usize> {
+        // Preserve the indexed PC probe and one input-width charge. Reading
+        // loan lengths is covered by the slot walk, before comparing contents.
+        let mut width = state.len().checked_add(1).ok_or(Stop::Limit)?;
+        budget.step(width)?;
+        for slot in &state {
+            if let State::Initialized(held) = slot {
+                let loans = held.loans.len();
+                width = width.checked_add(loans).ok_or(Stop::Limit)?;
+                budget.step(loans)?;
+            }
+        }
+        let head = self.heads.get_mut(&pc);
+        let previous = head.as_deref().copied();
+        let mut current = previous;
+        while let Some(block) = current {
+            let input = &self.blocks[block];
+            if input.state == state {
+                return Ok(block);
+            }
+            current = input.previous;
+            if current.is_some() {
+                budget.step(width)?;
+            }
+        }
+        // One worklist record, a head only for a new PC, and both the saved
+        // input and the mutable execution copy. No allocation before reserve.
+        let entries = state
+            .len()
+            .checked_mul(2)
+            .and_then(|n| n.checked_add(1 + usize::from(previous.is_none())))
+            .ok_or(Stop::Limit)?;
+        budget.reserve(entries)?;
+        let block = self.blocks.len();
+        if let Some(head) = head {
+            *head = block;
+        } else {
+            self.heads.insert(pc, block);
+        }
+        self.blocks.push(BlockInput {
+            pc,
+            state,
+            previous,
+        });
+        Ok(block)
+    }
+
+    fn input(&self, block: usize) -> &[State] {
+        &self.blocks[block].state
+    }
+}
 
 // Reuse the ordinary pre-instruction states and the checked graph's callee
 // identities. Taking ownership of these already-accounted collections does
@@ -983,7 +1048,6 @@ pub(super) struct CancellationTrace<'a, 'g> {
     bindings: BTreeMap<&'g DeclarationId, Slot>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'g>>,
-    pending: Vec<(Pc, Vec<State>)>,
     known: KnownStates,
     live: Vec<BTreeSet<Slot>>,
     flat: bool,
@@ -1102,7 +1166,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             return Ok(None);
         }
         let block = self.call_block.unwrap();
-        let pc = self.pending[block].0;
+        let pc = self.known.blocks[block].pc;
         let Instruction {
             node,
             action: Action::Call(index),
@@ -1147,7 +1211,7 @@ impl<'g> CancellationTrace<'_, 'g> {
         {
             return Ok(None);
         }
-        let state = self.known[&pc].keys().next().unwrap();
+        let state = self.known.input(block);
         let old = initialized(&state[target], node)?;
         let source = initialized(&state[input], node)?;
         if old.loans.is_empty()
@@ -1188,10 +1252,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             callee: call.callee,
             frame,
             body: self.body,
-            entry: self.known[&self.pending[mir.entry].0]
-                .keys()
-                .next()
-                .unwrap(),
+            entry: self.known.input(mir.entry),
             block,
             node,
             stages: [access, input, gate].map(|slot| self.slots[slot].place(self.module)),
@@ -1254,21 +1315,7 @@ impl<'g> CancellationTrace<'_, 'g> {
         }
         let frame = self.frame();
         if !checkpoints {
-            let initial = self.known[&self.pending[mir.entry].0]
-                .keys()
-                .next()
-                .unwrap();
-            return frame.entry(initial, self.body, budget);
-        }
-
-        // Index the inputs to the MIR blocks without copying ownership state.
-        budget.reserve(mir.blocks.len())?;
-        budget.step(self.known.len() + mir.blocks.len())?;
-        let mut inputs = vec![&[][..]; mir.blocks.len()];
-        for by_state in self.known.values() {
-            for (state, &block) in by_state {
-                inputs[block] = state;
-            }
+            return frame.entry(self.known.input(mir.entry), self.body, budget);
         }
 
         // A path condition is the pair of true and false parameter masks.
@@ -1297,7 +1344,8 @@ impl<'g> CancellationTrace<'_, 'g> {
                 return Ok(None);
             }
             budget.step(1)?;
-            let Instruction { node, action, .. } = self.code[self.pending[block].0];
+            let pc = self.known.blocks[block].pc;
+            let Instruction { node, action, .. } = self.code[pc];
             if !flat_action(action, &self.slots) {
                 complete = false;
                 continue;
@@ -1318,7 +1366,7 @@ impl<'g> CancellationTrace<'_, 'g> {
                 // Even after losing the receipt, a feasible independent path
                 // can expose a forbidden outward loan. Don't build cleanup
                 // or accumulate successors for a proof we cannot publish.
-                let admitted = frame.check(inputs[block], node, budget)?;
+                let admitted = frame.check(self.known.input(block), node, budget)?;
                 complete &= admitted;
                 if complete {
                     budget.reserve(1)?;
@@ -1343,7 +1391,7 @@ impl<'g> CancellationTrace<'_, 'g> {
                     // The condition has already read its parameter. Preserve that
                     // decision only if another read is possible, including on a backedge.
                     budget.step(1)?;
-                    let keep = if self.live[self.pending[block].0].contains(&slot) {
+                    let keep = if self.live[pc].contains(&slot) {
                         bit
                     } else {
                         0
@@ -1373,12 +1421,13 @@ impl<'g> CancellationTrace<'_, 'g> {
             return Ok(None);
         }
 
-        let Some(mut proof) = frame.entry(inputs[mir.entry], self.body, budget)? else {
+        let Some(mut proof) = frame.entry(self.known.input(mir.entry), self.body, budget)? else {
             return Ok(None);
         };
         for (block, callee) in deliveries {
             budget.step(1)?;
-            let on_delivery = frame.exit(inputs[block], mir.blocks[block].site.node, budget)?;
+            let on_delivery =
+                frame.exit(self.known.input(block), mir.blocks[block].site.node, budget)?;
             let successor = match callee {
                 Some(CalleeEntry { callee, site }) => CancellationSuccessor::CalleeEntry {
                     callee,
@@ -1549,31 +1598,8 @@ pub(super) fn run<'a, 'g>(
     } = build;
     let live = liveness(&slots, &code, &calls, &cleanups, &retained, budget)?;
     let empty = Held::default();
-    let mut pending = Vec::new();
-    let mut known = KnownStates::new();
+    let mut known = KnownStates::default();
     let mut blocks = Vec::new();
-    let add = |pc,
-               state: Vec<State>,
-               known: &mut KnownStates,
-               pending: &mut Vec<(Pc, Vec<State>)>,
-               budget: &mut Budget|
-     -> ResultOf<usize> {
-        budget.step(1 + state.len())?;
-        for slot in &state {
-            if let State::Initialized(held) = slot {
-                budget.step(held.loans.len())?;
-            }
-        }
-        let at_pc = known.entry(pc).or_default();
-        if let Some(&block) = at_pc.get(&state) {
-            return Ok(block);
-        }
-        budget.reserve(2 + 2 * state.len())?;
-        let block = pending.len();
-        at_pc.insert(state.clone(), block);
-        pending.push((pc, state));
-        Ok(block)
-    };
     // A worklist index is also the eventual MIR block index.
     budget.reserve(slots.len())?;
     let mut state: Vec<_> = slots
@@ -1630,12 +1656,13 @@ pub(super) fn run<'a, 'g>(
         });
     }
     let remainder = active.map(|frame| frame.remainder);
-    let entry = add(entry, state, &mut known, &mut pending, budget)?;
+    let entry = known.add(entry, state, budget)?;
     let mut blocked = None;
-    while blocks.len() < pending.len() {
-        let (pc, state) = &mut pending[blocks.len()];
-        let mut state = std::mem::take(state);
-        let pc = *pc;
+    while blocks.len() < known.blocks.len() {
+        let input = &known.blocks[blocks.len()];
+        let pc = input.pc;
+        // The insertion reserved this copy alongside the saved input.
+        let mut state = input.state.clone();
         let Instruction {
             node,
             action,
@@ -2568,7 +2595,7 @@ pub(super) fn run<'a, 'g>(
         if matches!(edges, Edges::Branch { .. }) {
             budget.reserve(state.len())?;
         }
-        let mut successor = |pc, state| add(pc, state, &mut known, &mut pending, budget);
+        let mut successor = |pc, state| known.add(pc, state, budget);
         let terminator = match edges {
             Edges::Next(next) => Terminator::Goto(successor(next, state)?),
             Edges::Branch { yes, no } => Terminator::Branch {
@@ -2599,7 +2626,6 @@ pub(super) fn run<'a, 'g>(
         bindings,
         code,
         calls,
-        pending,
         known,
         live,
         flat,
@@ -2622,6 +2648,75 @@ pub(super) fn run<'a, 'g>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_cache_failed_reservation_does_not_insert_pc() {
+        let mut known = KnownStates::default();
+        let mut budget = Budget {
+            limits: AnalysisLimits {
+                max_entries: 3,
+                ..AnalysisLimits::default()
+            },
+            statistics: Statistics::default(),
+        };
+        assert!(matches!(
+            known.add(7, vec![State::Vacant], &mut budget),
+            Err(Stop::Limit)
+        ));
+        assert!(
+            !known.heads.contains_key(&7),
+            "an unreserved PC entered the cache"
+        );
+        assert!(known.blocks.is_empty());
+        assert_eq!(budget.statistics.entries, 0);
+    }
+
+    #[test]
+    fn state_cache_reserves_work_for_each_wide_comparison() {
+        let mut known = KnownStates::default();
+        let mut budget = Budget {
+            limits: AnalysisLimits::default(),
+            statistics: Statistics::default(),
+        };
+        let state = |last| {
+            vec![
+                State::Initialized(Held {
+                    loans: Arc::from([0, 1, 2].map(|source| Loan {
+                        source,
+                        site: 0,
+                        exclusive: false,
+                        kind: LoanKind::Backing,
+                    })),
+                    ..Held::default()
+                }),
+                State::Moved(last),
+            ]
+        };
+        for last in [0, 1] {
+            assert_eq!(known.add(7, state(last), &mut budget).ok(), Some(last));
+        }
+        // Probe the first state, behind one other state with equal loan contents.
+        // The two slots and three loans cost six units per exact comparison.
+        for max_work in [11, 12] {
+            let mut budget = Budget {
+                limits: AnalysisLimits {
+                    max_work,
+                    max_entries: 0,
+                    ..AnalysisLimits::default()
+                },
+                statistics: Statistics::default(),
+            };
+            let result = known.add(7, state(0), &mut budget);
+            if max_work == 11 {
+                assert!(matches!(result, Err(Stop::Limit)));
+            } else {
+                assert_eq!(result.ok(), Some(0));
+                assert_eq!(budget.statistics.work, 12);
+            }
+            assert_eq!(known.blocks.len(), 2);
+            assert_eq!(budget.statistics.entries, 0);
+        }
+    }
 
     #[test]
     fn shared_slot_adds_incoming_storage_to_the_carried_restrictions() {

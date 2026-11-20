@@ -306,6 +306,79 @@ fn one_budget_leaves_unfinished_work_unproved() {
     );
 }
 
+#[test]
+fn installed_work_accounts_for_shared_module_path_prefixes() {
+    installed(
+        "graph::installed_work_accounts_for_shared_module_path_prefixes",
+        |request| {
+            let mut short = [AnalysisLimits::default(); 2];
+            for width in [1, 96] {
+                let prefix = "p".repeat(width);
+                let helper = format!("{prefix}a");
+                let unused = format!("{prefix}b");
+                let main = MAIN.replace(
+                    "import helper::ready;",
+                    &format!("import {helper}::ready;\nimport {unused}::other;"),
+                );
+                fs::write(&request.entry, main).unwrap();
+                fs::write(
+                    request.entry.with_file_name(format!("{helper}.rill")),
+                    HELPER,
+                )
+                .unwrap();
+                fs::write(
+                    request.entry.with_file_name(format!("{unused}.rill")),
+                    "export function other(): bool { return true; }\n",
+                )
+                .unwrap();
+                for (mode, test_mode) in [false, true].into_iter().enumerate() {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let typed = analyze_typed(&graph, AnalysisLimits::default());
+                    let receipt = typed.receipt().expect("installed typed receipt");
+                    let full = analyze_ownership(&receipt, AnalysisLimits::default());
+                    assert_eq!(full.completion(), GraphCompletion::Incomplete);
+                    assert!(full.inventory_complete());
+                    assert_eq!(full.roots().len(), 175);
+                    let expectation = root(&full, b"expect ready()");
+                    assert_eq!(expectation.completion(), Completion::Checked);
+                    let [edge] = expectation.dependencies() else {
+                        panic!("missing canonical ready edge");
+                    };
+                    assert_eq!(edge.declaration.module.path, format!("{helper}.rill"));
+                    assert_eq!(
+                        root(&full, b"function other(").completion(),
+                        Completion::Checked
+                    );
+                    let stats = full.statistics();
+                    if width == 1 {
+                        short[mode] = AnalysisLimits {
+                            max_work: stats.work,
+                            max_entries: stats.entries,
+                            max_depth: stats.max_depth,
+                        };
+                    } else {
+                        assert_eq!(stats.entries, short[mode].max_entries);
+                        assert_eq!(stats.max_depth, short[mode].max_depth);
+                        let same_work = analyze_ownership(&receipt, short[mode]);
+                        assert_eq!(
+                            same_work.completion(),
+                            GraphCompletion::ResourceLimit,
+                            "the short path budget ({}) also covered the long shared prefix ({stats:?})",
+                            short[mode].max_work,
+                        );
+                        assert!(same_work.inventory_complete());
+                        assert!(same_work.roots().iter().all(|root| root.mir().is_none()));
+                    }
+                }
+            }
+        },
+    );
+}
+
 fn root<'a, 'g>(report: &'a GraphReport<'g>, prefix: &[u8]) -> &'a RootReport<'g> {
     report
         .roots()
