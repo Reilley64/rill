@@ -479,6 +479,25 @@ pub fn lower_root<'g>(
 ) -> Result<Report<'g>, QueryError> {
     let typed = receipt.report;
     validate_request(typed, module, owner)?;
+    let mut budget = Budget {
+        limits,
+        statistics: Statistics::default(),
+    };
+    // Capture identity is constant-time and precedes resource errors. Charge
+    // valid root resolution, including an upper bound on binary-search comparisons.
+    let lookup_work = match owner {
+        BodyOwner::Startup => 1,
+        BodyOwner::Declaration(id) => match id.kind {
+            DeclarationKind::Function => 2,
+            DeclarationKind::Implementation | DeclarationKind::Expectation => {
+                3 + module.declarations.len().max(1).ilog2() as usize
+            }
+            _ => return Err(QueryError::InvalidRequest),
+        },
+    };
+    if budget.step(lookup_work).is_err() {
+        return Ok(report(Err((module, Stop::Limit)), budget.statistics));
+    }
     let plan = match owner {
         BodyOwner::Startup => RootPlan::Startup,
         BodyOwner::Declaration(id) if id.kind == DeclarationKind::Function => {
@@ -509,16 +528,10 @@ pub fn lower_root<'g>(
         }
         BodyOwner::Declaration(_) => return Err(QueryError::InvalidRequest),
     };
-    let mut budget = Budget {
-        limits,
-        statistics: Statistics::default(),
-    };
-    let result = checked_graph(typed, module, plan, &mut budget);
-    Ok(report(result, budget.statistics))
+    Ok(check_root(typed, module, plan, budget))
 }
 
-// Identity validation precedes proof work so a foreign request is invalid even
-// with zero proof budget. Loaded modules are ordered by their canonical keys.
+// Reject foreign capture handles even at zero budget, without searching either table.
 fn validate_request(
     typed: &TypedReport<'_>,
     module: &Module,
@@ -530,11 +543,7 @@ fn validate_request(
     {
         return Err(QueryError::InvalidRequest);
     }
-    let modules = graph.modules();
-    let index = modules
-        .binary_search_by(|candidate| candidate.key.cmp(&module.key))
-        .map_err(|_| QueryError::InvalidRequest)?;
-    if !std::ptr::eq(&modules[index], module) {
+    if !graph.owns_module(module) {
         return Err(QueryError::InvalidRequest);
     }
     Ok(())
@@ -552,7 +561,40 @@ pub fn lower_body<'g>(
     if declaration.kind != DeclarationKind::Function {
         return Err(QueryError::InvalidRequest);
     }
-    lower_root(receipt, module, BodyOwner::Declaration(declaration), limits)
+    let typed = receipt.report;
+    validate_request(typed, module, BodyOwner::Declaration(declaration))?;
+    // Preserve the original function query's budget boundary: its typed header
+    // is a request premise, not a root-discovery operation.
+    let header = typed
+        .inventory()
+        .type_facts()
+        .declarations
+        .get(declaration)
+        .ok_or(QueryError::InvalidRequest)?;
+    Ok(check_root(
+        typed,
+        module,
+        RootPlan::Function(header),
+        Budget {
+            limits,
+            statistics: Statistics::default(),
+        },
+    ))
+}
+
+fn check_root<'g>(
+    typed: &TypedReport<'g>,
+    module: &'g Module,
+    plan: RootPlan<'_, 'g>,
+    mut budget: Budget,
+) -> Report<'g> {
+    let mut result = checked_graph(typed, module, plan, &mut budget);
+    if let Err((at, Stop::Rejected { .. })) = result
+        && budget.reserve(1).is_err()
+    {
+        result = Err((at, Stop::Limit));
+    }
+    report(result, budget.statistics)
 }
 
 fn report<'g>(result: Result<Mir<'g>, (&'g Module, Stop)>, statistics: Statistics) -> Report<'g> {

@@ -140,6 +140,12 @@ fn assert_limits(
     assert_eq!(exact.statistics(), stats);
     assert_eq!(exact.completion(), report.completion());
     assert_eq!(exact.mir().is_some(), report.mir().is_some());
+    assert_eq!(exact.findings().len(), report.findings().len());
+    for (finding, expected) in exact.findings().iter().zip(report.findings()) {
+        assert_eq!(finding.code(), expected.code());
+        assert_eq!(finding.site.span, expected.site.span);
+        assert_eq!(finding.related.span, expected.related.span);
+    }
     for short in [
         AnalysisLimits {
             max_work: work - 1,
@@ -179,7 +185,7 @@ fn imported_startup_is_a_lexical_root_in_both_modes() {
             helper,
             owner,
             &report,
-            [(2024, 91, 3), (2039, 100, 3)][index],
+            [(2025, 91, 3), (2041, 101, 3)][index],
         );
         if index == 1 {
             assert_reuse(&report, helper, &reuse, "text");
@@ -248,7 +254,7 @@ fn unused_canonical_plain_implementation_is_a_root() {
                 helper,
                 owner,
                 &report,
-                [(2086, 134, 3), (2049, 115, 3)][index],
+                [(2092, 134, 3), (2056, 116, 3)][index],
             );
             if index == 1 {
                 assert_reuse(&report, helper, &reuse, "value");
@@ -294,7 +300,7 @@ fn expectation_checks_its_reached_helper_before_publishing_mir() {
                 helper,
                 owner,
                 &report,
-                [(4052, 205, 3), (4019, 188, 3)][index],
+                [(4058, 205, 3), (4026, 189, 3)][index],
             );
             if index == 1 {
                 assert_reuse(&report, helper, &reuse, "value");
@@ -440,6 +446,30 @@ expect ((Decision {{ allowed: false, text: "scratch" }}).allowed);
                 let blocker = result.blocked_at().unwrap();
                 assert_eq!((blocker.module, blocker.node), (&module.key, body.node));
             }
+        },
+    );
+}
+
+#[test]
+fn startup_cleanup_blocker_points_to_the_last_startup_statement() {
+    let source = format!(
+        "{HELPER}\nlet flag = false; let seed = &flag;\nlet mut a: [&bool, bool] = [seed, false]; let mut b: [&bool, bool] = [seed, true];\na[0] = &b[1]; b[0] = &a[1];\nfunction other(): void {{}}\n"
+    );
+    fixture(
+        "roots::startup_cleanup_blocker_points_to_the_last_startup_statement",
+        &[&source],
+        |_, _, graph, receipt, _| {
+            let (_, helper) = app_modules(graph);
+            let result = lower_root(
+                receipt,
+                helper,
+                BodyOwner::Startup,
+                AnalysisLimits::default(),
+            )
+            .unwrap();
+            assert_eq!(result.completion(), Completion::Incomplete);
+            assert!(result.mir().is_none() && result.findings().is_empty());
+            assert_eq!(result.blocked_at().unwrap().span.bytes(), b"b[0] = &a[1];");
         },
     );
 }

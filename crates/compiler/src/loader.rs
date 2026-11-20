@@ -344,6 +344,11 @@ impl Graph {
         self.ownership_archive.as_deref()
     }
 
+    /// Modules carry the loader's private capture identity, even for empty startup.
+    pub(crate) fn owns_module(&self, module: &Module) -> bool {
+        module.context == self.id
+    }
+
     /// This does not admit roles, implementations or representations.
     pub(crate) fn is_pinned_standard_source(&self, module: &Module) -> bool {
         module.context == self.id

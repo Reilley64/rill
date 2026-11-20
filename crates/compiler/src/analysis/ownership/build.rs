@@ -1666,7 +1666,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 None => None,
             },
         };
-        let mut tail = self.cleanup_scope(node, &locals, next)?;
+        // Module startup has no closing brace. Attribute its normal lexical
+        // exit to the last reached startup statement, not the entire file.
+        let exit_site = if node == self.module.syntax.root && prefix != 0 {
+            children[prefix - 1]
+        } else {
+            node
+        };
+        let mut tail = self.cleanup_scope(exit_site, &locals, next)?;
         if node == self.body {
             if !locals.is_empty()
                 && let Action::EndScope(index) = self.code[tail].action
