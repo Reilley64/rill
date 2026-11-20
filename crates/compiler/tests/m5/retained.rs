@@ -597,6 +597,212 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
 }
 
 #[test]
+fn loop_carried_input_reaches_destination_on_second_iteration() {
+    probe(
+        "retained::loop_carried_input_reaches_destination_on_second_iteration",
+        r#"
+            function remember(slot: &mut &bool, input: &bool): void { *slot = input; }
+            function late(seed: &bool, enter: bool, twice: bool): bool {
+                let mut flag = false;
+                let mut carrier = seed;
+                let mut out = seed;
+                let mut more = enter;
+                let mut phase = twice;
+                while (more) {
+                    remember(&mut out, carrier);
+                    carrier = &flag;
+                    more = phase;
+                    phase = false;
+                }
+                flag = true;
+                return *out;
+            }
+            function repaired(seed: &bool, enter: bool, twice: bool): bool {
+                let mut flag = false;
+                let mut carrier = seed;
+                let mut out = seed;
+                let mut more = enter;
+                let mut phase = twice;
+                while (more) {
+                    remember(&mut out, carrier);
+                    carrier = &flag;
+                    more = phase;
+                    phase = false;
+                }
+                out = seed;
+                flag = true;
+                return *out;
+            }
+            function one(seed: &bool): bool {
+                let mut flag = false;
+                let mut carrier = seed;
+                let mut out = seed;
+                remember(&mut out, carrier);
+                carrier = &flag;
+                flag = true;
+                return *out;
+            }
+            function two(seed: &bool): bool {
+                let mut flag = false;
+                let mut carrier = seed;
+                let mut out = seed;
+                remember(&mut out, carrier);
+                carrier = &flag;
+                remember(&mut out, carrier);
+                flag = true;
+                return *out;
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            for name in ["late", "two"] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one conflict, got {:?}", report.findings());
+                };
+                assert_eq!(finding.code(), "R0203", "{name}");
+                assert_eq!(finding.site.span.bytes(), b"flag = true;", "{name}");
+                assert_eq!(finding.related.span.bytes(), b"&flag", "{name}");
+                let body = &module.syntax.nodes[declaration(name).node].span;
+                for site in [finding.site, finding.related] {
+                    assert_eq!(site.module, &module.key);
+                    assert!(body.start() <= site.span.start() && site.span.end() <= body.end());
+                }
+                assert!(finding.related.span.end() < finding.site.span.start());
+            }
+
+            let one = lower("one");
+            assert_eq!(one.completion(), Completion::Checked);
+            assert!(one.findings().is_empty());
+            require_mir(&one, "one");
+            let repaired = lower("repaired");
+            assert_eq!(repaired.completion(), Completion::Checked);
+            assert!(repaired.findings().is_empty());
+            let mir = require_mir(&repaired, "repaired");
+            let remember = &declaration("remember").id;
+
+            // Exit after zero, one or two bodies: enter is false, or enter is true
+            // and twice selects whether phase permits a second iteration.
+            let prefix = straight_blocks(mir, mir.entry);
+            assert!(
+                !prefix
+                    .iter()
+                    .any(|block| matches!(block.operation, Operation::CallRetaining { .. }))
+            );
+            let mut head = *prefix.last().unwrap();
+            let condition = head.site.node;
+            let mut exit_roots = None;
+            for iterations in 0..=2 {
+                let Terminator::Branch { yes, no } = head.terminator else {
+                    panic!("expected loop test after {iterations} iterations");
+                };
+                assert_eq!(head.site.node, condition);
+                assert_eq!(head.site.span.bytes(), b"more");
+
+                let exit: Vec<_> = linear(mir, no)
+                    .into_iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Install { .. }
+                                | Operation::Dereference(_)
+                                | Operation::CallRetaining { .. }
+                        )
+                    })
+                    .collect();
+                let [
+                    Operation::Install {
+                        target: out,
+                        incoming: seed,
+                    },
+                    Operation::Install { target: flag, .. },
+                    Operation::Dereference(read),
+                ] = exit.as_slice()
+                else {
+                    panic!(
+                        "expected repair, write and read after {iterations} iterations: {exit:?}"
+                    );
+                };
+                assert_eq!(seed.root.span.bytes(), b"seed");
+                assert_eq!(out.root.span.bytes(), b"out");
+                assert_eq!(flag.root.span.bytes(), b"flag");
+                assert_eq!(read.root.node, out.root.node);
+                let roots = (out.root.node, flag.root.node);
+                assert_eq!(*exit_roots.get_or_insert(roots), roots);
+                if iterations == 2 {
+                    break;
+                }
+
+                let body = straight_blocks(mir, yes);
+                let events: Vec<_> = body
+                    .iter()
+                    .map(|block| &block.operation)
+                    .filter(|op| match op {
+                        Operation::Borrow { .. } | Operation::CallRetaining { .. } => true,
+                        Operation::Copy { from, .. } => from.root.span.bytes() == b"carrier",
+                        Operation::Install { target, .. } => {
+                            matches!(target.root.span.bytes(), b"carrier" | b"out" | b"flag")
+                        }
+                        _ => false,
+                    })
+                    .collect();
+                assert!(
+                    matches!(events.as_slice(), [
+                        Operation::Borrow { source: access, holder: access_stage, exclusive: true },
+                        Operation::Copy { from: carrier, into: Some(stage) },
+                        Operation::CallRetaining { callee, destination: RetainedPlace::Local(destination), input },
+                        Operation::Borrow { source, holder, exclusive: false },
+                        Operation::Install { target, incoming },
+                    ] if *callee == remember && access_stage.root.span.bytes() == b"&mut out"
+                        && access.root.node == out.root.node && destination.root.node == out.root.node
+                        && input.root.node == stage.root.node && source.root.node == flag.root.node
+                        && holder.root.span.bytes() == b"&flag" && incoming.root.node == holder.root.node
+                        && target.root.node == carrier.root.node),
+                    "expected retention before carrier replacement: {events:?}"
+                );
+                head = *body.last().unwrap();
+            }
+
+            let stats = repaired.statistics();
+            let exact = AnalysisLimits {
+                max_work: stats.work,
+                max_entries: stats.entries,
+                max_depth: stats.max_depth,
+            };
+            let at_limit = check("repaired", exact);
+            assert_eq!(at_limit.completion(), Completion::Checked);
+            assert!(at_limit.findings().is_empty());
+            require_mir(&at_limit, "repaired at exact limits");
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = check("repaired", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn retained_pipes_separate_formal_roles_from_staging_order() {
     probe(
         "retained::retained_pipes_separate_formal_roles_from_staging_order",
