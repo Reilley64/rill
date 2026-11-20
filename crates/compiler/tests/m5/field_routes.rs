@@ -137,6 +137,23 @@ fn carried_field_and_slot_borrow_differ() {
                 let mut x = LocalView { owned: true, view: seed };
                 x.view = &x.owned;
             }
+            function usedCopy(seed: &bool): bool {
+                let mut x = LocalView { owned: true, view: seed };
+                x.view = &x.owned;
+                let copied = x.view;
+                x.view = seed;
+                let observed = *copied;
+                x.owned = false;
+                return observed;
+            }
+            function liveCopy(seed: &bool): bool {
+                let mut x = LocalView { owned: true, view: seed };
+                x.view = &x.owned;
+                let copied = x.view;
+                x.view = seed;
+                x.owned = false;
+                return *copied;
+            }
         "#,
         |_, module, receipt| {
             let lower = |name| {
@@ -220,9 +237,61 @@ fn carried_field_and_slot_borrow_differ() {
             assert_eq!(finding.code(), "R0201");
             assert_eq!(finding.related.span.bytes(), b"&mut local");
 
+            // Acquiring and copying this route works; keeping it until cleanup does not.
             let grouped = lower("groupedOnly");
             assert_eq!(grouped.completion(), Completion::Incomplete);
+            assert!(grouped.findings().is_empty());
             assert!(grouped.mir().is_none());
+            let blocker = grouped.blocked_at().unwrap().span.bytes();
+            assert_eq!(
+                blocker,
+                b"{\n                let mut x = LocalView { owned: true, view: seed };\n                x.view = &x.owned;\n            }",
+            );
+
+            let used = lower("usedCopy");
+            let mir = require_mir(&used, "usedCopy");
+            let ops = linear(mir, mir.entry);
+            let staged = ops
+                .iter()
+                .find_map(|op| match op {
+                    Operation::Borrow {
+                        source,
+                        holder,
+                        exclusive: false,
+                    } if source.root.span.bytes() == b"x"
+                        && source
+                            .field()
+                            .is_some_and(|f| f.name.as_deref() == Some("owned")) =>
+                    {
+                        Some(holder)
+                    }
+                    _ => None,
+                })
+                .expect("borrow the owned field, not the whole record");
+            assert!(
+                ops.iter()
+                    .any(|op| matches!(op, Operation::Install { target, incoming }
+                if target.root.span.bytes() == b"x"
+                    && target.field().is_some_and(|f| f.name.as_deref() == Some("view"))
+                    && incoming.root.node == staged.root.node))
+            );
+            assert!(
+                ops.iter()
+                    .any(|op| matches!(op, Operation::Copy { from, into: Some(to) }
+                if from.root.span.bytes() == b"x"
+                    && from.field().is_some_and(|f| f.name.as_deref() == Some("view"))
+                    && to.root.span.bytes() == b"copied"))
+            );
+
+            let live = lower("liveCopy");
+            assert_eq!(live.completion(), Completion::SourceRejected);
+            assert!(live.mir().is_none());
+            let [finding] = live.findings() else {
+                panic!("expected the copied view to block backing replacement");
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"x.owned = false;");
+            assert_eq!(finding.related.span.bytes(), b"&x.owned");
 
             for name in [
                 "callerRetains",
