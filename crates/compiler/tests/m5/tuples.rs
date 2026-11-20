@@ -124,7 +124,6 @@ fn named_nested_tuple_leaf_transfers_keep_the_sibling_live_at_the_join() {
                 max_work: stats.work,
                 max_entries: stats.entries,
                 max_depth: stats.max_depth,
-                ..AnalysisLimits::default()
             };
             assert!(check("split", exact).mir().is_some());
             for short in [
