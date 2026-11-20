@@ -749,10 +749,6 @@ fn whole_nested_tuple_transfers_do_not_open_general_places_or_values() {
                 let mut saved = input;
                 saved = [[fresh, true], "tail"];
             }
-            function localPattern(input: [[string, bool], string]): void {
-                let saved = input;
-                let [[text, _], _] = saved;
-            }
             function consume(input: [[string, bool], string]): bool { return true; }
             function argument(input: [[string, bool], string]): bool {
                 let saved = input;
@@ -774,7 +770,6 @@ fn whole_nested_tuple_transfers_do_not_open_general_places_or_values() {
                 ("leafArgument", "saved[0][0]"),
                 ("construct", "saved"),
                 ("replaceWithConstructed", "[[fresh, true], \"tail\"]"),
-                ("localPattern", "saved"),
                 ("argument", "saved"),
                 ("result", "produce()"),
                 ("reference", "input: [[&string, bool], string]"),

@@ -247,7 +247,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 .insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
-        if let Some(slot) = self.nested_tuple_parameter(node, ty)? {
+        if let Some(slot) = self.nested_tuple_region(node, ty)? {
             self.budget.reserve(1)?;
             self.nested_tuple_parameters
                 .insert(&parameter.declaration.id, slot);
@@ -256,7 +256,7 @@ impl<'a, 'g> Build<'a, 'g> {
         self.local(&parameter.declaration.id, node, ty)
     }
 
-    fn nested_tuple_parameter(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Option<Slot>> {
+    fn nested_tuple_region(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Option<Slot>> {
         let TypeTerm::Tuple(elements) = ty.as_ref() else {
             return Ok(None);
         };
@@ -2337,24 +2337,19 @@ impl<'a, 'g> Build<'a, 'g> {
             }
         }
         let tuple_source = if nested_tuple {
-            let (input, path) = self
-                .whole_named_owned_place(source)?
-                .ok_or(Stop::Pending(source))?;
-            self.budget.step(1)?;
-            let from = *self
-                .nested_tuple_parameters
-                .get(path.root)
-                .ok_or(Stop::Pending(source))?;
-            self.budget.step(self.slots[from].storage(from).len())?;
-            if input.ty != facts.ty {
-                return Err(Stop::Pending(source));
-            }
-            Some(from)
+            self.nested_tuple_transfer_source(source, &facts.ty)?
         } else {
             None
         };
         let scratch = if let Some(from) = tuple_source {
             self.clone_region(from, source)?
+        } else if nested_tuple {
+            let literal = self.ungroup(source)?;
+            if self.module.syntax.nodes[literal].kind != NodeKind::Bracket {
+                return Err(Stop::Pending(source));
+            }
+            self.nested_tuple_region(source, &facts.ty)?
+                .ok_or(Stop::Pending(source))?
         } else if nested_record {
             self.nested_transfer_slot(source, source, &facts.ty)?
                 .ok_or(Stop::Pending(source))?
@@ -2430,10 +2425,62 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
+        if nested_tuple && tuple_source.is_none() {
+            return self.initialize_tuple_pattern_literal(source, scratch, &facts.ty, tail, depth);
+        }
         let proof = tuple_source
             .map(ExpressionProof::NestedTupleSource)
             .or_else(|| nested_reborrow.map(ExpressionProof::NestedTupleParent));
         self.expression_with_proof(source, Some(scratch), tail, depth, proof)
+    }
+
+    fn initialize_tuple_pattern_literal(
+        &mut self,
+        node: NodeId,
+        into: Slot,
+        expected: &Type<'g>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let (node, depth) = self.ungroup_expression_at(node, depth)?;
+        let facts = self.normal_value(node)?;
+        let (NodeKind::Bracket, Some(DataExpression::Tuple { elements }), TypeTerm::Tuple(types)) = (
+            &self.module.syntax.nodes[node].kind,
+            &facts.data,
+            expected.as_ref(),
+        ) else {
+            return Err(Stop::Pending(node));
+        };
+        self.budget.step(self.slots[into].storage(into).len())?;
+        if facts.access != Access::Owned || facts.ty != *expected || elements.len() != types.len() {
+            return Err(Stop::Pending(node));
+        }
+        let outer = match self.slots[into].projection {
+            None => None,
+            Some(Projection::TupleElement(position)) => Some(position),
+            _ => return Err(Stop::Pending(node)),
+        };
+        // Use typed positions, not flat slot offsets: each child has its own header.
+        // Build the continuation backward so the written operands run before their header.
+        let mut tail = self.emit(node, Action::Init(into), Edges::Next(next))?;
+        for (position, (&value, ty)) in elements.iter().zip(types).enumerate().rev() {
+            let target = self.nested_tuple_member_slot(
+                node,
+                into,
+                outer.unwrap_or(position),
+                outer.map(|_| position),
+            )?;
+            tail = match (outer, ty.as_ref()) {
+                (None, TypeTerm::Tuple(_)) => {
+                    self.initialize_tuple_pattern_literal(value, target, ty, tail, depth + 1)?
+                }
+                (_, TypeTerm::Primitive(_)) => {
+                    self.expression(value, Some(target), tail, depth + 1)?
+                }
+                _ => return Err(Stop::Pending(value)),
+            };
+        }
+        Ok(tail)
     }
 
     fn propagates_directly(&mut self, node: NodeId) -> ResultOf<bool> {
