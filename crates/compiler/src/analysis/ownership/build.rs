@@ -4641,14 +4641,26 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             _ => return Err(Stop::Pending(node)),
         };
+        let carries_exclusive = |capture: &CaptureFact<'_>| {
+            matches!(
+                capture.ty.as_ref(),
+                TypeTerm::Reference { mutable: true, .. }
+            )
+        };
+        let local_exclusive = carries_exclusive(first) || second.is_some_and(carries_exclusive);
         let capture = self.capture_slot(first)?;
         let second = second
             .map(|fact| {
                 let slot = self.capture_slot(fact)?;
-                // Repeated copies and shared borrows are non-consuming. A
-                // repeated move needs the full capture/use judgment.
+                // An exclusive borrow stages a move-only descriptor without
+                // moving the source. Check successive acquisitions in flow;
+                // repeated source moves need the full capture/use judgment.
+                let moves_source = |fact: &CaptureFact<'_>, slot: Slot| {
+                    self.slots[slot].moves
+                        && !matches!(fact.form, CaptureForm::ExplicitBorrow { .. })
+                };
                 if first.path.root == fact.path.root
-                    && (self.slots[capture].moves || self.slots[slot].moves)
+                    && (moves_source(first, capture) || moves_source(fact, slot))
                 {
                     return Err(Stop::Pending(node));
                 }
@@ -4681,6 +4693,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 mode,
                 cell_addend: None,
                 layout,
+                local_exclusive,
             },
             Edges::Next(next),
         )?;
@@ -4790,6 +4803,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 mode: InvocationMode::Mutable,
                 cell_addend: Some(addend),
                 layout: None,
+                local_exclusive: false,
             },
             Edges::Next(next),
         )?;
@@ -4801,25 +4815,82 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let shape = self.ungroup(node)?;
         self.budget.step(1)?;
         let syntax = &self.module.syntax.nodes[shape];
-        if !capture.reachable
-            || capture.through.is_some()
-            || !capture.path.projections.is_empty()
-            || !matches!(
-                (capture.form, syntax.kind),
-                (
-                    CaptureForm::ExplicitBorrow { mutable: false },
-                    NodeKind::Prefix("&")
-                ) | (
-                    CaptureForm::Value | CaptureForm::CarriedReference { mutable: false },
-                    NodeKind::ValueReference
-                )
+        if !capture.reachable || capture.through.is_some() || !capture.path.projections.is_empty() {
+            return Err(Stop::Pending(node));
+        }
+        if matches!(
+            capture.ty.as_ref(),
+            TypeTerm::Reference { mutable: true, .. }
+        ) {
+            return self.local_exclusive_capture_slot(capture, shape);
+        }
+        if !matches!(
+            (capture.form, syntax.kind),
+            (
+                CaptureForm::ExplicitBorrow { mutable: false },
+                NodeKind::Prefix("&")
+            ) | (
+                CaptureForm::Value | CaptureForm::CarriedReference { mutable: false },
+                NodeKind::ValueReference
             )
-            || !(matches!(capture.ty.as_ref(), TypeTerm::Primitive(_))
-                || primitive_reference(&capture.ty))
+        ) || !(matches!(capture.ty.as_ref(), TypeTerm::Primitive(_))
+            || primitive_reference(&capture.ty))
         {
             return Err(Stop::Pending(node));
         }
         self.slot(node, &capture.ty)
+    }
+
+    fn local_exclusive_capture_slot(
+        &mut self,
+        capture: &CaptureFact<'g>,
+        shape: NodeId,
+    ) -> ResultOf<Slot> {
+        let pending = Stop::Pending(capture.site.node);
+        let TypeTerm::Reference {
+            mutable: true,
+            referent,
+        } = capture.ty.as_ref()
+        else {
+            return Err(pending);
+        };
+        if !std::ptr::eq(capture.site.module, &self.module.key)
+            || !matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+            || capture.storage.as_ref() != Some(&capture.ty)
+        {
+            return Err(pending);
+        }
+        let syntax = &self.module.syntax.nodes[shape];
+        let (source, ty, needs_writable) = match (capture.form, syntax.kind) {
+            (CaptureForm::ExplicitBorrow { mutable: true }, NodeKind::Prefix("&mut"))
+                if capture.access == Access::Writable
+                    && capture.path.root.kind == DeclarationKind::Binding =>
+            {
+                let operand = self.ungroup(syntax.children[0])?;
+                if self.module.syntax.nodes[operand].kind != NodeKind::ValueReference {
+                    return Err(pending);
+                }
+                (operand, referent, true)
+            }
+            (CaptureForm::CarriedReference { mutable: true }, NodeKind::ValueReference)
+                if capture.access == Access::Owned
+                    && capture.demand == Some(InvocationMode::Once) =>
+            {
+                (shape, &capture.ty, false)
+            }
+            _ => return Err(pending),
+        };
+        let value = self.normal_value(source)?;
+        if value.access != Access::Owned
+            || value.ty != *ty
+            || (needs_writable && value.place != TypedPlace::Writable)
+            || !value.path.as_ref().is_some_and(|path| {
+                path.projections.is_empty() && std::ptr::eq(path.root, capture.path.root)
+            })
+        {
+            return Err(pending);
+        }
+        self.slot(capture.site.node, &capture.ty)
     }
 
     fn retained_call_contract(

@@ -1661,6 +1661,7 @@ enum Action<'g> {
         mode: InvocationMode,
         cell_addend: Option<i32>,
         layout: Option<CallableLayout>,
+        local_exclusive: bool,
     },
     Dispose(Slot),
     Displace {

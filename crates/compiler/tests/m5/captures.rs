@@ -1,9 +1,752 @@
 use super::*;
 use compiler::analysis::{
-    ownership::{CallableField, CallableLayout, Cleanup as Obligation, Place},
+    ownership::{
+        CallableField, CallableLayout, Cleanup as Obligation, GraphCompletion, GraphReport, Place,
+        RootReport, analyze_ownership,
+    },
     scalars::{data::Access, generics::callables::CaptureForm},
     typed::ResultUseBlocker,
 };
+
+#[test]
+fn local_exclusive_capture_transfers_the_loan_until_discard() {
+    probe_with_typed(
+        "captures::local_exclusive_capture_transfers_the_loan_until_discard",
+        r#"
+            function clear(seed: bool): bool {
+                let mut flag = seed;
+                let job: mut () => &mut bool = () => &mut flag;
+                let held: once () => &mut bool = job;
+                let other = held;
+                let _ = other;
+                flag = true;
+                return flag;
+            }
+            function writeLive(seed: bool): void {
+                let mut flag = seed;
+                let job: mut () => &mut bool = () => &mut flag;
+                let held: once () => &mut bool = job;
+                let other = held;
+                flag = true;
+                let _ = other;
+            }
+            function readLive(seed: bool): bool {
+                let mut flag = seed;
+                let job: mut () => &mut bool = () => &mut flag;
+                let held: once () => &mut bool = job;
+                let other = held;
+                let observed = flag;
+                let _ = other;
+                return observed;
+            }
+            function reuse(seed: bool): void {
+                let mut flag = seed;
+                let job: mut () => &mut bool = () => &mut flag;
+                let held: once () => &mut bool = job;
+                let other = held;
+                let _ = held;
+                let _ = other;
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(graph.test_mode(), request.test_mode);
+            let clear = check_local_capture_root(module, receipt, &graph, "clear", None);
+            let (origin, capture) =
+                assert_local_exclusive_route(module, clear.mir().unwrap(), false);
+            let root = capture_graph_root(module, &graph, capture_declaration(module, "clear"));
+            assert_eq!(
+                assert_local_exclusive_route(module, root.mir().unwrap(), false),
+                (origin, capture)
+            );
+            let arrow = typed.bodies().arrow(module, origin).unwrap().unwrap();
+            let [fact] = arrow.captures.as_slice() else {
+                panic!("one explicit capture")
+            };
+            assert_eq!(fact.site.node, capture);
+            assert_eq!(fact.form, CaptureForm::ExplicitBorrow { mutable: true });
+            assert_eq!(fact.access, Access::Writable);
+            assert!(fact.path.projections.is_empty());
+
+            for (name, code, site, related) in [
+                ("writeLive", "R0203", "flag = true;", "&mut flag"),
+                ("readLive", "R0201", "flag", "&mut flag"),
+                ("reuse", "R0200", "held", "held"),
+            ] {
+                check_local_capture_root(
+                    module,
+                    receipt,
+                    &graph,
+                    name,
+                    Some((code, site, related)),
+                );
+            }
+
+            let declaration = capture_declaration(module, "clear");
+            let run = |limits| lower_body(receipt, module, &declaration.id, limits).unwrap();
+            let used = clear.statistics();
+            let exact = AnalysisLimits {
+                max_work: used.work,
+                max_entries: used.entries,
+                max_depth: used.max_depth,
+            };
+            assert!(run(exact).mir().is_some());
+            for short in short_capture_limits(exact) {
+                let exhausted = run(short);
+                assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+                assert!(exhausted.mir().is_none() && exhausted.findings().is_empty());
+            }
+
+            let used = graph.statistics();
+            let exact = AnalysisLimits {
+                max_work: used.work,
+                max_entries: used.entries,
+                max_depth: used.max_depth,
+            };
+            let exact_graph = analyze_ownership(receipt, exact);
+            assert_eq!(exact_graph.statistics(), used);
+            assert_eq!(exact_graph.completion(), GraphCompletion::SourceRejected);
+            for name in ["clear", "writeLive", "readLive", "reuse"] {
+                let decl = capture_declaration(module, name);
+                let expected = capture_graph_root(module, &graph, decl);
+                let actual = capture_graph_root(module, &exact_graph, decl);
+                assert_eq!(actual.completion(), expected.completion());
+                assert_eq!(actual.mir().is_some(), expected.mir().is_some());
+            }
+            for short in short_capture_limits(exact) {
+                let exhausted = analyze_ownership(receipt, short);
+                assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
+                assert!(exhausted.roots().iter().all(|root| root.mir().is_none()));
+            }
+        },
+    );
+}
+
+#[test]
+fn local_exclusive_capture_checks_conflicts_in_written_order() {
+    probe(
+        "captures::local_exclusive_capture_checks_conflicts_in_written_order",
+        r#"
+            function exclusiveThenExclusive(seed: bool): void {
+                let mut flag = seed;
+                let first: once () => &mut bool = () => &mut flag;
+                let second: once () => &mut bool = () => &mut flag;
+                let _ = first;
+                let _ = second;
+            }
+            function exclusiveThenShared(seed: bool): void {
+                let mut flag = seed;
+                let first: once () => &mut bool = () => &mut flag;
+                let second: once () => &bool = () => &flag;
+                let _ = first;
+                let _ = second;
+            }
+            function sharedThenExclusive(seed: bool): void {
+                let mut flag = seed;
+                let first: once () => &bool = () => &flag;
+                let second: once () => &mut bool = () => &mut flag;
+                let _ = first;
+                let _ = second;
+            }
+            function independentExclusive(seed: bool): bool {
+                let mut flag = seed;
+                let mut separate = seed;
+                let first: once () => &mut bool = () => &mut flag;
+                let second: once () => &mut bool = () => &mut separate;
+                let _ = first;
+                flag = true;
+                let _ = second;
+                return flag;
+            }
+            function independentShared(seed: bool): void {
+                let mut flag = seed;
+                let separate = seed;
+                let first: once () => &mut bool = () => &mut flag;
+                let second: once () => &bool = () => &separate;
+                let _ = first;
+                let _ = second;
+            }
+            function reacquire(seed: bool): void {
+                let mut flag = seed;
+                let first: once () => &mut bool = () => &mut flag;
+                let _ = first;
+                let second: once () => &mut bool = () => &mut flag;
+                let _ = second;
+            }
+            function pairOverlap(seed: bool): void {
+                let mut flag = seed;
+                let both: once () => [&mut bool, &bool] = () => [&mut flag, &flag];
+                let _ = both;
+            }
+            function pairExclusiveOverlap(seed: bool): void {
+                let mut flag = seed;
+                let both: once () => [&mut bool, &mut bool] = () => [&mut flag, &mut flag];
+                let _ = both;
+            }
+            function pairIndependent(seed: bool): void {
+                let mut flag = seed;
+                let separate = seed;
+                let both: once () => [&mut bool, &bool] = () => [&mut flag, &separate];
+                let _ = both;
+            }
+            function sharedShared(seed: bool): void {
+                let flag = seed;
+                let both: once () => [&bool, &bool] = () => [&flag, &flag];
+                let _ = both;
+            }
+            function pairSharedThenExclusive(seed: bool): void {
+                let mut flag = seed;
+                let both: once () => [&bool, &mut bool] = () => [&flag, &mut flag];
+                let _ = both;
+            }
+            function repeatedMove(seed: bool): void {
+                let mut flag = seed;
+                let input = &mut flag;
+                let both: once () => [&mut bool, &mut bool] = () => [input, input];
+                let _ = both;
+            }
+        "#,
+        |_, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            for (name, attempted, original) in [
+                ("exclusiveThenExclusive", "&mut flag", "&mut flag"),
+                ("exclusiveThenShared", "&flag", "&mut flag"),
+                ("sharedThenExclusive", "&mut flag", "&flag"),
+                ("pairOverlap", "&flag", "&mut flag"),
+                ("pairExclusiveOverlap", "&mut flag", "&mut flag"),
+                ("pairSharedThenExclusive", "&mut flag", "&flag"),
+            ] {
+                check_local_capture_root(
+                    module,
+                    receipt,
+                    &graph,
+                    name,
+                    Some(("R0201", attempted, original)),
+                );
+            }
+            for name in [
+                "independentExclusive",
+                "independentShared",
+                "reacquire",
+                "sharedShared",
+            ] {
+                check_local_capture_root(module, receipt, &graph, name, None);
+            }
+            let pair = check_local_capture_root(module, receipt, &graph, "pairIndependent", None);
+            let mir = pair.mir().unwrap();
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Borrow { .. }
+                            | Operation::Reborrow { .. }
+                            | Operation::FormClosurePair { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Borrow { source: flag, holder: left, exclusive: true },
+                Operation::Borrow { source: separate, holder: right, exclusive: false },
+                Operation::FormClosurePair { captures, .. },
+            ] if flag.root.span.bytes() == b"flag" && separate.root.span.bytes() == b"separate"
+                && captures[0].node == left.root.node && captures[1].node == right.root.node
+                && captures[0].span.bytes() == b"&mut flag" && captures[1].span.bytes() == b"&separate"));
+            assert!(path_drops(mir, mir.entry).is_empty());
+            check_capture_blocker(
+                module,
+                receipt,
+                &graph,
+                "repeatedMove",
+                "() => [input, input]",
+            );
+        },
+    );
+}
+
+#[test]
+fn carried_exclusive_capture_moves_the_descriptor_not_the_referent() {
+    probe_with_typed(
+        "captures::carried_exclusive_capture_moves_the_descriptor_not_the_referent",
+        r#"
+            function carriedClear(seed: bool): bool {
+                let mut flag = seed;
+                let input = &mut flag;
+                let job: once () => &mut bool = () => input;
+                let held = job;
+                let other = held;
+                let _ = other;
+                flag = true;
+                return flag;
+            }
+            function carriedWriteLive(seed: bool): void {
+                let mut flag = seed;
+                let input = &mut flag;
+                let job: once () => &mut bool = () => input;
+                let held = job;
+                let other = held;
+                flag = true;
+                let _ = other;
+            }
+            function carriedUseOld(seed: bool): void {
+                let mut flag = seed;
+                let input = &mut flag;
+                let job: once () => &mut bool = () => input;
+                let _ = input;
+                let _ = job;
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let clear = check_local_capture_root(module, receipt, &graph, "carriedClear", None);
+            let (origin, capture) =
+                assert_local_exclusive_route(module, clear.mir().unwrap(), true);
+            let root =
+                capture_graph_root(module, &graph, capture_declaration(module, "carriedClear"));
+            assert_eq!(
+                assert_local_exclusive_route(module, root.mir().unwrap(), true),
+                (origin, capture)
+            );
+            let arrow = typed.bodies().arrow(module, origin).unwrap().unwrap();
+            let [fact] = arrow.captures.as_slice() else {
+                panic!("one carried capture")
+            };
+            assert_eq!(fact.site.node, capture);
+            assert_eq!(fact.form, CaptureForm::CarriedReference { mutable: true });
+            assert_eq!(fact.access, Access::Owned);
+            assert_eq!(fact.demand, Some(compiler::analysis::InvocationMode::Once));
+            for (name, code, site, related) in [
+                ("carriedWriteLive", "R0203", "flag = true;", "&mut flag"),
+                ("carriedUseOld", "R0200", "input", "input"),
+            ] {
+                check_local_capture_root(
+                    module,
+                    receipt,
+                    &graph,
+                    name,
+                    Some((code, site, related)),
+                );
+            }
+        },
+    );
+}
+
+fn capture_declaration<'g>(module: &'g loader::Module, name: &str) -> &'g loader::Declaration {
+    module
+        .declarations
+        .iter()
+        .find(|d| d.name.as_deref() == Some(name))
+        .unwrap()
+}
+
+fn capture_graph_root<'a, 'g>(
+    module: &'g loader::Module,
+    graph: &'a GraphReport<'g>,
+    decl: &loader::Declaration,
+) -> &'a RootReport<'g> {
+    graph
+        .roots()
+        .iter()
+        .find(|r| std::ptr::eq(r.site().module, &module.key) && r.site().node == decl.node)
+        .unwrap()
+}
+
+fn check_local_capture_root<'g>(
+    module: &'g loader::Module,
+    receipt: &TypedReceipt<'_, 'g>,
+    graph: &GraphReport<'g>,
+    name: &str,
+    rejection: Option<(&str, &str, &str)>,
+) -> compiler::analysis::ownership::Report<'g> {
+    let decl = capture_declaration(module, name);
+    let report = lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap();
+    let root = capture_graph_root(module, graph, decl);
+    let expected = if rejection.is_some() {
+        Completion::SourceRejected
+    } else {
+        Completion::Checked
+    };
+    assert_eq!(report.completion(), expected, "{name}");
+    assert_eq!(root.ordinary_completion(), expected, "{name}");
+    assert_eq!(root.mir().is_some(), rejection.is_none(), "{name}");
+    assert_eq!(report.mir().is_some(), rejection.is_none(), "{name}");
+    if let Some((code, site, related)) = rejection {
+        let [finding] = report.findings() else {
+            panic!("{name}: expected one finding")
+        };
+        assert_eq!(finding.code(), code);
+        let body = &module.syntax.nodes[decl.node].span;
+        for (site, expected) in [(&finding.site, site), (&finding.related, related)] {
+            assert!(std::ptr::eq(site.module, &module.key));
+            assert_eq!(site.span.bytes(), expected.as_bytes());
+            assert_eq!(site.span, &module.syntax.nodes[site.node].span);
+            assert!(body.start() <= site.span.start() && site.span.end() <= body.end());
+        }
+        assert!(
+            finding.related.span.end() < finding.site.span.start(),
+            "{name}"
+        );
+        let same = |a: compiler::analysis::scalars::Site<'_>,
+                    b: compiler::analysis::scalars::Site<'_>| {
+            std::ptr::eq(a.module, b.module) && a.node == b.node && a.span == b.span
+        };
+        assert_eq!(
+            graph
+                .findings()
+                .iter()
+                .filter(|f| f.code() == code
+                    && same(f.site, finding.site)
+                    && same(f.related, finding.related))
+                .count(),
+            1,
+            "{name}"
+        );
+    } else {
+        assert!(report.findings().is_empty());
+    }
+    report
+}
+
+fn check_capture_blocker<'g>(
+    module: &'g loader::Module,
+    receipt: &TypedReceipt<'_, 'g>,
+    graph: &GraphReport<'g>,
+    name: &str,
+    at: &str,
+) {
+    let decl = capture_declaration(module, name);
+    let report = lower_capture_root(module, receipt, name);
+    let root = capture_graph_root(module, graph, decl);
+    assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+    assert!(report.findings().is_empty() && report.mir().is_none());
+    assert_eq!(root.ordinary_completion(), Completion::Incomplete);
+    assert!(root.mir().is_none());
+    let target_site = report.blocked_at().unwrap();
+    let graph_site = root.blocked_at().unwrap();
+    assert_eq!(target_site.node, graph_site.node);
+    assert!(std::ptr::eq(target_site.module, graph_site.module));
+    assert_eq!(target_site.span.bytes(), at.as_bytes());
+    assert_eq!(graph_site.span, target_site.span);
+}
+
+fn short_capture_limits(exact: AnalysisLimits) -> [AnalysisLimits; 3] {
+    [
+        AnalysisLimits {
+            max_work: exact.max_work - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_entries: exact.max_entries - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_depth: exact.max_depth - 1,
+            ..exact
+        },
+    ]
+}
+
+fn assert_local_exclusive_route(
+    module: &loader::Module,
+    mir: &Mir<'_>,
+    carried: bool,
+) -> (usize, usize) {
+    use compiler::analysis::InvocationMode;
+
+    let ops = linear(mir, mir.entry);
+    let route: Vec<_> = ops
+        .iter()
+        .copied()
+        .filter(|op| {
+            matches!(
+                op,
+                Operation::Borrow { .. }
+                    | Operation::Reborrow { .. }
+                    | Operation::Move { .. }
+                    | Operation::FormClosure { .. }
+            )
+        })
+        .collect();
+    let [
+        Operation::Borrow {
+            source,
+            holder,
+            exclusive: true,
+        },
+        route @ ..,
+    ] = route.as_slice()
+    else {
+        panic!("one exclusive acquisition: {route:?}")
+    };
+    let (stage, route) = if carried {
+        let [
+            Operation::Move {
+                from,
+                into: Some(stage),
+            },
+            route @ ..,
+        ] = route
+        else {
+            panic!("move the existing descriptor: {route:?}")
+        };
+        assert_eq!(from.root.node, holder.root.node);
+        assert_eq!(from.root.span.bytes(), b"input");
+        assert_eq!(stage.root.span.bytes(), b"input");
+        (stage, route)
+    } else {
+        assert_eq!(holder.root.span.bytes(), b"&mut flag");
+        (holder, route)
+    };
+    let [
+        Operation::FormClosure {
+            closure,
+            capture,
+            mode,
+        },
+        Operation::Move {
+            from: job,
+            into: Some(held),
+        },
+        Operation::Move {
+            from: held_use,
+            into: Some(other),
+        },
+        Operation::Move {
+            from: other_use,
+            into: Some(discard),
+        },
+    ] = route
+    else {
+        panic!("form once and transfer the only owner: {route:?}")
+    };
+    assert_eq!(
+        *mode,
+        if carried {
+            InvocationMode::Once
+        } else {
+            InvocationMode::Mutable
+        }
+    );
+    assert_eq!(capture.node, stage.root.node);
+    assert_eq!(closure.node, job.root.node);
+    assert_eq!(held.root.node, held_use.root.node);
+    assert_eq!(other.root.node, other_use.root.node);
+    for (place, written) in [
+        (source, "flag"),
+        (job, "job"),
+        (held, "held"),
+        (other, "other"),
+        (discard, "other"),
+    ] {
+        assert!(std::ptr::eq(place.root.module, &module.key));
+        assert_eq!(place.root.span.bytes(), written.as_bytes());
+    }
+    let owners = [holder, stage, job, held, other, discard].map(|p| p.root.node);
+    let mut ended = Vec::new();
+    let mut write = None;
+    for (i, op) in ops.iter().enumerate() {
+        match op {
+            Operation::Cleanup(actions) => ended.extend(actions.iter().filter_map(|a| match a {
+                Obligation::EndStorage(place)
+                    if owners.contains(&place.root.node) || place.root.node == source.root.node =>
+                {
+                    Some((i, place.root.node))
+                }
+                _ => None,
+            })),
+            Operation::Install { target, .. } if target.root.node == source.root.node => {
+                write = Some(i)
+            }
+            Operation::Copy { from, .. } => assert!(!owners.contains(&from.root.node)),
+            _ => {}
+        }
+    }
+    let write = write.expect("backing is writable after discard");
+    assert!(
+        matches!(ended.as_slice(), [(before, owner), (after, backing)]
+        if *owner == discard.root.node && *backing == source.root.node && *before < write && write < *after)
+    );
+    assert!(path_drops(mir, mir.entry).is_empty());
+    let origin = straight_blocks(mir, mir.entry)
+        .into_iter()
+        .find(|block| matches!(block.operation, Operation::FormClosure { .. }))
+        .unwrap()
+        .site;
+    assert!(std::ptr::eq(origin.module, &module.key));
+    assert_eq!(
+        origin.span.bytes(),
+        if carried {
+            b"() => input".as_slice()
+        } else {
+            b"() => &mut flag"
+        }
+    );
+    (origin.node, capture.node)
+}
+
+#[test]
+fn exclusive_capture_evidence_distinguishes_disproved_from_unresolved() {
+    use compiler::analysis::{scalars::ScalarUnsupported, typed::TypedCompletion};
+
+    let scalar = r#"
+        function need<T>(value: T): bool where noBorrow(T) { let _ = value; return true; }
+        function probe(seed: bool): bool {
+            let mut flag = seed;
+            let job: mut () => bool = () => { return seed; };
+            let held: once () => bool = job;
+            return need(held);
+        }
+    "#;
+    // Same signature, weakening, and goal; only the captured access changes.
+    let exclusive = scalar.replace("return seed;", "let _ = &mut flag; return seed;");
+    let transfer = |result, packing, call| {
+        format!(
+            r#"
+            type Holder<F> = {{ task: F }};
+            function need<T>(value: T): bool where noBorrow(T) {{ let _ = value; return true; }}
+            function probe(seed: bool): {result} {{
+                let mut flag = seed;
+                let job: mut () => &mut bool = () => &mut flag;
+                let held: once () => &mut bool = job;
+                let other = held;
+                {packing}
+                return {call};
+            }}
+        "#
+        )
+    };
+    let wrapped = "let packed: Holder<once () => &mut bool> = Holder { task: other };";
+    for (source, completion, call, reason) in [
+        (scalar, TypedCompletion::Checked, "need(held)", None),
+        (
+            &exclusive,
+            TypedCompletion::SourceRejected,
+            "need(held)",
+            None,
+        ),
+        (
+            &transfer("bool", wrapped, "need(packed)"),
+            TypedCompletion::Incomplete,
+            "need(packed)",
+            Some(ScalarUnsupported::Requirements),
+        ),
+        (
+            &transfer("once () => &mut bool", "", "copy(&other)"),
+            TypedCompletion::Incomplete,
+            "copy(&other)",
+            Some(ScalarUnsupported::FamilySelection),
+        ),
+        (
+            &transfer("Holder<once () => &mut bool>", wrapped, "copy(&packed)"),
+            TypedCompletion::Incomplete,
+            "copy(&packed)",
+            Some(ScalarUnsupported::FamilySelection),
+        ),
+    ] {
+        probe_report(
+            "captures::exclusive_capture_evidence_distinguishes_disproved_from_unresolved",
+            source,
+            |_, module, typed| {
+                assert_eq!(typed.completion(), completion, "{call}");
+                assert_eq!(
+                    typed.receipt().is_some(),
+                    completion == TypedCompletion::Checked
+                );
+                assert!(typed.core_blockers().is_empty());
+                if completion == TypedCompletion::SourceRejected {
+                    let [finding] = typed.bodies().findings() else {
+                        panic!("expected only the noBorrow failure")
+                    };
+                    assert_eq!(finding.kind.code(), Some("R0302"));
+                    assert!(std::ptr::eq(finding.site.module, &module.key));
+                    assert_eq!(finding.site.span.bytes(), call.as_bytes());
+                    assert_eq!(
+                        finding.site.span,
+                        &module.syntax.nodes[finding.site.node].span
+                    );
+                } else {
+                    assert!(typed.bodies().findings().is_empty());
+                }
+                if let Some(reason) = reason {
+                    let [pending] = typed.bodies().obligations() else {
+                        panic!("expected an unresolved goal: {call}")
+                    };
+                    assert_eq!(pending.reason, reason);
+                    assert!(std::ptr::eq(pending.site.module, &module.key));
+                    assert_eq!(pending.site.span.bytes(), call.as_bytes());
+                    assert_eq!(
+                        pending.site.span,
+                        &module.syntax.nodes[pending.site.node].span
+                    );
+                }
+            },
+        );
+    }
+}
+
+#[test]
+fn exclusive_capture_formation_does_not_grant_invocation_or_erasure() {
+    use compiler::analysis::typed::TypedCompletion;
+
+    const TEST: &str = "captures::exclusive_capture_formation_does_not_grant_invocation_or_erasure";
+    probe_report(
+        TEST,
+        r#"
+            function callOnce(seed: bool): [&mut bool, bool] {
+                let mut flag = seed;
+                let job: mut () => [&mut bool, bool] = () => [&mut flag, seed];
+                let held: once () => [&mut bool, bool] = job;
+                return held();
+            }
+            function callMutable(seed: bool): &mut bool {
+                let mut flag = seed;
+                let mut job: mut () => &mut bool = () => &mut flag;
+                return job();
+            }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none() && typed.bodies().findings().is_empty());
+            let calls: Vec<_> = typed
+                .result_use()
+                .unwrap()
+                .pending()
+                .iter()
+                .filter(|p| {
+                    std::ptr::eq(p.site.module, &module.key)
+                        && p.blocker == ResultUseBlocker::CallBoundary
+                })
+                .map(|p| p.site.span.bytes())
+                .collect();
+            assert_eq!(calls, [b"held()".as_slice(), b"job()"]);
+        },
+    );
+    probe(
+        TEST,
+        r#"
+            function localCaller(input: &mut bool): void {
+                let job: once () => &mut bool = () => input;
+                let _ = job;
+            }
+            function eraseCaller(input: &mut bool): once () => &mut bool {
+                let job: once () => &mut bool = () => input;
+                return job;
+            }
+            type Carrier<F> = { task: F };
+            function eraseWrapped(input: &mut bool): Carrier<once () => &mut bool> {
+                let job: once () => &mut bool = () => input;
+                let packed: Carrier<once () => &mut bool> = Carrier { task: job };
+                return packed;
+            }
+        "#,
+        |_, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            check_local_capture_root(module, receipt, &graph, "localCaller", None);
+            check_capture_blocker(module, receipt, &graph, "eraseCaller", "return job;");
+            check_capture_blocker(module, receipt, &graph, "eraseWrapped", "packed");
+        },
+    );
+}
 
 #[test]
 fn private_callable_transfer_keeps_backing_and_owns_string_cleanup() {

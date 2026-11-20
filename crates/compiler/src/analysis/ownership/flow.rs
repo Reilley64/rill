@@ -31,6 +31,7 @@ struct Held {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CallableOwner {
+    LocalExclusive,
     Pair(CallableLayout),
     Formal(CallableLayout),
     Returned(CallableLayout),
@@ -39,7 +40,7 @@ enum CallableOwner {
 impl CallableOwner {
     fn transport_cleanup(self) -> Option<CallableLayout> {
         match self {
-            Self::Pair(_) => None,
+            Self::LocalExclusive | Self::Pair(_) => None,
             Self::Formal(layout) | Self::Returned(layout) => Some(layout),
         }
     }
@@ -586,6 +587,12 @@ fn cleanup_operation<'g>(
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
         cleanup @ Cleanup::DropOptionPayload { .. } => {
+            budget.reserve(1)?;
+            Operation::Cleanup(vec![cleanup])
+        }
+        cleanup @ Cleanup::EndStorage(_)
+            if held.callable_owner == Some(CallableOwner::LocalExclusive) =>
+        {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
         }
@@ -2511,6 +2518,7 @@ pub(super) fn run<'a, 'g>(
                     mode,
                     cell_addend,
                     layout,
+                    local_exclusive,
                 } => {
                     let first = initialized(&state[capture], node)?;
                     let loans = if let Some(second) = second {
@@ -2529,8 +2537,14 @@ pub(super) fn run<'a, 'g>(
                     state[into] = State::Initialized(Held {
                         loans,
                         capture_drops: [drop_of(capture), second.and_then(drop_of)],
-                        callable_owner: layout.map(CallableOwner::Pair),
-                        pair_origin: second.map(|_| (node, mode)),
+                        callable_owner: if local_exclusive {
+                            Some(CallableOwner::LocalExclusive)
+                        } else {
+                            layout.map(CallableOwner::Pair)
+                        },
+                        // An exclusive capture transfers locally but grants no
+                        // invocation proof, even through a weakened interface.
+                        pair_origin: (second.is_some() && !local_exclusive).then_some((node, mode)),
                         mutable_cell: cell_addend.map(|addend| MutableCell {
                             origin: node,
                             field: slots[capture].node,
@@ -2851,7 +2865,10 @@ pub(super) fn run<'a, 'g>(
                             return Ok(Operation::None);
                         }
                         callable_exported = true;
-                    } else if matches!(owner, Some(CallableOwner::Returned(_))) {
+                    } else if matches!(
+                        owner,
+                        Some(CallableOwner::LocalExclusive | CallableOwner::Returned(_))
+                    ) {
                         // Nothing proves a further erased output boundary.
                         return Err(Stop::Pending(node));
                     }
