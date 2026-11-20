@@ -1,8 +1,297 @@
 use super::*;
 use compiler::analysis::{
-    ownership::Place,
+    ownership::{CallableField, CallableLayout, Cleanup as Obligation, Place},
     scalars::{data::Access, generics::callables::CaptureForm},
+    typed::ResultUseBlocker,
 };
+
+#[test]
+fn private_callable_transfer_keeps_backing_and_owns_string_cleanup() {
+    let mut modes = Vec::new();
+    probe(
+        "captures::private_callable_transfer_keeps_backing_and_owns_string_cleanup",
+        r#"
+            function forward(job: once () => [&bool, string]): once () => [&bool, string] {
+                let note = "epilogue";
+                return job;
+            }
+            function after(seed: bool, text: string): void {
+                let mut flag = seed;
+                let held = forward(() => [&flag, text]);
+                let _ = held;
+                flag = true;
+            }
+            function overlap(seed: bool, text: string): void {
+                let mut flag = seed;
+                let held = forward(() => [&flag, text]);
+                flag = true;
+                let _ = held;
+            }
+        "#,
+        |request, module, receipt| {
+            let lower = |name| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, AnalysisLimits::default()).unwrap()
+            };
+            let after = lower("after");
+            modes.push((request.test_mode, after.completion()));
+            if request.test_mode {
+                assert_eq!(
+                    modes,
+                    [(false, Completion::Checked), (true, Completion::Checked)]
+                );
+            }
+            let Some(mir) = after.mir() else { return };
+            assert!(mir.cancellation().is_none());
+            let ops = linear(mir, mir.entry);
+            let layout = CallableLayout([
+                CallableField::SharedPrimitive("bool"),
+                CallableField::OwnedString,
+            ]);
+            let (call_pos, argument, result, body) = ops
+                .iter()
+                .enumerate()
+                .find_map(|(i, op)| match op {
+                    Operation::CallCallableTransfer {
+                        callee,
+                        argument,
+                        into,
+                        layout: bound,
+                        body,
+                    } => {
+                        assert_eq!(*bound, layout);
+                        assert_eq!(
+                            *callee,
+                            &module
+                                .declarations
+                                .iter()
+                                .find(|d| d.name.as_deref() == Some("forward"))
+                                .unwrap()
+                                .id
+                        );
+                        Some((i, *argument, *into, body))
+                    }
+                    _ => None,
+                })
+                .expect("a real named transfer");
+            let same = |a: Place<'_>, b: Place<'_>| {
+                a.root.node == b.root.node && a.projection.is_none() && b.projection.is_none()
+            };
+            assert!(!same(argument, result));
+            assert_eq!(
+                ops[..call_pos]
+                    .iter()
+                    .filter(|op| matches!(op,
+                Operation::Move { from, .. } if from.root.span.bytes() == b"text: string"))
+                    .count(),
+                1
+            );
+            let callee = linear(body, body.entry);
+            let effects: Vec<_> = callee
+                .iter()
+                .copied()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Cleanup(_)
+                            | Operation::Drop(_)
+                            | Operation::DropCapture { .. }
+                            | Operation::Export(_)
+                    ) && !matches!(op, Operation::Cleanup(actions) if actions.is_empty())
+                })
+                .collect();
+            let [
+                Operation::Move {
+                    from,
+                    into: Some(stage),
+                },
+                Operation::Cleanup(epilogue),
+                Operation::Export(output),
+            ] = effects.as_slice()
+            else {
+                panic!("expected only formal move, epilogue, and export")
+            };
+            assert_eq!(from.root.span.bytes(), b"job: once () => [&bool, string]");
+            assert!(same(*stage, *output));
+            assert!(
+                matches!(epilogue.as_slice(), [Obligation::Drop(note)] if note.root.span.bytes() == b"note")
+            );
+            let mut consumed = Vec::new();
+            for (i, op) in ops.iter().enumerate() {
+                if let Operation::Cleanup(actions) = op {
+                    for action in actions {
+                        match action {
+                            Obligation::ConsumeCallableTransfer {
+                                operand,
+                                layout: bound,
+                            } => {
+                                assert_eq!(*bound, layout);
+                                consumed.push((i, *operand));
+                            }
+                            Obligation::Drop(_) | Obligation::DropCapture { .. } => {
+                                panic!("duplicate caller drop")
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                assert!(!matches!(
+                    op,
+                    Operation::Drop(_) | Operation::DropCapture { .. }
+                ));
+            }
+            let [(cleanup_pos, discarded)] = consumed.as_slice() else {
+                panic!("consume returned owner once")
+            };
+            assert!(ops[call_pos + 1..*cleanup_pos].iter().any(|op| matches!(op,
+                Operation::Move { from, into: Some(stage) } if same(*from, result) && same(*stage, *discarded)
+            )));
+            assert!(
+                ops[*cleanup_pos + 1..]
+                    .iter()
+                    .any(|op| matches!(op, Operation::Install { target, .. }
+                if target.root.span.bytes() == b"flag"))
+            );
+            assert!(
+                !ops[..*cleanup_pos]
+                    .iter()
+                    .any(|op| matches!(op, Operation::Install { .. }))
+            );
+            let overlap = lower("overlap");
+            assert_eq!(overlap.completion(), Completion::SourceRejected);
+            let [finding] = overlap.findings() else {
+                panic!("expected an overlap finding")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"flag = true;");
+            assert_eq!(finding.related.span.bytes(), b"&flag");
+            assert!(overlap.mir().is_none());
+            assert_eq!(lower("forward").completion(), Completion::Incomplete);
+        },
+    );
+}
+
+#[test]
+fn callable_transfer_withholds_unproved_environments_and_checks_escape() {
+    probe(
+        "captures::callable_transfer_withholds_unproved_environments_and_checks_escape",
+        r#"
+            function forward(job: once () => [&bool, bool]): once () => [&bool, bool] { return job; }
+            function alternate(job: once () => [&bool, bool]): once () => [&bool, bool] {
+                let note = "callee local"; let _ = &note; return job;
+            }
+            function diverge(): never { while (true) { continue; } }
+            function different(job: once () => [&bool, bool]): once () => [&bool, bool] {
+                let _ = job; return () => diverge();
+            }
+            function differentSameLayout(job: once () => [bool, bool]): once () => [bool, bool] {
+                let _ = job;
+                let flag = true;
+                let other = false;
+                return () => [flag, other];
+            }
+            function escaping(job: once () => [&bool, bool]): once () => [&bool, bool] {
+                let local = true; let _ = job; return () => [&local, local];
+            }
+            function after(seed: bool): void {
+                let mut flag = seed;
+                let other = true;
+                let job: once () => [&bool, bool] = () => [&flag, other];
+                let held = forward(job);
+                let _ = held;
+                flag = true;
+            }
+            function alternateAfter(seed: bool): void {
+                let mut flag = seed;
+                let other = true;
+                let held = alternate(() => [&flag, other]);
+                let _ = held;
+                flag = true;
+            }
+            function escapesCaller(seed: bool): once () => [&bool, bool] {
+                let flag = seed; let other = true; return forward(() => [&flag, other]);
+            }
+            function escapesCallee(seed: bool): void {
+                let flag = seed; let other = true; let _ = escaping(() => [&flag, other]);
+            }
+            function unknown(job: once () => [&bool, bool]): void { let _ = forward(job); }
+            function unknownCleanup(seed: bool): void {
+                let flag = seed; let owned = "hidden";
+                let _ = forward(() => { let _ = owned; return [&flag, flag]; });
+            }
+            function unprovedReturn(seed: bool): void {
+                let mut flag = seed; let other = true; let held = different(() => [&flag, other]);
+                flag = true; let _ = held;
+            }
+            function unprovedPair(seed: bool): void {
+                let other = true; let _ = differentSameLayout(() => [seed, other]);
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, AnalysisLimits::default()).unwrap()
+            };
+            for name in ["after", "alternateAfter"] {
+                assert_eq!(lower(name).completion(), Completion::Checked, "{name}");
+            }
+            for name in [
+                "unknown",
+                "unknownCleanup",
+                "unprovedReturn",
+                "unprovedPair",
+            ] {
+                let checked = lower(name);
+                assert_eq!(checked.completion(), Completion::Incomplete, "{name}");
+                assert!(checked.mir().is_none() && checked.findings().is_empty());
+            }
+            for (name, related) in [
+                ("escapesCallee", &b"&local"[..]),
+                ("escapesCaller", &b"&flag"[..]),
+            ] {
+                let checked = lower(name);
+                assert_eq!(checked.completion(), Completion::SourceRejected, "{name}");
+                let [finding] = checked.findings() else {
+                    panic!("expected one escape finding")
+                };
+                assert_eq!(finding.code(), "R0202");
+                assert_eq!(finding.related.span.bytes(), related);
+                assert!(checked.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn transfer_does_not_prove_erased_invocation() {
+    probe_report(
+        "captures::transfer_does_not_prove_erased_invocation",
+        r#"
+            function invoke(job: once () => [&bool, bool]): [&bool, bool] { return job(); }
+        "#,
+        |_, module, typed| {
+            assert!(typed.receipt().is_none());
+            let pending = typed.result_use().unwrap().pending();
+            assert!(
+                pending
+                    .iter()
+                    .any(|p| p.blocker == ResultUseBlocker::CallBoundary
+                        && p.site.module == &module.key
+                        && p.site.span.bytes() == b"job()")
+            );
+        },
+    );
+}
 
 #[test]
 fn stored_pair_captures_transfer_backing_and_cleanup() {

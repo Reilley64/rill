@@ -11,6 +11,7 @@ use crate::loader::{Declaration, DeclarationId, DeclarationKind};
 use crate::source::Span;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
+use std::sync::Arc;
 
 mod build;
 mod flow;
@@ -290,6 +291,15 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
+    /// Move a staged pair owner through a closed ordinary specialization, not
+    /// an erased invocation or a proof for the callee's open source root.
+    CallCallableTransfer {
+        callee: &'g DeclarationId,
+        argument: Place<'g>,
+        into: Place<'g>,
+        layout: CallableLayout,
+        body: Arc<Mir<'g>>,
+    },
     /// Call the selected scalar copy body, ending only the argument stage.
     CallScalarCopy {
         implementation: &'g DeclarationId,
@@ -495,6 +505,18 @@ pub enum RetainedPlace<'g> {
     },
 }
 
+/// Capture storage in a checked pair, in formation order. This describes
+/// ordinary ownership and cleanup, not a runtime layout or invocation ABI.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CallableLayout(pub [CallableField; 2]);
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CallableField {
+    OwnedPrimitive(&'static str),
+    SharedPrimitive(&'static str),
+    OwnedString,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Cleanup<'g> {
     EndStorage(Place<'g>),
@@ -507,6 +529,13 @@ pub enum Cleanup<'g> {
     DropCapture {
         closure: Site<'g>,
         field: Site<'g>,
+    },
+    /// Consume the environment in reverse capture order, dropping each
+    /// owned string and ending primitive and descriptor storage without access
+    /// to the descriptor's referent.
+    ConsumeCallableTransfer {
+        operand: Place<'g>,
+        layout: CallableLayout,
     },
     InvokeDisposer {
         operand: Place<'g>,
@@ -904,6 +933,7 @@ struct Lowered<'a, 'g> {
 
 enum Frame {
     OrdinaryFunction,
+    CallableTransfer(CallableLayout),
     PlainImplementation { body: NodeId },
     ScalarCopy { body: NodeId },
     ActiveDisposer,
@@ -961,7 +991,9 @@ fn lower<'a, 'g>(
     let mut params = Vec::with_capacity(parameters.len());
     let mut owns_guard = false;
     for parameter in parameters {
-        if matches!(parameter.ty.as_ref(), TypeTerm::Callable { .. }) {
+        if matches!(parameter.ty.as_ref(), TypeTerm::Callable { .. })
+            && !matches!(frame, Frame::CallableTransfer(_))
+        {
             return Err(Stop::Pending(parameter.declaration.node));
         }
         let slot = build.parameter(parameter)?;
@@ -1017,6 +1049,13 @@ fn lower<'a, 'g>(
         None
     };
     let end = build.emit(body, Action::None, Edges::End)?;
+    let end = if let Frame::CallableTransfer(layout) = frame {
+        let output = build.slot(body, result)?;
+        build.callable_frame = Some((layout, output));
+        build.emit(body, Action::Export(output), Edges::Next(end))?
+    } else {
+        end
+    };
     let end = match active {
         Some(frame) => build.cleanup(body, &[frame.remainder], end)?,
         None => end,
@@ -1031,6 +1070,9 @@ fn lower<'a, 'g>(
         },
         1,
     )?;
+    if build.callable_frame.is_some() {
+        build.check_callable_transfer_dependencies()?;
+    }
     // Only an empty application frame can contribute its entry and no other
     // delivery point. Ordinary lowering already has its body and signature.
     let empty_entry = (matches!(frame, Frame::OrdinaryFunction)
@@ -1503,6 +1545,7 @@ enum Action<'g> {
         into: Slot,
         mode: InvocationMode,
         cell_addend: Option<i32>,
+        layout: Option<CallableLayout>,
     },
     Dispose(Slot),
     Displace {
@@ -1529,6 +1572,7 @@ enum Action<'g> {
     End(Slot),
     Cleanup(usize),
     EndScope(usize),
+    CheckCallableReturn(Slot),
     Export(Slot),
 }
 
@@ -1589,6 +1633,7 @@ struct Build<'a, 'g, 'b> {
     scalar_copy_read: Option<NodeId>,
     dispose: Option<&'g DeclarationId>,
     return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
+    callable_frame: Option<(CallableLayout, Slot)>,
     proved_variant_cleanup: Vec<Type<'g>>,
     budget: &'b mut Budget,
 }
@@ -1629,6 +1674,7 @@ enum CallResult {
     ScalarCopy,
     RetainsInputs,
     RetainsRecordInput,
+    TransfersCallable,
 }
 
 #[derive(Clone, Copy)]

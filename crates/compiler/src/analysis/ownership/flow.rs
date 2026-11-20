@@ -17,6 +17,7 @@ enum State {
 struct Held {
     loans: Arc<[Loan]>,
     capture_drops: [Option<NodeId>; 2],
+    callable_owner: Option<CallableOwner>,
     /// A checked pair body acquired at this local arrow, not just a callable type.
     pair_origin: Option<(NodeId, InvocationMode)>,
     /// The checked single-cell body of the environment currently in this slot.
@@ -26,6 +27,22 @@ struct Held {
     stored_at: Option<NodeId>,
     /// Identity of the stored descriptor, independent of the access loans.
     exact_target: Option<ExactTarget>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CallableOwner {
+    Pair(CallableLayout),
+    Formal(CallableLayout),
+    Returned(CallableLayout),
+}
+
+impl CallableOwner {
+    fn transport_cleanup(self) -> Option<CallableLayout> {
+        match self {
+            Self::Pair(_) => None,
+            Self::Formal(layout) | Self::Returned(layout) => Some(layout),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,11 +85,16 @@ enum LoanKind {
     // Shared access to a caller-owned field slot, keyed conservatively by
     // the incoming parameter, not by the parameter's local storage.
     IncomingSharedSlot,
+    // Opaque caller backing, not a loan of the formal's storage.
+    IncomingCallableBacking,
 }
 
 impl LoanKind {
     fn is_incoming(self) -> bool {
-        matches!(self, Self::IncomingExclusive | Self::IncomingSharedSlot)
+        matches!(
+            self,
+            Self::IncomingExclusive | Self::IncomingSharedSlot | Self::IncomingCallableBacking
+        )
     }
 
     fn borrows_local_storage(self) -> bool {
@@ -147,6 +169,7 @@ fn liveness(
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
+            Action::CheckCallableReturn(slot) => use_one(Some(slot), None),
             Action::Dispose(slot) | Action::Export(slot) | Action::EndEmptyOption(slot) => {
                 use_one(Some(slot), Some(slot))
             }
@@ -527,6 +550,16 @@ fn cleanup_operation<'g>(
     let State::Initialized(held) = state else {
         return Ok(Operation::None);
     };
+    if let Some(layout) = held
+        .callable_owner
+        .and_then(CallableOwner::transport_cleanup)
+    {
+        budget.reserve(1)?;
+        return Ok(Operation::Cleanup(vec![Cleanup::ConsumeCallableTransfer {
+            operand: local.place(module),
+            layout,
+        }]));
+    }
     let closure = local.place(module).root;
     match held.capture_drops {
         [Some(first), Some(second)] => {
@@ -558,6 +591,7 @@ fn cleanup_operation<'g>(
         }
         Cleanup::EndStorage(_) => Operation::None,
         Cleanup::InvokeDisposer { .. }
+        | Cleanup::ConsumeCallableTransfer { .. }
         | Cleanup::DeferDisposerFields { .. }
         | Cleanup::ReleaseGuard { .. } => {
             unreachable!("these obligations use a cleanup boundary")
@@ -848,6 +882,16 @@ fn cleanup_boundary<'g>(
             if let State::Initialized(held) = std::mem::replace(&mut state[member], State::Vacant) {
                 if member != slot {
                     budget.reserve(1)?;
+                }
+                if let Some(layout) = held
+                    .callable_owner
+                    .and_then(CallableOwner::transport_cleanup)
+                {
+                    actions.push(Cleanup::ConsumeCallableTransfer {
+                        operand: slots[member].place(module),
+                        layout,
+                    });
+                    continue;
                 }
                 let drops = held.capture_drops.into_iter().flatten();
                 let count = drops.clone().count();
@@ -1668,10 +1712,12 @@ pub(super) fn run<'a, 'g>(
     let mut calls_reached = 0;
     let mut call_block = None;
     let Build {
+        typed,
         module,
         body,
         facts,
         indexed_facts,
+        callable_frame,
         locals: bindings,
         return_contract,
         slots,
@@ -1706,6 +1752,24 @@ pub(super) fn run<'a, 'g>(
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
+    }
+    let mut callable_proofs = BTreeMap::new();
+    let mut callable_exported = false;
+    if let Some((layout, _)) = callable_frame {
+        let [formal] = params.as_slice() else {
+            return Err(Stop::Pending(body));
+        };
+        budget.reserve(1)?;
+        state[*formal] = State::Initialized(Held {
+            callable_owner: Some(CallableOwner::Formal(layout)),
+            loans: Arc::from([Loan {
+                source: *formal,
+                site: slots[*formal].node,
+                exclusive: false,
+                kind: LoanKind::IncomingCallableBacking,
+            }]),
+            ..Held::default()
+        });
     }
     for source in incoming_exclusive_bools {
         budget.step(1)?;
@@ -2197,6 +2261,64 @@ pub(super) fn run<'a, 'g>(
                         binding,
                     }
                 }
+                Action::Call(index) if calls[index].result == CallResult::TransfersCallable => {
+                    let call = &calls[index];
+                    let ([argument], Some(into)) = (call.args.as_slice(), call.into) else {
+                        return Err(Stop::Pending(node));
+                    };
+                    let actual = initialized(&state[*argument], node)?;
+                    let Some(CallableOwner::Pair(layout)) = actual.callable_owner else {
+                        return Err(Stop::Pending(node));
+                    };
+                    budget.step(actual.loans.len())?;
+                    if actual
+                        .loans
+                        .iter()
+                        .any(|loan| loan.exclusive || loan.source == *argument)
+                        || !matches!(state[into], State::Vacant)
+                    {
+                        return Err(Stop::Pending(node));
+                    }
+                    // The cache is local to this typed capture/module and keying
+                    // uses the selected canonical declaration, not the arrow.
+                    let key = (call.callee.start, layout);
+                    budget.step(1)?;
+                    let body = match callable_proofs.entry(key) {
+                        std::collections::btree_map::Entry::Occupied(proof) => {
+                            Arc::clone(proof.get())
+                        }
+                        std::collections::btree_map::Entry::Vacant(proof) => {
+                            let checked = graph::lower_callable_transfer(
+                                typed,
+                                module,
+                                call.callee,
+                                layout,
+                                indexed_facts.unwrap_or(&facts),
+                                node,
+                                budget,
+                            )?;
+                            budget.reserve(2)?;
+                            Arc::clone(proof.insert(Arc::new(checked)))
+                        }
+                    };
+                    // Declared conservative may-carry behavior: retain all
+                    // actual input loans without the origin or exact targets.
+                    let loans = actual.loans.clone();
+                    state[*argument] = State::Vacant;
+                    state[into] = State::Initialized(Held {
+                        loans,
+                        callable_owner: Some(CallableOwner::Returned(layout)),
+                        ..Held::default()
+                    });
+                    candidate = false;
+                    Operation::CallCallableTransfer {
+                        callee: call.callee,
+                        argument: local(*argument),
+                        into: local(into),
+                        layout,
+                        body,
+                    }
+                }
                 Action::Call(index) => {
                     let call = &calls[index];
                     let mut retained = BTreeSet::new();
@@ -2376,6 +2498,7 @@ pub(super) fn run<'a, 'g>(
                     into,
                     mode,
                     cell_addend,
+                    layout,
                 } => {
                     let first = initialized(&state[capture], node)?;
                     let loans = if let Some(second) = second {
@@ -2394,6 +2517,7 @@ pub(super) fn run<'a, 'g>(
                     state[into] = State::Initialized(Held {
                         loans,
                         capture_drops: [drop_of(capture), second.and_then(drop_of)],
+                        callable_owner: layout.map(CallableOwner::Pair),
                         pair_origin: second.map(|_| (node, mode)),
                         mutable_cell: cell_addend.map(|addend| MutableCell {
                             origin: node,
@@ -2678,8 +2802,9 @@ pub(super) fn run<'a, 'g>(
                     )?;
                     Operation::None
                 }
-                Action::Export(slot) => {
+                Action::CheckCallableReturn(slot) | Action::Export(slot) => {
                     require_initialized(&slots, &state, slot, node, budget)?;
+                    let owner = initialized(&state[slot], node)?.callable_owner;
                     forbid_active_escape(&state[slot], node)?;
                     let mut escape: Option<Loan> = None;
                     visit_loans(&state, slots[slot].storage(slot), budget, |loan, _| {
@@ -2693,13 +2818,30 @@ pub(super) fn run<'a, 'g>(
                     if let Some(loan) = escape {
                         return Err(Stop::Rejected {
                             site: node,
-                            related: if slots[loan.source].projection.is_some() {
+                            related: if callable_frame.is_some()
+                                || matches!(owner, Some(CallableOwner::Returned(_)))
+                                || slots[loan.source].projection.is_some()
+                            {
                                 loan.site
                             } else {
                                 slots[loan.source].node
                             },
                             kind: Conflict::Escape,
                         });
+                    }
+                    if let Some((layout, output)) = callable_frame {
+                        if slot != output || owner != Some(CallableOwner::Formal(layout)) {
+                            return Err(Stop::Pending(node));
+                        }
+                        if matches!(action, Action::CheckCallableReturn(_)) {
+                            // The return stage stays initialized across lexical
+                            // and parameter cleanup and is exported only after.
+                            return Ok(Operation::None);
+                        }
+                        callable_exported = true;
+                    } else if matches!(owner, Some(CallableOwner::Returned(_))) {
+                        // Nothing proves a further erased output boundary.
+                        return Err(Stop::Pending(node));
                     }
                     let region = slots[slot].storage(slot);
                     budget.step(region.len())?;
@@ -2781,6 +2923,9 @@ pub(super) fn run<'a, 'g>(
     }
     if let Some(node) = blocked {
         return Err(Stop::Pending(node));
+    }
+    if callable_frame.is_some() && !callable_exported {
+        return Err(Stop::Pending(body));
     }
     let trace = candidate.then(|| CancellationTrace {
         module,

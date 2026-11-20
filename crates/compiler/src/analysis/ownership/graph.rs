@@ -25,9 +25,13 @@ pub enum GraphObligation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DependencyContract<'g> {
     OrdinaryCall,
+    /// Closed at the call by ordinary flow; the open source root is separate.
+    CallableTransfer(CallableLayout),
     ActiveDisposer,
     BuiltinDispose,
-    ProtectedRelease { entry: &'g DeclarationId },
+    ProtectedRelease {
+        entry: &'g DeclarationId,
+    },
     ResultConstructor,
     RetainedErrorDisplay,
 }
@@ -513,6 +517,12 @@ fn analyze<'g>(
             }) => {
                 visit_dependencies(&mir, budget, |block, edge, budget| {
                     budget.reserve(1)?;
+                    if matches!(edge.contract, DependencyContract::CallableTransfer(_)) {
+                        // This edge carries the checked specialized MIR, not a
+                        // claim about the callee's unbound source root.
+                        report.bodies[index].dependencies.push(edge);
+                        return Ok(());
+                    }
                     let id = edge.declaration;
                     let target = match edge.contract {
                         DependencyContract::OrdinaryCall
@@ -863,6 +873,45 @@ fn lower_indexed<'a, 'g>(
     lower(typed, module, header, frame, collect_trace, nodes, budget)
 }
 
+pub(super) fn lower_callable_transfer<'g>(
+    typed: &TypedReport<'g>,
+    module: &'g Module,
+    callee: &'g DeclarationId,
+    layout: CallableLayout,
+    nodes: &NodeIndex<'_, 'g>,
+    site: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<Mir<'g>> {
+    budget.step(1 + module.key.path.len())?;
+    let header = typed
+        .inventory()
+        .type_facts()
+        .declarations
+        .get(callee)
+        .ok_or(Stop::Pending(site))?;
+    let lowered = lower(
+        typed,
+        module,
+        header,
+        Frame::CallableTransfer(layout),
+        false,
+        Some(nodes),
+        budget,
+    )
+    .map_err(|stop| match stop {
+        Stop::Limit
+        | Stop::Rejected {
+            kind: Conflict::Escape,
+            ..
+        } => stop,
+        _ => Stop::Pending(site),
+    })?;
+    // The preflight rules out unresolved dependencies before source findings;
+    // also require the actual ordinary MIR to have no external edge.
+    visit_dependencies(&lowered.mir, budget, |_, _, _| Err(Stop::Pending(site)))?;
+    Ok(lowered.mir)
+}
+
 pub(super) fn visit_dependencies<'g>(
     mir: &Mir<'g>,
     budget: &mut Budget,
@@ -891,6 +940,9 @@ pub(super) fn visit_dependencies<'g>(
             | Operation::CallRetainingWithBool { callee, .. }
             | Operation::CallRetainingWithOptionBool { callee, .. } => {
                 emit(callee, OrdinaryCall, budget)?
+            }
+            Operation::CallCallableTransfer { callee, layout, .. } => {
+                emit(callee, CallableTransfer(layout), budget)?
             }
             Operation::CallScalarCopy { implementation, .. } => {
                 emit(implementation, OrdinaryCall, budget)?

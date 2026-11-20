@@ -4,8 +4,8 @@ use super::{
 };
 use compiler::analysis::{
     ownership::{
-        Delivery, DependencyContract, GraphCompletion, GraphObligation, GraphReport, RootReport,
-        analyze_ownership,
+        CallableField, CallableLayout, Delivery, DependencyContract, GraphCompletion,
+        GraphObligation, GraphReport, RootReport, analyze_ownership,
     },
     scalars::BodyOwner,
 };
@@ -15,6 +15,82 @@ use loader::DeclarationKind::{Expectation, Function, Implementation};
 mod delivery;
 #[path = "graph/scalar.rs"]
 mod scalar;
+
+#[test]
+fn callable_transfer_specialization_is_not_an_open_source_root_proof() {
+    probe(
+        "graph::callable_transfer_specialization_is_not_an_open_source_root_proof",
+        r#"
+            function forward(job: once () => [&bool, bool]): once () => [&bool, bool] { return job; }
+            function after(seed: bool): void {
+                let mut flag = seed;
+                let other = true;
+                let held = forward(() => [&flag, other]);
+                let _ = held;
+                flag = true;
+            }
+            function overlap(seed: bool): void {
+                let mut flag = seed;
+                let other = true;
+                let held = forward(() => [&flag, other]);
+                flag = true;
+                let _ = held;
+            }
+        "#,
+        |_, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let producer = root(&graph, b"function forward");
+            assert_eq!(producer.ordinary_completion(), Completion::Incomplete);
+            assert!(producer.ordinary_mir().is_none());
+            let BodyOwner::Declaration(id) = producer.owner() else {
+                panic!("named callee")
+            };
+            let after = root(&graph, b"function after");
+            assert_eq!(after.ordinary_completion(), Completion::Checked);
+            assert!(after.ordinary_mir().is_some());
+            assert!(matches!(after.enabled_frame(), Delivery::Unresolved));
+            assert!(matches!(after.selected_call(), Delivery::Unresolved));
+            let [edge] = after.dependencies() else {
+                panic!("one canonical dependency")
+            };
+            assert_eq!(edge.declaration, id);
+            assert_eq!(
+                edge.contract,
+                DependencyContract::CallableTransfer(CallableLayout([
+                    CallableField::SharedPrimitive("bool"),
+                    CallableField::OwnedPrimitive("bool"),
+                ]))
+            );
+            let overlap = root(&graph, b"function overlap");
+            assert_eq!(overlap.ordinary_completion(), Completion::SourceRejected);
+            assert!(overlap.ordinary_mir().is_none());
+            let found = graph
+                .findings()
+                .iter()
+                .find(|finding| finding.site.module == &module.key)
+                .unwrap();
+            assert_eq!(found.code(), "R0203");
+            assert_eq!(found.related.span.bytes(), b"&flag");
+            let BodyOwner::Declaration(id) = overlap.owner() else {
+                panic!("named caller")
+            };
+            let full = lower_body(receipt, module, id, AnalysisLimits::default()).unwrap();
+            assert_eq!(full.completion(), Completion::SourceRejected);
+            let short = lower_body(
+                receipt,
+                module,
+                id,
+                AnalysisLimits {
+                    max_entries: full.statistics().entries - 1,
+                    ..AnalysisLimits::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none() && short.findings().is_empty());
+        },
+    );
+}
 
 #[test]
 fn uncalled_enabled_frame_rejects_only_the_delivery_judgment() {

@@ -115,6 +115,53 @@ fn shared_primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { mutable: false, .. }) && primitive_reference(ty)
 }
 
+fn callable_field(ty: &TypeTerm<'_>) -> Option<CallableField> {
+    match ty {
+        TypeTerm::Primitive(p) if p.name() == "string" => Some(CallableField::OwnedString),
+        TypeTerm::Primitive(p) if p.name() != "void" => {
+            Some(CallableField::OwnedPrimitive(p.name()))
+        }
+        TypeTerm::Reference {
+            mutable: false,
+            referent,
+        } => match referent.as_ref() {
+            TypeTerm::Primitive(p) if p.name() != "void" => {
+                Some(CallableField::SharedPrimitive(p.name()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn callable_pair_result<'a, 'g>(
+    ty: &'a TypeTerm<'g>,
+    allow_read_only: bool,
+) -> Option<&'a Type<'g>> {
+    let TypeTerm::Callable {
+        mode,
+        parameters,
+        result,
+    } = ty
+    else {
+        return None;
+    };
+    if !parameters.is_empty()
+        || !(*mode == InvocationMode::Once || allow_read_only && *mode == InvocationMode::ReadOnly)
+    {
+        return None;
+    }
+    let TypeTerm::Tuple(fields) = result.as_ref() else {
+        return None;
+    };
+    let [first, second] = fields.as_slice() else {
+        return None;
+    };
+    callable_field(first)?;
+    callable_field(second)?;
+    Some(result)
+}
+
 fn shared_pattern_member_type(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(_)) || shared_primitive_reference(ty)
 }
@@ -278,9 +325,34 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             scalar_copy_read: None,
             dispose: typed.dispose_role().map(|d| &d.id),
             return_contract,
+            callable_frame: None,
             proved_variant_cleanup: Vec::new(),
             budget,
         })
+    }
+
+    // This specialization has no external dependency other than its bound
+    // carrier. Withhold calls and non-primitive cleanup even on alternate exits.
+    pub(super) fn check_callable_transfer_dependencies(&mut self) -> ResultOf<()> {
+        self.budget.step(self.slots.len())?;
+        self.budget.step(self.code.len())?;
+        if self.slots.iter().any(|slot| {
+            slot.custom_disposer.is_some()
+                || !matches!(slot.cleanup, StorageCleanup::End | StorageCleanup::Drop)
+        }) || self.code.iter().any(|instruction| {
+            matches!(
+                instruction.action,
+                Action::Call(_)
+                    | Action::Dispose(_)
+                    | Action::ConstructResultError { .. }
+                    | Action::WrapResultFailure { .. }
+                    | Action::InvokeClosurePair { .. }
+                    | Action::InvokeMutableI32Cell { .. }
+            )
+        }) {
+            return Err(Stop::Pending(self.body));
+        }
+        Ok(())
     }
 
     fn fact(&self, node: &NodeId) -> Option<&'a NodeFacts<'g>> {
@@ -2005,6 +2077,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 let returning =
                     self.check_retained(node, exits.returning.ok_or(Stop::Pending(node))?)?;
                 if let Some(&value) = children.first() {
+                    if let Some((_, output)) = self.callable_frame {
+                        let checked = self.emit(
+                            node,
+                            Action::CheckCallableReturn(output),
+                            Edges::Next(returning),
+                        )?;
+                        return self.stage_named_transfer(value, output, checked, None, depth + 1);
+                    }
                     let ty = self.value(value)?.ty.clone();
                     let tuple_source = self.nested_tuple_transfer_source(value, result)?;
                     let output = if let Some(from) = tuple_source {
@@ -4584,6 +4664,23 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 Ok((fact.site.node, slot))
             })
             .transpose()?;
+        let layout = match (callable_field(&first.ty), second) {
+            (Some(first), Some((site, slot))) => {
+                self.budget.step(1)?;
+                callable_field(&self.value(site)?.ty).and_then(|second| {
+                    let matches_cleanup = |field, slot: Slot| {
+                        self.slots[slot].cleanup
+                            == match field {
+                                CallableField::OwnedString => StorageCleanup::Drop,
+                                _ => StorageCleanup::End,
+                            }
+                    };
+                    (matches_cleanup(first, capture) && matches_cleanup(second, slot))
+                        .then_some(CallableLayout([first, second]))
+                })
+            }
+            _ => None,
+        };
         let form = self.emit(
             node,
             Action::FormClosure {
@@ -4592,6 +4689,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 into,
                 mode,
                 cell_addend: None,
+                layout,
             },
             Edges::Next(next),
         )?;
@@ -4700,6 +4798,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 into,
                 mode: InvocationMode::Mutable,
                 cell_addend: Some(addend),
+                layout: None,
             },
             Edges::Next(next),
         )?;
@@ -5349,6 +5448,72 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         )
     }
 
+    fn call_callable_transfer(
+        &mut self,
+        node: NodeId,
+        call: &crate::analysis::scalars::CallFacts<'g>,
+        result: &Type<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let (Some(into), [argument]) = (into, call.arguments.as_slice()) else {
+            return Err(pending());
+        };
+        self.budget.step(1 + self.module.key.path.len())?;
+        if self.callable_frame.is_some()
+            || call.callee.module != self.module.key
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || call.selection.is_some()
+        {
+            return Err(pending());
+        }
+        let header = self
+            .typed
+            .inventory()
+            .type_facts()
+            .declarations
+            .get(call.callee)
+            .ok_or_else(pending)?;
+        let DeclarationShape::Function {
+            parameters,
+            result: declared,
+        } = &header.shape
+        else {
+            return Err(pending());
+        };
+        let [formal] = parameters.as_slice() else {
+            return Err(pending());
+        };
+        let actual = self.normal_value(*argument)?;
+        let pair = callable_pair_result(declared, false).ok_or_else(pending)?;
+        if header.declaration.public
+            || header.declaration.scope.is_some()
+            || !header.binders.is_empty()
+            || callable_pair_result(&formal.ty, false) != Some(pair)
+            || callable_pair_result(result, false) != Some(pair)
+            || callable_pair_result(&actual.ty, true) != Some(pair)
+            || actual.access != Access::Owned
+        {
+            return Err(pending());
+        }
+        let actual_ty = actual.ty.clone();
+        let stage = self.slot(*argument, &actual_ty)?;
+        self.budget.reserve(2)?;
+        let index = self.calls.len();
+        self.calls.push(Call {
+            callee: &header.declaration.id,
+            args: vec![stage],
+            into: Some(into),
+            result: CallResult::TransfersCallable,
+            destination: None,
+        });
+        let transfer = self.emit(node, Action::Call(index), Edges::Next(next))?;
+        self.expression(*argument, Some(stage), transfer, depth + 1)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -5421,6 +5586,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(Stop::Pending(node));
         }
         let result = checked_carrier.unwrap_or(&facts.ty);
+        if checked_carrier.is_none() && matches!(result.as_ref(), TypeTerm::Callable { .. }) {
+            return self.call_callable_transfer(node, call, result, into, next, depth);
+        }
         let borrows_record = checked_carrier.is_none()
             && into.is_some()
             && self.borrows_record_result(node, call, result, depth)?;
