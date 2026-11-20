@@ -62,6 +62,7 @@ impl<'g> RootReport<'g> {
     pub fn completion(&self) -> Completion {
         self.completion
     }
+    /// A known blocker, even if exhaustion prevented a closure verdict.
     pub fn blocked_at(&self) -> Option<Site<'g>> {
         self.blocked_at
     }
@@ -304,7 +305,6 @@ fn analyze<'g>(
             Err(Stop::Limit) => return Err(()),
             Err(Stop::Pending(node)) => {
                 let root = &mut report.bodies[index];
-                root.completion = Completion::Incomplete;
                 root.blocked_at = Some(site_at(module, node));
             }
             Err(Stop::Rejected {
@@ -362,7 +362,6 @@ fn analyze<'g>(
                         reverse_edges += 1;
                     } else {
                         let root = &mut report.bodies[index];
-                        root.completion = Completion::Incomplete;
                         root.blocked_at.get_or_insert(edge.site);
                     }
                     Ok(())
@@ -376,10 +375,17 @@ fn analyze<'g>(
 
     // Charge the complete bounded close before releasing any MIR. Each pass
     // visits a frame once and traverses each incoming edge at most once.
-    budget.step(work.len().checked_mul(5).ok_or(())?)?;
+    budget.step(work.len().checked_mul(6).ok_or(())?)?;
     budget.step(reverse_edges.checked_mul(2).ok_or(())?)?;
     budget.reserve(work.len())?;
     let mut queue = VecDeque::with_capacity(work.len());
+    // Until closure is funded, a pending local edge is not the final result:
+    // a rejected dependency may take precedence over it.
+    for root in &mut report.bodies {
+        if root.blocked_at.is_some() {
+            root.completion = Completion::Incomplete;
+        }
+    }
     propagate(
         &mut report.bodies,
         &work,

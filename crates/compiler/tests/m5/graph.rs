@@ -407,8 +407,8 @@ fn nested_and_unused_bodies_are_independent_source_obligations() {
     let source = format!(
         r#"{HELPER}
 function outer(): bool {{
-    return true;
     function nested(owner: string): bool {{ let taken = owner; let again = owner; return true; }}
+    return true;
 }}
 function neverCalled(owner: string): bool {{ let taken = owner; let again = owner; return true; }}
 "#
@@ -441,6 +441,50 @@ function neverCalled(owner: string): bool {{ let taken = owner; let again = owne
             assert_eq!(
                 [nested.site.span.start(), unused.site.span.start()],
                 sites.as_slice()
+            );
+        },
+    );
+}
+
+#[test]
+fn local_blocker_is_not_a_finished_dependency_verdict_on_exhaustion() {
+    let source = format!(
+        r#"{HELPER}
+function broken(v: string): void {{ let first = v; let again = v; }}
+function combined(v: string, other: string): void {{ broken(v); dispose(other); }}
+"#
+    );
+    fixture(
+        "graph::local_blocker_is_not_a_finished_dependency_verdict_on_exhaustion",
+        &[&source],
+        |_, _, _, receipt, _| {
+            let full = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(
+                root(&full, b"function combined(").completion(),
+                Completion::SourceRejected
+            );
+            let short = analyze_ownership(
+                receipt,
+                AnalysisLimits {
+                    max_entries: full.statistics().entries - 1,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+            let pending = root(&short, b"function combined(");
+            assert_eq!(pending.completion(), Completion::ResourceLimit);
+            assert_eq!(
+                pending.blocked_at().unwrap().span.bytes(),
+                b"dispose(other)"
+            );
+            assert!(pending.mir().is_none());
+            let [finding] = short.findings() else {
+                panic!("expected reached helper's finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(
+                finding.site.span.start(),
+                source.find("again = v").unwrap() + "again = ".len()
             );
         },
     );

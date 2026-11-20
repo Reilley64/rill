@@ -1707,6 +1707,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let children = &syntax.children;
         match syntax.kind {
             NodeKind::Block => self.sequence(node, children, next, exits, depth),
+            // A nested function is a separate source root, not an executed statement.
+            NodeKind::Function => Ok(next),
             NodeKind::Binding { .. } => {
                 let value = *children.last().unwrap();
                 let binding = self.binding(node)?;
