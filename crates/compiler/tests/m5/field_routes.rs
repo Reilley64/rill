@@ -9,7 +9,10 @@ fn require_mir<'a, 'g>(report: &'a Report<'g>, name: &str) -> &'a Mir<'g> {
 
 #[test]
 fn incoming_shared_record_copies_carried_field() {
-    use compiler::analysis::ownership::{BorrowedMemberBinding::CopyReference, Projection};
+    use compiler::analysis::ownership::{
+        BorrowedMemberBinding::{CopyReference, SharedSlot},
+        Projection,
+    };
 
     let mut blockers = Vec::new();
     probe_with_typed(
@@ -24,6 +27,7 @@ fn incoming_shared_record_copies_carried_field() {
             type Wider = { value: &bool; pair: [bool, bool]; }
             function unsupportedSibling(x: &Wider): &bool { return x.value; }
             function slot(x: &Holder): &&bool { return &x.value; }
+            function unsupportedSlot(x: &Wider): &&bool { return &x.value; }
             function localSlot(x: &Holder): &&bool {
                 let view = x.value;
                 return &view;
@@ -35,10 +39,22 @@ fn incoming_shared_record_copies_carried_field() {
                 let stillLive = slot;
                 return view;
             }
+            function usedSlot(x: &Holder, seed: &bool): &bool {
+                let mut view = x.value;
+                let slot = &view;
+                let last = slot;
+                view = seed;
+                return view;
+            }
+            function aliasSlot(x: &Holder): &&bool { let saved = x; return &saved.value; }
             function callerEscape(): &bool {
                 let local = true;
                 let x = Holder { value: &local };
                 return project(&x);
+            }
+            function callerSlotEscape(seed: &bool): &&bool {
+                let x = Holder { value: seed };
+                return slot(&x);
             }
         "#,
         |request, module, receipt, typed| {
@@ -111,6 +127,43 @@ fn incoming_shared_record_copies_carried_field() {
                     ))
                 );
                 assert!(path_drops(mir, mir.entry).is_empty());
+
+                let slot = lower("slot");
+                let mir = require_mir(&slot, "slot");
+                assert!(slot.findings().is_empty());
+                let ops = linear(mir, mir.entry);
+                let [
+                    Operation::BindBorrowedMember {
+                        descriptor,
+                        projection: Projection::Field(slot_field),
+                        into,
+                        binding: SharedSlot,
+                    },
+                    Operation::Export(output),
+                ] = ops
+                    .iter()
+                    .copied()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::BindBorrowedMember { .. } | Operation::Export(_)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .as_slice()
+                else {
+                    panic!("expected a single slot view through the incoming descriptor: {ops:?}");
+                };
+                assert_eq!(descriptor.root.span.bytes(), b"x: &Holder");
+                assert!(descriptor.projection.is_none());
+                assert_eq!(slot_field.id, field.id);
+                assert_eq!(output.root.node, into.root.node);
+                assert!(output.projection.is_none() && into.projection.is_none());
+                assert!(!ops.iter().any(|op| matches!(
+                    op,
+                    Operation::Borrow { .. } | Operation::Reborrow { .. } | Operation::Copy { .. }
+                )));
+                assert!(path_drops(mir, mir.entry).is_empty());
             }
             if report.completion() == Completion::Checked {
                 let stats = report.statistics();
@@ -163,10 +216,42 @@ fn incoming_shared_record_copies_carried_field() {
                 assert_eq!(finding.code(), "R0203");
                 assert_eq!(finding.site.span.bytes(), b"view = seed;");
                 assert_eq!(finding.related.span.bytes(), b"&view");
+
+                let used_slot = lower("usedSlot");
+                let mir = require_mir(&used_slot, "usedSlot");
+                assert!(used_slot.findings().is_empty());
+                let ops = linear(mir, mir.entry);
+                let borrow = ops
+                    .iter()
+                    .position(|op| {
+                        matches!(op, Operation::Borrow {
+                    source, exclusive: false, ..
+                } if source.root.span.bytes() == b"view" && source.projection.is_none())
+                    })
+                    .unwrap();
+                let last_read = ops
+                    .iter()
+                    .position(|op| {
+                        matches!(op, Operation::Copy {
+                    from, ..
+                } if from.root.span.bytes() == b"slot" && from.projection.is_none())
+                    })
+                    .unwrap();
+                let install = ops
+                    .iter()
+                    .position(|op| {
+                        matches!(op, Operation::Install {
+                    target, ..
+                } if target.root.span.bytes() == b"view" && target.projection.is_none())
+                    })
+                    .unwrap();
+                assert!(borrow < last_read && last_read < install);
             }
             for (name, blocked) in [
-                ("slot", b"x.value".as_slice()),
-                ("callerEscape", b"&x"),
+                ("callerEscape", b"&x".as_slice()),
+                ("callerSlotEscape", b"slot(&x)"),
+                ("aliasSlot", b"saved.value"),
+                ("unsupportedSlot", b"x.value"),
                 ("alias", b"saved.value"),
                 ("groupedReceiver", b"(x).value"),
                 ("unsupportedSibling", b"x.value"),

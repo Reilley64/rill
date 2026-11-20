@@ -55,9 +55,16 @@ enum LoanKind {
     // External backing carried by an incoming exclusive Bool descriptor,
     // not a borrow of the parameter's local storage.
     IncomingExclusive,
+    // Shared access to a caller-owned field slot, keyed conservatively by
+    // the incoming parameter, not by the parameter's local storage.
+    IncomingSharedSlot,
 }
 
 impl LoanKind {
+    fn is_incoming(self) -> bool {
+        matches!(self, Self::IncomingExclusive | Self::IncomingSharedSlot)
+    }
+
     fn borrows_local_storage(self) -> bool {
         matches!(self, Self::Backing | Self::Contents)
     }
@@ -241,7 +248,8 @@ fn conflict(
     budget: &mut Budget,
 ) -> ResultOf<()> {
     let check = |loan: Loan, _: &mut Budget| -> ResultOf<()> {
-        if loan.kind == LoanKind::IncomingExclusive {
+        // The parameter key for incoming backing is not a local place.
+        if loan.kind.is_incoming() {
             return Ok(());
         }
         let blocks = match access {
@@ -831,8 +839,7 @@ fn retire_loans(
         };
         budget.step(held.loans.len().saturating_mul(retired.len()))?;
         let current = |loan: &Loan| {
-            loan.kind == LoanKind::IncomingExclusive
-                || !retired.iter().any(|&old| overlap(slots, old, loan.source))
+            loan.kind.is_incoming() || !retired.iter().any(|&old| overlap(slots, old, loan.source))
         };
         if held.loans.iter().any(|loan| !current(loan)) {
             budget.reserve(held.loans.len())?;
@@ -1340,6 +1347,20 @@ pub(super) fn run<'g>(
                                         .copied()
                                         .filter(|loan| loan.kind != LoanKind::Backing),
                                 ),
+                                ..Held::default()
+                            }
+                        }
+                        BorrowedMemberBinding::SharedSlot => {
+                            budget.step(held.loans.len())?;
+                            budget.reserve(held.loans.len() + 1)?;
+                            let access = Loan {
+                                source: descriptor,
+                                site: node,
+                                exclusive: false,
+                                kind: LoanKind::IncomingSharedSlot,
+                            };
+                            Held {
+                                loans: Arc::from_iter(held.loans.iter().copied().chain([access])),
                                 ..Held::default()
                             }
                         }

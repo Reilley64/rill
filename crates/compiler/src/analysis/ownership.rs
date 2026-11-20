@@ -293,6 +293,8 @@ pub enum BorrowedMemberBinding {
     /// Copy a stored shared reference with carried dependencies, not the
     /// loan used to access the enclosing aggregate.
     CopyReference,
+    /// Borrow the stored reference's caller-owned slot without copying it.
+    SharedSlot,
     /// Retain the original backing for a shared view of the member.
     SharedView,
     /// Consume the fresh staged descriptor and transfer its original

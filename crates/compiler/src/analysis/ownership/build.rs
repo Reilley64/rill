@@ -3267,16 +3267,17 @@ impl<'a, 'g> Build<'a, 'g> {
         self.expression_with_proof(node, into, next, depth, None)
     }
 
-    fn copy_incoming_shared_field(
+    fn incoming_shared_reference_field(
         &mut self,
         node: NodeId,
         facts: &ExpressionFacts<'g>,
-        into: Option<Slot>,
-    ) -> ResultOf<Action<'g>> {
+    ) -> ResultOf<(Slot, Projection<'g>)> {
         let Some(DataExpression::Projection(field)) = &facts.data else {
             return Err(Stop::Pending(node));
         };
-        let into = into.ok_or(Stop::Pending(node))?;
+        if facts.access != Access::ReadOnly || !shared_primitive_reference(&facts.ty) {
+            return Err(Stop::Pending(node));
+        }
         self.budget.step(1)?;
         if self.module.syntax.nodes[field.base].kind != NodeKind::ValueReference {
             return Err(Stop::Pending(node));
@@ -3307,14 +3308,7 @@ impl<'a, 'g> Build<'a, 'g> {
             .find(|member| member.declaration.id == field.field.id && member.ty == facts.ty)
             .ok_or(Stop::Pending(node))?;
         let descriptor = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
-        // This reads a descriptor stored in caller-owned storage. It does not
-        // borrow that slot or prove which caller sources back the copied value.
-        Ok(Action::BindBorrowedMember {
-            descriptor,
-            projection: Projection::Field(member.declaration),
-            into,
-            binding: BorrowedMemberBinding::CopyReference,
-        })
+        Ok((descriptor, Projection::Field(member.declaration)))
     }
 
     fn expression_with_proof(
@@ -3384,7 +3378,14 @@ impl<'a, 'g> Build<'a, 'g> {
                 && facts.access == Access::ReadOnly
                 && shared_primitive_reference(&facts.ty)
             {
-                self.copy_incoming_shared_field(node, facts, into)?
+                let into = into.ok_or(Stop::Pending(node))?;
+                let (descriptor, projection) = self.incoming_shared_reference_field(node, facts)?;
+                Action::BindBorrowedMember {
+                    descriptor,
+                    projection,
+                    into,
+                    binding: BorrowedMemberBinding::CopyReference,
+                }
             } else {
                 let leaf = if matches!(proof, Some(ExpressionProof::NamedNestedTupleLeaf)) {
                     self.named_nested_tuple_leaf(node, facts)?
@@ -3459,6 +3460,26 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 } else {
                     let operand_facts = self.value(operand)?;
+                    if !exclusive
+                        && operand_facts.access == Access::ReadOnly
+                        && shared_primitive_reference(&operand_facts.ty)
+                        && matches!(operand_facts.data, Some(DataExpression::Projection(_)))
+                        && matches!(facts.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                            if *referent == operand_facts.ty)
+                    {
+                        let (descriptor, projection) =
+                            self.incoming_shared_reference_field(operand, operand_facts)?;
+                        return self.emit(
+                            node,
+                            Action::BindBorrowedMember {
+                                descriptor,
+                                projection,
+                                into,
+                                binding: BorrowedMemberBinding::SharedSlot,
+                            },
+                            Edges::Next(next),
+                        );
+                    }
                     if matches!(
                         self.admitted_option(&operand_facts.ty),
                         Some((_, OptionPayload::Text(_)))
