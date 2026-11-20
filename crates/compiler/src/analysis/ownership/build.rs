@@ -86,7 +86,9 @@ enum OptionTextSource {
     PipeStep,
 }
 
+#[derive(Clone, Copy)]
 struct CheckedPropagation<'a, 'g> {
+    facts: &'a ExpressionFacts<'g>,
     exit: &'a Propagation<'g>,
     wrap: Option<&'a ErrorConstruction<'g>>,
     fresh: Option<&'a ErrorConstruction<'g>>,
@@ -1392,6 +1394,7 @@ impl<'a, 'g> Build<'a, 'g> {
                                 Some(ExpressionProof::NestedRecordConstruction),
                             );
                         }
+                        self.budget.step(1)?;
                         if self.module.syntax.nodes[initializer].kind == NodeKind::Construction
                             && let Some(entry) = self.initialize_propagating_record(
                                 value,
@@ -2282,6 +2285,7 @@ impl<'a, 'g> Build<'a, 'g> {
             (None, text)
         };
         Ok(CheckedPropagation {
+            facts,
             exit,
             wrap,
             fresh,
@@ -2338,7 +2342,21 @@ impl<'a, 'g> Build<'a, 'g> {
     ) -> ResultOf<Pc> {
         self.depth(depth)?;
         let facts = self.value(node)?;
+        let checked = self.checked_propagation(node, facts)?;
+        self.lower_checked_propagation(node, into, next, return_cleanup, depth, checked)
+    }
+
+    fn lower_checked_propagation(
+        &mut self,
+        node: NodeId,
+        into: Option<Slot>,
+        next: Pc,
+        return_cleanup: Pc,
+        depth: usize,
+        checked: CheckedPropagation<'a, 'g>,
+    ) -> ResultOf<Pc> {
         let CheckedPropagation {
+            facts,
             exit,
             wrap,
             fresh,
@@ -2347,7 +2365,7 @@ impl<'a, 'g> Build<'a, 'g> {
             operand,
             wrapper,
             option_text,
-        } = self.checked_propagation(node, facts)?;
+        } = checked;
         let pipe_arguments = if piped
             && fresh.is_none()
             && let Some(call) = facts.call.as_deref()
@@ -3445,14 +3463,19 @@ impl<'a, 'g> Build<'a, 'g> {
         let Some((position, postfix)) = postfix else {
             return Ok(None);
         };
-        if self.slots[into].contains_guard()
-            || self.record_fields(&data.ty)?.is_none()
-            || self.slots[into].members != data.fields.len()
+        let fields = self.record_fields(&data.ty)?.ok_or(Stop::Pending(node))?;
+        self.budget.step(fields.len())?;
+        if self.slots[into].members != fields.len()
+            || fields.len() != data.fields.len()
+            || !fields
+                .iter()
+                .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(_)))
             || self.contains_unadmitted_propagation(value, Some(postfix), depth)?
         {
             return Err(Stop::Pending(node));
         }
-        self.budget.step(2)?;
+        // Read the postfix syntax and facts, its operand facts, and constructor flow.
+        self.budget.step(4)?;
         let checked = self.checked_propagation(postfix, self.value(postfix)?)?;
         let flow = &self.facts[&node].flow;
         if self.bool_option_role(checked.operand).is_none()
@@ -3489,7 +3512,15 @@ impl<'a, 'g> Build<'a, 'g> {
                     .can_continue
                     .then(|| self.field(node, into, &field.field.id))
                     .transpose()?;
-                tail = self.propagate(postfix, target, tail, failure, depth + 1)?;
+                self.depth(depth + 1)?;
+                tail = self.lower_checked_propagation(
+                    postfix,
+                    target,
+                    tail,
+                    failure,
+                    depth + 1,
+                    checked,
+                )?;
             } else {
                 let target = self.field(node, into, &field.field.id)?;
                 tail = self.expression(field.expression, Some(target), tail, depth + 1)?;

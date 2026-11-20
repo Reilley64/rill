@@ -2191,7 +2191,19 @@ fn interrupted_record_initialization_keeps_unreached_and_unsupported_shapes_sepa
             type Deeper = { inner: Pack; check: bool; }
             type Protected = { held: LockGuard<i32>; check: bool; }
             type Number = { data: i32; }
+            type Text = { data: string; }
+            type Ref = { view: &bool; check: bool; }
             function relay(flag: bool): bool { return flag; }
+            function absent(): Option<bool>.None { return Option<bool>.None; }
+            function badSuffix(b: string): string { let taken = b; return b; }
+            function skipSuffix(a: string, b: string): Option<bool> {
+                let packed = Pack { first: a, check: absent()?, last: badSuffix(b) };
+                return Option.Some(true);
+            }
+            function reachSuffix(a: string, b: string): Option<bool> {
+                let packed = Pack { first: a, check: Option<bool>.Some(true)?, last: badSuffix(b) };
+                return Option.Some(true);
+            }
             function certainNone(a: string, b: string): Option<bool> {
                 let kept = b;
                 let packed = Pack { first: a, check: Option<bool>.None?, last: b };
@@ -2207,6 +2219,18 @@ fn interrupted_record_initialization_keeps_unreached_and_unsupported_shapes_sepa
             }
             function second(gate: Option<bool>): Option<bool> {
                 let packed = Pair { check: Option<bool>.None?, again: gate? };
+                return Option.Some(true);
+            }
+            function hiddenSuffix(gate: Option<bool>): Option<bool> {
+                let packed = Pair { check: Option<bool>.None?, again: relay(gate?) };
+                return Option.Some(true);
+            }
+            function textCarrier(value: Option<string>): Option<bool> {
+                let packed = Text { data: value? };
+                return Option.Some(true);
+            }
+            function reference(view: &bool, gate: Option<bool>): Option<bool> {
+                let packed = Ref { view: view, check: gate? };
                 return Option.Some(true);
             }
             function deeper(inner: Pack, gate: Option<bool>): Option<bool> {
@@ -2240,6 +2264,29 @@ fn interrupted_record_initialization_keeps_unreached_and_unsupported_shapes_sepa
                 lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
             };
             let role = typed.option_role().unwrap();
+            let skipped = lower("skipSuffix");
+            let mir = skipped
+                .mir()
+                .expect("a known None factory skips the invalid suffix body");
+            let calls: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::Call(callee) => Some(*callee),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                matches!(calls.as_slice(), [id] if module.declarations.iter().any(|decl| &decl.id == *id && decl.name.as_deref() == Some("absent")))
+            );
+            let reached = lower("reachSuffix");
+            assert_eq!(reached.completion(), Completion::SourceRejected);
+            assert!(reached.mir().is_none());
+            let [finding] = reached.findings() else {
+                panic!("expected the reached suffix diagnostic")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"b");
+            assert!(finding.related.span.start() < finding.site.span.start());
             for (name, variant, drop_names) in [
                 ("certainNone", &role.none.id, ["first", "kept"]),
                 ("certainSome", &role.some.id, ["last", "first"]),
@@ -2267,6 +2314,18 @@ fn interrupted_record_initialization_keeps_unreached_and_unsupported_shapes_sepa
                 let [export] = exports.as_slice() else {
                     panic!("{name}: expected one export");
                 };
+                if name == "certainNone" {
+                    let export_at = path
+                        .iter()
+                        .position(|op| matches!(op, Operation::Export(_)))
+                        .unwrap();
+                    assert!(
+                        !path[..export_at]
+                            .iter()
+                            .any(|op| matches!(op, Operation::Drop(_) | Operation::Cleanup(_))),
+                        "failure must export before prefix or lexical cleanup"
+                    );
+                }
                 assert!(path.iter().any(|op| matches!(op, Operation::ConstructVariant { variant: made, into, .. }
                     if *made == variant && into.root.node == export.root.node && into.projection.is_none())));
                 assert_eq!(path.iter().any(|op| matches!(op, Operation::Initialize(place) if place.root.span.bytes() == b"packed")), name == "certainSome");
@@ -2296,6 +2355,12 @@ fn interrupted_record_initialization_keeps_unreached_and_unsupported_shapes_sepa
                     "second",
                     b"Pair { check: Option<bool>.None?, again: gate? }",
                 ),
+                (
+                    "hiddenSuffix",
+                    b"Pair { check: Option<bool>.None?, again: relay(gate?) }",
+                ),
+                ("textCarrier", b"Text { data: value? }"),
+                ("reference", b"Ref { view: view, check: gate? }"),
                 ("deeper", b"Deeper { inner: inner, check: gate? }"),
                 ("protected", b"Protected { held: held, check: gate? }"),
                 ("rebuild", b"Pack { ...base, check: gate? }"),
