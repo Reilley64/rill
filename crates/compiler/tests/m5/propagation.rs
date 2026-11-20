@@ -344,6 +344,60 @@ fn exclusive_option_postfix_moves_the_carrier_and_descriptor() {
 }
 
 #[test]
+fn known_some_postfix_moves_the_exclusive_carrier_without_a_tag_test() {
+    probe_with_typed(
+        "propagation::known_some_postfix_moves_the_exclusive_carrier_without_a_tag_test",
+        r#"
+            function present(input: Option<&mut bool>.Some): Option<&mut bool> {
+                let view = input?; return Option.Some(view);
+            }
+            function reuse(input: Option<&mut bool>.Some): Option<&mut bool> {
+                let _ = input?; return input;
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let lower = |name: &str| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap()
+            };
+            let present = lower("present");
+            let mir = present
+                .mir()
+                .expect("known Some must take its only feasible edge");
+            let path = linear(mir, mir.entry);
+            assert!(matches!(path.as_slice(), [
+                Operation::Move { from: input, into: Some(stage) },
+                Operation::TakeOptionPayload { operand, into: view },
+                Operation::Move { from, into: Some(payload) },
+                Operation::ConstructVariant { variant, payload: Some(value), into },
+                Operation::Export(ret), ..
+            ] if input.root.span.bytes() == b"input: Option<&mut bool>.Some"
+                && stage.root.node == operand.root.node && view.root.node == from.root.node
+                && payload.root.node == value.root.node && into.root.node == ret.root.node
+                && *variant == &typed.option_role().unwrap().some.id));
+            assert!(!mir.blocks.iter().any(|b| matches!(
+                b.operation,
+                Operation::TestVariant { .. } | Operation::EndEmptyOption(_)
+            )));
+            let reuse = lower("reuse");
+            assert_eq!(reuse.completion(), Completion::SourceRejected);
+            assert!(reuse.mir().is_none());
+            let [finding] = reuse.findings() else {
+                panic!("expected the reached second read")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"input");
+            assert_eq!(finding.related.span.bytes(), b"input");
+            assert!(finding.related.span.start() < finding.site.span.start());
+        },
+    );
+}
+
+#[test]
 fn exclusive_option_postfix_checks_reached_moves_and_loans() {
     probe_with_typed(
         "propagation::exclusive_option_postfix_checks_reached_moves_and_loans",
