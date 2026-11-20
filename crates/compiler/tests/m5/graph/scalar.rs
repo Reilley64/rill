@@ -408,11 +408,11 @@ fn written_scalar_dispose_consumes_the_selected_named_operand() {
             r#"{MAIN}
 import std::core::dispose as release;
 function widths(flag: bool, wide: i128, other: bool): void {{
-    release(flag); dispose(wide); dispose<bool>((other));
+    ((release))(flag); dispose(wide); dispose<bool>((other));
 }}
 function repair(value: bool): bool {{ let mut flag = value; release(flag); flag = true; return flag; }}
 function savedCopy(value: bool): bool {{ let flag = value; let saved = flag; release(flag); return saved; }}
-function reuse(flag: bool): bool {{ release(flag); return flag; }}
+function reuse(flag: bool): bool {{ ((release))(flag); return flag; }}
 function live(value: bool): bool {{ let flag = value; let held = &flag; release(flag); return *held; }}
 function text(value: string): void {{ release(value); }}
 "#
@@ -506,7 +506,7 @@ function text(value: string): void {{ release(value); }}
                     "reuse",
                     "R0200",
                     b"flag".as_slice(),
-                    b"release(flag)".as_slice(),
+                    b"((release))(flag)".as_slice(),
                 ),
                 ("live", "R0203", b"release(flag)", b"&flag"),
             ] {
@@ -594,7 +594,7 @@ fn assert_scalar_handoff(mir: &Mir<'_>, caller: &RootReport<'_>) {
         } else if written == b"dispose<bool>((other))" {
             assert_eq!(operand.root.span.bytes(), b"other: bool");
         } else {
-            assert_eq!(written, b"release(flag)");
+            assert!(matches!(written, b"release(flag)" | b"((release))(flag)"));
             assert!(operand.root.span.bytes().starts_with(b"flag"));
         }
         let later = &path[i + 1..];
@@ -602,6 +602,12 @@ fn assert_scalar_handoff(mir: &Mir<'_>, caller: &RootReport<'_>) {
             block.operation,
             Operation::Drop(_) | Operation::Move { .. } | Operation::Dispose { .. }
         )));
+        let ends = |blocks: &[&compiler::analysis::ownership::Block<'_>]| {
+            blocks.iter().map(|block| match &block.operation {
+            Operation::Cleanup(actions) => actions.iter().filter(|action| matches!(action, Obligation::EndStorage(place) if same_slot(*place))).count(),
+            _ => 0,
+        }).sum::<usize>()
+        };
         if caller.site().span.bytes().starts_with(b"function repair") {
             let install = later
                 .iter()
@@ -610,6 +616,8 @@ fn assert_scalar_handoff(mir: &Mir<'_>, caller: &RootReport<'_>) {
                 Operation::Install { target, .. } if same_slot(target))
                 })
                 .expect("repair the consumed binding");
+            assert_eq!(ends(&later[..install]), 0);
+            assert_eq!(ends(&later[install + 1..]), 1);
             assert!(
                 later[install + 1..]
                     .iter()
@@ -617,9 +625,7 @@ fn assert_scalar_handoff(mir: &Mir<'_>, caller: &RootReport<'_>) {
                 Operation::Copy { from, .. } if same_slot(from)))
             );
         } else {
-            assert!(!later.iter().any(|block| matches!(&block.operation,
-                Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
-                    Obligation::EndStorage(place) if same_slot(*place))))));
+            assert_eq!(ends(later), 0);
         }
         let mut copies = path[..i].iter().filter_map(|block| match block.operation {
             Operation::Copy { from, into } if same_slot(from) => Some(into),

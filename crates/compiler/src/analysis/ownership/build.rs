@@ -5711,6 +5711,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         facts: &ExpressionFacts<'g>,
         call: &CallFacts<'g>,
+        depth: usize,
     ) -> ResultOf<NodeId> {
         let pending = || Stop::Pending(node);
         let syntax = &self.module.syntax.nodes[node];
@@ -5721,13 +5722,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         ) else {
             return Err(pending());
         };
+        // M4 records the canonical Callee fact on the ungrouped target.
+        let (callee, _) = self.ungroup_expression_at(*callee, depth + 1)?;
         self.budget.step(1)?;
         if argument != typed_argument
             || call.pipe_input.is_some()
             || !call.defaults.is_empty()
             || facts.admission.is_some()
             || facts.ordinary_context.is_some()
-            || !matches!(self.fact(callee).map(|fact| &fact.kind),
+            || !matches!(self.fact(&callee).map(|fact| &fact.kind),
                 Some(NodeFactKind::Callee { declaration }) if std::ptr::eq(*declaration, call.callee))
         {
             return Err(pending());
@@ -5745,7 +5748,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         depth: usize,
     ) -> ResultOf<Pc> {
         let pending = || Stop::Pending(node);
-        let argument = self.written_scalar_argument(node, facts, call)?;
+        let argument = self.written_scalar_argument(node, facts, call, depth)?;
         if into.is_some_and(|slot| self.slots[slot].contains_guard()) {
             return Err(pending());
         }
@@ -5802,7 +5805,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         depth: usize,
     ) -> ResultOf<&'g DeclarationId> {
         let pending = || Stop::Pending(node);
-        let argument = self.written_scalar_argument(node, facts, call)?;
+        let argument = self.written_scalar_argument(node, facts, call, depth)?;
         let (name, _) = self.ungroup_expression_at(argument, depth + 1)?;
         let (named, path) = self.named_owned_place(name)?.ok_or_else(pending)?;
         let actual = self.normal_value(argument)?;
