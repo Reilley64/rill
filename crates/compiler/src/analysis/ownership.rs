@@ -424,13 +424,16 @@ pub enum Operation<'g> {
         exclusive: bool,
     },
     Dereference(Place<'g>),
-    /// Copy an i32 through a shared view using the linked `List::index` action.
+    /// Read an i32 through the checked view using the linked `List::index` action.
+    /// An exclusive view here belongs to a transferred child environment;
+    /// reading does not copy the descriptor or create another loan.
     /// The full u64 is checked against the backing at evaluation; out of
     /// bounds is fatal. Only success initializes `into` and reaches the
     /// normal successor.
     ReadListI32 {
         view: Place<'g>,
         backing: Place<'g>,
+        exclusive: bool,
         index: u64,
         into: Option<Place<'g>>,
         owner: &'g DeclarationId,
@@ -2003,7 +2006,7 @@ enum Action<'g> {
         into: Slot,
         role: super::typed::RoutineRole<'g>,
     },
-    UnprovedScopedJoin {
+    OverlappingScopedJoin {
         receivers: [Slot; 2],
         into: Slot,
     },
@@ -2129,8 +2132,9 @@ struct Build<'a, 'g, 'b> {
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'a, 'g>>,
     list_arrow_pairs: Vec<build::ListArrowPair<'g>>,
-    // A transferred descriptor and its external backing, not a new acquisition.
-    incoming_list_arrow: Option<(Slot, Slot)>,
+    // A transferred descriptor, its external backing, and its exclusivity.
+    // This is not a new acquisition.
+    incoming_list_arrow: Option<(Slot, Slot, bool)>,
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
     /// A top-level empty/continue loop whose only decision reads a Bool formal.

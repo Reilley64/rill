@@ -36,6 +36,7 @@ pub(in crate::analysis::ownership) struct ListArrow<'g> {
 pub(in crate::analysis::ownership) enum ArrowBody<'g> {
     List {
         incoming_backing: Place<'g>,
+        exclusive: bool,
         mir: Arc<Mir<'g>>,
     },
     Reference(Type<'g>),
@@ -104,13 +105,16 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         }
         let left = self.list_arrow_plan(first, tuple_depth + 1, scoped.is_some())?;
         let right = self.list_arrow_plan(second, tuple_depth + 1, scoped.is_some())?;
-        let needs_lifecycle = left.exclusive || right.exclusive;
+        // A pair on the same whole List cannot commit if either input is
+        // exclusive. Still lower the acquisitions so the second one reports
+        // the actual conflict, without building unreachable child frames.
+        let overlap = left.source == right.source && (left.exclusive || right.exclusive);
         let sources = [
             (left.source, left.exclusive),
             (right.source, right.exclusive),
         ];
-        let (a, a_capture, a_body) = self.list_arrow(first, left, needs_lifecycle)?;
-        let (b, b_capture, b_body) = self.list_arrow(second, right, needs_lifecycle)?;
+        let (a, a_capture, a_body) = self.list_arrow(first, left, overlap)?;
+        let (b, b_capture, b_body) = self.list_arrow(second, right, overlap)?;
         let action = if let (Some(a_body), Some(b_body)) = (a_body, b_body) {
             self.budget.reserve(3)?;
             let index = self.list_arrow_pairs.len();
@@ -134,9 +138,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 }
             }
         } else {
-            // Check both real acquisitions, but do not build or commit an
-            // exclusive child frame without a checked lifecycle for it.
-            Action::UnprovedScopedJoin {
+            Action::OverlappingScopedJoin {
                 receivers: [a, b],
                 into,
             }
@@ -303,25 +305,25 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         &mut self,
         child: &PairChild<'g>,
         plan: ListArrowPlan<'a, 'g>,
-        needs_lifecycle: bool,
+        overlap: bool,
     ) -> ResultOf<(Slot, Slot, Option<ListArrow<'g>>)> {
         let ListArrowPlan {
             read,
             operand,
             source,
+            exclusive,
             op: read_op,
             read_type,
             comparison,
             output,
             closure,
-            ..
         } = plan;
         let base = read_op.base;
         let view_ty = &read_op.view.ty;
         let backing = self.slots[source];
         let receiver = self.slot(child.arrow.site.node, closure)?;
         let staged = self.slot(base, view_ty)?;
-        if needs_lifecycle {
+        if overlap {
             return Ok((receiver, staged, None));
         }
 
@@ -347,7 +349,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             cleanup: StorageCleanup::End,
             ..backing
         });
-        frame.incoming_list_arrow = Some((view, incoming));
+        frame.incoming_list_arrow = Some((view, incoming, exclusive));
         let end = frame.emit(result, Action::None, Edges::End)?;
         let cleanup = frame.cleanup(result, &[view], end)?;
         let exported = frame.emit(result, Action::Export(output), Edges::Next(cleanup))?;
@@ -384,6 +386,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 capture,
                 body: ArrowBody::List {
                     incoming_backing,
+                    exclusive,
                     mir: Arc::new(body),
                 },
             }),

@@ -81,6 +81,7 @@ impl<'g> Probe<'g> {
                     capture: frame.capture,
                     backing: frame.backing,
                     incoming_list_backing: Some(frame.incoming_backing),
+                    exclusive: false,
                     result: frame.result,
                     body: Arc::clone(&frame.body),
                 });

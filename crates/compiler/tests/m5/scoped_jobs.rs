@@ -807,6 +807,7 @@ fn installed_shared_list_literal_reads() {
                         view,
                         backing,
                         index: read_index,
+                        exclusive: false,
                         into: Some(result),
                         owner,
                         representation: repr,

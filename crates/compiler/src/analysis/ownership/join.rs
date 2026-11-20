@@ -66,6 +66,8 @@ pub struct JoinWait<'g> {
     pub retained_backings: [Place<'g>; 2],
     /// Each live environment carries its input dependency until its storage ends.
     pub environment_backings: [Option<Place<'g>>; 2],
+    /// Backings still restricted by a transferred exclusive loan.
+    pub exclusive_backings: [Option<Place<'g>>; 2],
     /// Initialized reference stages carry their own dependencies independently.
     pub retained_results: [Option<Place<'g>>; 2],
     pub successors: Vec<(JoinEvent, JoinNext<'g>)>,
@@ -84,6 +86,8 @@ pub struct ScopedJoinFrame<'g> {
     pub backing: Place<'g>,
     /// The non-owning List proxy. Reference children instead use their capture.
     pub incoming_list_backing: Option<Place<'g>>,
+    /// Access carried by the moved environment, not a new loan in the child.
+    pub exclusive: bool,
     pub result: Place<'g>,
     pub body: Arc<Mir<'g>>,
 }

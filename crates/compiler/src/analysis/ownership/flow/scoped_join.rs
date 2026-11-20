@@ -27,6 +27,7 @@ struct Child<'g> {
     backing: Place<'g>,
     export: ResultExport<'g>,
     reference: bool,
+    exclusive: bool,
     end_view: Cleanup<'g>,
     entry: Site<'g>,
     returned: Site<'g>,
@@ -56,7 +57,7 @@ impl<'g> Child<'g> {
         let pending = Stop::Pending(node);
         let compared = match frame.body.blocks.len() {
             4 => false,
-            5 if frame.incoming_list_backing.is_some() => {
+            5 if frame.incoming_list_backing.is_some() && !frame.exclusive => {
                 budget.step(1)?;
                 true
             }
@@ -76,18 +77,21 @@ impl<'g> Child<'g> {
                 Operation::ReadListI32 {
                     view,
                     backing,
+                    exclusive,
                     into: Some(output),
                     ..
                 },
                 Some(incoming),
-            ) if at_root(*backing, incoming.root) => (*view, *output),
+            ) if *exclusive == frame.exclusive && at_root(*backing, incoming.root) => {
+                (*view, *output)
+            }
             (
                 Operation::Copy {
                     from,
                     into: Some(output),
                 },
                 None,
-            ) if !same_root(from.root, output.root) => (*from, *output),
+            ) if !frame.exclusive && !same_root(from.root, output.root) => (*from, *output),
             _ => return Err(pending),
         };
         let (output, export) = if compared {
@@ -140,6 +144,7 @@ impl<'g> Child<'g> {
         Ok(Self {
             backing: frame.backing,
             reference: frame.incoming_list_backing.is_none(),
+            exclusive: frame.exclusive,
             export: ResultExport {
                 stage: ResultSlot { slot, from: *from },
                 into: frame.result,
@@ -166,7 +171,7 @@ fn check_receiver<'g>(
         Loan {
             source,
             site: acquisition,
-            exclusive: false,
+            exclusive,
             kind,
         },
     ] = held.loans.as_ref()
@@ -174,7 +179,8 @@ fn check_receiver<'g>(
         return Err(Stop::Pending(node));
     };
     budget.step(membership_work(parent))?;
-    if !at_root(frame.environment, environment.root)
+    if *exclusive != frame.exclusive
+        || !at_root(frame.environment, environment.root)
         || !same_root(frame.origin, environment.root)
         || held.callable_owner != Some(CallableOwner::ListArrow(environment.root.node))
         || !at_root(
@@ -194,7 +200,8 @@ fn check_receiver<'g>(
                 && (parent.locals.binary_search(source).is_ok()
                     || parent.params.binary_search(source).is_ok()) => {}
         (None, LoanKind::IncomingSharedI32)
-            if *acquisition == parent.slots[*source].node
+            if !*exclusive
+                && *acquisition == parent.slots[*source].node
                 && parent.params.binary_search(source).is_ok() =>
         {
             // This key is not a loan of the parameter slot. The source was
@@ -239,7 +246,7 @@ fn parent_exit<'g>(
 
 /// Cleanup if control exits before commit. This projection does not add a
 /// poll between capture formations: delivery requires a separately proved
-/// enabled checkpoint, and a direct shared borrow is not one.
+/// enabled checkpoint, and direct capture formation is not one.
 fn before_commit_exit<'g>(
     parent: &CancellationFrame<'_, 'g>,
     input: &[State],
@@ -317,6 +324,8 @@ impl<'g> Staged<'g> {
         budget.statistics.max_depth = budget.statistics.max_depth.max(2);
         if receivers[0] == receivers[1]
             || same_root(frames[0].environment.root, frames[1].environment.root)
+            || ((frames[0].exclusive || frames[1].exclusive)
+                && same_root(frames[0].backing.root, frames[1].backing.root))
             || !parent.retained.is_empty()
             || parent.slots[into].members != 2
             || parent.slots[into].custom_disposer.is_some()
@@ -348,7 +357,7 @@ impl<'g> Staged<'g> {
             Child::check(right, 1, node, budget)?,
         ];
 
-        // At an entry delivery, end the staged shared environments before
+        // At an entry delivery, end the staged environments before
         // parent cleanup. After commit the children, not the parent, end
         // those views; the same parent exit is then gated on both terminals.
         let (precommit_cleanup, parent_exit) =
@@ -498,6 +507,19 @@ enum Successor<'g> {
     },
 }
 
+impl ChildState<'_> {
+    fn environment(&self) -> Option<&Held> {
+        match self {
+            Self::Entry(held)
+            | Self::Running(held)
+            | Self::Cleaning {
+                environment: held, ..
+            } => Some(held),
+            Self::AtExit(_) | Self::Complete => None,
+        }
+    }
+}
+
 impl<'g> Waiting<'g> {
     fn backings(&self) -> [Place<'g>; 2] {
         self.proof.children.each_ref().map(|child| child.backing)
@@ -505,11 +527,17 @@ impl<'g> Waiting<'g> {
 
     fn environment_backings(&self) -> [Option<Place<'g>>; 2] {
         std::array::from_fn(|i| {
-            matches!(
-                self.children[i],
-                ChildState::Entry(_) | ChildState::Running(_) | ChildState::Cleaning { .. }
-            )
-            .then_some(self.proof.children[i].backing)
+            self.children[i]
+                .environment()
+                .map(|_| self.proof.children[i].backing)
+        })
+    }
+
+    fn exclusive_backings(&self) -> [Option<Place<'g>>; 2] {
+        std::array::from_fn(|i| {
+            let environment = self.children[i].environment()?;
+            matches!(environment.loans.as_ref(), [loan] if loan.exclusive)
+                .then_some(self.proof.children[i].backing)
         })
     }
 
@@ -578,9 +606,11 @@ impl<'g> Waiting<'g> {
                         ChildEvent::EndView,
                     ) => {
                         if !matches!(environment.loans.as_ref(), [loan]
-                            if if proof.reference { loan.kind == LoanKind::IncomingSharedI32 }
-                            else { loan.site == view.root.node })
-                        {
+                        if loan.exclusive == proof.exclusive && if proof.reference {
+                            loan.kind == LoanKind::IncomingSharedI32
+                        } else {
+                            loan.kind == LoanKind::Backing && loan.site == view.root.node
+                        }) {
                             return Err(pending);
                         }
                         ChildState::AtExit(

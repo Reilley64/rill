@@ -121,6 +121,8 @@ impl LoanKind {
 enum Access {
     Observe,
     Exclusive,
+    // Check access through this holder's single exclusive backing loan.
+    ThroughExclusive(Slot),
     EndScope,
 }
 
@@ -208,7 +210,9 @@ fn liveness(
             | Action::ScopedJoin {
                 receivers, into, ..
             }
-            | Action::UnprovedScopedJoin { receivers, into } => (receivers.map(Some), Some(into)),
+            | Action::OverlappingScopedJoin { receivers, into } => {
+                (receivers.map(Some), Some(into))
+            }
             Action::Call(index) => use_one(None, calls[index].into),
             Action::CopyClosure { from, into } => use_one(Some(from), Some(into)),
             Action::InvokeClosurePair { receiver, into, .. }
@@ -318,6 +322,14 @@ fn conflict(
     access: Access,
     budget: &mut Budget,
 ) -> ResultOf<()> {
+    if let Access::ThroughExclusive(view) = access {
+        budget.step(1)?;
+        if !matches!(initialized(&state[view], site)?.loans.as_ref(),
+            [Loan { source: backing, exclusive: true, kind: LoanKind::Backing, .. }] if *backing == source)
+        {
+            return Err(Stop::Pending(site));
+        }
+    }
     let check = |loan: Loan, _: &mut Budget| -> ResultOf<()> {
         // The parameter key for incoming backing is not a local place.
         if loan.kind.is_incoming() {
@@ -325,7 +337,7 @@ fn conflict(
         }
         let blocks = match access {
             Access::Observe => loan.exclusive,
-            Access::Exclusive => true,
+            Access::Exclusive | Access::ThroughExclusive(_) => true,
             Access::EndScope => loan.kind.borrows_local_storage(),
         };
         // Keep the exact member for initialization, backing and MIR, but
@@ -350,6 +362,9 @@ fn conflict(
     };
     for &holder in live {
         budget.step(1)?;
+        if matches!(access, Access::ThroughExclusive(view) if view == holder) {
+            continue;
+        }
         if let State::Initialized(held) = &state[holder] {
             for &loan in held.loans.iter() {
                 budget.step(1)?;
@@ -2157,13 +2172,13 @@ pub(super) fn run<'a, 'g>(
             ..Held::default()
         });
     }
-    if let Some((view, backing)) = incoming_list_arrow {
+    if let Some((view, backing, exclusive)) = incoming_list_arrow {
         budget.reserve(1)?;
         state[view] = State::Initialized(Held {
             loans: Arc::from([Loan {
                 source: backing,
                 site: slots[view].node,
-                exclusive: false,
+                exclusive,
                 kind: LoanKind::Backing,
             }]),
             ..Held::default()
@@ -3024,7 +3039,7 @@ pub(super) fn run<'a, 'g>(
                     )?;
                     return Err(Stop::Pending(node));
                 }
-                Action::UnprovedScopedJoin { .. } => return Err(Stop::Pending(node)),
+                Action::OverlappingScopedJoin { .. } => return Err(Stop::Pending(node)),
                 Action::ScopedJoin {
                     pair,
                     receivers,
@@ -3044,33 +3059,53 @@ pub(super) fn run<'a, 'g>(
                             budget.step(1)?;
                             initialized(&state[receiver], node)?;
                         }
-                        for (slot, access) in [
-                            (receiver, Access::Exclusive),
-                            (child.source, Access::Observe),
-                        ] {
-                            conflict(
-                                &slots,
-                                &state,
-                                &live[pc],
-                                slot,
-                                (node, Conflict::Access),
-                                access,
-                                budget,
-                            )?;
-                        }
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            receiver,
+                            (node, Conflict::Access),
+                            Access::Exclusive,
+                            budget,
+                        )?;
+                        let exclusive = matches!(
+                            child.body,
+                            build::ArrowBody::List {
+                                exclusive: true,
+                                ..
+                            }
+                        );
+                        // Check the transferred access, not an observation
+                        // by the parent. Staged::check binds this loan to
+                        // the child's actual capture site and backing proxy.
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            child.source,
+                            (node, Conflict::Access),
+                            if exclusive {
+                                Access::ThroughExclusive(receiver)
+                            } else {
+                                Access::Observe
+                            },
+                            budget,
+                        )?;
                     }
-                    // Both reached capture copies have formed before probing
-                    // either reference child. The scalar frames are prebuilt.
+                    // Both captures have formed before probing either
+                    // reference child. The scalar frames are prebuilt.
                     let mut frame = |i: usize| -> ResultOf<_> {
                         let child = &frames.children[i];
                         let environment = local(receivers[i]);
-                        let (incoming_list_backing, body) = match &child.body {
+                        let (incoming_list_backing, exclusive, body) = match &child.body {
                             build::ArrowBody::List {
                                 incoming_backing,
+                                exclusive,
                                 mir,
-                            } => (Some(*incoming_backing), Arc::clone(mir)),
+                            } => (Some(*incoming_backing), *exclusive, Arc::clone(mir)),
                             build::ArrowBody::Reference(ty) => (
                                 None,
+                                false,
                                 build::lower_reference_child(
                                     typed,
                                     module,
@@ -3089,6 +3124,7 @@ pub(super) fn run<'a, 'g>(
                             capture: child.capture,
                             backing: local(child.source),
                             incoming_list_backing,
+                            exclusive,
                             result: local(into + 1 + i),
                             body,
                         })
@@ -3127,6 +3163,7 @@ pub(super) fn run<'a, 'g>(
                         let body = &pair.children[position];
                         let build::ArrowBody::List {
                             incoming_backing,
+                            exclusive: false,
                             mir,
                         } = &body.body
                         else {
@@ -3535,7 +3572,7 @@ pub(super) fn run<'a, 'g>(
                     let [
                         Loan {
                             source: backing,
-                            exclusive: false,
+                            exclusive,
                             kind: LoanKind::Backing,
                             ..
                         },
@@ -3543,25 +3580,43 @@ pub(super) fn run<'a, 'g>(
                     else {
                         return Err(Stop::Pending(node));
                     };
-                    let backing = *backing;
-                    require_initialized(&slots, &state, backing, node, budget)?;
-                    for source in [view, backing] {
-                        conflict(
-                            &slots,
-                            &state,
-                            &live[pc],
-                            source,
-                            (node, Conflict::Access),
-                            Access::Observe,
-                            budget,
-                        )?;
+                    let (backing, exclusive) = (*backing, *exclusive);
+                    if exclusive && incoming_list_arrow != Some((view, backing, true)) {
+                        return Err(Stop::Pending(node));
                     }
+                    require_initialized(&slots, &state, backing, node, budget)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        view,
+                        (node, Conflict::Access),
+                        Access::Observe,
+                        budget,
+                    )?;
+                    // Only the transferred descriptor may access its backing
+                    // through this loan. Keep the restriction on all other
+                    // access; this operation reads only the scalar element.
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        backing,
+                        (node, Conflict::Access),
+                        if exclusive {
+                            Access::ThroughExclusive(view)
+                        } else {
+                            Access::Observe
+                        },
+                        budget,
+                    )?;
                     if let Some(into) = into {
                         state[into] = State::Initialized(empty.clone());
                     }
                     Operation::ReadListI32 {
                         view: local(view),
                         backing: local(backing),
+                        exclusive,
                         index,
                         into: into.map(local),
                         owner,

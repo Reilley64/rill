@@ -231,6 +231,7 @@ pub(in crate::analysis::ownership::flow) fn check<'g>(
             initialized_results: key.stages,
             retained_backings: waiting.backings(),
             environment_backings: waiting.environment_backings(),
+            exclusive_backings: waiting.exclusive_backings(),
             retained_results: waiting.retained_results(),
             successors: edges,
         });
