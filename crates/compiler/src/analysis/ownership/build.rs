@@ -34,6 +34,7 @@ enum ExpressionProof<'t, 'g> {
     NestedTupleSource(Slot),
     NamedNestedTupleLeaf,
     NestedRecordConstruction,
+    UnloweredRebuildRead(Slot),
     NamedRecordRebuild,
     NestedRecordFieldTemporary(ProjectedTemporary),
 }
@@ -3239,7 +3240,9 @@ impl<'a, 'g> Build<'a, 'g> {
             return self.stage_value(node, into, finish, Some(temp), depth + 1);
         }
         if projection(facts).is_some() {
-            let action = if facts.access != Access::Owned && owns_text(&facts.ty) {
+            let action = if let Some(ExpressionProof::UnloweredRebuildRead(slot)) = proof {
+                Action::UnloweredRebuildRead(slot)
+            } else if facts.access != Access::Owned && owns_text(&facts.ty) {
                 let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
                 let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
                 Action::ForbiddenBorrowedMove(root)
@@ -3444,6 +3447,12 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(node));
         }
 
+        struct Replacement {
+            value: NodeId,
+            target: Slot,
+            incoming: Slot,
+            unlowered_read: Option<Slot>,
+        }
         self.budget.reserve(data.fields.len())?;
         let mut replacements = Vec::with_capacity(data.fields.len());
         let first_stage = self.slots.len();
@@ -3471,7 +3480,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     // Check the read before blocking an operand that would open
                     // a hole in the base. Do not actually move the original field.
                     owns_text(&facts.ty)
-                        .then(|| self.field(value, from, member).map(|slot| (value, slot)))
+                        .then(|| self.field(value, from, member))
                         .transpose()?
                 }
                 _ => return Err(Stop::Pending(value)),
@@ -3482,7 +3491,12 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Err(Stop::Pending(node));
             }
             let incoming = self.slot(field.expression, &facts.ty)?;
-            replacements.push((field.expression, target, incoming, unlowered_read));
+            replacements.push(Replacement {
+                value: field.expression,
+                target,
+                incoming,
+                unlowered_read,
+            });
         }
 
         // Commit on the original place, then transfer the completed owner.
@@ -3494,7 +3508,10 @@ impl<'a, 'g> Build<'a, 'g> {
             },
             Edges::Next(next),
         )?;
-        for &(_, target, incoming, _) in replacements.iter().rev() {
+        for &Replacement {
+            target, incoming, ..
+        } in replacements.iter().rev()
+        {
             tail = self.emit(
                 node,
                 Action::Install { target, incoming },
@@ -3514,17 +3531,17 @@ impl<'a, 'g> Build<'a, 'g> {
             },
             Edges::Next(tail),
         )?;
-        for (value, _, incoming, unlowered_read) in replacements.into_iter().rev() {
-            tail = if let Some((site, source)) = unlowered_read {
-                self.depth(depth)?;
-                self.emit(
-                    site,
-                    Action::UnloweredRebuildRead(source),
-                    Edges::Next(tail),
-                )?
-            } else {
-                self.expression(value, Some(incoming), tail, depth)?
-            };
+        for replacement in replacements.into_iter().rev() {
+            let proof = replacement
+                .unlowered_read
+                .map(ExpressionProof::UnloweredRebuildRead);
+            tail = self.expression_with_proof(
+                replacement.value,
+                Some(replacement.incoming),
+                tail,
+                depth,
+                proof,
+            )?;
         }
         self.emit(
             base,

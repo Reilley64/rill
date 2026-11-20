@@ -28,6 +28,11 @@ fn custom_record_rebuild() {
                 }
                 dispose(after);
             }
+            type Escape = { text: string; }
+            implement release(value: Escape): void {
+                let rebuilt = Escape { ...value, text: "new" };
+            }
+            function activeEscape(value: Escape): void {}
             type Plain = { keep: string; mark: bool; last: string; }
             function repair(base: Plain, replacement: string): void {
                 let taken = base.last;
@@ -118,6 +123,17 @@ fn custom_record_rebuild() {
                 [Obligation::InvokeDisposer { operand, implementation }]
                     if is_root(operand, b"value: Custom") && *implementation == selected));
             check_disposer(control);
+            let active = lower("activeEscape");
+            assert_eq!(active.completion(), Completion::SourceRejected);
+            assert!(active.mir().is_none());
+            let [finding] = active.findings() else {
+                panic!("expected one active-disposer escape finding")
+            };
+            assert_eq!(finding.code(), "R0501");
+            assert_eq!(
+                finding.site.span.bytes(),
+                b"Escape { ...value, text: \"new\" }"
+            );
 
             // A partially moved plain base avoids the separate restriction on moving
             // a field out of an ordinary custom owner. Repair is not a checked slice.
@@ -164,7 +180,7 @@ fn custom_record_rebuild() {
                         from: original_mark,
                         into: Some(mark_stage),
                     },
-                    _, // old last drop
+                    Operation::Drop(old),
                     Operation::Install {
                         target: last_target,
                         incoming: new_last,
@@ -180,7 +196,7 @@ fn custom_record_rebuild() {
                     Operation::Dispose {
                         operand: before, ..
                     },
-                    _, // lexical exit of saved
+                    Operation::Cleanup(exit),
                     Operation::Dispose { operand: after, .. },
                 ] = effects.as_slice()
                 else {
@@ -211,18 +227,16 @@ fn custom_record_rebuild() {
                 assert!(new_mark.projection.is_none() && same_root(new_mark, mark_stage));
                 assert!(is_root(before, b"before: string") && is_root(after, b"after: string"));
 
-                let cleanup = path_drops(mir, mir.entry);
+                assert!(same_root(old, base) && old.field().is_some_and(|f| &f.id == last));
                 let [
-                    Obligation::Drop(old),
                     Obligation::InvokeDisposer {
                         operand,
                         implementation,
                     },
-                ] = cleanup.as_slice()
+                ] = exit.as_slice()
                 else {
-                    panic!("expected only the old last drop and the rebuilt owner's disposer");
+                    panic!("expected only the rebuilt owner's disposer at lexical exit");
                 };
-                assert!(same_root(old, base) && old.field().is_some_and(|f| &f.id == last));
                 assert!(same_root(operand, saved) && operand.projection.is_none());
                 assert_eq!(*implementation, selected);
                 check_disposer(mir);

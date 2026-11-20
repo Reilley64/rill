@@ -2525,6 +2525,10 @@ fn flat_rebuild_distinguishes_moved_inputs_live_loans_and_unsupported_bases() {
             function moveOriginal(base: Pack): void {
                 let saved = Pack { ...base, last: base.last };
             }
+            function movedFieldGrouped(base: Pack): void {
+                let consumed = base.last;
+                let saved = Pack { ...base, last: ((base.last)) };
+            }
             function conflict(base: Pack, replacement: string): &string {
                 let view = &base.keep;
                 let saved = Pack { ...base, last: replacement };
@@ -2553,14 +2557,27 @@ fn flat_rebuild_distinguishes_moved_inputs_live_loans_and_unsupported_bases() {
             }
         "#,
         |_, module, receipt| {
-            let lower = |name| {
+            let check = |name, limits| {
                 let decl = module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap();
-                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+                lower_body(receipt, module, &decl.id, limits).unwrap()
             };
+            let lower = |name| check(name, AnalysisLimits::default());
+            let bare = lower("movedField");
+            let depth = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..AnalysisLimits::default()
+            };
+            assert_eq!(
+                check("movedField", depth).completion(),
+                Completion::SourceRejected
+            );
+            let limited = check("movedFieldGrouped", depth);
+            assert_eq!(limited.completion(), Completion::ResourceLimit);
+            assert!(limited.mir().is_none() && limited.findings().is_empty());
             for (name, code, site, related) in [
                 (
                     "reused",
@@ -2571,6 +2588,7 @@ fn flat_rebuild_distinguishes_moved_inputs_live_loans_and_unsupported_bases() {
                 ("movedBase", "R0200", "base", "base"),
                 ("movedReplacement", "R0200", "replacement", "replacement"),
                 ("movedField", "R0200", "base.last", "base.last"),
+                ("movedFieldGrouped", "R0200", "base.last", "base.last"),
                 (
                     "conflict",
                     "R0203",
