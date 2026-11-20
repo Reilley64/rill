@@ -283,7 +283,10 @@ impl<'a, 'g> Check<'a, 'g> {
         depth: usize,
     ) -> Work<bool> {
         self.depth(depth)?;
-        if !self.checked.contains(declaration) || self.contracts.contains_key(declaration) {
+        if !self.checked.contains(declaration)
+            || self.contracts.contains_key(declaration)
+            || self.pairs.contains_key(declaration)
+        {
             return Ok(false);
         }
         let Some(signature) = self.signature(declaration) else {
@@ -314,9 +317,11 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(!proof.has_pending)
     }
 
-    fn callable_check(&mut self, module: &'g Module) -> Work<Check<'_, 'g>> {
+    pub(super) fn callable_check(&mut self, module: &'g Module) -> Work<Check<'_, 'g>> {
         let sources = Sources {
             inventory: self.inventory,
+            bodies: self.bodies,
+            pairs: self.pairs,
             nodes: self.nodes,
             checked: self.checked,
             variants: self.variants,

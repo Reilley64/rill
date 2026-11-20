@@ -20,6 +20,7 @@ mod callbacks;
 mod calls;
 mod control;
 mod loops;
+mod pairs;
 mod patterns;
 mod releases;
 mod retained;
@@ -166,8 +167,18 @@ pub(super) fn check<'g>(
         &implementation_headers,
         budget,
     )?;
+    let pairs = pairs::summaries(
+        inventory,
+        bodies,
+        &nodes,
+        &checked,
+        &implementation_headers,
+        budget,
+    )?;
     let sources = Sources {
         inventory,
+        bodies,
+        pairs: &pairs,
         nodes: &nodes,
         checked: &checked,
         variants: &variants,
@@ -220,6 +231,8 @@ pub(super) fn check<'g>(
 #[derive(Clone, Copy)]
 struct Sources<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
+    bodies: &'a GenericReport<'g>,
+    pairs: &'a pairs::PairBodies<'g>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
@@ -230,6 +243,8 @@ struct Sources<'a, 'g> {
 
 struct Check<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
+    bodies: &'a GenericReport<'g>,
+    pairs: &'a pairs::PairBodies<'g>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
@@ -271,6 +286,8 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         Ok(Self {
             inventory: sources.inventory,
+            bodies: sources.bodies,
+            pairs: sources.pairs,
             nodes: sources.nodes,
             checked: sources.checked,
             variants: sources.variants,
@@ -434,6 +451,7 @@ impl<'a, 'g> Check<'a, 'g> {
             match declaration.id.kind {
                 DeclarationKind::Function | DeclarationKind::Implementation => {
                     if syntax.children.get(1).is_none()
+                        || self.pairs.contains_key(&declaration.id)
                         || self
                             .contracts
                             .get(&declaration.id)

@@ -63,6 +63,34 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             return Ok(states);
         }
+        if settled
+            && let Some(slots) = call
+                .selection
+                .as_ref()
+                .and_then(|selection| self.pairs.get(selection.implementation))
+                .copied()
+        {
+            let mut forwarded = Vec::new();
+            let mut pending = Vec::new();
+            for mut state in states {
+                self.budget.reserve(1)?;
+                if self.transfer_pair(node, value, call, &mut state, slots, depth + 1)? {
+                    forwarded.push(state);
+                } else {
+                    self.pending(node, ResultUseBlocker::CallBoundary)?;
+                    self.finish_call(
+                        node,
+                        value,
+                        &mut state,
+                        call.argument_evaluation_order(),
+                        (false, false, false),
+                    )?;
+                    pending.push(state);
+                }
+            }
+            forwarded.extend(self.call_output(node, value, pending)?);
+            return Ok(forwarded);
+        }
         for state in &mut states {
             let checked = settled && self.ordinary_boundary(call, state, depth + 1)?;
             if settled && !checked && self.contracts.contains_key(call.callee) {

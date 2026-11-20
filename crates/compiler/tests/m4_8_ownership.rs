@@ -114,6 +114,7 @@ fn installed_ownership_requires_the_built_archive() {
         installed_receipts(&request);
         installed_ordinary_family(&request);
         installed_pair_evidence(&request);
+        installed_pair_invocation(&request);
 
         let facade = root.join("lib/rill/std/std.rill");
         let bytes = fs::read(&facade).unwrap();
@@ -1702,6 +1703,233 @@ fn installed_pair_evidence(request: &InstalledRequest) {
                 && w.origin.span.bytes() == b"Result.Ok(true)"
                 && w.origin.module.origin == Origin::Application
         }));
+    }
+}
+
+const INVOKE_PAIR: &str = r#"
+    function runTwo<W, R>(jobs: W): R;
+    implement<F, G, A, B> runTwo<[F, G], [A, B]>(jobs: [F, G]): [A, B]
+    where callableOnce(F, [], A), callableOnce(G, [], B),
+          sendable(F), sendable(G), sendable(A), sendable(B) {
+        return [jobs[0](), jobs[1]()];
+    }
+"#;
+
+fn installed_pair_invocation(request: &InstalledRequest) {
+    use compiler::analysis::Stage;
+    use compiler::analysis::generics::{GoalState, callables::CaptureForm};
+    use compiler::analysis::ownership::{Completion, lower_body};
+    use compiler::analysis::typed::ResultUseBlocker;
+
+    let baseline = include_str!("../../../tests/installed/typed/main.rill");
+    fs::write(
+        request.entry.with_file_name("checks.rill"),
+        format!(
+            "{}\n{}",
+            include_str!("../../../tests/installed/typed/checks.rill"),
+            INVOKE_PAIR.replace("function runTwo", "export function runTwo")
+        ),
+    )
+    .unwrap();
+    let source = format!(
+        "{baseline}\n{}",
+        r#"
+        import checks::runTwo as join;
+        function mixed(left: List<bool>, right: List<i32>): [[bool, i32], i32] {
+            return join([(): [bool, i32] => [(&left)[0u64], 17i32], () => { return (&right)[0u64]; }]);
+        }
+        function shared(input: List<i32>): [i32, i32] {
+            let numbers = input;
+            let [first, second] = join([() => (&numbers)[0u64], () => (&numbers)[1u64]]);
+            dispose(numbers);
+            return [first, second];
+        }
+        function residences(): void {
+            let owed: Result<bool> = Result.Ok(true);
+            let [parts, no] = join([(): [bool, i32] => [true, 17i32], () => false]);
+            if (parts[0] && !no) { let _ = owed; }
+        }
+    "#
+    );
+    fs::write(&request.entry, source).unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let app = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.path == "main.rill")
+            .unwrap();
+        let node = app
+            .syntax
+            .nodes
+            .iter()
+            .position(|n| {
+                n.span
+                    .bytes()
+                    .starts_with(b"join([(): [bool, i32] => [(&left)")
+            })
+            .unwrap();
+        let call = report.bodies().ordinary_call(app, node).unwrap().unwrap();
+        assert!(call.checked && call.premise.is_none());
+        let goal = report.bodies().goal(call.goal.as_ref().unwrap()).unwrap();
+        assert_eq!(goal.state, GoalState::Proved);
+        assert_eq!(
+            goal.selection.as_ref().unwrap().implementation.module.path,
+            "checks.rill"
+        );
+        assert_eq!(goal.dependencies.len(), 6);
+        let mut origins = Vec::new();
+        for id in &goal.dependencies {
+            let goal = report.bodies().goal(id).unwrap();
+            assert_eq!(goal.state, GoalState::Proved);
+            assert!(goal.premise.is_none());
+            if let Some(arrow) = &goal.arrow_origin {
+                let [capture] = arrow.captures.as_slice() else {
+                    panic!("one actual capture")
+                };
+                assert_eq!(capture.form, CaptureForm::ExplicitBorrow { mutable: false });
+                origins.push((arrow.site.node, capture.site.span.bytes()));
+            }
+        }
+        assert_eq!(origins.len(), 2);
+        assert_ne!(origins[0].0, origins[1].0);
+        assert_eq!(
+            [origins[0].1, origins[1].1],
+            [b"&left".as_slice(), b"&right"]
+        );
+        let uses = report.result_use().unwrap();
+        let pending: Vec<_> = uses
+            .pending()
+            .iter()
+            .map(|p| (p.blocker, p.site.span.bytes().escape_ascii().to_string()))
+            .collect();
+        assert_eq!(report.completion(), TypedCompletion::Checked, "{pending:?}");
+        assert!(uses.discards().is_empty());
+        let receipt = report.receipt().unwrap();
+        assert_eq!(
+            receipt.not_performed(),
+            &[Stage::Ownership, Stage::Execution]
+        );
+        let user = app
+            .declarations
+            .iter()
+            .find(|d| d.name.as_deref() == Some("mixed"))
+            .unwrap();
+        let local = lower_body(&receipt, app, &user.id, AnalysisLimits::default()).unwrap();
+        assert_eq!(local.completion(), Completion::Incomplete);
+        assert!(local.mir().is_none());
+        let s = receipt.statistics();
+        let exact = AnalysisLimits {
+            max_work: s.work,
+            max_entries: s.entries,
+            max_depth: s.max_depth,
+        };
+        assert!(analyze_typed(&graph, exact).receipt().is_some());
+        let short = analyze_typed(
+            &graph,
+            AnalysisLimits {
+                max_work: s.work - 1,
+                ..exact
+            },
+        );
+        assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
+        assert!(short.receipt().is_none());
+    }
+
+    for (source, completion, boundary, discard) in [
+        ("function bodyWithoutCaller(): bool { return true; }", TypedCompletion::Checked, false, None),
+        ("function exclusive(input: List<i32>): [i32, i32] {
+            let mut numbers = input;
+            return join([() => (&numbers)[0u64], () => (&mut numbers)[1u64]]);
+        }", TypedCompletion::Incomplete, true, None),
+        ("function erased(job: () => i32): [i32, i32] {
+            return join([() => 1i32, job]);
+        }", TypedCompletion::Incomplete, false, None),
+        ("function nested(): void {
+            let outputs = join([(): [Result<bool, i32>, i32] => [Result.Ok(true), 1i32], () => false]);
+        }", TypedCompletion::Incomplete, false, None),
+        ("function childOwes(): void {
+            let _ = join([() => {
+                let nested: [Result<bool>, i32] = [Result.Ok(true), 1i32];
+                return 2i32;
+            }, () => 3i32]);
+        }", TypedCompletion::Incomplete, true, Some(b"Result.Ok(true)".as_slice())),
+        ("function callerOwes(numbers: List<i32>): void {
+            let owed: Result<bool> = Result.Ok(false);
+            let _ = join([() => (&numbers)[0u64], () => (&numbers)[1u64]]);
+        }", TypedCompletion::SourceRejected, false, Some(b"Result.Ok(false)".as_slice())),
+    ] {
+        fs::write(&request.entry, format!("{baseline}\nimport checks::runTwo as join;\n{source}")).unwrap();
+        for test_mode in [false, true] {
+            let graph = loader::load_installed(InstalledRequest { test_mode, ..request.clone() }).unwrap();
+            let report = analyze_typed(&graph, AnalysisLimits::default());
+            assert_eq!(report.completion(), completion, "{source}");
+            assert_eq!(report.receipt().is_some(), completion == TypedCompletion::Checked);
+            let uses = report.result_use().unwrap();
+            let blocked_call = uses.pending().iter().any(|p| {
+                p.blocker == ResultUseBlocker::CallBoundary && p.site.span.bytes().starts_with(b"join([")
+            });
+            assert_eq!(blocked_call, boundary, "{source}");
+            let discards: Vec<_> = uses.discards().iter().map(|w| {
+                assert_eq!(w.code(), "R0103");
+                w.origin.span.bytes()
+            }).collect();
+            assert_eq!(discards, discard.as_slice(), "{source}");
+        }
+    }
+
+    // A checked selection with the same written premises is not enough. The
+    // selected implementation must actually route both invocation results.
+    let reordered = INVOKE_PAIR
+        .replace("[A, B]", "[B, A]")
+        .replace("[jobs[0](), jobs[1]()]", "[jobs[1](), jobs[0]()]");
+    fs::write(
+        &request.entry,
+        format!(
+            "{baseline}\n{reordered}\n{}",
+            "function flipped(): [i32, bool] { return runTwo([() => true, () => 1i32]); }",
+        ),
+    )
+    .unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let app = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.path == "main.rill")
+            .unwrap();
+        let node = app
+            .syntax
+            .nodes
+            .iter()
+            .position(|node| node.span.bytes() == b"runTwo([() => true, () => 1i32])")
+            .unwrap();
+        assert!(
+            report
+                .bodies()
+                .ordinary_call(app, node)
+                .unwrap()
+                .unwrap()
+                .checked
+        );
+        assert_eq!(report.completion(), TypedCompletion::Incomplete);
+        assert!(report.receipt().is_none());
+        let pending = report.result_use().unwrap().pending();
+        for call in [b"jobs[1]()", b"jobs[0]()"] {
+            assert!(pending.iter().any(
+                |p| p.blocker == ResultUseBlocker::CallBoundary && p.site.span.bytes() == call
+            ));
+        }
     }
 }
 
