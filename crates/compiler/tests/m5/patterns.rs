@@ -1750,6 +1750,234 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
 }
 
 #[test]
+fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
+    use compiler::analysis::ownership::Projection;
+
+    probe(
+        "patterns::owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary",
+        r#"
+            function unpack(value: [[string, bool, string], string, [string, string], string]): string {
+                let ([([_, bit, (selected)]), tail, [_, _], _]) = (value);
+                return selected;
+            }
+            function reuse(value: [[string, string], bool]): bool {
+                let [[_, text], _] = value;
+                let [[_, again], bit] = value;
+                return bit;
+            }
+            function copied(value: [[bool, bool], bool]): bool {
+                let [[_, first], _] = value;
+                let [[_, _], again] = value;
+                return again;
+            }
+            function ignore(value: [[string, string], string]): void {
+                let [[_, _], _] = value;
+            }
+            function child(value: [[string, bool], string, [bool, string]]): string {
+                let [whole, _, [_, text]] = value;
+                return text;
+            }
+            function forward(value: [[bool, bool], bool]): [[bool, bool], bool] { return value; }
+            function temporary(value: [[bool, bool], bool]): bool {
+                let [[flag, _], _] = forward(value);
+                return flag;
+            }
+            function indexed(value: [[bool, bool], bool]): bool { return value[1]; }
+            function deeper(value: [[[bool, string], bool], bool]): bool {
+                let [[[bit, _], _], _] = value;
+                return bit;
+            }
+            function reference(value: [[&bool, bool], bool]): &bool {
+                let [[saved, _], _] = value;
+                return saved;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name, limits| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, limits).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            let unpack = lower("unpack", default);
+            let mir = unpack.mir().unwrap_or_else(|| {
+                panic!(
+                    "owned nested tuple: {:?} at {:?}",
+                    unpack.completion(),
+                    unpack.blocked_at().map(|site| site.span.bytes())
+                )
+            });
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Copy { .. }
+                            | Operation::Cleanup(_)
+                            | Operation::Drop(_)
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            let [
+                Operation::Move {
+                    from: value,
+                    into: Some(scratch),
+                },
+                Operation::Copy {
+                    from: flag,
+                    into: Some(bit),
+                },
+                Operation::Move {
+                    from: leaf,
+                    into: Some(selected),
+                },
+                Operation::Move {
+                    from: sibling,
+                    into: Some(tail),
+                },
+                Operation::Cleanup(remaining),
+                Operation::Move {
+                    from: result,
+                    into: Some(staged),
+                },
+                Operation::Export(output),
+                Operation::Cleanup(lexical),
+                Operation::Cleanup(parameters),
+            ] = route.as_slice()
+            else {
+                panic!(
+                    "expected one stage, leaf transfers, temporary cleanup, then export: {route:?}"
+                );
+            };
+            assert_eq!(
+                value.root.span.bytes(),
+                b"value: [[string, bool, string], string, [string, string], string]"
+            );
+            assert_eq!(scratch.root.span.bytes(), b"(value)");
+            assert!(value.projection.is_none() && scratch.projection.is_none());
+            let nested = |place: &compiler::analysis::ownership::Place<'_>, a, b| {
+                place.root.node == scratch.root.node
+                    && matches!(place.projection, Some(Projection::NestedTupleElement { outer, inner }) if (outer, inner) == (a, b))
+            };
+            assert!(nested(flag, 0, 1) && nested(leaf, 0, 2));
+            assert_eq!(sibling.root.node, scratch.root.node);
+            assert_eq!(sibling.tuple_element(), Some(1));
+            assert_eq!(bit.root.span.bytes(), b"bit");
+            assert_eq!(selected.root.span.bytes(), b"selected");
+            assert_eq!(tail.root.span.bytes(), b"tail");
+            assert_eq!(selected.root.node, result.root.node);
+            assert_eq!(staged.root.node, output.root.node);
+            assert!(
+                matches!(remaining.as_slice(), [Obligation::Drop(last), Obligation::Drop(right), Obligation::Drop(left), Obligation::EndStorage(second), Obligation::EndStorage(flag), Obligation::Drop(first), Obligation::EndStorage(child), Obligation::EndStorage(root)]
+                if last.root.node == scratch.root.node && last.tuple_element() == Some(3)
+                    && nested(right, 2, 1) && nested(left, 2, 0) && second.root.node == scratch.root.node && second.tuple_element() == Some(2)
+                    && nested(flag, 0, 1) && nested(first, 0, 0) && child.root.node == scratch.root.node && child.tuple_element() == Some(0)
+                    && root.root.node == scratch.root.node && root.projection.is_none())
+            );
+            assert!(
+                matches!(lexical.as_slice(), [Obligation::Drop(name), Obligation::EndStorage(flag)]
+                if name.root.node == tail.root.node && flag.root.node == bit.root.node
+                    && name.projection.is_none() && flag.projection.is_none())
+            );
+            assert!(parameters.is_empty());
+            let ignored = lower("ignore", default);
+            let mir = ignored
+                .mir()
+                .expect("a wildcard-only nested pattern still stages the source");
+            let moves: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Copy { .. }))
+                .collect();
+            let [
+                Operation::Move {
+                    from,
+                    into: Some(scratch),
+                },
+            ] = moves.as_slice()
+            else {
+                panic!("expected just the wildcard temporary move")
+            };
+            assert_eq!(from.root.span.bytes(), b"value: [[string, string], string]");
+            assert!(from.projection.is_none() && scratch.projection.is_none());
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(last), Obligation::Drop(right), Obligation::Drop(left)]
+                if [last, right, left].iter().all(|place| place.root.node == scratch.root.node)
+                    && last.tuple_element() == Some(1)
+                    && matches!(right.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 1 }))
+                    && matches!(left.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 0 })))
+            );
+            let reused = lower("reuse", default);
+            assert_eq!(reused.completion(), Completion::SourceRejected);
+            assert!(reused.mir().is_none());
+            let [finding] = reused.findings() else {
+                panic!("expected one moved source finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"value");
+            assert_eq!(finding.related.span.bytes(), b"value");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let copied = lower("copied", default);
+            let mir = copied.mir().expect("a copyable source can be staged twice");
+            let copies: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::Copy {
+                        from,
+                        into: Some(dest),
+                    } => Some((from, dest)),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                matches!(copies.as_slice(), [(source, first), (leaf, binder), (reused, second), (sibling, again), (returned, _)]
+                if source.root.span.bytes() == b"value: [[bool, bool], bool]" && source.root.node == reused.root.node
+                    && first.root.node == leaf.root.node && matches!(leaf.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 1 }))
+                    && binder.root.span.bytes() == b"first" && second.root.node == sibling.root.node && sibling.tuple_element() == Some(1)
+                    && again.root.span.bytes() == b"again" && again.root.node == returned.root.node)
+            );
+            assert!(path_drops(mir, mir.entry).is_empty());
+            for (name, at) in [
+                ("child", b"whole".as_slice()),
+                ("temporary", b"forward(value)"),
+                ("indexed", b"value[1]"),
+                ("deeper", b"value: [[[bool, string], bool], bool]"),
+                ("reference", b"value: [[&bool, bool], bool]"),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), at, "{name}");
+            }
+            let exact = AnalysisLimits {
+                max_work: unpack.statistics().work,
+                max_entries: unpack.statistics().entries,
+                ..default
+            };
+            assert!(lower("unpack", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let report = lower("unpack", short);
+                assert_eq!(report.completion(), Completion::ResourceLimit);
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
     use compiler::analysis::ownership::{
         BorrowedMemberBinding::{CopyScalar, SharedView},
@@ -1928,6 +2156,14 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
                     _ => unreachable!(),
                 }
             }
+            let owned = check("ownedNested");
+            let mir = owned
+                .mir()
+                .expect("the previous storage-boundary witness now reaches its pattern");
+            assert!(
+                matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(text)]
+                if text.root.span.bytes() == b"value" && matches!(text.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 1 })))
+            );
             let view = check("view");
             let limits = AnalysisLimits {
                 max_work: view.statistics().work,
@@ -1951,7 +2187,6 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
             }
             for (name, site) in [
                 ("nestedName", "pair"),
-                ("ownedNested", "value: [[bool, string], bool]"),
                 ("deeper", "[[[bit, _], _], _]"),
                 ("nestedReference", "[[saved, _], _]"),
                 ("mixedReference", "[saved, [bit, _]]"),

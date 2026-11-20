@@ -179,7 +179,7 @@ fn product_member<'g>(
         [
             PatternProjection::TupleElement(outer),
             PatternProjection::TupleElement(inner),
-        ] if access != Access::Owned => Some(ProductMember::NestedTupleElement {
+        ] => Some(ProductMember::NestedTupleElement {
             outer: *outer,
             inner: *inner,
         }),
@@ -229,7 +229,50 @@ impl<'a, 'g> Build<'a, 'g> {
                 .insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
+        if let Some(slot) = self.nested_tuple_parameter(node, ty)? {
+            self.budget.reserve(1)?;
+            self.nested_tuple_parameters
+                .insert(&parameter.declaration.id, slot);
+            return Ok(slot);
+        }
         self.local(&parameter.declaration.id, node, ty)
+    }
+
+    fn nested_tuple_parameter(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Option<Slot>> {
+        let TypeTerm::Tuple(elements) = ty.as_ref() else {
+            return Ok(None);
+        };
+        if !matches!(
+            self.primitive_tuple_width(elements, |_| Ok(true))?,
+            Some((_, true))
+        ) {
+            return Ok(None);
+        }
+        if self.outer_disposer(node, ty)?.is_some() {
+            return Err(Stop::Pending(node));
+        }
+        let root = self.aggregate_root(node, None, 0)?;
+        for (outer, element) in elements.iter().enumerate() {
+            self.budget.step(1)?;
+            let child = if let TypeTerm::Tuple(inner) = element.as_ref() {
+                if self.outer_disposer(node, element)?.is_some() {
+                    return Err(Stop::Pending(node));
+                }
+                self.aggregate(
+                    node,
+                    None,
+                    inner
+                        .iter()
+                        .enumerate()
+                        .map(|(inner, ty)| (Projection::NestedTupleElement { outer, inner }, ty)),
+                )?
+            } else {
+                self.slot(node, element)?
+            };
+            self.embed_member(root, child, Projection::TupleElement(outer))?;
+        }
+        self.slots[root].members = self.slots.len() - root - 1;
+        Ok(Some(root))
     }
 
     fn nested_record_parameter(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Option<Slot>> {
@@ -282,15 +325,26 @@ impl<'a, 'g> Build<'a, 'g> {
                     }),
                 )?
             };
-            self.slots[child].projection = Some(Projection::Field(outer.declaration));
-            self.slots[root].moves |= self.slots[child].moves;
-            for slot in self.slots[child].storage(child) {
-                self.budget.step(1)?;
-                self.slots[slot].owner = root;
-            }
+            self.embed_member(root, child, Projection::Field(outer.declaration))?;
         }
         self.slots[root].members = self.slots.len() - root - 1;
         Ok(Some(root))
+    }
+
+    fn embed_member(
+        &mut self,
+        root: Slot,
+        child: Slot,
+        projection: Projection<'g>,
+    ) -> ResultOf<()> {
+        self.budget.step(1)?;
+        self.slots[child].projection = Some(projection);
+        self.slots[root].moves |= self.slots[child].moves;
+        for slot in self.slots[child].storage(child) {
+            self.budget.step(1)?;
+            self.slots[slot].owner = root;
+        }
+        Ok(())
     }
 
     fn local(&mut self, id: &'g DeclarationId, node: NodeId, ty: &Type<'g>) -> ResultOf<Slot> {
@@ -936,6 +990,10 @@ impl<'a, 'g> Build<'a, 'g> {
         if facts.ty != *expected {
             return Err(Stop::Pending(value));
         }
+        self.clone_region(from, dest).map(Some)
+    }
+
+    fn clone_region(&mut self, from: Slot, dest: NodeId) -> ResultOf<Slot> {
         let region = self.slots[from].storage(from);
         let owner = self.slots.len();
         self.budget.step(region.len())?;
@@ -947,7 +1005,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 ..self.slots[slot]
             });
         }
-        Ok(Some(owner))
+        Ok(owner)
     }
 
     fn binding_destination(&mut self, node: NodeId, id: &DeclarationId) -> ResultOf<Slot> {
@@ -997,6 +1055,28 @@ impl<'a, 'g> Build<'a, 'g> {
                 if parent.id == *outer && leaf.id == *inner)
             {
                 return Ok(field);
+            }
+        }
+        Err(Stop::Pending(node))
+    }
+
+    fn nested_tuple_pattern_member(
+        &mut self,
+        node: NodeId,
+        root: Slot,
+        outer: usize,
+        inner: Option<usize>,
+    ) -> ResultOf<Slot> {
+        for slot in self.slots[root].storage(root).skip(1) {
+            self.budget.step(1)?;
+            match (inner, self.slots[slot].projection) {
+                (None, Some(Projection::TupleElement(index))) if index == outer => return Ok(slot),
+                (Some(index), Some(Projection::NestedTupleElement { outer: a, inner: b }))
+                    if (a, b) == (outer, index) =>
+                {
+                    return Ok(slot);
+                }
+                _ => {}
             }
         }
         Err(Stop::Pending(node))
@@ -1632,7 +1712,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     self.budget.step(1)?;
                     let name = self.ungroup(child)?;
                     let syntax = &self.module.syntax.nodes[name];
-                    if access != Access::Owned && syntax.kind == NodeKind::BracketPattern {
+                    if syntax.kind == NodeKind::BracketPattern {
                         for (inner, &child) in syntax.children.iter().enumerate() {
                             self.budget.step(1)?;
                             let leaf = self.ungroup(child)?;
@@ -1764,20 +1844,43 @@ impl<'a, 'g> Build<'a, 'g> {
         // the descriptor; the aggregate storage stays with its owner.
         let source = facts.source.node;
         // Inspect the typed shape even when a nested pattern has no binders.
-        let nested_record = if access == Access::Owned
-            && let Pattern::Constructor(Constructor::Record(_), fields, _) = facts.pattern.as_ref()
+        let (mut nested_record, mut nested_tuple) = (false, false);
+        if access == Access::Owned
+            && let Pattern::Constructor(kind, children, _) = facts.pattern.as_ref()
         {
-            self.budget.step(fields.len())?;
-            fields.iter().any(|field| {
-                matches!(
-                    field.as_ref(),
-                    Pattern::Constructor(Constructor::Record(_), ..)
-                )
-            })
+            self.budget.step(children.len())?;
+            for child in children {
+                match (kind, child.as_ref()) {
+                    (Constructor::Record(_), Pattern::Constructor(Constructor::Record(_), ..)) => {
+                        nested_record = true
+                    }
+                    (Constructor::Tuple(_), Pattern::Constructor(Constructor::Tuple(_), ..)) => {
+                        nested_tuple = true
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let tuple_source = if nested_tuple {
+            let (input, path) = self
+                .whole_named_owned_place(source)?
+                .ok_or(Stop::Pending(source))?;
+            self.budget.step(1)?;
+            let from = *self
+                .nested_tuple_parameters
+                .get(path.root)
+                .ok_or(Stop::Pending(source))?;
+            self.budget.step(self.slots[from].storage(from).len())?;
+            if input.ty != facts.ty {
+                return Err(Stop::Pending(source));
+            }
+            Some(from)
         } else {
-            false
+            None
         };
-        let scratch = if nested_record {
+        let scratch = if let Some(from) = tuple_source {
+            self.clone_region(from, source)?
+        } else if nested_record {
             self.nested_transfer_slot(source, source, &facts.ty)?
                 .ok_or(Stop::Pending(source))?
         } else {
@@ -1798,7 +1901,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 .get(binder.declaration)
                 .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
-            if nested_record && !matches!(binder.source_type.as_ref(), TypeTerm::Primitive(_)) {
+            if (nested_record || nested_tuple)
+                && !matches!(binder.source_type.as_ref(), TypeTerm::Primitive(_))
+            {
                 return Err(Stop::Pending(site));
             }
             let member = product_member(access, &binder.projections).ok_or(Stop::Pending(site))?;
@@ -1828,12 +1933,18 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
             } else {
                 let from = match member {
+                    ProductMember::TupleElement(position) if nested_tuple => {
+                        self.nested_tuple_pattern_member(site, scratch, position, None)?
+                    }
                     ProductMember::TupleElement(position) => {
                         self.element(site, scratch, position)?
                     }
                     ProductMember::Field(field) => self.field(site, scratch, field)?,
                     ProductMember::NestedField { outer, inner } => {
                         self.nested_field(site, scratch, outer, inner)?
+                    }
+                    ProductMember::NestedTupleElement { outer, inner } if nested_tuple => {
+                        self.nested_tuple_pattern_member(site, scratch, outer, Some(inner))?
                     }
                     ProductMember::NestedTupleElement { .. } => return Err(Stop::Pending(site)),
                 };
@@ -1844,13 +1955,24 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
-        self.expression_with_proof(
-            source,
-            Some(scratch),
-            tail,
-            depth,
-            nested_reborrow.map(ExpressionProof::NestedTupleParent),
-        )
+        if let Some(from) = tuple_source {
+            self.emit(
+                source,
+                Action::Read {
+                    from,
+                    into: Some(scratch),
+                },
+                Edges::Next(tail),
+            )
+        } else {
+            self.expression_with_proof(
+                source,
+                Some(scratch),
+                tail,
+                depth,
+                nested_reborrow.map(ExpressionProof::NestedTupleParent),
+            )
+        }
     }
 
     fn propagates_directly(&mut self, node: NodeId) -> ResultOf<bool> {
