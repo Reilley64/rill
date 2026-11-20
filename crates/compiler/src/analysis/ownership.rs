@@ -784,6 +784,7 @@ fn checked_graph<'g>(
     };
     // All direct dependencies of the root are queued before transitive ones.
     let mut direct = pending.len();
+    let mut scalar_targets = None;
     let mut known_entry = false;
     let mut unknown_entry = false;
     while let Some((target, id, is_disposer)) = pending.pop_front() {
@@ -791,15 +792,22 @@ fn checked_graph<'g>(
         let missing = (module, Stop::Pending(root_site));
         let enabled = !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
         let lowered = if !is_disposer && id.kind == DeclarationKind::Implementation {
-            // Scalar-copy ordinary edges reach the same source body as lower_root.
-            budget
-                .step(2 + target.declarations.len().max(1).ilog2() as usize)
-                .map_err(|()| (target, Stop::Limit))?;
-            let index = target
-                .declarations
-                .binary_search_by(|declaration| declaration.id.cmp(id))
-                .map_err(|_| missing)?;
-            lower_implementation(typed, target, &target.declarations[index], budget)
+            // Only scalar-copy edges target ordinary implementations here. All
+            // widths are in the same core module; index its captured facts once.
+            let index = match &scalar_targets {
+                Some(index) => index,
+                None => scalar_targets.insert(
+                    scalar::TargetIndex::new(typed, target, target.syntax.root, budget)
+                        .map_err(|stop| (target, stop))?,
+                ),
+            };
+            index
+                .lower_selected(typed, target, id, target.syntax.root, budget)
+                .map(|mir| Lowered {
+                    mir,
+                    trace: None,
+                    empty_entry: None,
+                })
         } else {
             let (selected, frame) = if is_disposer {
                 let family = typed

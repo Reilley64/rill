@@ -94,6 +94,15 @@ function conflict(): bool {
 function text(value: &string): string { return duplicate(value); }
 "#;
 
+fn function_id<'g>(module: &'g loader::Module, name: &str) -> &'g loader::DeclarationId {
+    &module
+        .declarations
+        .iter()
+        .find(|d| d.name.as_deref() == Some(name) && d.id.kind == loader::DeclarationKind::Function)
+        .unwrap()
+        .id
+}
+
 fn limits(statistics: Statistics) -> AnalysisLimits {
     AnalysisLimits {
         max_work: statistics.work,
@@ -338,6 +347,108 @@ function shadow(value: &bool): bool {{ return copy(value); }}
                     assert_eq!(result.findings().len(), 1);
                     assert_eq!(result.findings()[0].code(), "R0201");
                 }
+            }
+        },
+    );
+}
+
+#[test]
+fn scalar_copy_preflight_checks_argument_and_borrow_operand_depth() {
+    probe_with_typed(
+        "graph::scalar::scalar_copy_preflight_checks_argument_and_borrow_operand_depth",
+        r#"
+function pass(x: &bool): &bool { return x; }
+function bare(x: &bool): bool { return copy(x); }
+function grouped(x: &bool): bool { return copy(((((((((((x))))))))))); }
+function computed(x: &bool): bool { return copy(((((((((((pass(x)))))))))))); }
+type Pair = { flag: bool; }
+function projected(x: Pair): bool { return copy(&((((((((((x.flag))))))))))); }
+"#,
+        |_, module, receipt, _| {
+            let run = |name, limits| {
+                lower_body(receipt, module, function_id(module, name), limits).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            let bare = run("bare", default);
+            assert!(bare.mir().is_some());
+            let limit = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..default
+            };
+            assert!(run("bare", limit).mir().is_some());
+            for (name, expected) in [
+                ("grouped", Completion::Checked),
+                ("computed", Completion::Incomplete),
+                ("projected", Completion::Incomplete),
+            ] {
+                assert_eq!(run(name, default).completion(), expected);
+                let short = run(name, limit);
+                assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
+                assert!(short.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn distinct_scalar_targets_share_the_core_index_in_a_targeted_query() {
+    let main = format!(
+        "{MAIN}\nfunction plain(x: &bool): bool {{ return *x; }}\nfunction one(x: &bool): bool {{ return copy(x); }}\nfunction both(x: &bool, y: &i128): bool {{ let wide = copy(y); return copy(x); }}"
+    );
+    let mut larger = HELPER.to_string();
+    for i in 0..12 {
+        larger.push_str(&format!("\nfunction other{i}(): bool {{ return true; }}"));
+    }
+    let mut baseline = [None; 2];
+    fixture_with_main(
+        "graph::scalar::distinct_scalar_targets_share_the_core_index_in_a_targeted_query",
+        &main,
+        &[HELPER, &larger],
+        |index, request, graph, receipt, _| {
+            let module = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.path == "main.rill")
+                .unwrap();
+            let work = ["plain", "one", "both"].map(|name| {
+                let result = lower_body(
+                    receipt,
+                    module,
+                    function_id(module, name),
+                    AnalysisLimits::default(),
+                )
+                .unwrap();
+                let mir = result.mir().unwrap_or_else(|| panic!("{name}: {result:?}"));
+                let ops = linear(mir, mir.entry);
+                let targets: Vec<_> = ops
+                    .iter()
+                    .filter_map(|op| match op {
+                        Operation::CallScalarCopy { implementation, .. } => Some(implementation),
+                        _ => None,
+                    })
+                    .collect();
+                match name {
+                    "plain" => assert!(targets.is_empty()),
+                    "one" => assert_eq!(targets.len(), 1),
+                    "both" => assert!(matches!(targets.as_slice(), [wide, flag] if wide != flag)),
+                    _ => unreachable!(),
+                }
+                result.statistics().work
+            });
+            let prior = &mut baseline[usize::from(request.test_mode)];
+            if index == 0 {
+                *prior = Some(work);
+            } else {
+                let old = prior.unwrap();
+                let [plain, one, both] = std::array::from_fn(|i| work[i] - old[i]);
+                assert!(
+                    one > plain,
+                    "indexing the additional capture facts must be charged"
+                );
+                assert_eq!(
+                    both, one,
+                    "a second selected width must not rescan unrelated bodies"
+                );
             }
         },
     );

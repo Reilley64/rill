@@ -12,6 +12,92 @@ use crate::analysis::{
 };
 use crate::loader::Origin;
 
+/// Targeted callers share this index across distinct selected scalar widths.
+/// Graph queries already have module and root indexes of their own.
+#[derive(Default)]
+pub(super) struct TargetIndex<'a, 'g> {
+    nodes: NodeIndex<'a, 'g>,
+    bodies: BTreeMap<NodeId, &'a BodyFacts<'g>>,
+    implementations: BTreeMap<usize, &'a ImplementationFacts<'g>>,
+}
+
+impl<'a, 'g> TargetIndex<'a, 'g> {
+    pub(super) fn new(
+        typed: &'a TypedReport<'g>,
+        module: &'g Module,
+        site: NodeId,
+        budget: &mut Budget,
+    ) -> ResultOf<Self> {
+        let mut index = Self::default();
+        let role = typed.copy_role().ok_or(Stop::Pending(site))?;
+        budget.step(1)?;
+        let family = typed
+            .inventory()
+            .captured_family(&role.id)
+            .ok_or(Stop::Pending(site))?;
+        for implementation in &family.implementations {
+            budget.step(1)?;
+            let declaration = implementation.header.declaration;
+            if declaration.id.module == module.key {
+                budget.reserve(1)?;
+                index
+                    .implementations
+                    .insert(declaration.id.start, implementation);
+            }
+        }
+        for facts in typed.bodies().checked_bodies() {
+            budget.step(1)?;
+            if std::ptr::eq(facts.site.module, &module.key) {
+                budget.reserve(1)?;
+                index.bodies.insert(facts.site.node, facts);
+            }
+        }
+        for facts in typed.bodies().typed_nodes() {
+            budget.step(1)?;
+            if std::ptr::eq(facts.site.module, &module.key) {
+                budget.reserve(1)?;
+                index.nodes.insert(facts.site.node, facts);
+            }
+        }
+        Ok(index)
+    }
+
+    pub(super) fn lower_selected(
+        &self,
+        typed: &TypedReport<'g>,
+        module: &'g Module,
+        id: &DeclarationId,
+        site: NodeId,
+        budget: &mut Budget,
+    ) -> ResultOf<Mir<'g>> {
+        budget.step(2)?;
+        let implementation = self
+            .implementations
+            .get(&id.start)
+            .ok_or(Stop::Pending(site))?;
+        let declaration = implementation.header.declaration;
+        if !std::ptr::eq(id, &declaration.id) {
+            return Err(Stop::Pending(site));
+        }
+        let facts = self
+            .bodies
+            .get(&implementation.source.body_node)
+            .ok_or(Stop::Pending(declaration.node))?;
+        let frame =
+            implementation_frame(typed, module, declaration, implementation, facts, budget)?;
+        Ok(lower(
+            typed,
+            module,
+            &implementation.header,
+            frame,
+            false,
+            Some(&self.nodes),
+            budget,
+        )?
+        .mir)
+    }
+}
+
 fn scalar(ty: &TypeTerm<'_>) -> Option<Primitive> {
     let TypeTerm::Primitive(intrinsic) = ty else {
         return None;

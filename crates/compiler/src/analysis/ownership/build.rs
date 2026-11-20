@@ -5073,7 +5073,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             input,
             self.budget,
         )?;
-        let root = self.ungroup(*argument)?;
+        let (root, argument_depth) = self.ungroup_expression_at(*argument, depth + 1)?;
         let syntax = &self.module.syntax.nodes[root];
         match syntax.kind {
             NodeKind::ValueReference if self.named_owned_place(root)?.is_some() => {}
@@ -5081,7 +5081,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 let [owner] = syntax.children.as_slice() else {
                     return Err(pending());
                 };
-                let Some((owner, _)) = self.whole_named_owned_place(*owner)? else {
+                let (owner, _) = self.ungroup_expression_at(*owner, argument_depth + 1)?;
+                let Some((owner, _)) = self.named_owned_place(owner)? else {
                     return Err(pending());
                 };
                 if owner.ty != facts.ty {
