@@ -1027,7 +1027,14 @@ struct CalleeEntry<'g> {
 fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
     match action {
         Action::Displace { target, .. } => slots[target].cleanup == StorageCleanup::End,
-        Action::None
+        // A checked List<i32> index and its backing release are leaf actions
+        // in this static frame. Neither introduces a call-entry checkpoint.
+        Action::Dispose {
+            operand,
+            scalar_implementation: None,
+        } => matches!(slots[operand].cleanup, StorageCleanup::DisposeListI32(_)),
+        Action::ReadListI32 { .. }
+        | Action::None
         | Action::BudgetBackedge
         | Action::Init(_)
         | Action::Read { .. }
@@ -2032,6 +2039,7 @@ pub(super) fn run<'a, 'g>(
             Some(RetainedContents::TwoHop(_))
         );
     let mut flat = true;
+    let mut list_backing = false;
     let mut loop_delivery = false;
     let mut branching = false;
     let mut calls_reached = 0;
@@ -2077,13 +2085,21 @@ pub(super) fn run<'a, 'g>(
                 candidate = false;
                 replacement_candidate = false;
             }
+            list_backing |= matches!(slot.cleanup, StorageCleanup::DisposeListI32(_));
             candidate = candidate
                 && slot.projection.is_none()
-                && !slot.needs_boundary_cleanup()
-                && matches!(slot.cleanup, StorageCleanup::End | StorageCleanup::Drop);
+                && slot.members == 0
+                && slot.custom_disposer.is_none()
+                && matches!(
+                    slot.cleanup,
+                    StorageCleanup::End | StorageCleanup::Drop | StorageCleanup::DisposeListI32(_)
+                );
             State::Vacant
         })
         .collect();
+    // This admits the installed backing in a leaf frame only; in particular
+    // it adds no contract for outward storage or for transferred call frames.
+    candidate &= !list_backing || retained.is_empty();
     for &slot in &params {
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
@@ -2197,6 +2213,9 @@ pub(super) fn run<'a, 'g>(
         // one with a fresh successor state for a straight-line disposer.
         if active.is_some() && matches!(action, Action::BudgetBackedge) {
             single_active_call = false;
+        }
+        if list_backing && matches!(action, Action::Call(_)) {
+            candidate = false;
         }
         if matches!(action, Action::CallListArrows { .. }) {
             candidate = false;
@@ -3601,7 +3620,9 @@ pub(super) fn run<'a, 'g>(
     if callable_frame.is_some() && !callable_exported {
         return Err(Stop::Pending(body));
     }
-    let (trace, replacement) = if candidate {
+    // Add the List-backed delivery judgment only for frames with a reached
+    // loop check. Entry-only List readers keep their ordinary-only contract.
+    let (trace, replacement) = if candidate && (!list_backing || loop_delivery) {
         (
             Some(CancellationTrace {
                 module,

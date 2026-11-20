@@ -6,6 +6,209 @@ use compiler::analysis::scalars::{BodyOwner, NodeFactKind};
 use compiler::parser::{NodeId, NodeKind};
 
 #[test]
+fn installed_list_backing_on_budget_delivery() {
+    use compiler::analysis::Statistics;
+    use compiler::analysis::ownership::{
+        Delivery, GraphCompletion, GraphObligation, GraphReport, analyze_ownership,
+    };
+    use compiler::analysis::typed::CollectionOperation;
+
+    probe_with_typed(
+        "cancellation::installed_list_backing_on_budget_delivery",
+        r#"
+        function read(input: List<i32>, again: bool): i32 {
+            let numbers = input;
+            let first = &numbers;
+            let second = &numbers;
+            while (again) { continue; }
+            let result = first[0u64];
+            let other = second[1u64];
+            dispose(numbers);
+            return result;
+        }
+        function released(input: List<i32>, again: bool): void {
+            dispose(input);
+            while (again) { continue; }
+        }
+        function observe(): void {}
+        function acrossCall(input: List<i32>, again: bool): void {
+            observe();
+            while (again) { continue; }
+            dispose(input);
+        }
+        "#,
+        |request, module, receipt, typed| {
+            let limits = AnalysisLimits::default();
+            let decl = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let declaration = decl("read");
+            let local = lower_body(receipt, module, &declaration.id, limits).unwrap();
+            assert_eq!(local.completion(), Completion::Checked, "{local:?}");
+            let graph = analyze_ownership(receipt, limits);
+            let root_at = |graph: &GraphReport<'_>, name| {
+                graph
+                    .roots()
+                    .iter()
+                    .position(|r| {
+                        r.site().module == &module.key && r.site().node == decl(name).node
+                    })
+                    .unwrap()
+            };
+            let root = &graph.roots()[root_at(&graph, "read")];
+            assert_eq!(root.completion(), Completion::Checked);
+            let local_mir = local.mir().unwrap();
+            let local_proof = local_mir.cancellation().unwrap_or_else(|| {
+                panic!(
+                    "no enabled List-frame proof in test_mode={}",
+                    request.test_mode
+                )
+            });
+            let Delivery::Proved(graph_proof) = root.enabled_frame() else {
+                panic!("no enabled List-frame proof in graph");
+            };
+            let provider = typed
+                .collection_protection()
+                .find(|p| p.operation == CollectionOperation::DisposeList)
+                .unwrap()
+                .provider
+                .unwrap();
+            let assert_release = |items: &[Obligation<'_>], name: &[u8]| {
+                let [
+                    Obligation::DisposeListI32 {
+                        operand,
+                        implementation,
+                        bridge,
+                    },
+                ] = items
+                else {
+                    panic!("expected one List release, got {items:?}");
+                };
+                assert_eq!(operand.root.span.bytes(), name);
+                assert!(std::ptr::eq(*implementation, &provider.implementation.id));
+                assert!(std::ptr::eq(*bridge, &provider.bridge.id));
+            };
+            for (mir, proof) in [(local_mir, local_proof), (root.mir().unwrap(), graph_proof)] {
+                let entry = &proof.on_entry_delivery;
+                assert!(entry.retained.is_none());
+                let [
+                    Obligation::EndStorage(flag),
+                    release @ Obligation::DisposeListI32 { .. },
+                ] = entry.cleanup.as_slice()
+                else {
+                    panic!("entry: {:?}", entry.cleanup)
+                };
+                assert_eq!(flag.root.span.bytes(), b"again: bool");
+                assert_release(std::slice::from_ref(release), b"input: List<i32>");
+
+                let successors = (0..mir.blocks.len())
+                    .filter_map(|block| proof.successor(block).map(|edge| (block, edge)))
+                    .collect::<Vec<_>>();
+                let [(block, CancellationSuccessor::LoopBackedge { on_delivery })] =
+                    successors.as_slice()
+                else {
+                    panic!("expected only budget backedge: {successors:?}")
+                };
+                assert_eq!(
+                    mir.blocks[*block].site.span.bytes(),
+                    b"while (again) { continue; }"
+                );
+                assert!(on_delivery.retained.is_none());
+                let [
+                    Obligation::EndStorage(second),
+                    Obligation::EndStorage(first),
+                    release @ Obligation::DisposeListI32 { .. },
+                    Obligation::EndStorage(flag),
+                ] = on_delivery.cleanup.as_slice()
+                else {
+                    panic!("backedge: {:?}", on_delivery.cleanup)
+                };
+                assert_eq!(second.root.span.bytes(), b"second");
+                assert_eq!(first.root.span.bytes(), b"first");
+                assert_eq!(flag.root.span.bytes(), b"again: bool");
+                assert_release(std::slice::from_ref(release), b"numbers");
+                let (_, ordinary_exit) = branch_targets(mir);
+                assert_release(&path_drops(mir, ordinary_exit), b"numbers");
+            }
+            let released = lower_body(receipt, module, &decl("released").id, limits).unwrap();
+            let released_mir = released.mir().unwrap();
+            let released_proof = released_mir.cancellation().unwrap();
+            let [CancellationSuccessor::LoopBackedge { on_delivery }] =
+                (0..released_mir.blocks.len())
+                    .filter_map(|i| released_proof.successor(i))
+                    .collect::<Vec<_>>()[..]
+            else {
+                panic!("actual backedge after release")
+            };
+            assert!(
+                matches!(on_delivery.cleanup.as_slice(), [Obligation::EndStorage(flag)]
+                if flag.root.span.bytes() == b"again: bool")
+            );
+            let across = lower_body(receipt, module, &decl("acrossCall").id, limits).unwrap();
+            assert!(across.mir().unwrap().cancellation().is_none());
+            assert!(matches!(
+                graph.roots()[root_at(&graph, "acrossCall")].enabled_frame(),
+                Delivery::Unresolved
+            ));
+            assert!(
+                graph
+                    .open_obligations()
+                    .contains(&GraphObligation::MaskingAndJoin)
+            );
+
+            let caps = |s: Statistics| {
+                let exact = AnalysisLimits {
+                    max_work: s.work,
+                    max_entries: s.entries,
+                    max_depth: s.max_depth,
+                };
+                (
+                    exact,
+                    [
+                        AnalysisLimits {
+                            max_work: s.work - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_entries: s.entries - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_depth: s.max_depth - 1,
+                            ..exact
+                        },
+                    ],
+                )
+            };
+            let (exact, shorts) = caps(local.statistics());
+            let limited = |limits| lower_body(receipt, module, &declaration.id, limits).unwrap();
+            assert!(limited(exact).mir().unwrap().cancellation().is_some());
+            for cap in shorts {
+                let short = limited(cap);
+                assert_eq!(short.completion(), Completion::ResourceLimit);
+                assert!(short.mir().is_none());
+            }
+            let (exact, shorts) = caps(graph.statistics());
+            let exact_graph = analyze_ownership(receipt, exact);
+            assert!(matches!(
+                exact_graph.roots()[root_at(&exact_graph, "read")].enabled_frame(),
+                Delivery::Proved(_)
+            ));
+            for cap in shorts {
+                let short = analyze_ownership(receipt, cap);
+                assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+                assert!(short.roots().iter().all(|root| root.mir().is_none()
+                    && matches!(root.enabled_frame(), Delivery::Unresolved)));
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_loop_backedge_cancellation_rejects_unrepaired_store() {
     check_pair(
         "cancellation::installed_loop_backedge_cancellation_rejects_unrepaired_store",
