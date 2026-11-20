@@ -1552,6 +1552,11 @@ impl<'a, 'g> Build<'a, 'g> {
                 };
                 let mut tail = self.cleanup_scope(node, &locals, next)?;
                 if node == self.body {
+                    if !locals.is_empty()
+                        && let Action::EndScope(index) = self.code[tail].action
+                    {
+                        self.body_scope = Some(index);
+                    }
                     tail = self.check_retained(node, tail)?;
                 }
                 for &child in children[..prefix].iter().rev() {
@@ -1838,7 +1843,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 let cond = children[0];
                 let (can_be_true, _) = self.outcomes(cond)?;
                 let yes = if can_be_true {
-                    let backedge = self.emit(node, Action::None, Edges::End)?;
+                    let backedge = self.emit(node, Action::BudgetBackedge, Edges::End)?;
                     let looping = Some(Loop {
                         breaks: next,
                         continues: backedge,

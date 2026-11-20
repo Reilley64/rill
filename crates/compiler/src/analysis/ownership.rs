@@ -27,6 +27,8 @@ pub enum Completion {
 pub struct Finding<'g> {
     pub site: Site<'g>,
     pub related: Site<'g>,
+    /// The backedge or suspended call at which an intrinsic exit exposes the store.
+    pub cancellation_delivery: Option<Site<'g>>,
     kind: Conflict,
 }
 
@@ -36,6 +38,7 @@ enum Conflict {
     Access,
     ForbiddenMove,
     Escape,
+    CancellationEscape { delivery: NodeId },
     Release,
 }
 
@@ -45,7 +48,7 @@ impl Finding<'_> {
             Conflict::Moved => "R0200",
             Conflict::Access => "R0201",
             Conflict::ForbiddenMove => "R0501",
-            Conflict::Escape => "R0202",
+            Conflict::Escape | Conflict::CancellationEscape { .. } => "R0202",
             Conflict::Release => "R0203",
         }
     }
@@ -83,6 +86,7 @@ pub struct Mir<'g> {
     pub entry: usize,
     pub blocks: Vec<Block<'g>>,
     disposer_bodies: BTreeMap<&'g DeclarationId, Mir<'g>>,
+    cancellation: Option<Cancellation<'g>>,
 }
 
 impl<'g> Mir<'g> {
@@ -90,6 +94,61 @@ impl<'g> Mir<'g> {
     pub fn disposer(&self, implementation: &DeclarationId) -> Option<&Mir<'g>> {
         self.disposer_bodies.get(implementation)
     }
+
+    /// Intrinsic cancellation proof for this frame in the supported flat subset.
+    /// `None` means unknown, not that cancellation is impossible. `Some` does
+    /// not certify enclosing callers, deferred regions, or graph-wide roots.
+    pub fn cancellation(&self) -> Option<&Cancellation<'g>> {
+        self.cancellation.as_ref()
+    }
+}
+
+#[derive(Debug)]
+pub struct Cancellation<'g> {
+    /// The budget check before the first ordinary instruction of this frame.
+    pub entry_site: Site<'g>,
+    pub on_entry_delivery: CancellationExit<'g>,
+    successors: BTreeMap<usize, CancellationSuccessor<'g>>,
+}
+
+impl<'g> Cancellation<'g> {
+    /// The alternate edge at a reached ordinary MIR block. Within a known
+    /// proof, absence means this block contributes no delivery edge.
+    pub fn successor(&self, block: usize) -> Option<&CancellationSuccessor<'g>> {
+        self.successors.get(&block)
+    }
+}
+
+#[derive(Debug)]
+pub enum CancellationSuccessor<'g> {
+    /// Reached after the iteration's lexical cleanup, before the next test.
+    LoopBackedge { on_delivery: CancellationExit<'g> },
+    /// Delivery at the identified callee's entry exits the suspended caller,
+    /// before any normal callee result is produced. The admitted callee has no
+    /// arguments or owned state to clean at entry. This is not a caller poll.
+    CalleeEntry {
+        callee: &'g DeclarationId,
+        entry: Site<'g>,
+        on_delivery: CancellationExit<'g>,
+    },
+}
+
+/// The terminal successor of an actual budget yield with a pending intrinsic
+/// request and delivery enabled. A check without a yield, a yield without a
+/// request, or disabled delivery does not take this edge. The ordinary MIR
+/// path is separate; this successor neither exports a result nor returns.
+#[derive(Debug)]
+pub struct CancellationExit<'g> {
+    /// Checked before any cleanup. The caller's slot is not a cleanup operand.
+    pub retained: Option<RetainedAtDelivery<'g>>,
+    pub cleanup: Vec<Cleanup<'g>>,
+}
+
+#[derive(Debug)]
+pub struct RetainedAtDelivery<'g> {
+    pub parameter: Place<'g>,
+    /// The last checked outward write; `None` preserves incoming contents.
+    pub last_store: Option<Site<'g>>,
 }
 
 #[derive(Debug)]
@@ -403,7 +462,8 @@ pub enum Terminator {
 }
 
 /// Lower the selected body after validating reached direct calls and disposers.
-/// A body MIR is not a whole-capture ownership receipt or evidence of execution.
+/// `Checked` certifies ordinary MIR; see `Mir::cancellation` for the separate,
+/// bounded intrinsic-exit proof. Neither is a whole-capture receipt or execution.
 pub fn lower_body<'g>(
     receipt: &TypedReceipt<'_, 'g>,
     module: &'g Module,
@@ -448,6 +508,10 @@ pub fn lower_body<'g>(
             vec![Finding {
                 site: site_at(module, site),
                 related: site_at(module, related),
+                cancellation_delivery: match kind {
+                    Conflict::CancellationEscape { delivery } => Some(site_at(module, delivery)),
+                    _ => None,
+                },
                 kind,
             }],
             None,
@@ -533,7 +597,8 @@ fn checked_graph<'g>(
     budget.reserve(1).map_err(|()| (module, Stop::Limit))?;
     let mut seen = BTreeSet::from([&header.declaration.id]);
     let mut pending = VecDeque::new();
-    let mut root = lower(typed, module, header, false, budget).map_err(|stop| (module, stop))?;
+    let mut root =
+        lower(typed, module, header, Frame::Query, budget).map_err(|stop| (module, stop))?;
     reached(&root, &mut pending, &mut seen, budget).map_err(|stop| (module, stop))?;
     while let Some((target, id, is_disposer)) = pending.pop_front() {
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
@@ -555,8 +620,12 @@ fn checked_graph<'g>(
             typed.inventory().type_facts().declarations.get(id)
         }
         .ok_or(missing)?;
-        let mir =
-            lower(typed, target, selected, is_disposer, budget).map_err(|stop| (target, stop))?;
+        let frame = if is_disposer {
+            Frame::ActiveDisposer
+        } else {
+            Frame::ReachedCall
+        };
+        let mir = lower(typed, target, selected, frame, budget).map_err(|stop| (target, stop))?;
         reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
         if is_disposer {
             budget.reserve(1).map_err(|()| (target, Stop::Limit))?;
@@ -566,11 +635,17 @@ fn checked_graph<'g>(
     Ok(root)
 }
 
+enum Frame {
+    Query,
+    ReachedCall,
+    ActiveDisposer,
+}
+
 fn lower<'g>(
     typed: &TypedReport<'g>,
     module: &'g Module,
     header: &DeclarationFacts<'g>,
-    start_disposer: bool,
+    frame: Frame,
     budget: &mut Budget,
 ) -> ResultOf<Mir<'g>> {
     let entry_site = header.declaration.node;
@@ -609,6 +684,7 @@ fn lower<'g>(
         code: Vec::new(),
         calls: Vec::new(),
         cleanups: Vec::new(),
+        body_scope: None,
         dispose: typed.dispose_role().map(|d| &d.id),
         return_contract: (&header.declaration.id, result),
         proved_variant_cleanup: Vec::new(),
@@ -665,7 +741,7 @@ fn lower<'g>(
             }
         }
     }
-    let active = if start_disposer {
+    let active = if matches!(frame, Frame::ActiveDisposer) {
         let ([slot], [parameter]) = (params.as_slice(), parameters.as_slice()) else {
             return Err(Stop::Pending(entry_site));
         };
@@ -695,7 +771,9 @@ fn lower<'g>(
         },
         1,
     )?;
-    flow::run(build, entry, &params, active)
+    // Reached ordinary bodies may run under an enclosing mask. We have not
+    // proved those contexts. The root proof links only admitted callee entries.
+    flow::run(build, entry, &params, active, matches!(frame, Frame::Query))
 }
 
 fn retained_two_hop_bool_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
@@ -904,6 +982,7 @@ impl<'g> Local<'g> {
 #[derive(Clone, Copy)]
 enum Action<'g> {
     None,
+    BudgetBackedge,
     Init(Slot),
     Read {
         from: Slot,
@@ -1072,6 +1151,7 @@ struct Build<'a, 'g> {
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'g>>,
     cleanups: Vec<Vec<Slot>>,
+    body_scope: Option<usize>,
     dispose: Option<&'g DeclarationId>,
     return_contract: (&'g DeclarationId, &'a Type<'g>),
     proved_variant_cleanup: Vec<Type<'g>>,

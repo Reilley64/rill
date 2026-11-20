@@ -14,6 +14,8 @@ use std::{
     process::Command,
 };
 
+#[path = "m5/cancellation.rs"]
+mod cancellation;
 #[path = "m5/captures.rs"]
 mod captures;
 #[path = "m5/disposers.rs"]

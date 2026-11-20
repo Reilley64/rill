@@ -115,9 +115,11 @@ fn liveness(
         let instruction = code[pc];
         let use_one = |used, killed| ([used, None], killed);
         let (used, killed) = match instruction.action {
-            Action::None | Action::Cleanup(_) | Action::EndScope(_) | Action::CheckRetained => {
-                use_one(None, None)
-            }
+            Action::None
+            | Action::BudgetBackedge
+            | Action::Cleanup(_)
+            | Action::EndScope(_)
+            | Action::CheckRetained => use_one(None, None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
             Action::Read { from, into }
             | Action::Move { from, into }
@@ -718,7 +720,7 @@ fn cleanup_boundary<'g>(
     live: &BTreeSet<Slot>,
     (node, boundary): (NodeId, Boundary),
     budget: &mut Budget,
-) -> ResultOf<Operation<'g>> {
+) -> ResultOf<Vec<Cleanup<'g>>> {
     budget.reserve(3 * scope.len())?;
     let mut indegrees = vec![0usize; scope.len()];
     let mut remaining = 0usize;
@@ -871,7 +873,7 @@ fn cleanup_boundary<'g>(
         state[region].fill(State::Vacant);
     }
     retire_loans(slots, state, scope, budget)?;
-    Ok(Operation::Cleanup(actions))
+    Ok(actions)
 }
 
 // No surviving future use may depend on a retired storage version. Forget the
@@ -900,18 +902,274 @@ fn retire_loans(
     Ok(())
 }
 
+fn check_retained(
+    retained: &BTreeMap<Slot, RetainedContents>,
+    state: &[State],
+    (node, escape): (NodeId, Conflict),
+    retains_exclusive_bool: bool,
+    budget: &mut Budget,
+) -> ResultOf<()> {
+    let mut unhandled_restriction = None;
+    for contents in retained.values() {
+        budget.step(1)?;
+        let State::Initialized(value) = &state[contents.slot()] else {
+            continue;
+        };
+        let site = value.stored_at.unwrap_or(node);
+        for loan in value.loans.iter() {
+            budget.step(1)?;
+            if loan.kind.borrows_local_storage() {
+                return Err(Stop::Rejected {
+                    site,
+                    related: loan.site,
+                    kind: escape,
+                });
+            }
+            if !retains_exclusive_bool {
+                unhandled_restriction.get_or_insert(site);
+            }
+        }
+    }
+    // Local access restrictions in outward storage need a supported contract.
+    if let Some(site) = unhandled_restriction {
+        return Err(Stop::Pending(site));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct CalleeEntry<'g> {
+    callee: &'g DeclarationId,
+    site: Site<'g>,
+}
+
+// Admit only a closed frame. An unmodeled call could have started work before
+// a later check. An empty void body bounds this call's cancellation proof to
+// its entry, before it owns any storage. This is an admission check for the
+// cancellation proof only; the ordinary call contract is unchanged.
+fn empty_callee_entry<'g>(
+    build: &mut Build<'_, 'g>,
+    index: usize,
+) -> ResultOf<Option<CalleeEntry<'g>>> {
+    let call = &build.calls[index];
+    if !call.args.is_empty() || call.callee.module.origin != crate::loader::Origin::Application {
+        return Ok(None);
+    }
+    build.budget.step(1)?;
+    let Some(header) = build
+        .typed
+        .inventory()
+        .type_facts()
+        .declarations
+        .get(call.callee)
+    else {
+        return Ok(None);
+    };
+    if !matches!(&header.shape, DeclarationShape::Function { parameters, result }
+        if parameters.is_empty() && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void"))
+    {
+        return Ok(None);
+    }
+    for module in build.typed.inventory().graph().modules() {
+        build.budget.step(1)?;
+        if module.key == call.callee.module {
+            let Some(&body) = module.syntax.nodes[header.declaration.node].children.get(1) else {
+                return Ok(None);
+            };
+            let syntax = &module.syntax.nodes[body];
+            return Ok((syntax.kind == crate::parser::NodeKind::Block
+                && syntax.children.is_empty())
+            .then(|| CalleeEntry {
+                callee: call.callee,
+                site: site_at(module, body),
+            }));
+        }
+    }
+    Ok(None)
+}
+
+// The ordinary CFG already encodes feasible branches and abandoned suffixes.
+fn cancellation_calls<'g>(
+    build: &mut Build<'_, 'g>,
+    entry: Pc,
+) -> ResultOf<Option<BTreeMap<Pc, CalleeEntry<'g>>>> {
+    if build.module.key.origin != crate::loader::Origin::Application
+        || build.retains_exclusive_bool
+        || build.retained.len() > 1
+        || matches!(
+            build.retained.values().next(),
+            Some(RetainedContents::TwoHop(_))
+        )
+    {
+        return Ok(None);
+    }
+    build.budget.step(build.slots.len())?;
+    if !build.slots.iter().all(|slot| {
+        slot.projection.is_none()
+            && !slot.needs_boundary_cleanup()
+            && matches!(slot.cleanup, StorageCleanup::End | StorageCleanup::Drop)
+    }) {
+        return Ok(None);
+    }
+    build.budget.reserve(2 * build.code.len())?;
+    let mut calls = BTreeMap::new();
+    let mut seen = vec![false; build.code.len()];
+    let mut pending = vec![entry];
+    seen[entry] = true;
+    while let Some(pc) = pending.pop() {
+        build.budget.step(1)?;
+        let instruction = build.code[pc];
+        if let Action::Call(index) = instruction.action {
+            let Some(callee) = empty_callee_entry(build, index)? else {
+                return Ok(None);
+            };
+            build.budget.reserve(1)?;
+            calls.insert(pc, callee);
+        } else if let Action::Displace { target, .. } = instruction.action {
+            // Ending a plain descriptor is not an observable disposal interval.
+            if build.slots[target].cleanup != StorageCleanup::End {
+                return Ok(None);
+            }
+        } else if !matches!(
+            instruction.action,
+            Action::None
+                | Action::BudgetBackedge
+                | Action::Init(_)
+                | Action::Read { .. }
+                | Action::Move { .. }
+                | Action::Borrow { .. }
+                | Action::Reborrow { .. }
+                | Action::Dereference { .. }
+                | Action::Install { .. }
+                | Action::CopyThrough { .. }
+                | Action::InstallThrough { .. }
+                | Action::CheckRetained
+                | Action::End(_)
+                | Action::Cleanup(_)
+                | Action::EndScope(_)
+                | Action::Export(_)
+        ) {
+            return Ok(None);
+        }
+        for next in instruction.edges.successors() {
+            if !seen[next] {
+                seen[next] = true;
+                pending.push(next);
+            }
+        }
+    }
+    Ok(Some(calls))
+}
+
+struct CancellationFrame<'a, 'g> {
+    module: &'g Module,
+    slots: &'a [Local<'g>],
+    locals: &'a [Slot],
+    params: &'a [Slot],
+    retained: &'a BTreeMap<Slot, RetainedContents>,
+}
+
+impl<'g> CancellationFrame<'_, 'g> {
+    fn exit(
+        &self,
+        state: &[State],
+        node: NodeId,
+        budget: &mut Budget,
+    ) -> ResultOf<Option<CancellationExit<'g>>> {
+        let outward = self.retained.iter().next();
+        let contents = outward.map(|(_, contents)| contents.slot());
+        for (slot, held) in state.iter().enumerate() {
+            budget.step(1)?;
+            if matches!(held, State::Initialized(_))
+                && Some(slot) != contents
+                && self.locals.binary_search(&slot).is_err()
+                && self.params.binary_search(&slot).is_err()
+            {
+                // Nested scopes and in-flight staging are not flat boundaries.
+                return Ok(None);
+            }
+        }
+        // Outward storage is live on delivery, regardless of the ordinary
+        // continuation. Check it before ending even the first local owner.
+        match check_retained(
+            self.retained,
+            state,
+            (node, Conflict::CancellationEscape { delivery: node }),
+            false,
+            budget,
+        ) {
+            Err(Stop::Pending(_)) => return Ok(None),
+            checked => checked?,
+        }
+        let retained = outward.map(|(&parameter, contents)| RetainedAtDelivery {
+            parameter: self.slots[parameter].place(self.module),
+            last_store: match &state[contents.slot()] {
+                State::Initialized(held) => held.stored_at.map(|store| site_at(self.module, store)),
+                _ => None,
+            },
+        });
+        budget.reserve(state.len() + usize::from(contents.is_some()))?;
+        let mut abandoned = state.to_vec();
+        let mut live = BTreeSet::from_iter(contents);
+        // The lexical body ends before parameter storage. Within a boundary
+        // all initialized dependents are scheduled before their sources.
+        budget.reserve(self.params.len())?;
+        live.extend(self.params.iter().copied());
+        let boundary = (
+            node,
+            Boundary::End {
+                lexical: true,
+                remainder: None,
+            },
+        );
+        let mut cleanup = cleanup_boundary(
+            self.module,
+            self.slots,
+            &mut abandoned,
+            self.locals,
+            &live,
+            boundary,
+            budget,
+        )?;
+        for parameter in self.params {
+            budget.step(1)?;
+            live.remove(parameter);
+        }
+        let parameters = cleanup_boundary(
+            self.module,
+            self.slots,
+            &mut abandoned,
+            self.params,
+            &live,
+            boundary,
+            budget,
+        )?;
+        budget.reserve(parameters.len())?;
+        cleanup.extend(parameters);
+        Ok(Some(CancellationExit { retained, cleanup }))
+    }
+}
+
 pub(super) fn run<'g>(
-    build: Build<'_, 'g>,
+    mut build: Build<'_, 'g>,
     entry: Pc,
     params: &[Slot],
     active: Option<DisposerFrame>,
+    check_cancellation: bool,
 ) -> ResultOf<Mir<'g>> {
+    let cancellation_calls = if check_cancellation {
+        cancellation_calls(&mut build, entry)?
+    } else {
+        None
+    };
     let Build {
         module,
+        body,
         slots,
         code,
         calls,
         cleanups,
+        body_scope,
         dispose,
         retained,
         retains_exclusive_bool,
@@ -993,6 +1251,25 @@ pub(super) fn run<'g>(
         });
     }
     let remainder = active.map(|frame| frame.remainder);
+    let frame = CancellationFrame {
+        module,
+        slots: &slots,
+        locals: body_scope.map_or(&[], |index| cleanups[index].as_slice()),
+        params,
+        retained: &retained,
+    };
+    let mut cancellation = if cancellation_calls.is_some() {
+        frame
+            .exit(&state, body, budget)?
+            .map(|on_entry_delivery| Cancellation {
+                entry_site: site_at(module, body),
+                on_entry_delivery,
+                successors: BTreeMap::new(),
+            })
+    } else {
+        None
+    };
+    let mut cancellation_unknown = false;
     let entry = add(entry, state, &mut known, &mut pending, budget)?;
     let mut blocked = None;
     while blocks.len() < pending.len() {
@@ -1006,9 +1283,34 @@ pub(super) fn run<'g>(
         } = code[pc];
         let site = site_at(module, node);
         let local = |slot: Slot| slots[slot].place(module);
+        if let (Some(proof), Some(callees)) = (&mut cancellation, &cancellation_calls) {
+            let callee = if matches!(action, Action::Call(_)) {
+                callees.get(&pc)
+            } else {
+                None
+            };
+            if matches!(action, Action::BudgetBackedge) || callee.is_some() {
+                // Independent of the normal continuation: the loop condition
+                // has not run and a suspended call has produced no result.
+                if let Some(exit) = frame.exit(&state, node, budget)? {
+                    let successor = match callee {
+                        Some(CalleeEntry { callee, site }) => CancellationSuccessor::CalleeEntry {
+                            callee,
+                            entry: *site,
+                            on_delivery: exit,
+                        },
+                        None => CancellationSuccessor::LoopBackedge { on_delivery: exit },
+                    };
+                    budget.reserve(1)?;
+                    proof.successors.insert(blocks.len(), successor);
+                } else {
+                    cancellation_unknown = true;
+                }
+            }
+        }
         let operation = (|| -> ResultOf<_> {
             Ok(match action {
-                Action::None => Operation::None,
+                Action::None | Action::BudgetBackedge => Operation::None,
                 Action::Init(slot) => {
                     for field in slots[slot].storage(slot).skip(1) {
                         budget.step(1)?;
@@ -1701,7 +2003,7 @@ pub(super) fn run<'g>(
                         if disposal_origin(&state[target]).is_some() {
                             return Err(Stop::Pending(node));
                         }
-                        cleanup_boundary(
+                        Operation::Cleanup(cleanup_boundary(
                             module,
                             &slots,
                             &mut state,
@@ -1709,7 +2011,7 @@ pub(super) fn run<'g>(
                             &live[pc],
                             (node, Boundary::Replacement),
                             budget,
-                        )?
+                        )?)
                     } else {
                         conflict(
                             &slots,
@@ -1826,34 +2128,13 @@ pub(super) fn run<'g>(
                     }
                 }
                 Action::CheckRetained => {
-                    let mut unhandled_restriction = None;
-                    for contents in retained.values() {
-                        budget.step(1)?;
-                        let State::Initialized(value) = &state[contents.slot()] else {
-                            continue;
-                        };
-                        let site = value.stored_at.unwrap_or(node);
-                        for loan in value.loans.iter() {
-                            budget.step(1)?;
-                            if !loan.kind.borrows_local_storage() {
-                                if !retains_exclusive_bool {
-                                    unhandled_restriction.get_or_insert(site);
-                                }
-                            } else {
-                                return Err(Stop::Rejected {
-                                    site,
-                                    related: loan.site,
-                                    kind: Conflict::Escape,
-                                });
-                            }
-                        }
-                    }
-                    // A suspension restricts the local access holder. Its
-                    // incoming backing can survive that holder and needs a
-                    // supported outward contract. Local backing still rejects.
-                    if let Some(site) = unhandled_restriction {
-                        return Err(Stop::Pending(site));
-                    }
+                    check_retained(
+                        &retained,
+                        &state,
+                        (node, Conflict::Escape),
+                        retains_exclusive_bool,
+                        budget,
+                    )?;
                     Operation::None
                 }
                 Action::Export(slot) => {
@@ -1884,21 +2165,23 @@ pub(super) fn run<'g>(
                     state[region].fill(State::Vacant);
                     Operation::Export(local(slot))
                 }
-                Action::Cleanup(index) | Action::EndScope(index) => cleanup_boundary(
-                    module,
-                    &slots,
-                    &mut state,
-                    &cleanups[index],
-                    &live[pc],
-                    (
-                        node,
-                        Boundary::End {
-                            lexical: matches!(action, Action::EndScope(_)),
-                            remainder,
-                        },
-                    ),
-                    budget,
-                )?,
+                Action::Cleanup(index) | Action::EndScope(index) => {
+                    Operation::Cleanup(cleanup_boundary(
+                        module,
+                        &slots,
+                        &mut state,
+                        &cleanups[index],
+                        &live[pc],
+                        (
+                            node,
+                            Boundary::End {
+                                lexical: matches!(action, Action::EndScope(_)),
+                                remainder,
+                            },
+                        ),
+                        budget,
+                    )?)
+                }
                 Action::End(slot) => {
                     if matches!(state[slot], State::Initialized(_)) {
                         conflict(
@@ -1960,6 +2243,7 @@ pub(super) fn run<'g>(
         entry,
         blocks,
         disposer_bodies: BTreeMap::new(),
+        cancellation: cancellation.filter(|_| !cancellation_unknown),
     })
 }
 
