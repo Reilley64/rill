@@ -1433,6 +1433,53 @@ fn check_reference_lifecycle(module: &Module, mir: &Mir<'_>, sources: [&str; 2])
 }
 
 #[test]
+fn grouped_reference_publication_keeps_each_result_dependency() {
+    probe(
+        "scoped_join::grouped_reference_publication_keeps_each_result_dependency",
+        r#"
+        import std::routine::join;
+        function joined(input: &i32, other: &i32): [&i32,&i32] {
+            return join((((([((() => ((other)))), () => (((input)))])))));
+        }
+    "#,
+        |_, module, receipt| {
+            let d = &module.declarations[named(module, "joined")];
+            let lower = |limits| lower_body(receipt, module, &d.id, limits).unwrap();
+            let full = lower(AnalysisLimits::default());
+            let s = full.statistics();
+            let exact = AnalysisLimits {
+                max_work: s.work,
+                max_entries: s.entries,
+                max_depth: s.max_depth,
+            };
+            check_reference_lifecycle(
+                module,
+                lower(exact).mir().expect("grouped published pair"),
+                ["other", "input"],
+            );
+            for short in [
+                AnalysisLimits {
+                    max_work: s.work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: s.entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: s.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower(short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
 fn grouped_reference_children_charge_depth_and_keep_the_written_escape() {
     probe(
         "scoped_join::grouped_reference_children_charge_depth_and_keep_the_written_escape",
