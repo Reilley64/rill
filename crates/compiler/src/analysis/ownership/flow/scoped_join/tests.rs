@@ -458,11 +458,21 @@ fn check_bounds<'g>(stage: impl Fn(&mut Budget) -> ResultOf<Staged<'g>>) {
     for count in [2, publish_events.len()] {
         let prefix = |budget: &mut Budget| -> ResultOf<Successor<'g>> {
             let mut edge = Successor::Wait(stage(budget)?.commit(ENABLED, budget)?);
-            for &event in &publish_events[..count] {
+            for (i, &event) in publish_events[..count].iter().enumerate() {
                 let Successor::Wait(state) = edge else {
                     panic!("early publication")
                 };
+                let before = budget.statistics;
                 edge = state.advance(event, budget)?;
+                if i + 1 == count {
+                    let delta = (
+                        budget.statistics.work - before.work,
+                        budget.statistics.entries - before.entries,
+                    );
+                    // Export reserves one unpublished slot. Publication reserves
+                    // its two records and initializes three parent places.
+                    assert_eq!(delta, if count == 2 { (2, 1) } else { (6, 2) });
+                }
             }
             Ok(edge)
         };
