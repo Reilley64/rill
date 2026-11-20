@@ -241,7 +241,7 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
                 return again;
             }
             function borrowField(value: Outer): void { let held = &value.child; }
-            function nestedLeaf(value: Outer): string { return value.child.text; }
+            function nestedLeaf(value: Stacked): string { return value.last.front; }
         "#,
         |_, module, receipt, typed| {
             let declaration = |name| {
@@ -446,15 +446,26 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
                     assert!(finding.related.span.start() < finding.site.span.start());
                 }
             }
-            for (name, site) in [
-                ("borrowField", b"value.child".as_slice()),
-                ("nestedLeaf", b"value.child.text"),
-            ] {
-                let report = lower(name, default);
-                assert_eq!(report.completion(), Completion::Incomplete);
-                assert!(report.mir().is_none());
-                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
-            }
+            let leaf = lower("nestedLeaf", default);
+            let mir = leaf.mir().expect("the exact nested field is owned");
+            let ops = linear(mir, mir.entry);
+            assert!(ops.windows(2).any(|pair| matches!(pair,
+                [Operation::Move { from, into: Some(staged) }, Operation::Export(output)]
+                if matches!(from.projection, Some(Projection::NestedField { outer, inner })
+                    if &outer.id == field("Stacked", "last") && &inner.id == field("Pair", "front"))
+                    && staged.root.node == output.root.node)));
+            assert!(path_drops(mir, mir.entry).iter().any(|drop| matches!(drop,
+                Obligation::Drop(place) if matches!(place.projection,
+                    Some(Projection::NestedField { outer, inner })
+                    if &outer.id == field("Stacked", "first") && &inner.id == field("Pair", "front")))));
+
+            let unsupported = lower("borrowField", default);
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert!(unsupported.mir().is_none());
+            assert_eq!(
+                unsupported.blocked_at().unwrap().span.bytes(),
+                b"value.child"
+            );
             let exact = AnalysisLimits {
                 max_work: branch.statistics().work,
                 max_entries: branch.statistics().entries,
@@ -661,9 +672,28 @@ fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children
                 assert_eq!(finding.related.span.bytes(), related);
                 assert!(finding.related.span.start() < finding.site.span.start());
             }
+            let replaced = lower("replaceLocal", default);
+            let mir = replaced.mir().expect("replace a named whole nested record");
+            let ops = linear(mir, mir.entry);
+            assert!(ops.windows(3).any(|group| matches!(group, [
+                Operation::Move { from, into: Some(staged) },
+                Operation::Cleanup(old),
+                Operation::Install { target, incoming },
+            ] if from.root.span.bytes() == b"replacement: Outer" && target.root.span.bytes() == b"saved"
+                && [from, staged, target, incoming].iter().all(|place| place.projection.is_none())
+                && staged.root.node == incoming.root.node
+                && matches!(old.as_slice(), [Obligation::Drop(sibling), Obligation::Drop(text), ..]
+                    if sibling.root.node == target.root.node && text.root.node == target.root.node
+                        && sibling.field().is_some_and(|member| &member.id == field("Outer", "sibling"))
+                        && matches!(text.projection, Some(Projection::NestedField { outer, inner })
+                            if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "text"))))));
+            assert_eq!(
+                path_drops(mir, mir.entry).len(),
+                4,
+                "drop the old and installed leaves once each"
+            );
             for (name, site) in [
                 ("borrowedLocal", b"saved".as_slice()),
-                ("replaceLocal", b"saved"),
                 ("argument", b"value"),
                 ("result", b"give(value)"),
             ] {
@@ -1143,6 +1173,367 @@ fn replacing_an_initialized_nested_string_leaf_preserves_its_neighbors() {
                     4,
                     "no extra drops before or after install"
                 );
+            }
+        },
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn direct_owned_nested_record_leaf_reads_and_repair() {
+    use compiler::analysis::ownership::{Place, Projection};
+
+    let mut failures = Vec::new();
+    probe_with_typed(
+        "records::direct_owned_nested_record_leaf_reads_and_repair",
+        r#"
+            type Inner = { first: string; flag: bool; last: string; }
+            type Outer = { child: Inner; sibling: string; }
+            function takeLeaf(seed: Outer): string {
+                let saved = seed;
+                return saved.child.first;
+            }
+            function siblings(seed: Outer): string {
+                let taken = seed.child.first;
+                let flag = seed.child.flag;
+                if (seed.child.flag) { return seed.child.last; }
+                return seed.sibling;
+            }
+            function restoreLeaf(seed: Outer, fresh: string): Outer {
+                let mut saved = seed;
+                let prior = saved.child.first;
+                saved.child.first = fresh;
+                return saved;
+            }
+            function rereadLeaf(seed: Outer): string {
+                let saved = seed;
+                let prior = saved.child.first;
+                return saved.child.first;
+            }
+            function movedChild(seed: Outer): string {
+                let taken = seed.child;
+                return seed.child.first;
+            }
+            function movedRoot(seed: Outer): string {
+                let taken = seed;
+                return seed.child.first;
+            }
+            function partialRoot(seed: Outer): Outer {
+                let prior = seed.child.first;
+                return seed;
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
+            let child = field("Outer", "child");
+            for (name, rejected) in [
+                ("takeLeaf", None),
+                ("siblings", None),
+                ("restoreLeaf", None),
+                (
+                    "rereadLeaf",
+                    Some(("saved.child.first", "saved.child.first")),
+                ),
+                ("movedChild", Some(("seed.child.first", "seed.child"))),
+                ("movedRoot", Some(("seed.child.first", "seed"))),
+                ("partialRoot", Some(("seed", "seed.child.first"))),
+            ] {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let report =
+                    lower_body(receipt, module, &declaration.id, AnalysisLimits::default())
+                        .unwrap();
+                let expected = if rejected.is_some() {
+                    Completion::SourceRejected
+                } else {
+                    Completion::Checked
+                };
+                if report.completion() != expected {
+                    failures.push(format!(
+                        "test_mode={}: {name}: expected {expected:?}, got {:?} at {:?}",
+                        request.test_mode,
+                        report.completion(),
+                        report.blocked_at().map(|site| site
+                            .span
+                            .bytes()
+                            .escape_ascii()
+                            .to_string())
+                    ));
+                    continue;
+                }
+                if let Some((site, moved_at)) = rejected {
+                    assert!(report.mir().is_none());
+                    let [finding] = report.findings() else {
+                        panic!("{name}: expected one moved-place finding")
+                    };
+                    assert_eq!(finding.code(), "R0200", "{name}");
+                    assert_eq!(finding.site.span.bytes(), site.as_bytes());
+                    assert_eq!(finding.related.span.bytes(), moved_at.as_bytes());
+                    assert!(finding.related.span.start() < finding.site.span.start());
+                    continue;
+                }
+                assert!(report.findings().is_empty());
+                let mir = report.mir().unwrap();
+                let leaf = |place: &Place<'_>, root: &[u8], name| {
+                    place.root.span.bytes() == root
+                        && matches!(place.projection, Some(Projection::NestedField { outer, inner })
+                            if &outer.id == child && &inner.id == field("Inner", name))
+                };
+                match name {
+                    "takeLeaf" => {
+                        let ops = linear(mir, mir.entry);
+                        assert!(ops.windows(2).any(|pair| matches!(pair,
+                            [Operation::Move { from, into: Some(into) }, Operation::Export(result)]
+                            if leaf(from, b"saved", "first") && into.root.node == result.root.node)));
+                        let drops = path_drops(mir, mir.entry);
+                        assert!(
+                            matches!(drops.as_slice(), [Obligation::Drop(sibling), Obligation::Drop(last)]
+                            if sibling.root.span.bytes() == b"saved" && sibling.field().is_some_and(|decl| &decl.id == field("Outer", "sibling"))
+                                && leaf(last, b"saved", "last"))
+                        );
+                    }
+                    "siblings" => {
+                        assert_eq!(
+                            mir.blocks
+                                .iter()
+                                .filter(|block| matches!(&block.operation,
+                            Operation::Copy { from, .. } if leaf(from, b"seed: Outer", "flag")))
+                                .count(),
+                            2
+                        );
+                        assert!(mir.blocks.iter().any(|block| matches!(&block.operation,
+                            Operation::Move { from, .. } if leaf(from, b"seed: Outer", "last"))));
+                        assert!(mir.blocks.iter().any(|block| matches!(&block.operation,
+                            Operation::Move { from, .. } if from.field().is_some_and(|f| &f.id == field("Outer", "sibling")))));
+                    }
+                    "restoreLeaf" => {
+                        let ops = linear(mir, mir.entry);
+                        assert!(ops.windows(3).any(|group| matches!(group,
+                            [Operation::Install { target, .. }, Operation::Move { from, into: Some(into) }, Operation::Export(result)]
+                            if leaf(target, b"saved", "first") && target.root.node == from.root.node
+                                && from.projection.is_none() && into.root.node == result.root.node)));
+                        let drops = path_drops(mir, mir.entry);
+                        assert_eq!(
+                            drops.len(),
+                            1,
+                            "only the value extracted before repair is dropped"
+                        );
+                        assert!(
+                            matches!(drops.as_slice(), [Obligation::Drop(prior)] if prior.root.span.bytes() == b"prior")
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        },
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn direct_owned_nested_record_leaf_loans_respect_overlap_and_last_use() {
+    use compiler::analysis::ownership::{Place, Projection};
+    use std::fmt::Write as _;
+
+    let cases = [
+        (
+            "sharedRead",
+            "&saved.child.flag",
+            "let read = saved.child.flag; let used = *held;",
+            None,
+        ),
+        (
+            "exclusiveRead",
+            "&mut saved.child.flag",
+            "let read = saved.child.flag; let used = *held;",
+            Some(("R0201", "saved.child.flag")),
+        ),
+        (
+            "sharedMove",
+            "&saved.child.first",
+            "let taken = saved.child.first; let used = held;",
+            Some(("R0203", "saved.child.first")),
+        ),
+        (
+            "exclusiveMove",
+            "&mut saved.child.first",
+            "let taken = saved.child.first; let used = held;",
+            Some(("R0203", "saved.child.first")),
+        ),
+        (
+            "sharedWrite",
+            "&saved.child.first",
+            "saved.child.first = fresh; let used = held;",
+            Some(("R0203", "saved.child.first = fresh;")),
+        ),
+        (
+            "exclusiveWrite",
+            "&mut saved.child.first",
+            "saved.child.first = fresh; let used = held;",
+            Some(("R0203", "saved.child.first = fresh;")),
+        ),
+        (
+            "sharedWholeMove",
+            "&saved.child.first",
+            "let taken = saved; let used = held;",
+            Some(("R0203", "saved")),
+        ),
+        (
+            "exclusiveWholeMove",
+            "&mut saved.child.first",
+            "let taken = saved; let used = held;",
+            Some(("R0203", "saved")),
+        ),
+        (
+            "sharedWholeWrite",
+            "&saved.child.first",
+            "saved = whole; let used = held;",
+            Some(("R0203", "saved = whole;")),
+        ),
+        (
+            "exclusiveWholeWrite",
+            "&mut saved.child.first",
+            "saved = whole; let used = held;",
+            Some(("R0203", "saved = whole;")),
+        ),
+        (
+            "disjoint",
+            "&mut saved.child.first",
+            "let taken = saved.child.last; saved.child.last = fresh; let sibling = saved.sibling; let used = held;",
+            None,
+        ),
+        (
+            "afterLastUse",
+            "&saved.child.first",
+            "let used = held; let taken = saved.child.first; saved.child.first = fresh; let moved = saved;",
+            None,
+        ),
+        (
+            "wholeAfterLastUse",
+            "&mut saved.child.first",
+            "let used = held; saved = whole; let taken = saved.child.first;",
+            None,
+        ),
+    ];
+    let mut source = String::from(
+        r#"
+        type Inner = { first: string; flag: bool; last: string; }
+        type Outer = { child: Inner; sibling: string; }
+    "#,
+    );
+    for (name, borrow, statements, _) in cases {
+        writeln!(
+            source,
+            "function {name}(seed: Outer, fresh: string, whole: Outer): void {{
+            let mut saved = seed;
+            let held = {borrow};
+            {statements}
+        }}"
+        )
+        .unwrap();
+    }
+    let mut failures = Vec::new();
+    probe_with_typed(
+        "records::direct_owned_nested_record_leaf_loans_respect_overlap_and_last_use",
+        &source,
+        |request, module, receipt, typed| {
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
+            let child = field("Outer", "child");
+            let leaf = |place: &Place<'_>, name| {
+                place.root.span.bytes() == b"saved"
+                    && matches!(place.projection, Some(Projection::NestedField { outer, inner })
+                        if &outer.id == child && &inner.id == field("Inner", name))
+            };
+            for (name, borrow, _, rejected) in cases {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap();
+                let report =
+                    lower_body(receipt, module, &declaration.id, AnalysisLimits::default())
+                        .unwrap();
+                let expected = if rejected.is_some() {
+                    Completion::SourceRejected
+                } else {
+                    Completion::Checked
+                };
+                if report.completion() != expected {
+                    failures.push(format!(
+                        "test_mode={}: {name}: expected {expected:?}, got {:?} at {:?}",
+                        request.test_mode,
+                        report.completion(),
+                        report.blocked_at().map(|site| site
+                            .span
+                            .bytes()
+                            .escape_ascii()
+                            .to_string())
+                    ));
+                    continue;
+                }
+                if let Some((code, site)) = rejected {
+                    assert!(report.mir().is_none());
+                    let [finding] = report.findings() else {
+                        panic!("{name}: expected one conflict")
+                    };
+                    assert_eq!(finding.code(), code, "{name}");
+                    assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                    assert_eq!(finding.related.span.bytes(), borrow.as_bytes(), "{name}");
+                    assert!(finding.related.span.start() < finding.site.span.start());
+                    continue;
+                }
+                assert!(report.findings().is_empty());
+                let mir = report.mir().unwrap();
+                let ops = linear(mir, mir.entry);
+                let borrowed_member = if name == "sharedRead" {
+                    "flag"
+                } else {
+                    "first"
+                };
+                let borrowed = ops
+                    .iter()
+                    .position(|op| {
+                        matches!(op,
+                    Operation::Borrow { source, holder, exclusive }
+                    if leaf(source, borrowed_member) && holder.root.span.bytes() == b"held"
+                        && *exclusive == borrow.starts_with("&mut"))
+                    })
+                    .unwrap();
+                let after_borrow = &ops[borrowed + 1..];
+                if name == "sharedRead" {
+                    assert!(
+                        matches!(after_borrow.first(), Some(Operation::Copy { from, .. }) if leaf(from, "flag"))
+                    );
+                    continue;
+                }
+                let used = after_borrow.iter().position(|op| matches!(op,
+                    Operation::Copy { from, into: Some(into) } | Operation::Move { from, into: Some(into) }
+                    if from.root.span.bytes() == b"held" && into.root.span.bytes() == b"used")).unwrap();
+                match name {
+                    "disjoint" => {
+                        let before_use = &after_borrow[..used];
+                        assert!(before_use.iter().any(
+                            |op| matches!(op, Operation::Move { from, .. } if leaf(from, "last"))
+                        ));
+                        assert!(before_use.iter().any(|op| matches!(op, Operation::Install { target, .. } if leaf(target, "last"))));
+                        assert!(before_use.iter().any(|op| matches!(op, Operation::Move { from, .. }
+                            if from.root.span.bytes() == b"saved" && from.field().is_some_and(|decl| &decl.id == field("Outer", "sibling")))));
+                    }
+                    "afterLastUse" => {
+                        assert!(after_borrow[used + 1..].iter().any(|op| matches!(op,
+                            Operation::Move { from, .. } if leaf(from, "first"))));
+                        assert!(after_borrow[used + 1..].iter().any(|op| matches!(op,
+                            Operation::Install { target, .. } if leaf(target, "first"))));
+                    }
+                    "wholeAfterLastUse" => {
+                        assert!(after_borrow[used + 1..].iter().any(|op| matches!(op,
+                            Operation::Install { target, .. } if target.root.span.bytes() == b"saved" && target.projection.is_none())));
+                    }
+                    _ => unreachable!(),
+                }
             }
         },
     );

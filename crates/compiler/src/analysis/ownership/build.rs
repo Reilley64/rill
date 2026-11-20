@@ -217,6 +217,7 @@ enum AssignmentPlan<'a, 'g> {
     General,
     Exact(&'a Type<'g>),
     NestedTuple(Slot),
+    StagedNestedRecord(Slot),
     NestedRecordLeaf { ty: &'a Type<'g>, child: Slot },
 }
 
@@ -973,6 +974,12 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return match path.projections.as_slice() {
                 [] => Ok(root),
                 [PathProjection::Field(field)] => self.field(node, root, field),
+                [PathProjection::Field(outer), PathProjection::Field(inner)]
+                    if matches!(facts.ty.as_ref(), TypeTerm::Primitive(_)) =>
+                {
+                    self.nested_field(node, root, outer, inner)
+                        .map(|(_, leaf)| leaf)
+                }
                 _ => Err(Stop::Pending(node)),
             };
         }
@@ -1010,6 +1017,17 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 return Err(Stop::Pending(value));
             }
             return Ok((target, AssignmentPlan::Exact(&facts.ty)));
+        }
+        if facts.access == Access::Owned
+            && facts.place == TypedPlace::Writable
+            && path.projections.is_empty()
+            && let Some(target) = self.nested_record_root(path)?
+        {
+            let (name, _) = self.ungroup_expression_at(value, rhs_depth)?;
+            let incoming = self
+                .nested_transfer_slot(name, value, &facts.ty)?
+                .ok_or(Stop::Pending(value))?;
+            return Ok((target, AssignmentPlan::StagedNestedRecord(incoming)));
         }
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
@@ -1736,6 +1754,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 }
                 let (incoming, temporary) = if let AssignmentPlan::NestedTuple(from) = source {
                     (self.clone_region(from, value)?, None)
+                } else if let AssignmentPlan::StagedNestedRecord(incoming) = source {
+                    (incoming, None)
                 } else {
                     let ty = if let AssignmentPlan::Exact(ty)
                     | AssignmentPlan::NestedRecordLeaf { ty, .. } = source
@@ -3897,7 +3917,22 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                         return Err(Stop::Pending(node));
                     }
                     let path = operand_facts.path.as_ref().ok_or(Stop::Pending(operand))?;
-                    let from = self.resolve_place(operand, path)?;
+                    let from = if operand_facts.access == Access::Owned
+                        && matches!(operand_facts.ty.as_ref(), TypeTerm::Primitive(_))
+                        && let [PathProjection::Field(outer), PathProjection::Field(inner)] =
+                            path.projections.as_slice()
+                        && let Some(root) = self.nested_record_root(path)?
+                    {
+                        if (exclusive && operand_facts.place != TypedPlace::Writable)
+                            || !matches!(facts.ty.as_ref(), TypeTerm::Reference { mutable, referent }
+                                if *mutable == exclusive && *referent == operand_facts.ty)
+                        {
+                            return Err(Stop::Pending(operand));
+                        }
+                        self.nested_field(operand, root, outer, inner)?.1
+                    } else {
+                        self.resolve_place(operand, path)?
+                    };
                     if self.slots[from].contains_guard()
                         || (matches!(
                             self.slots[from].projection,
