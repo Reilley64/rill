@@ -1,5 +1,6 @@
 //! Ordinary and bounded delivered-exit judgments, not an execution plan.
 use super::*;
+use crate::analysis::typed::CollectionOperation;
 use crate::analysis::{ordinary::ImplementationFacts, scalars::BodyFacts};
 use crate::loader::{GraphId, ModuleKey, Origin};
 use std::collections::BTreeSet;
@@ -45,6 +46,11 @@ pub enum DependencyContract<'g> {
     },
     /// Closed ordinary effect of the installed List<i32> disposal bridge.
     ListI32Disposal {
+        bridge: &'g DeclarationId,
+    },
+    /// Closed ordinary cursor effect, not a checked generic wrapper frame.
+    ListI32Iteration {
+        operation: CollectionOperation,
         bridge: &'g DeclarationId,
     },
     ResultConstructor,
@@ -553,6 +559,7 @@ fn analyze<'g>(
                             | DependencyContract::SynchronousListArrows { .. }
                             | DependencyContract::ScopedJoin { .. }
                             | DependencyContract::ListI32Disposal { .. }
+                            | DependencyContract::ListI32Iteration { .. }
                     ) {
                         // Specialized evidence closes this ordinary edge,
                         // not the callee's unbound source root.
@@ -951,6 +958,7 @@ pub(super) fn visit_dependencies<'g>(
     budget: &mut Budget,
     mut visit: impl FnMut(usize, Dependency<'g>, &mut Budget) -> ResultOf<()>,
 ) -> ResultOf<()> {
+    use crate::analysis::typed::ListTraversal::Owned;
     use DependencyContract::*;
     for (index, block) in mir.blocks.iter().enumerate() {
         budget.step(1)?;
@@ -975,6 +983,19 @@ pub(super) fn visit_dependencies<'g>(
             | Operation::CallRetainingWithOptionBool { callee, .. } => {
                 emit(callee, OrdinaryCall, budget)?
             }
+            Operation::OpenOwnedListI32 { provider, .. }
+            | Operation::AdvanceOwnedListI32 { provider, .. } => emit(
+                &provider.implementation.id,
+                ListI32Iteration {
+                    operation: if matches!(block.operation, Operation::OpenOwnedListI32 { .. }) {
+                        CollectionOperation::Iterate(Owned)
+                    } else {
+                        CollectionOperation::Next(Owned)
+                    },
+                    bridge: &provider.bridge.id,
+                },
+                budget,
+            )?,
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
             }
@@ -1049,6 +1070,18 @@ pub(super) fn visit_dependencies<'g>(
                             bridge,
                             ..
                         } => emit(implementation, ListI32Disposal { bridge }, budget)?,
+                        Cleanup::DisposeOwnedListIterI32 {
+                            implementation,
+                            bridge,
+                            ..
+                        } => emit(
+                            implementation,
+                            ListI32Iteration {
+                                operation: CollectionOperation::DisposeIterator(Owned),
+                                bridge,
+                            },
+                            budget,
+                        )?,
                         _ => {}
                     }
                 }

@@ -2,7 +2,7 @@
 use super::DeclarationFacts;
 use super::declarations::Budget;
 use super::scalars::{BodyOwner, NodeFactKind, NodeFacts, Site};
-use super::typed::{TypedReceipt, TypedReport};
+use super::typed::{CollectionProvider, CollectionRepresentation, TypedReceipt, TypedReport};
 use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
     TypeTerm, retained_bool_contents_type,
@@ -413,6 +413,22 @@ pub enum Operation<'g> {
         from: Place<'g>,
         into: Option<Place<'g>>,
     },
+    /// Consume the List and initialize the sole owner of its unyielded slots.
+    OpenOwnedListI32 {
+        source: Place<'g>,
+        cursor: Place<'g>,
+        backing: CollectionRepresentation<'g>,
+        provider: CollectionProvider<'g>,
+    },
+    /// Call the selected `next` once. The yes edge takes `Some`'s i32 into
+    /// the binder (or discards it); the no edge sees `None` and an empty cursor.
+    AdvanceOwnedListI32 {
+        cursor: Place<'g>,
+        into: Option<Place<'g>>,
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+        provider: CollectionProvider<'g>,
+    },
     Borrow {
         source: Place<'g>,
         holder: Place<'g>,
@@ -796,6 +812,13 @@ pub enum Cleanup<'g> {
     /// Consume the canonical List<i32> backing. Its scalar elements have no drop action.
     DisposeListI32 {
         operand: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+    },
+    /// Retire only the remaining backing. The checked i32 element disposer
+    /// has no effect, including when `next` has already observed exhaustion.
+    DisposeOwnedListIterI32 {
+        cursor: Place<'g>,
         implementation: &'g DeclarationId,
         bridge: &'g DeclarationId,
     },
@@ -1804,6 +1827,7 @@ enum StorageCleanup<'g> {
     Unlowered,
     ReleaseGuard(GuardRelease<'g>),
     DisposeListI32(ListDisposal<'g>),
+    DisposeOwnedListIterI32(ListDisposal<'g>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1832,7 +1856,9 @@ impl<'g> Local<'g> {
             || self.custom_disposer.is_some()
             || matches!(
                 self.cleanup,
-                StorageCleanup::ReleaseGuard(_) | StorageCleanup::DisposeListI32(_)
+                StorageCleanup::ReleaseGuard(_)
+                    | StorageCleanup::DisposeListI32(_)
+                    | StorageCleanup::DisposeOwnedListIterI32(_)
             )
     }
 
@@ -1884,6 +1910,19 @@ enum Action<'g> {
     None,
     BudgetBackedge,
     Init(Slot),
+    OpenOwnedListI32 {
+        source: Slot,
+        cursor: Slot,
+        backing: CollectionRepresentation<'g>,
+        provider: CollectionProvider<'g>,
+    },
+    AdvanceOwnedListI32 {
+        cursor: Slot,
+        into: Option<Slot>,
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+        provider: CollectionProvider<'g>,
+    },
     Read {
         from: Slot,
         into: Option<Slot>,

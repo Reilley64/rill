@@ -23,6 +23,7 @@ use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
+mod iteration;
 mod list_arrows;
 mod reference_results;
 pub(super) use list_arrows::{ArrowBody, ListArrowPair, reached_exclusive_pair};
@@ -813,6 +814,16 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             _ => return Err(Stop::Pending(node)),
         };
+        self.allocate_slot(node, moves, cleanup, reference_option)
+    }
+
+    fn allocate_slot(
+        &mut self,
+        node: NodeId,
+        moves: bool,
+        cleanup: StorageCleanup<'g>,
+        reference_option: Option<ReferenceOption>,
+    ) -> ResultOf<Slot> {
         self.budget.reserve(1)?;
         let slot = self.slots.len();
         self.slots.push(Local {
@@ -2469,6 +2480,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 };
                 self.condition(cond, yes, next, depth + 1)
             }
+            NodeKind::For => self.owned_list_iteration(node, next, exits, depth),
             NodeKind::Break => Ok(exits.looping.ok_or(Stop::Pending(node))?.breaks),
             NodeKind::Continue => Ok(exits.looping.ok_or(Stop::Pending(node))?.continues),
             _ => Err(Stop::Pending(node)),

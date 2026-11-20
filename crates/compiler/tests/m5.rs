@@ -24,6 +24,8 @@ mod disposers;
 mod field_routes;
 #[path = "m5/graph.rs"]
 mod graph;
+#[path = "m5/iteration.rs"]
+mod iteration;
 #[path = "m5/patterns.rs"]
 mod patterns;
 #[path = "m5/propagation.rs"]

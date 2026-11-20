@@ -171,6 +171,8 @@ fn liveness(
             | Action::CheckRetained => use_one(None, None),
             Action::CheckScopedReferenceResults { entries, .. } => (entries.map(Some), None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
+            Action::OpenOwnedListI32 { source, cursor, .. } => use_one(Some(source), Some(cursor)),
+            Action::AdvanceOwnedListI32 { cursor, into, .. } => use_one(Some(cursor), into),
             Action::Read { from, into }
             | Action::Move { from, into }
             | Action::Dereference { from, into, .. } => {
@@ -580,6 +582,11 @@ fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultO
         }),
         StorageCleanup::ReleaseGuard(release) => Ok(release.cleanup(place)),
         StorageCleanup::DisposeListI32(disposal) => Ok(disposal.cleanup(place)),
+        StorageCleanup::DisposeOwnedListIterI32(disposal) => Ok(Cleanup::DisposeOwnedListIterI32 {
+            cursor: place,
+            implementation: disposal.implementation,
+            bridge: disposal.bridge,
+        }),
         StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
 }
@@ -629,7 +636,9 @@ fn cleanup_operation<'g>(
     Ok(match cleanup_of(module, local, node)? {
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
-        cleanup @ (Cleanup::DropOptionPayload { .. } | Cleanup::DisposeListI32 { .. }) => {
+        cleanup @ (Cleanup::DropOptionPayload { .. }
+        | Cleanup::DisposeListI32 { .. }
+        | Cleanup::DisposeOwnedListIterI32 { .. }) => {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
         }
@@ -2112,8 +2121,10 @@ pub(super) fn run<'a, 'g>(
     let mut state: Vec<_> = slots
         .iter()
         .map(|slot| {
-            // Reference-carrying Option transfer has only an ordinary-exit proof.
-            if slot.reference_option.is_some() {
+            // These transfers have only an ordinary-exit proof.
+            if slot.reference_option.is_some()
+                || matches!(slot.cleanup, StorageCleanup::DisposeOwnedListIterI32(_))
+            {
                 candidate = false;
                 replacement_candidate = false;
             }
@@ -2341,6 +2352,51 @@ pub(super) fn run<'a, 'g>(
                     }
                     state[slot] = State::Initialized(empty.clone());
                     Operation::Initialize(local(slot))
+                }
+                Action::OpenOwnedListI32 {
+                    source,
+                    cursor,
+                    backing,
+                    provider,
+                } => {
+                    require_initialized(&slots, &state, source, node, budget)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        source,
+                        (node, Conflict::Release),
+                        Access::Exclusive,
+                        budget,
+                    )?;
+                    state[source] = State::Moved(node);
+                    retire_loans(&slots, &mut state, &[source], budget)?;
+                    state[cursor] = State::Initialized(empty.clone());
+                    Operation::OpenOwnedListI32 {
+                        source: local(source),
+                        cursor: local(cursor),
+                        backing,
+                        provider,
+                    }
+                }
+                Action::AdvanceOwnedListI32 {
+                    cursor,
+                    into,
+                    some,
+                    none,
+                    provider,
+                } => {
+                    require_initialized(&slots, &state, cursor, node, budget)?;
+                    if into.is_some_and(|slot| !matches!(state[slot], State::Vacant)) {
+                        return Err(Stop::Pending(node));
+                    }
+                    Operation::AdvanceOwnedListI32 {
+                        cursor: local(cursor),
+                        into: into.map(local),
+                        some,
+                        none,
+                        provider,
+                    }
                 }
                 Action::Read { from, into } | Action::Move { from, into } => {
                     require_initialized(&slots, &state, from, node, budget)?;
@@ -3896,10 +3952,21 @@ pub(super) fn run<'a, 'g>(
             // Publication returns a lowering PC and a checked caller state.
             // Intern the pair; the PC alone is not a MIR block index.
             Edges::Next(next) => Terminator::Goto(successor(join_resume.unwrap_or(next), state)?),
-            Edges::Branch { yes, no } => Terminator::Branch {
-                yes: successor(yes, state.clone())?,
-                no: successor(no, state)?,
-            },
+            Edges::Branch { yes, no } => {
+                let mut on_yes = state.clone();
+                // Both outcomes retain the unique cursor until lexical cleanup.
+                // Only a successful advance initializes the iteration binder.
+                if let Action::AdvanceOwnedListI32 {
+                    into: Some(item), ..
+                } = action
+                {
+                    on_yes[item] = State::Initialized(empty.clone());
+                }
+                Terminator::Branch {
+                    yes: successor(yes, on_yes)?,
+                    no: successor(no, state)?,
+                }
+            }
             Edges::End => Terminator::Return,
             Edges::FinishStartup => Terminator::FinishStartup,
             Edges::FinishExpectation => Terminator::FinishExpectation,
