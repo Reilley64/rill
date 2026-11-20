@@ -57,6 +57,11 @@ pub struct OrdinaryCall<'g> {
     pub output_agreement: OutputAgreement<'g>,
 }
 
+pub(in crate::analysis::scalars) struct SourceSelection<'g> {
+    winner: GoalSelection<'g>,
+    argument_pair: Option<evidence::ArgumentPair<'g>>,
+}
+
 struct CallablePath {
     column: usize,
     tuple_indices: Vec<usize>,
@@ -1005,10 +1010,21 @@ impl<'r, 'g> Checker<'r, 'g> {
         } else {
             let selection = if let Some((c, _, substitution)) = &solved {
                 self.elab.reserve(substitution.len())?;
-                Some(GoalSelection {
-                    implementation: &c.body.source.declaration,
-                    alternative: c.alternative,
-                    substitution: substitution.clone(),
+                let argument_pair = match &c.body.header.shape {
+                    DeclarationShape::Function { parameters, .. }
+                        if let [formal] = parameters.as_slice() =>
+                    {
+                        self.direct_argument_pair(inference, call, &formal.ty)?
+                    }
+                    _ => None,
+                };
+                Some(SourceSelection {
+                    winner: GoalSelection {
+                        implementation: &c.body.source.declaration,
+                        alternative: c.alternative,
+                        substitution: substitution.clone(),
+                    },
+                    argument_pair,
                 })
             } else {
                 None
@@ -1170,7 +1186,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         inputs: Vec<Type<'g>>,
         explicit: &[Substitution<'g>],
         bindings: &[&'g Binding],
-        selection: Option<GoalSelection<'g>>,
+        selection: Option<SourceSelection<'g>>,
     ) -> Work<GoalId> {
         let family = self
             .input
@@ -1193,6 +1209,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             .collect();
         let origin = self.evidence_module(&callee.module)?;
         let declaration = family.header.declaration;
+        let (winner, argument_pair) = selection.map_or((None, None), |source| {
+            (Some(source.winner), source.argument_pair)
+        });
         let goal = self.issue_determination(
             GoalJudgment::Determine {
                 family: callee,
@@ -1202,8 +1221,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             site,
             Self::site(origin, origin.syntax.nodes[declaration.node].children[0]),
             bindings,
-            selection,
+            winner,
         )?;
+        if let Some(pair) = argument_pair {
+            self.attach_argument_pair(&goal, pair)?;
+        }
         self.solve_goal(&goal)?;
         Ok(goal)
     }

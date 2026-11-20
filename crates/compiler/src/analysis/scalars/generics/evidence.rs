@@ -96,6 +96,8 @@ pub struct GoalEquality<'g> {
     pub agrees: bool,
 }
 
+pub(super) type ArgumentPair<'g> = [Option<Arc<ArrowFacts<'g>>>; 2];
+
 #[derive(Debug)]
 pub struct GoalFacts<'g> {
     pub id: GoalId,
@@ -109,6 +111,9 @@ pub struct GoalFacts<'g> {
     pub premise: Option<InputPremise>,
     /// Exact originating arrow, when the source ties this subject to one value.
     pub arrow_origin: Option<Arc<ArrowFacts<'g>>>,
+    // Only a direct source determination has operand occurrences. An
+    // instantiation may reuse its determination's occurrences, not its types.
+    argument_pair: Option<ArgumentPair<'g>>,
     /// A verdict only under the retained role and protection premise.
     pub hypothetical: Option<GoalVerdict>,
     pub selection: Option<GoalSelection<'g>>,
@@ -327,6 +332,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             state,
             premise,
             arrow_origin: None,
+            argument_pair: None,
             hypothetical: None,
             selection: None,
             conversion_outcome: None,
@@ -657,6 +663,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             return Ok(true);
         };
+        let pair = match call.parameters.as_slice() {
+            [formal] => self.direct_argument_pair(inference, call, formal)?,
+            _ => None,
+        };
         let mut unresolved = false;
         let mut rejected = false;
         for requirement in &header.requirements {
@@ -676,12 +686,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 &requirement.routes,
                 false,
             )?;
-            let origin = self.arrow_subject(inference, call, requirement)?;
-            let fact = &mut self.evidence.goals[goal.index];
-            if let Some(premise) = origin.as_ref().and_then(|arrow| arrow.premise) {
-                fact.premise = Some(fact.premise.map_or(premise, |p| p.combine(premise)));
-            }
-            fact.arrow_origin = origin;
+            let origin = if let (Some(pair), [formal]) = (&pair, call.parameters.as_slice()) {
+                self.pair_arrow_subject(formal, pair, requirement)?.cloned()
+            } else {
+                self.arrow_subject(inference, call, requirement)?
+            };
+            self.set_arrow_subject(&goal, origin);
             match self.solve_goal(&goal)? {
                 GoalState::Proved => (),
                 _ if self.arrow_premise.is_some_and(|p| p.has_conversion())
@@ -813,17 +823,126 @@ impl<'r, 'g> Checker<'r, 'g> {
         })
     }
 
+    fn property_subject<'a>(requirement: &'a RequirementMetadata<'g>) -> Option<&'a Type<'g>> {
+        if !matches!(requirement.target, Some(RequirementTarget::Predicate(id)) if !matches!(Predicate::of(id), Predicate::Callable(_)))
+        {
+            return None;
+        }
+        match requirement.arguments.as_slice() {
+            [Some(subject)] => Some(subject),
+            _ => None,
+        }
+    }
+
+    fn set_arrow_subject(&mut self, goal: &GoalId, origin: Option<Arc<ArrowFacts<'g>>>) {
+        if let Some(premise) = origin.as_ref().and_then(|arrow| arrow.premise) {
+            self.add_goal_premise(goal, premise);
+        }
+        self.evidence.goals[goal.index].arrow_origin = origin;
+    }
+
+    fn pair_formals(formal: &TypeTerm<'g>) -> Option<[&'g DeclarationId; 2]> {
+        let TypeTerm::Tuple(fields) = formal else {
+            return None;
+        };
+        let [first, second] = fields.as_slice() else {
+            return None;
+        };
+        match (first.as_ref(), second.as_ref()) {
+            (
+                TypeTerm::Parameter { declaration: f, .. },
+                TypeTerm::Parameter { declaration: g, .. },
+            ) if f != g => Some([f, g]),
+            _ => None,
+        }
+    }
+
+    pub(super) fn direct_argument_pair(
+        &mut self,
+        inference: &Inference<'g>,
+        call: &PreparedCall<'g>,
+        formal: &TypeTerm<'g>,
+    ) -> Work<Option<ArgumentPair<'g>>> {
+        let [argument] = call.fact.arguments.as_slice() else {
+            return Ok(None);
+        };
+        if call.fact.pipe_input.is_some() || Self::pair_formals(formal).is_none() {
+            return Ok(None);
+        }
+        self.elab.step(1)?;
+        let syntax = &inference.module.syntax.nodes[*argument];
+        let tuple = &inference.slots[argument];
+        if syntax.kind != NodeKind::Bracket || tuple.blocked {
+            return Ok(None);
+        }
+        let (Some(TypeTerm::Tuple(types)), [first, second]) =
+            (tuple.ty.as_deref(), syntax.children.as_slice())
+        else {
+            return Ok(None);
+        };
+        let [first_type, second_type] = types.as_slice() else {
+            return Ok(None);
+        };
+        let mut pair = [None, None];
+        for ((node, ty), origin) in [(first, first_type), (second, second_type)]
+            .into_iter()
+            .zip(&mut pair)
+        {
+            self.elab.step(1)?;
+            // The typed expression slot supplies the origin. Equality only
+            // validates that this expression is the corresponding tuple member.
+            let slot = &inference.slots[node];
+            if !slot.blocked
+                && matches!(ty.as_ref(), TypeTerm::Callable { .. })
+                && let (Some(actual), Some(arrow)) = (&slot.ty, &slot.arrow)
+                && self.same(ty, actual)?
+            {
+                *origin = Some(arrow.clone());
+            }
+        }
+        Ok(pair.iter().any(Option::is_some).then_some(pair))
+    }
+
+    fn pair_arrow_subject<'a>(
+        &mut self,
+        formal: &TypeTerm<'g>,
+        pair: &'a ArgumentPair<'g>,
+        requirement: &RequirementMetadata<'g>,
+    ) -> Work<Option<&'a Arc<ArrowFacts<'g>>>> {
+        self.elab.step(1)?;
+        let Some([first, second]) = Self::pair_formals(formal) else {
+            return Ok(None);
+        };
+        // Match the written binder, before substitution can make the two
+        // callable types equal. A missing occurrence has no concrete origin.
+        Ok(match Self::property_subject(requirement).map(Arc::as_ref) {
+            Some(TypeTerm::Parameter { declaration, .. }) if *declaration == first => {
+                pair[0].as_ref()
+            }
+            Some(TypeTerm::Parameter { declaration, .. }) if *declaration == second => {
+                pair[1].as_ref()
+            }
+            _ => None,
+        })
+    }
+
+    pub(super) fn attach_argument_pair(
+        &mut self,
+        goal: &GoalId,
+        pair: ArgumentPair<'g>,
+    ) -> Work<()> {
+        self.elab.reserve(pair.len())?;
+        self.evidence.goals[goal.index].argument_pair = Some(pair);
+        Ok(())
+    }
+
     fn arrow_subject(
         &mut self,
         inference: &Inference<'g>,
         call: &PreparedCall<'g>,
         requirement: &RequirementMetadata<'g>,
     ) -> Work<Option<Arc<ArrowFacts<'g>>>> {
-        if !matches!(requirement.target, Some(RequirementTarget::Predicate(id)) if !matches!(Predicate::of(id), Predicate::Callable(_)))
-        {
-            return Ok(None);
-        }
-        let [Some(subject)] = requirement.arguments.as_slice() else {
+        let Some(subject) = Self::property_subject(requirement) else {
             return Ok(None);
         };
         let mut origin: Option<Arc<ArrowFacts<'g>>> = None;
@@ -855,8 +974,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         } {
             return Ok(false);
         }
+        if !match (&l_fact.argument_pair, &r_fact.argument_pair) {
+            (None, None) => true,
+            (Some(l), Some(r)) => l.iter().zip(r).all(|(l, r)| match (l, r) {
+                (None, None) => true,
+                (Some(l), Some(r)) => Arc::ptr_eq(l, r),
+                _ => false,
+            }),
+            _ => false,
+        } {
+            return Ok(false);
+        }
         let l = &l_fact.judgment;
-        let r = &self.evidence.goals[right].judgment;
+        let r = &r_fact.judgment;
         if std::mem::discriminant(l) != std::mem::discriminant(r) {
             return Ok(false);
         }
@@ -1597,10 +1727,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             result,
             site: source,
         });
-        let declared =
-            self.append_header_goals(goal, site, &family.header.declaration.id, &substitutions)?;
+        let declared = self.append_header_goals(goal, site, &family.header, &substitutions)?;
         let selected =
-            self.append_header_goals(goal, site, implementation, &selected_substitutions)?;
+            self.append_header_goals(goal, site, &body.header, &selected_substitutions)?;
         Ok(join(declared, selected))
     }
 
@@ -1729,13 +1858,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         &mut self,
         goal: usize,
         site: Site<'g>,
-        owner: &DeclarationId,
+        declaration: &DeclarationFacts<'g>,
         substitutions: &[Substitution<'g>],
     ) -> Work<GoalState> {
+        let owner = &declaration.declaration.id;
         let Some(header) = self.input.ordinary.unwrap().headers().get(owner) else {
             return Ok(GoalState::Proved);
         };
         let module = self.evidence_module(&owner.module)?;
+        let argument_goal = match &self.evidence.goals[goal].judgment {
+            GoalJudgment::Instantiate { determination, .. } => determination.index,
+            _ => goal,
+        };
+        let pair = self.evidence.goals[argument_goal].argument_pair.clone();
         let mut state = GoalState::Proved;
         for requirement in &header.requirements {
             self.elab.step(1)?;
@@ -1749,6 +1884,15 @@ impl<'r, 'g> Checker<'r, 'g> {
                 && !self.has_application_ordinary_scope(family)
             {
                 self.add_goal_premise(&child, InputPremise::HypotheticalOrdinaryRole);
+            }
+            if let Some(pair) = &pair
+                && let DeclarationShape::Function { parameters, .. } = &declaration.shape
+                && let [formal] = parameters.as_slice()
+            {
+                let origin = self
+                    .pair_arrow_subject(&formal.ty, pair, requirement)?
+                    .cloned();
+                self.set_arrow_subject(&child, origin);
             }
             self.link_goal(goal, child)?;
         }
