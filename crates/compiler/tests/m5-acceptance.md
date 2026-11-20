@@ -1335,6 +1335,20 @@ At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github
 
 Native `test:runtime` is separate, unrun execution evidence. The hosted job reaches the unimplemented task; it does not run a Rill program. No work on M6 or #78 is part of this plan.
 
+## Returning from the right-hand side of an error wrap
+
+At `f3f1b34`, [`returning_wrap_rhs_forwards_instead_of_wrapping`](m5/propagation.rs) checks `input ? (marker()?)` through the installed compiler. The operands are owned scalar Results with `i32` errors. The marker constructs an error at its own source site and can wrap a prior cause. What the outer function does depends on which operand fails:
+
+| Path | Ownership MIR |
+| --- | --- |
+| Left `Ok` | Take its value and run the continuation. Do not call the marker. |
+| Left `Err`, RHS `Ok` | Consume the held left wrapper and the new payload in `WrapResultFailure`. The outer `?` supplies the new origin; the left error supplies the cause. Export the new error. |
+| Left `Err`, RHS `Err` | Forward and export the **RHS** wrapper unchanged. Then `DropResultFailure` consumes the still-held **left** failure once, using the pinned sealed `OwnedErr<i32>` storage, before lexical cleanup. No outer wrapper, display call or normal continuation. |
+
+A known failed RHS carried in by the caller needs no success test. A reached bad marker gives `R0200` at its second `dispose(text)`, related to the first; a moved caller argument gives `R0200` at the read of `text`, related to the caller’s `dispose(text)`. Neither publishes MIR. Both skipped calls check. The `wrapsAfterRhs` body checks in both modes at 12,574 work / 2,472 entries / depth 6. One short in any dimension withholds MIR. The unchanged literal wrap still fits 4,080 / 801 / 4. Separate call-backed and postfix controls retain their old caps, as do the **incomplete** nested-argument and pipe RHS controls. Group wrappers are charged once during discovery and depth is checked before descending.
+
+Twelve focused M5 tests, scoped Clippy, formatting and a Rust test of deep stored-cause destruction passed. The latter tested Rust storage, not Rill execution. In the mixed installed capture, `terminalRhs` has graph-root MIR; `wrapsAfterRhs` still lacks ordinary graph-root MIR despite its targeted proof, and the two real move findings survive. This is not general error-wrapper destruction, borrowed payload forwarding, iterator cleanup, cancellation, or graph completion. [#76](https://github.com/Reilley64/rill/issues/76) remains open.
+
 ## When an initializer returns before an irrefutable binding
 
 [`patterns/commitment.rs`](m5/patterns/commitment.rs) checks one flat, default-cleanup record with a single canonical `Option<bool>` postfix. Both installed load modes issue M4 receipts. At `ff8f725`, M5 could lower the named initializer followed by the binding, but not the same initializer written directly in the pattern. At `8eea08e` the direct binding has these ownership MIR paths:
