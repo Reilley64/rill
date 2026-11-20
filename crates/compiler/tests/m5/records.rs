@@ -687,11 +687,17 @@ fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children
                         && sibling.field().is_some_and(|member| &member.id == field("Outer", "sibling"))
                         && matches!(text.projection, Some(Projection::NestedField { outer, inner })
                             if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "text"))))));
-            assert_eq!(
-                path_drops(mir, mir.entry).len(),
-                4,
-                "drop the old and installed leaves once each"
-            );
+            let drops = path_drops(mir, mir.entry);
+            assert_eq!(drops.len(), 4);
+            for pair in drops.as_chunks::<2>().0 {
+                assert!(
+                    matches!(pair, [Obligation::Drop(sibling), Obligation::Drop(text)]
+                    if sibling.root.span.bytes() == b"saved" && text.root.node == sibling.root.node
+                        && sibling.field().is_some_and(|member| &member.id == field("Outer", "sibling"))
+                        && matches!(text.projection, Some(Projection::NestedField { outer, inner })
+                            if &outer.id == field("Outer", "child") && &inner.id == field("Inner", "text")))
+                );
+            }
             for (name, site) in [
                 ("borrowedLocal", b"saved".as_slice()),
                 ("argument", b"value"),
@@ -1331,6 +1337,48 @@ fn direct_owned_nested_record_leaf_reads_and_repair() {
         },
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn nested_leaf_borrow_groups_count_toward_depth() {
+    probe_with_typed(
+        "records::nested_leaf_borrow_groups_count_toward_depth",
+        r#"
+            type Inner = { flag: bool; }
+            type Outer = { child: Inner; sibling: string; }
+            function bare(seed: Outer): bool {
+                let mut saved = seed;
+                let held = &mut saved.child.flag;
+                return *held;
+            }
+            function grouped(seed: Outer): bool {
+                let mut saved = seed;
+                let held = &mut (((((saved.child.flag)))));
+                return *held;
+            }
+        "#,
+        |_, module, receipt, _| {
+            let lower = |name: &str, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let bare = lower("bare", AnalysisLimits::default());
+            assert!(bare.mir().is_some());
+            assert!(lower("grouped", AnalysisLimits::default()).mir().is_some());
+            let limits = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..Default::default()
+            };
+            assert!(lower("bare", limits).mir().is_some());
+            let grouped = lower("grouped", limits);
+            assert_eq!(grouped.completion(), Completion::ResourceLimit);
+            assert!(grouped.mir().is_none());
+        },
+    );
 }
 
 #[test]
