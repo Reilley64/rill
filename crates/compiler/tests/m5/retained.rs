@@ -3024,6 +3024,298 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
     );
 }
 
+#[test]
+fn direct_retaining_option_call_checks_reached_propagation_exits() {
+    probe_with_typed(
+        "retained::direct_retaining_option_call_checks_reached_propagation_exits",
+        r#"
+            function before(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                let flag = true;
+                *slot = &flag;
+                *slot = seed;
+                let bit = gate?;
+                return Option.Some(bit);
+            }
+            function after(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                let flag = true;
+                *slot = &flag;
+                let bit = gate?;
+                *slot = seed;
+                return Option.Some(bit);
+            }
+            function callerOK(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                return before(slot, seed, gate);
+            }
+            function callerBad(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                return after(slot, seed, gate);
+            }
+            function knownSome(slot: &mut &bool, seed: &bool, gate: Option<bool>.Some): Option<bool> {
+                let flag = true;
+                *slot = &flag;
+                let bit = gate?;
+                *slot = seed;
+                return Option.Some(bit);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let good = lower("callerOK");
+            let bad = lower("callerBad");
+            assert_eq!(
+                (good.completion(), bad.completion()),
+                (Completion::Checked, Completion::SourceRejected),
+                "callerOK blocked at {:?}; callerBad blocked at {:?}",
+                good.blocked_at()
+                    .map(|site| site.span.bytes().escape_ascii().to_string()),
+                bad.blocked_at()
+                    .map(|site| site.span.bytes().escape_ascii().to_string()),
+            );
+            let mir = require_mir(&good, "callerOK");
+            let path: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| !matches!(op, Operation::None))
+                .collect();
+            let [
+                Operation::Reborrow {
+                    parent,
+                    holder,
+                    exclusive: true,
+                },
+                Operation::Copy {
+                    from: seed,
+                    into: Some(staged_seed),
+                },
+                Operation::Copy {
+                    from: gate,
+                    into: Some(staged_gate),
+                },
+                Operation::CallRetainingWithOptionBool {
+                    callee,
+                    destination: RetainedPlace::ThroughParameter(destination),
+                    arguments: [slot_arg, seed_arg, gate_arg],
+                    into,
+                },
+                Operation::Export(export),
+                Operation::Cleanup(cleanup),
+            ] = path.as_slice()
+            else {
+                panic!(
+                    "expected one written-order staging, retaining call, export and cleanup: {path:?}"
+                );
+            };
+            assert_eq!(*callee, &declaration("before").id);
+            assert_eq!(parent.root.span.bytes(), b"slot: &mut &bool");
+            assert_eq!(seed.root.span.bytes(), b"seed: &bool");
+            assert_eq!(gate.root.span.bytes(), b"gate: Option<bool>");
+            assert_eq!(destination.root.node, parent.root.node);
+            assert_eq!(slot_arg.root.node, holder.root.node);
+            assert_eq!(seed_arg.root.node, staged_seed.root.node);
+            assert_eq!(gate_arg.root.node, staged_gate.root.node);
+            assert_eq!(into.root.node, export.root.node);
+            assert!(matches!(cleanup.as_slice(), [
+                Obligation::EndStorage(ended_gate),
+                Obligation::EndStorage(ended_seed),
+                Obligation::EndStorage(ended_slot),
+            ] if ended_gate.root.node == gate.root.node && ended_seed.root.node == seed.root.node
+                && ended_slot.root.node == parent.root.node));
+            assert_retained_call_limits(&good, |limits| check("callerOK", limits));
+
+            assert!(bad.mir().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected the reached callee's escaped loan")
+            };
+            assert_eq!(finding.code(), "R0202");
+            assert_eq!(finding.site.span.bytes(), b"*slot = &flag;");
+            assert_eq!(finding.related.span.bytes(), b"&flag");
+            let after = &module.syntax.nodes[declaration("after").node].span;
+            assert!(
+                after.start() < finding.site.span.start() && finding.site.span.end() < after.end()
+            );
+
+            let option = typed.option_role().unwrap();
+            let before = lower("before");
+            let mir = require_mir(&before, "before");
+            let prefix = straight_blocks(mir, mir.entry);
+            let stores: Vec<_> = prefix
+                .iter()
+                .filter(|block| matches!(block.operation, Operation::InstallThrough { .. }))
+                .map(|block| block.site.span.bytes())
+                .collect();
+            assert_eq!(stores, [b"*slot = &flag;".as_slice(), b"*slot = seed;"]);
+            assert!(matches!(prefix.last().unwrap().operation,
+                Operation::TestVariant { success, .. } if success == &option.some.id));
+            let (some, none) = branch_targets(mir);
+            propagation::assert_return(&linear(mir, some), &option.some.id, true, &[]);
+            propagation::assert_return(&linear(mir, none), &option.none.id, false, &[]);
+
+            let known = lower("knownSome");
+            let mir = require_mir(&known, "knownSome");
+            let path = linear(mir, mir.entry);
+            assert!(
+                !path
+                    .iter()
+                    .any(|op| matches!(op, Operation::TestVariant { .. }))
+            );
+            propagation::assert_return(&path, &option.some.id, true, &[]);
+        },
+    );
+}
+
+#[test]
+fn retaining_option_call_preserves_old_and_possible_new_backing_in_caller() {
+    probe(
+        "retained::retaining_option_call_preserves_old_and_possible_new_backing_in_caller",
+        r#"
+            function ignore(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                return Option.Some(true);
+            }
+            function newBacking(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                let flag = true;
+                let saved = ignore(slot, &flag, gate);
+                let bit = saved?;
+                *slot = seed;
+                return Option.Some(bit);
+            }
+            function oldBacking(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                let flag = true;
+                *slot = &flag;
+                return ignore(slot, seed, gate);
+            }
+            function repaired(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                let flag = true;
+                let saved = ignore(slot, &flag, gate);
+                *slot = seed;
+                return saved;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, AnalysisLimits::default()).unwrap()
+            };
+            require_mir(&lower("ignore"), "ignore");
+            // The callee does not actually store the new source and always
+            // returns Some, but neither fact narrows its declared contract.
+            for (name, call) in [
+                ("newBacking", b"ignore(slot, &flag, gate)".as_slice()),
+                ("oldBacking", b"ignore(slot, seed, gate)".as_slice()),
+            ] {
+                let report = lower(name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::SourceRejected,
+                    "{name}: {report:?}"
+                );
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected a retained caller loan to escape in {name}");
+                };
+                assert_eq!(finding.code(), "R0202");
+                assert_eq!(finding.site.span.bytes(), call);
+                assert_eq!(finding.related.span.bytes(), b"&flag");
+            }
+
+            let report = lower("repaired");
+            let mir = require_mir(&report, "repaired");
+            let path: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::CallRetainingWithOptionBool { .. }
+                            | Operation::InstallThrough { .. }
+                            | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(matches!(path.as_slice(), [
+                Operation::CallRetainingWithOptionBool { destination: RetainedPlace::ThroughParameter(dest), .. },
+                Operation::InstallThrough { descriptor, incoming },
+                Operation::Export(_),
+            ] if dest.root.node == descriptor.root.node && incoming.root.span.bytes() == b"seed"));
+        },
+    );
+}
+
+#[test]
+fn retaining_option_call_requires_exact_direct_signature_and_incoming_destination() {
+    probe(
+        "retained::retaining_option_call_requires_exact_direct_signature_and_incoming_destination",
+        r#"
+            function keep(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                return gate;
+            }
+            function keepText(slot: &mut &bool, seed: &bool, gate: Option<string>): Option<string> {
+                return gate;
+            }
+            function keepSome(slot: &mut &bool, seed: &bool, gate: Option<bool>.Some): Option<bool>.Some {
+                return gate;
+            }
+            function keepExtra(slot: &mut &bool, seed: &bool, other: &bool, gate: Option<bool>): Option<bool> {
+                return gate;
+            }
+            function wrongPayload(slot: &mut &bool, seed: &bool, gate: Option<string>): Option<string> {
+                return keepText(slot, seed, gate);
+            }
+            function refinedActual(slot: &mut &bool, seed: &bool, gate: Option<bool>.Some): Option<bool> {
+                return keep(slot, seed, gate);
+            }
+            function refinedSignature(slot: &mut &bool, seed: &bool, gate: Option<bool>.Some): Option<bool>.Some {
+                return keepSome(slot, seed, gate);
+            }
+            function extraSource(slot: &mut &bool, seed: &bool, other: &bool, gate: Option<bool>): Option<bool> {
+                return keepExtra(slot, seed, other, gate);
+            }
+            function pipe(slot: &mut &bool, seed: &bool, gate: Option<bool>): Option<bool> {
+                return gate |> keep(slot, seed, _);
+            }
+            function local(seed: &bool, gate: Option<bool>): Option<bool> {
+                let mut out = seed;
+                return keep(&mut out, seed, gate);
+            }
+        "#,
+        |_, module, receipt| {
+            for (name, site) in [
+                ("wrongPayload", b"keepText(slot, seed, gate)".as_slice()),
+                ("refinedActual", b"keep(slot, seed, gate)"),
+                ("refinedSignature", b"keepSome(slot, seed, gate)"),
+                ("extraSource", b"keepExtra(slot, seed, other, gate)"),
+                ("pipe", b"gate |> keep(slot, seed, _)"),
+                ("local", b"&mut out"),
+            ] {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let report =
+                    lower_body(receipt, module, &declaration.id, AnalysisLimits::default())
+                        .unwrap();
+                assert_eq!(
+                    report.completion(),
+                    Completion::Incomplete,
+                    "{name}: {report:?}"
+                );
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site, "{name}");
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
 fn assert_retained_call_limits<'g>(
     report: &Report<'g>,
     check: impl Fn(AnalysisLimits) -> Report<'g>,

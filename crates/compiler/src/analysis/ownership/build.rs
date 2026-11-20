@@ -4155,6 +4155,7 @@ impl<'a, 'g> Build<'a, 'g> {
         call: &crate::analysis::scalars::CallFacts<'g>,
         position: usize,
         result: &Type<'g>,
+        value_output: Option<Slot>,
     ) -> ResultOf<RetainedBoolContract<'a, 'g>> {
         // The declaration determines the possible inputs. Do not use the
         // callee body to narrow them.
@@ -4162,8 +4163,31 @@ impl<'a, 'g> Build<'a, 'g> {
         if declared_result != result {
             return Err(Stop::Pending(node));
         }
-        let contract = retained_bool_contract(formals, declared_result, position, self.budget)?
-            .ok_or(Stop::Pending(node))?;
+        let contract = if let Some(output) = value_output
+            && call.pipe_input.is_none()
+            && matches!(declared_result.as_ref(), TypeTerm::Nominal { .. })
+            && self.bool_option_role(declared_result).is_some()
+        {
+            // This value-use slice admits the full canonical carrier, not
+            // individual variants, other payloads or extra reference inputs.
+            let ([destination, seed, gate], 0) = (formals, position) else {
+                return Err(Stop::Pending(node));
+            };
+            self.budget.step(3)?;
+            let contents =
+                retained_bool_contents_type(&destination.ty).ok_or(Stop::Pending(node))?;
+            if seed.ty != *contents || gate.ty != *declared_result {
+                return Err(Stop::Pending(node));
+            }
+            RetainedBoolContract {
+                contents,
+                extra: Some(RetainedCallExtra::OptionBool { output }),
+                exclusive_source: false,
+            }
+        } else {
+            retained_bool_contract(formals, declared_result, position, self.budget)?
+                .ok_or(Stop::Pending(node))?
+        };
         for (formal, &actual) in formals.iter().zip(&call.arguments) {
             self.budget.step(1)?;
             if self.value(actual)?.ty != formal.ty {
@@ -4182,8 +4206,12 @@ impl<'a, 'g> Build<'a, 'g> {
         depth: usize,
     ) -> ResultOf<CallDestination> {
         self.budget.step(args.len())?;
+        let independent = contract.extra.map(|extra| match extra {
+            RetainedCallExtra::Bool { position } => position,
+            RetainedCallExtra::OptionBool { .. } => 2,
+        });
         let mut sources = (0..args.len())
-            .filter(|&i| i != position && contract.scalar != Some(i))
+            .filter(|&i| i != position && independent != Some(i))
             .map(|i| args[i]);
         let input = sources.next().unwrap();
         let second_input = sources.next();
@@ -4192,8 +4220,9 @@ impl<'a, 'g> Build<'a, 'g> {
             argument: args[position],
             input,
             second_input,
-            has_scalar: contract.scalar.is_some(),
+            extra: contract.extra,
         };
+        let option_call = matches!(contract.extra, Some(RetainedCallExtra::OptionBool { .. }));
         let (argument, _) = self.ungroup_expression_at(call.arguments[position], depth)?;
         let syntax = &self.module.syntax.nodes[argument];
         if syntax.kind == NodeKind::ValueReference {
@@ -4211,14 +4240,15 @@ impl<'a, 'g> Build<'a, 'g> {
                     descriptor,
                     contents,
                 }
-            } else if path.root.kind == DeclarationKind::Binding {
+            } else if !option_call && path.root.kind == DeclarationKind::Binding {
                 CallStorage::ThroughAlias { descriptor }
             } else {
                 return Err(Stop::Pending(argument));
             };
             return Ok(destination(storage));
         }
-        if syntax.kind != NodeKind::Prefix("&mut") {
+        // The Option case only forwards the original incoming descriptor.
+        if option_call || syntax.kind != NodeKind::Prefix("&mut") {
             return Err(Stop::Pending(argument));
         }
         let target = syntax.children[0];
@@ -4498,7 +4528,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if retained_bool_contents_type(&self.value(arg)?.ty).is_some() {
                     pipe_retention = Some((
                         position,
-                        self.retained_call_contract(node, call, position, result)?,
+                        self.retained_call_contract(node, call, position, result, None)?,
                     ));
                     break;
                 }
@@ -4556,7 +4586,13 @@ impl<'a, 'g> Build<'a, 'g> {
             (Some(checked), _) => Some(checked),
             (None, Some(position)) => Some((
                 position,
-                self.retained_call_contract(node, call, position, result)?,
+                self.retained_call_contract(
+                    node,
+                    call,
+                    position,
+                    result,
+                    into.filter(|_| checked_carrier.is_none()),
+                )?,
             )),
             (None, None) => None,
         };

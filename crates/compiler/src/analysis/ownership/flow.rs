@@ -1498,7 +1498,15 @@ pub(super) fn run<'g>(
                     }
                     if let Some((destination, contents, retention, held)) = contents {
                         state[contents] = State::Initialized(held);
-                        if retention.has_scalar {
+                        if let Some(RetainedCallExtra::OptionBool { output }) = retention.extra {
+                            budget.step(call.args.len())?;
+                            Operation::CallRetainingWithOptionBool {
+                                callee: call.callee,
+                                destination,
+                                arguments: std::array::from_fn(|i| local(call.args[i])),
+                                into: local(output),
+                            }
+                        } else if retention.extra.is_some() {
                             budget.step(call.args.len())?;
                             budget.reserve(call.args.len())?;
                             Operation::CallRetainingWithBool {

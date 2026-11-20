@@ -222,6 +222,15 @@ pub enum Operation<'g> {
         input: Place<'g>,
         second_input: Option<Place<'g>>,
     },
+    /// A direct call with staged `(destination, seed, gate)` in formal order.
+    /// Only `seed` can add backing to the destination. Neither the canonical
+    /// `Option<bool>` gate nor the result carries loans.
+    CallRetainingWithOptionBool {
+        callee: &'g DeclarationId,
+        destination: RetainedPlace<'g>,
+        arguments: [Place<'g>; 3],
+        into: Place<'g>,
+    },
     /// Select the success variant of a staged propagation or wrapping operand.
     TestVariant {
         operand: Place<'g>,
@@ -463,7 +472,8 @@ fn checked_graph<'g>(
                 | Operation::CallIntoTemporary { callee, .. }
                 | Operation::CallRetaining { callee, .. }
                 | Operation::CallRetainingPair { callee, .. }
-                | Operation::CallRetainingWithBool { callee, .. } => Some((callee, false)),
+                | Operation::CallRetainingWithBool { callee, .. }
+                | Operation::CallRetainingWithOptionBool { callee, .. } => Some((callee, false)),
                 _ => None,
             };
             let cleanup = match &block.operation {
@@ -659,11 +669,17 @@ fn lower<'g>(
 
 struct RetainedBoolContract<'a, 'g> {
     contents: &'a Type<'g>,
-    scalar: Option<usize>,
+    extra: Option<RetainedCallExtra>,
     exclusive_source: bool,
 }
 
-// Only one destination, one or two compatible sources and at most one
+#[derive(Clone, Copy)]
+enum RetainedCallExtra {
+    Bool { position: usize },
+    OptionBool { output: Slot },
+}
+
+// Void calls: one destination, one or two compatible sources and at most one
 // independent Bool. Check the same declared contract at calls and exits.
 fn retained_bool_contract<'a, 'g>(
     parameters: &'a [super::MemberType<'g>],
@@ -710,7 +726,7 @@ fn retained_bool_contract<'a, 'g>(
     }
     Ok(matches!(sources, 1 | 2).then_some(RetainedBoolContract {
         contents,
-        scalar,
+        extra: scalar.map(|position| RetainedCallExtra::Bool { position }),
         exclusive_source,
     }))
 }
@@ -1012,7 +1028,7 @@ struct CallDestination {
     argument: Slot,
     input: Slot,
     second_input: Option<Slot>,
-    has_scalar: bool,
+    extra: Option<RetainedCallExtra>,
 }
 
 #[derive(Clone, Copy)]
