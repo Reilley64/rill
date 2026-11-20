@@ -96,7 +96,7 @@ fn liveness(
     code: &[Instruction<'_>],
     calls: &[Call<'_>],
     cleanups: &[Vec<Slot>],
-    retained: &BTreeMap<Slot, Slot>,
+    retained: &BTreeMap<Slot, RetainedContents>,
     budget: &mut Budget,
 ) -> ResultOf<Vec<BTreeSet<Slot>>> {
     budget.reserve(3 * code.len())?;
@@ -155,6 +155,10 @@ fn liveness(
             } => use_one(Some(descriptor), into),
             Action::InstallThrough {
                 descriptor,
+                incoming,
+            }
+            | Action::InstallThroughTwoHop {
+                route: OriginalTwoHopBool { descriptor, .. },
                 incoming,
             } => ([Some(descriptor), Some(incoming)], None),
             Action::TestVariant { operand, .. } => use_one(Some(operand), None),
@@ -216,7 +220,7 @@ fn liveness(
             .into_iter()
             .flatten()
             .chain(args.iter().copied())
-            .chain(retained.values().copied())
+            .chain(retained.values().map(|contents| contents.slot()))
         {
             for member in slots[slot].storage(slot) {
                 budget.step(1)?;
@@ -965,13 +969,22 @@ pub(super) fn run<'g>(
     }
     for (&parameter, &contents) in &retained {
         budget.step(1)?;
-        state[parameter] = State::Initialized(Held {
-            exact_target: Some(ExactTarget::Caller {
-                parameter,
-                contents,
-            }),
-            ..Held::default()
-        });
+        match contents {
+            RetainedContents::OneHop(contents) => {
+                state[parameter] = State::Initialized(Held {
+                    exact_target: Some(ExactTarget::Caller {
+                        parameter,
+                        contents,
+                    }),
+                    ..Held::default()
+                });
+            }
+            RetainedContents::TwoHop(contents) => {
+                // Incoming final backing is opaque. There are no tracked
+                // body-local loans yet, and no one-hop target for the route.
+                state[contents] = State::Initialized(empty.clone());
+            }
+        }
     }
     if let Some(frame) = active {
         state[frame.operand] = State::Initialized(Held {
@@ -1423,6 +1436,17 @@ pub(super) fn run<'g>(
                                 contents,
                                 RetainedPlace::ThroughParameter(local(descriptor)),
                             ),
+                            CallStorage::ThroughTwoHopParameter(route) => {
+                                initialized(&state[route.contents], node)?;
+                                (
+                                    route.descriptor,
+                                    route.contents,
+                                    RetainedPlace::ThroughTwoHopParameter {
+                                        parameter: local(route.descriptor),
+                                        argument: local(destination.argument),
+                                    },
+                                )
+                            }
                             CallStorage::ThroughAlias { descriptor } => {
                                 match exact_target(&state, destination.argument, node, budget)? {
                                     ExactTarget::Local(target) => (
@@ -1468,6 +1492,7 @@ pub(super) fn run<'g>(
                             stored_at: matches!(
                                 target,
                                 RetainedPlace::ThroughParameter(_)
+                                    | RetainedPlace::ThroughTwoHopParameter { .. }
                                     | RetainedPlace::ThroughParameterAlias { .. }
                             )
                             .then_some(node),
@@ -1779,11 +1804,32 @@ pub(super) fn run<'g>(
                         incoming: local(incoming),
                     }
                 }
+                Action::InstallThroughTwoHop { route, incoming } => {
+                    initialized(&state[route.descriptor], node)?;
+                    initialized(&state[route.contents], node)?;
+                    let mut value = initialized(&state[incoming], node)?.clone();
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        route.descriptor,
+                        (node, Conflict::Access),
+                        Access::Exclusive,
+                        budget,
+                    )?;
+                    value.stored_at = Some(node);
+                    state[route.contents] = State::Initialized(value);
+                    state[incoming] = State::Vacant;
+                    Operation::InstallThroughTwoHop {
+                        parameter: local(route.descriptor),
+                        incoming: local(incoming),
+                    }
+                }
                 Action::CheckRetained => {
                     let mut unhandled_restriction = None;
-                    for &contents in retained.values() {
+                    for contents in retained.values() {
                         budget.step(1)?;
-                        let State::Initialized(value) = &state[contents] else {
+                        let State::Initialized(value) = &state[contents.slot()] else {
                             continue;
                         };
                         let site = value.stored_at.unwrap_or(node);

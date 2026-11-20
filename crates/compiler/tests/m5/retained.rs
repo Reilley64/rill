@@ -2,6 +2,262 @@ use super::*;
 use compiler::analysis::ownership::{Place, Report, RetainedPlace};
 
 #[test]
+fn original_two_hop_bool_store_distinguishes_incoming_and_local_backing() {
+    probe(
+        "retained::original_two_hop_bool_store_distinguishes_incoming_and_local_backing",
+        r#"
+            function keep(slot: &mut &mut &bool, input: &bool): void { **slot = input; }
+            function leak(slot: &mut &mut &bool, input: &bool): void {
+                let flag = true;
+                **slot = &flag;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            let keep = lower("keep");
+            let mir = require_mir(&keep, "keep");
+            let path: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| !matches!(op, Operation::None | Operation::Cleanup(_)))
+                .collect();
+            assert!(matches!(path.as_slice(), [
+                Operation::Copy { from, into: Some(stage) },
+                Operation::InstallThroughTwoHop { parameter, incoming },
+            ] if from.root.span.bytes() == b"input: &bool"
+                && parameter.root.span.bytes() == b"slot: &mut &mut &bool"
+                && parameter.projection.is_none()
+                && incoming.root.node == stage.root.node));
+
+            let leak = lower("leak");
+            assert_eq!(leak.completion(), Completion::SourceRejected, "{leak:?}");
+            assert!(leak.mir().is_none());
+            let [finding] = leak.findings() else {
+                panic!("expected the store's escaped loan")
+            };
+            assert_eq!(finding.code(), "R0202");
+            assert_eq!(finding.site.span.bytes(), b"**slot = &flag;");
+            assert_eq!(finding.related.span.bytes(), b"&flag");
+        },
+    );
+}
+
+#[test]
+fn original_two_hop_relay_checks_reached_bodies_and_preserves_backing() {
+    probe(
+        "retained::original_two_hop_relay_checks_reached_bodies_and_preserves_backing",
+        r#"
+            function keep(slot: &mut &mut &bool, input: &bool): void { **slot = input; }
+            function leak(slot: &mut &mut &bool, input: &bool): void {
+                let flag = true;
+                **slot = &flag;
+            }
+            function relay(slot: &mut &mut &bool, input: &bool): void { keep(slot, input); }
+            function relayBad(slot: &mut &mut &bool, input: &bool): void { leak(slot, input); }
+            function relayLocal(slot: &mut &mut &bool, input: &bool): void {
+                let flag = true;
+                keep(slot, &flag);
+            }
+            function relayTwice(slot: &mut &mut &bool, input: &bool): void {
+                let flag = true;
+                keep(slot, &flag);
+                keep(slot, input);
+            }
+            function feasible(slot: &mut &mut &bool, input: &bool): void {
+                if (false) { leak(slot, input); }
+                relay(slot, input);
+                keep(slot, input);
+                return;
+            }
+            function ignore(slot: &mut &mut &bool, input: &bool): void {}
+            function early(slot: &mut &mut &bool, input: &bool): void {
+                let flag = true;
+                if (*input) { ignore(slot, &flag); return; }
+            }
+            function exclusiveSource(slot: &mut &mut &bool, input: &bool): void {
+                let mut flag = true;
+                let source = &mut flag;
+                keep(slot, &*source);
+                keep(slot, input);
+                let read = *source;
+            }
+            function expires(slot: &mut &mut &bool, input: &bool): void {
+                { let flag = true; keep(slot, &flag); }
+                keep(slot, input);
+            }
+        "#,
+        |_, module, receipt| {
+            let decl = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower = |name| {
+                lower_body(receipt, module, &decl(name).id, AnalysisLimits::default()).unwrap()
+            };
+            let relay = lower("relay");
+            assert_eq!(
+                relay.completion(),
+                Completion::Checked,
+                "blocked at {:?}",
+                relay
+                    .blocked_at()
+                    .map(|site| site.span.bytes().escape_ascii().to_string())
+            );
+            let mir = require_mir(&relay, "relay");
+            let path: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| !matches!(op, Operation::None | Operation::Cleanup(_)))
+                .collect();
+            assert!(matches!(path.as_slice(), [
+                Operation::Reborrow { parent, holder, exclusive: true },
+                Operation::Copy { from, into: Some(source) },
+                Operation::CallRetaining {
+                    callee,
+                    destination: RetainedPlace::ThroughTwoHopParameter { parameter, argument },
+                    input,
+                },
+            ] if *callee == &decl("keep").id
+                && parent.root.span.bytes() == b"slot: &mut &mut &bool"
+                && parameter.root.node == parent.root.node
+                && parameter.projection.is_none()
+                && argument.root.node == holder.root.node
+                && from.root.span.bytes() == b"input: &bool"
+                && input.root.node == source.root.node));
+            let feasible = lower("feasible");
+            require_mir(&feasible, "feasible");
+            for (name, origin, site) in [
+                ("relayBad", "leak", b"**slot = &flag;".as_slice()),
+                ("relayLocal", "relayLocal", b"keep(slot, &flag)"),
+                ("relayTwice", "relayTwice", b"keep(slot, input)"),
+                ("early", "early", b"ignore(slot, &flag)"),
+            ] {
+                let report = lower(name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::SourceRejected,
+                    "{name}: {report:?}"
+                );
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected one escaped loan for {name}")
+                };
+                assert_eq!(finding.code(), "R0202");
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), b"&flag");
+                let body = &module.syntax.nodes[decl(origin).node].span;
+                for site in [finding.site, finding.related] {
+                    assert_eq!(site.module, &module.key);
+                    assert!(body.start() <= site.span.start() && site.span.end() <= body.end());
+                }
+                if name == "relayTwice" {
+                    assert!(finding.related.span.end() < finding.site.span.start());
+                }
+            }
+            for (name, code, site, related) in [
+                (
+                    "exclusiveSource",
+                    "R0201",
+                    b"*source".as_slice(),
+                    b"&*source".as_slice(),
+                ),
+                (
+                    "expires",
+                    "R0203",
+                    b"{ let flag = true; keep(slot, &flag); }",
+                    b"&flag",
+                ),
+            ] {
+                let report = lower(name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::SourceRejected,
+                    "{name}: {report:?}"
+                );
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected one retained access restriction for {name}");
+                };
+                assert_eq!(finding.code(), code);
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), related);
+            }
+        },
+    );
+}
+
+#[test]
+fn two_hop_relay_does_not_admit_aliases_or_changed_descriptors() {
+    probe(
+        "retained::two_hop_relay_does_not_admit_aliases_or_changed_descriptors",
+        r#"
+            function keep(slot: &mut &mut &bool, input: &bool): void { **slot = input; }
+            function moved(slot: &mut &mut &bool, input: &bool): void {
+                let alias = slot;
+                keep(alias, input);
+            }
+            function consumed(slot: &mut &mut &bool, input: &bool): void {
+                let alias = slot;
+                keep(slot, input);
+            }
+            function borrowed(slot: &mut &mut &bool, input: &bool): void {
+                keep(&mut *slot, input);
+            }
+            function innerMoved(slot: &mut &mut &bool, input: &bool): void {
+                let inner = *slot;
+                keep(slot, input);
+            }
+            function piped(slot: &mut &mut &bool, input: &bool): void {
+                input |> keep(slot, _);
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            for (name, site) in [
+                ("moved", b"alias".as_slice()),
+                ("borrowed", b"&mut *slot"),
+                ("innerMoved", b"*slot"),
+                ("piped", b"input |> keep(slot, _)"),
+            ] {
+                let report = lower(name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::Incomplete,
+                    "{name}: {report:?}"
+                );
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site, "{name}");
+                assert!(report.findings().is_empty() && report.mir().is_none());
+            }
+            let consumed = lower("consumed");
+            assert_eq!(consumed.completion(), Completion::SourceRejected);
+            assert!(consumed.mir().is_none());
+            let [finding] = consumed.findings() else {
+                panic!("expected reuse of the moved outer parameter")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"slot");
+            assert_eq!(finding.related.span.bytes(), b"slot");
+            assert!(finding.related.span.end() < finding.site.span.start());
+        },
+    );
+}
+
+#[test]
 fn caller_owned_descriptor_cannot_retain_body_local_sources() {
     probe(
         "retained::caller_owned_descriptor_cannot_retain_body_local_sources",

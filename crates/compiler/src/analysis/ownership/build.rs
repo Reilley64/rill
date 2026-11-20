@@ -1349,6 +1349,144 @@ impl<'a, 'g> Build<'a, 'g> {
             .ok_or(Stop::Pending(node))
     }
 
+    fn immutable_named_root(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<&'g DeclarationId> {
+        let facts = self.normal_value(node)?;
+        let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
+        if self.module.syntax.nodes[node].kind != NodeKind::ValueReference
+            || facts.ty != *ty
+            || facts.place != TypedPlace::ReadOnly
+            || facts.access != Access::Owned
+            || facts.binding != Some(path.root)
+            || !path.projections.is_empty()
+            || facts.refinement.is_some()
+        {
+            return Err(Stop::Pending(node));
+        }
+        Ok(path.root)
+    }
+
+    fn original_two_hop_parameter(
+        &mut self,
+        node: NodeId,
+        ty: &Type<'g>,
+    ) -> ResultOf<OriginalTwoHopBool> {
+        let root = self.immutable_named_root(node, ty)?;
+        if root.kind != DeclarationKind::Parameter {
+            return Err(Stop::Pending(node));
+        }
+        self.budget.step(2)?;
+        // The parameter cannot be reassigned. Ordinary place resolution
+        // doesn't admit a dereference here, and the one-hop cases cannot
+        // move, replace, or expose the inner exclusive descriptor.
+        let descriptor = *self.locals.get(root).ok_or(Stop::Pending(node))?;
+        let Some(&RetainedContents::TwoHop(contents)) = self.retained.get(&descriptor) else {
+            return Err(Stop::Pending(node));
+        };
+        Ok(OriginalTwoHopBool {
+            descriptor,
+            contents,
+        })
+    }
+
+    fn terminal_two_hop_store(
+        &mut self,
+        node: NodeId,
+        left: NodeId,
+        rhs: NodeId,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        self.budget.step(3)?;
+        // Match the typed handoff's flat terminal shape. No earlier action
+        // may touch the outer or inner descriptor.
+        let binding = match self.module.syntax.nodes[self.body].children.as_slice() {
+            [store] if *store == node => None,
+            [binding, store] if *store == node => Some(*binding),
+            _ => return Err(Stop::Pending(left)),
+        };
+        let nodes = &self.module.syntax.nodes;
+        let (NodeKind::Prefix("*"), [inner]) = (nodes[left].kind, nodes[left].children.as_slice())
+        else {
+            return Err(Stop::Pending(left));
+        };
+        let (NodeKind::Prefix("*"), [parameter]) =
+            (nodes[*inner].kind, nodes[*inner].children.as_slice())
+        else {
+            return Err(Stop::Pending(*inner));
+        };
+        self.depth(depth + 3)?;
+        let parameter_ty = &self.value(*parameter)?.ty;
+        let route = self.original_two_hop_parameter(*parameter, parameter_ty)?;
+        let TypeTerm::Reference {
+            mutable: true,
+            referent: inner_ty,
+        } = parameter_ty.as_ref()
+        else {
+            return Err(Stop::Pending(*parameter));
+        };
+        let shared_ty = retained_bool_contents_type(inner_ty).ok_or(Stop::Pending(*inner))?;
+        let root = self.value(*parameter)?.binding;
+        for (hop, ty, projections) in [
+            (*inner, inner_ty, &[PathProjection::Dereference][..]),
+            (
+                left,
+                shared_ty,
+                &[PathProjection::Dereference, PathProjection::Dereference][..],
+            ),
+        ] {
+            let facts = self.normal_value(hop)?;
+            if facts.ty != *ty
+                || facts.place != TypedPlace::Writable
+                || facts.access != Access::Writable
+                || facts.refinement.is_some()
+                || facts.read_only_projection
+                || !facts
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| Some(path.root) == root && path.projections == projections)
+            {
+                return Err(Stop::Pending(hop));
+            }
+        }
+        if let Some(binding) = binding {
+            self.budget.step(3)?;
+            let (NodeKind::Binding { mutable: false }, [name, literal]) =
+                (nodes[binding].kind, nodes[binding].children.as_slice())
+            else {
+                return Err(Stop::Pending(binding));
+            };
+            let (NodeKind::Prefix("&"), [flag]) = (nodes[rhs].kind, nodes[rhs].children.as_slice())
+            else {
+                return Err(Stop::Pending(rhs));
+            };
+            let TypeTerm::Reference {
+                referent: bool_ty, ..
+            } = shared_ty.as_ref()
+            else {
+                return Err(Stop::Pending(rhs));
+            };
+            let backing = self.immutable_named_root(*flag, bool_ty)?;
+            if self.normal_value(rhs)?.ty != *shared_ty
+                || nodes[*name].kind != NodeKind::NamePattern
+                || nodes[*literal].kind != NodeKind::Literal
+                || self.normal_value(*literal)?.ty != *bool_ty
+                || !matches!(self.binding(binding)?, Binding::Name { declaration, .. }
+                    if declaration == backing)
+            {
+                return Err(Stop::Pending(rhs));
+            }
+        } else if self.immutable_named_root(rhs, shared_ty)?.kind != DeclarationKind::Parameter {
+            return Err(Stop::Pending(rhs));
+        }
+        let incoming = self.slot(rhs, shared_ty)?;
+        let install = self.emit(
+            node,
+            Action::InstallThroughTwoHop { route, incoming },
+            Edges::Next(next),
+        )?;
+        self.expression(rhs, Some(incoming), install, depth + 1)
+    }
+
     fn check_retained(&mut self, node: NodeId, next: Pc) -> ResultOf<Pc> {
         if self.retained.is_empty() {
             Ok(next)
@@ -1568,6 +1706,12 @@ impl<'a, 'g> Build<'a, 'g> {
                         Edges::Next(next),
                     )?;
                     return self.expression(value, Some(incoming), install, depth + 1);
+                }
+                if facts.path.as_ref().is_some_and(|path| {
+                    path.projections.as_slice()
+                        == [PathProjection::Dereference, PathProjection::Dereference]
+                }) {
+                    return self.terminal_two_hop_store(node, left, value, next, depth);
                 }
                 let (target, source) = self.assignment_target(left, facts, value, depth + 1)?;
                 if self.slots[target].projection.is_some()
@@ -4257,6 +4401,41 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(contract)
     }
 
+    fn two_hop_call_route(
+        &mut self,
+        node: NodeId,
+        call: &CallFacts<'g>,
+        result: &Type<'g>,
+        depth: usize,
+    ) -> ResultOf<OriginalTwoHopBool> {
+        let [destination, input] = call.arguments.as_slice() else {
+            return Err(Stop::Pending(node));
+        };
+        if self.module.syntax.nodes[node].kind != NodeKind::Call
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || call.selection.is_some()
+            || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
+        {
+            return Err(Stop::Pending(node));
+        }
+        self.budget.step(2)?;
+        let header = self
+            .typed
+            .inventory()
+            .type_facts()
+            .declarations
+            .get(call.callee)
+            .ok_or(Stop::Pending(node))?;
+        let (formal, contents) =
+            retained_two_hop_bool_contract(header).ok_or(Stop::Pending(node))?;
+        if self.normal_value(*input)?.ty != *contents {
+            return Err(Stop::Pending(*input));
+        }
+        let (destination, _) = self.ungroup_expression_at(*destination, depth)?;
+        self.original_two_hop_parameter(destination, &formal.ty)
+    }
+
     fn call_destination(
         &mut self,
         call: &crate::analysis::scalars::CallFacts<'g>,
@@ -4295,16 +4474,17 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             self.budget.step(2)?;
             let descriptor = *self.locals.get(path.root).ok_or(Stop::Pending(argument))?;
-            let storage = if let Some(&contents) = self.retained.get(&descriptor) {
-                CallStorage::ThroughParameter {
-                    descriptor,
-                    contents,
-                }
-            } else if !option_call && path.root.kind == DeclarationKind::Binding {
-                CallStorage::ThroughAlias { descriptor }
-            } else {
-                return Err(Stop::Pending(argument));
-            };
+            let storage =
+                if let Some(&RetainedContents::OneHop(contents)) = self.retained.get(&descriptor) {
+                    CallStorage::ThroughParameter {
+                        descriptor,
+                        contents,
+                    }
+                } else if !option_call && path.root.kind == DeclarationKind::Binding {
+                    CallStorage::ThroughAlias { descriptor }
+                } else {
+                    return Err(Stop::Pending(argument));
+                };
             return Ok(destination(storage));
         }
         // The Option case only forwards the original incoming descriptor.
@@ -4715,6 +4895,7 @@ impl<'a, 'g> Build<'a, 'g> {
         self.budget.reserve(call.arguments.len() + 1)?;
         let mut args = Vec::with_capacity(call.arguments.len());
         let mut destination = None;
+        let mut two_hop = None;
         let mut pipe_formal = None;
         for (position, &arg) in call.arguments.iter().enumerate() {
             self.budget.step(1)?;
@@ -4722,7 +4903,12 @@ impl<'a, 'g> Build<'a, 'g> {
                 pipe_formal = Some(position);
             }
             let ty = self.value(arg)?.ty.clone();
-            if retained_bool_contents_type(&ty).is_some() {
+            if retained_two_hop_bool_type(&ty).is_some() {
+                if position != 0 || checked_carrier.is_some() {
+                    return Err(Stop::Pending(arg));
+                }
+                two_hop = Some(self.two_hop_call_route(node, call, result, depth + 1)?);
+            } else if retained_bool_contents_type(&ty).is_some() {
                 if !piped && destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
@@ -4753,11 +4939,21 @@ impl<'a, 'g> Build<'a, 'g> {
             )),
             (None, None) => None,
         };
-        let destination = retention
-            .map(|(position, contract)| {
-                self.call_destination(call, position, &args, contract, depth + 1)
+        let destination = if let Some(route) = two_hop {
+            Some(CallDestination {
+                storage: CallStorage::ThroughTwoHopParameter(route),
+                argument: args[0],
+                input: args[1],
+                second_input: None,
+                extra: None,
             })
-            .transpose()?;
+        } else {
+            retention
+                .map(|(position, contract)| {
+                    self.call_destination(call, position, &args, contract, depth + 1)
+                })
+                .transpose()?
+        };
         self.calls.push(Call {
             callee: call.callee,
             args,
@@ -4796,6 +4992,9 @@ impl<'a, 'g> Build<'a, 'g> {
                     Some(CallDestination {
                         storage:
                             CallStorage::ThroughParameter { descriptor, .. }
+                            | CallStorage::ThroughTwoHopParameter(OriginalTwoHopBool {
+                                descriptor, ..
+                            })
                             | CallStorage::ThroughAlias { descriptor, .. },
                         argument,
                         ..

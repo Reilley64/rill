@@ -313,6 +313,12 @@ pub enum Operation<'g> {
         descriptor: Place<'g>,
         incoming: Place<'g>,
     },
+    /// Install at `**parameter`, leaving the exclusive descriptor at
+    /// `*parameter` in place.
+    InstallThroughTwoHop {
+        parameter: Place<'g>,
+        incoming: Place<'g>,
+    },
     Export(Place<'g>),
     Drop(Place<'g>),
     DropCapture {
@@ -342,6 +348,12 @@ pub enum BorrowedMemberBinding {
 pub enum RetainedPlace<'g> {
     Local(Place<'g>),
     ThroughParameter(Place<'g>),
+    /// The final contents at `**parameter`, passed via the staged exclusive
+    /// reborrow of `parameter`. The descriptor at `*parameter` stays in place.
+    ThroughTwoHopParameter {
+        parameter: Place<'g>,
+        argument: Place<'g>,
+    },
     ThroughAlias {
         descriptor: Place<'g>,
         target: Place<'g>,
@@ -580,6 +592,7 @@ fn lower<'g>(
                     .is_some_and(|contract| contract.exclusive_source);
         }
     }
+    let two_hop = retained_two_hop_bool_contract(header);
     let mut build = Build {
         typed,
         module,
@@ -621,7 +634,17 @@ fn lower<'g>(
         if let Some(ty) = retained_bool_contents_type(&parameter.ty) {
             let contents = build.slot(parameter.declaration.node, ty)?;
             build.budget.reserve(1)?;
-            build.retained.insert(slot, contents);
+            build
+                .retained
+                .insert(slot, RetainedContents::OneHop(contents));
+        } else if let Some((destination, ty)) = two_hop
+            && destination.declaration.id == parameter.declaration.id
+        {
+            let contents = build.slot(parameter.declaration.node, ty)?;
+            build.budget.reserve(1)?;
+            build
+                .retained
+                .insert(slot, RetainedContents::TwoHop(contents));
         } else if matches!(parameter.ty.as_ref(),
             TypeTerm::Reference { mutable: true, referent }
                 if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
@@ -673,6 +696,35 @@ fn lower<'g>(
         1,
     )?;
     flow::run(build, entry, &params, active)
+}
+
+fn retained_two_hop_bool_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+    let TypeTerm::Reference {
+        mutable: true,
+        referent,
+    } = ty
+    else {
+        return None;
+    };
+    retained_bool_contents_type(referent)
+}
+
+fn retained_two_hop_bool_contract<'a, 'g>(
+    header: &'a DeclarationFacts<'g>,
+) -> Option<(&'a super::MemberType<'g>, &'a Type<'g>)> {
+    if header.declaration.id.kind != DeclarationKind::Function || !header.binders.is_empty() {
+        return None;
+    }
+    let DeclarationShape::Function { parameters, result } = &header.shape else {
+        return None;
+    };
+    let [destination, source] = parameters.as_slice() else {
+        return None;
+    };
+    let contents = retained_two_hop_bool_type(&destination.ty)?;
+    (source.ty == *contents
+        && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void"))
+    .then_some((destination, contents))
 }
 
 struct RetainedBoolContract<'a, 'g> {
@@ -963,6 +1015,10 @@ enum Action<'g> {
         descriptor: Slot,
         incoming: Slot,
     },
+    InstallThroughTwoHop {
+        route: OriginalTwoHopBool,
+        incoming: Slot,
+    },
     CheckRetained,
     End(Slot),
     Cleanup(usize),
@@ -1009,7 +1065,7 @@ struct Build<'a, 'g> {
     /// Exact named tuple bindings with their proved initializer slot.
     nested_tuple_bindings: BTreeMap<&'g DeclarationId, (Slot, Slot)>,
     /// Separate contents of checked caller destinations from the access descriptors.
-    retained: BTreeMap<Slot, Slot>,
+    retained: BTreeMap<Slot, RetainedContents>,
     retains_exclusive_bool: bool,
     incoming_exclusive_bools: Vec<Slot>,
     slots: Vec<Local<'g>>,
@@ -1020,6 +1076,28 @@ struct Build<'a, 'g> {
     return_contract: (&'g DeclarationId, &'a Type<'g>),
     proved_variant_cleanup: Vec<Type<'g>>,
     budget: &'a mut Budget,
+}
+
+#[derive(Clone, Copy)]
+enum RetainedContents {
+    OneHop(Slot),
+    TwoHop(Slot),
+}
+
+impl RetainedContents {
+    fn slot(self) -> Slot {
+        match self {
+            Self::OneHop(slot) | Self::TwoHop(slot) => slot,
+        }
+    }
+}
+
+/// The original exclusive route authorizes the store. Its inner descriptor
+/// is never resolved as a separate value or replaced by the final contents.
+#[derive(Clone, Copy)]
+struct OriginalTwoHopBool {
+    descriptor: Slot,
+    contents: Slot,
 }
 
 struct Call<'g> {
@@ -1050,5 +1128,6 @@ struct CallDestination {
 enum CallStorage {
     Local(Slot),
     ThroughParameter { descriptor: Slot, contents: Slot },
+    ThroughTwoHopParameter(OriginalTwoHopBool),
     ThroughAlias { descriptor: Slot },
 }
