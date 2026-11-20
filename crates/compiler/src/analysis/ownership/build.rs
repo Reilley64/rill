@@ -4615,8 +4615,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // Admit only direct stable sources, either the entire body or a
         // written pair. A tuple of these sources adds no body computation
         // to run at formation.
-        let (first, second) = match arrow.captures.as_slice() {
-            [capture] if self.ungroup(capture.site.node)? == self.ungroup(body)? => (capture, None),
+        let (first, (first_site, first_depth), second) = match arrow.captures.as_slice() {
+            [capture] => {
+                let written = self.ungroup_expression_at(body, depth)?;
+                if self.ungroup_expression_at(capture.site.node, depth)?.0 != written.0 {
+                    return Err(Stop::Pending(node));
+                }
+                (capture, written, None)
+            }
             [first, second] => {
                 self.budget.step(1)?;
                 let Some(DataExpression::Tuple { elements }) = &self.value(body)?.data else {
@@ -4625,16 +4631,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 let [left, right] = elements.as_slice() else {
                     return Err(Stop::Pending(node));
                 };
-                let written = [
-                    self.ungroup_expression_at(*left, depth + 1)?.0,
-                    self.ungroup_expression_at(*right, depth + 1)?.0,
-                ];
+                let left = self.ungroup_expression_at(*left, depth + 1)?;
+                let right = self.ungroup_expression_at(*right, depth + 1)?;
+                let written = [left.0, right.0];
                 let a = self.ungroup_expression_at(first.site.node, depth + 1)?.0;
                 let b = self.ungroup_expression_at(second.site.node, depth + 1)?.0;
                 if written == [a, b] {
-                    (first, Some(second))
+                    (first, left, Some((second, right)))
                 } else if written == [b, a] {
-                    (second, Some(first))
+                    (second, left, Some((first, right)))
                 } else {
                     return Err(Stop::Pending(node));
                 }
@@ -4647,11 +4652,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 TypeTerm::Reference { mutable: true, .. }
             )
         };
-        let local_exclusive = carries_exclusive(first) || second.is_some_and(carries_exclusive);
-        let capture = self.capture_slot(first)?;
+        let local_exclusive =
+            carries_exclusive(first) || second.is_some_and(|(fact, _)| carries_exclusive(fact));
+        let capture = self.capture_slot(first, first_site, first_depth)?;
         let second = second
-            .map(|fact| {
-                let slot = self.capture_slot(fact)?;
+            .map(|(fact, (site, depth))| {
+                let slot = self.capture_slot(fact, site, depth)?;
                 // An exclusive borrow stages a move-only descriptor without
                 // moving the source. Check successive acquisitions in flow;
                 // repeated source moves need the full capture/use judgment.
@@ -4659,16 +4665,16 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     self.slots[slot].moves
                         && !matches!(fact.form, CaptureForm::ExplicitBorrow { .. })
                 };
-                if first.path.root == fact.path.root
+                if std::ptr::eq(first.path.root, fact.path.root)
                     && (moves_source(first, capture) || moves_source(fact, slot))
                 {
                     return Err(Stop::Pending(node));
                 }
-                Ok((fact.site.node, slot))
+                Ok((site, slot, depth))
             })
             .transpose()?;
         let layout = match (callable_field(&first.ty), second) {
-            (Some(first), Some((site, slot))) => {
+            (Some(first), Some((site, slot, _))) => {
                 self.budget.step(1)?;
                 callable_field(&self.value(site)?.ty).and_then(|second| {
                     let matches_cleanup = |field, slot: Slot| {
@@ -4688,7 +4694,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             node,
             Action::FormClosure {
                 capture,
-                second: second.map(|(_, slot)| slot),
+                second: second.map(|(_, slot, _)| slot),
                 into,
                 mode,
                 cell_addend: None,
@@ -4697,12 +4703,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             },
             Edges::Next(next),
         )?;
-        let tail = if let Some((site, slot)) = second {
-            self.expression(site, Some(slot), form, depth + 1)?
+        let tail = if let Some((site, slot, depth)) = second {
+            self.expression(site, Some(slot), form, depth)?
         } else {
             form
         };
-        self.expression(first.site.node, Some(capture), tail, depth + 1)
+        self.expression(first_site, Some(capture), tail, first_depth)
     }
 
     fn mutable_i32_cell(
@@ -4793,7 +4799,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending);
         }
         let addend = i32::try_from(magnitude).map_err(|_| pending)?;
-        let stage = self.capture_slot(capture)?;
+        let stage = self.capture_slot(capture, write, write_depth)?;
         let form = self.emit(
             node,
             Action::FormClosure {
@@ -4810,9 +4816,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(write, Some(stage), form, write_depth)
     }
 
-    fn capture_slot(&mut self, capture: &CaptureFact<'g>) -> ResultOf<Slot> {
+    fn capture_slot(
+        &mut self,
+        capture: &CaptureFact<'g>,
+        shape: NodeId,
+        depth: usize,
+    ) -> ResultOf<Slot> {
         let node = capture.site.node;
-        let shape = self.ungroup(node)?;
         self.budget.step(1)?;
         let syntax = &self.module.syntax.nodes[shape];
         if !capture.reachable || capture.through.is_some() || !capture.path.projections.is_empty() {
@@ -4822,7 +4832,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             capture.ty.as_ref(),
             TypeTerm::Reference { mutable: true, .. }
         ) {
-            return self.local_exclusive_capture_slot(capture, shape);
+            return self.local_exclusive_capture_slot(capture, shape, depth);
         }
         if !matches!(
             (capture.form, syntax.kind),
@@ -4845,6 +4855,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         &mut self,
         capture: &CaptureFact<'g>,
         shape: NodeId,
+        depth: usize,
     ) -> ResultOf<Slot> {
         let pending = Stop::Pending(capture.site.node);
         let TypeTerm::Reference {
@@ -4866,7 +4877,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if capture.access == Access::Writable
                     && capture.path.root.kind == DeclarationKind::Binding =>
             {
-                let operand = self.ungroup(syntax.children[0])?;
+                let (operand, _) = self.ungroup_expression_at(syntax.children[0], depth + 1)?;
                 if self.module.syntax.nodes[operand].kind != NodeKind::ValueReference {
                     return Err(pending);
                 }

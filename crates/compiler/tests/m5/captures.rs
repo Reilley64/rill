@@ -123,6 +123,51 @@ fn local_exclusive_capture_transfers_the_loan_until_discard() {
 }
 
 #[test]
+fn local_exclusive_capture_keeps_body_group_depth_through_the_borrow() {
+    probe(
+        "captures::local_exclusive_capture_keeps_body_group_depth_through_the_borrow",
+        r#"
+function bare(seed: bool): void { let mut flag = seed; let job: mut () => &mut bool = () => &mut flag; let _ = job; }
+function bodyGroups(seed: bool): void { let mut flag = seed; let job: mut () => &mut bool = () => ((((((((&mut flag)))))))); let _ = job; }
+function operandGroups(seed: bool): void { let mut flag = seed; let job: mut () => &mut bool = () => &mut ((((((((flag)))))))); let _ = job; }
+function both(seed: bool): void { let mut flag = seed; let job: mut () => &mut bool = () => ((((((((&mut ((((((((flag)))))))))))))))); let _ = job; }
+"#,
+        |_, module, receipt| {
+            let check = |name, limits| {
+                lower_body(
+                    receipt,
+                    module,
+                    &capture_declaration(module, name).id,
+                    limits,
+                )
+                .unwrap()
+            };
+            let depths = ["bare", "bodyGroups", "operandGroups", "both"].map(|name| {
+                let result = check(name, AnalysisLimits::default());
+                assert!(result.mir().is_some(), "{name}: {:?}", result.completion());
+                result.statistics().max_depth
+            });
+            let [bare, body, operand, _] = depths;
+            for (name, max_depth) in [
+                ("bodyGroups", bare),
+                ("operandGroups", bare),
+                ("both", body.max(operand)),
+            ] {
+                let limited = check(
+                    name,
+                    AnalysisLimits {
+                        max_depth,
+                        ..Default::default()
+                    },
+                );
+                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+        },
+    );
+}
+
+#[test]
 fn local_exclusive_capture_checks_conflicts_in_written_order() {
     probe(
         "captures::local_exclusive_capture_checks_conflicts_in_written_order",
@@ -259,6 +304,56 @@ fn local_exclusive_capture_checks_conflicts_in_written_order() {
                 &graph,
                 "repeatedMove",
                 "() => [input, input]",
+            );
+        },
+    );
+}
+
+#[test]
+fn discarding_an_exclusive_environment_drops_only_its_owned_string() {
+    probe(
+        "captures::discarding_an_exclusive_environment_drops_only_its_owned_string",
+        r#"
+function after(seed: bool, text: string): bool {
+    let mut flag = seed;
+    let job: once () => [&mut bool, string] = () => [&mut flag, text];
+    let other = job; let _ = other; flag = false; return flag;
+}
+function early(seed: bool, text: string): bool {
+    let mut flag = seed;
+    let job: once () => [&mut bool, string] = () => [&mut flag, text];
+    let other = job; flag = false; let _ = other; return flag;
+}
+"#,
+        |_, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let ok = check_local_capture_root(module, receipt, &graph, "after", None);
+            let mir = ok.mir().unwrap();
+            let drops = path_drops(mir, mir.entry);
+            let [Obligation::DropCapture { closure, field }] = drops.as_slice() else {
+                panic!("expected exactly the capture drop, not a referent drop")
+            };
+            let ops = linear(mir, mir.entry);
+            let written = ops
+                .iter()
+                .find_map(|op| match op {
+                    Operation::FormClosurePair { captures, .. } => Some(captures),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(written[0].span.bytes(), b"&mut flag");
+            assert_eq!(written[1].span.bytes(), b"text");
+            assert_eq!(field.node, written[1].node);
+            let i = ops.iter().position(|op| matches!(op, Operation::Move { from, into: Some(into) } if from.root.span.bytes() == b"other" && into.root.node == closure.node)).unwrap();
+            let drop = ops.iter().position(|op| matches!(op, Operation::DropCapture { closure: c, field: f } if c.node == closure.node && f.node == field.node)).unwrap();
+            let write = ops.iter().position(|op| matches!(op, Operation::Install {target,..} if target.root.span.bytes() == b"flag")).unwrap();
+            assert!(i < drop && drop < write);
+            check_local_capture_root(
+                module,
+                receipt,
+                &graph,
+                "early",
+                Some(("R0203", "flag = false;", "&mut flag")),
             );
         },
     );
