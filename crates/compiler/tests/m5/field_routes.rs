@@ -137,6 +137,13 @@ fn carried_field_and_slot_borrow_differ() {
                 let mut x = LocalView { owned: true, view: seed };
                 x.view = &x.owned;
             }
+            type TwoViews = { owned: bool; internal: &bool; external: &bool; }
+            function mixedEdges(seed: &bool): void {
+                let mut holder = TwoViews { owned: true, internal: seed, external: seed };
+                let backing = LocalView { owned: false, view: seed };
+                holder.internal = &holder.owned;
+                holder.external = &backing.owned;
+            }
             type ReverseView = { view: &bool; owned: bool; }
             function outOfOrder(seed: &bool): void {
                 let mut x = ReverseView { owned: true, view: seed };
@@ -329,6 +336,40 @@ fn carried_field_and_slot_borrow_differ() {
                 }
             }
             assert_eq!(ends, [Some(view), Some(owned), None]);
+            assert!(path_drops(mir, mir.entry).is_empty());
+
+            let mixed = lower("mixedEdges");
+            let mir = require_mir(&mixed, "mixedEdges");
+            let ends: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::Cleanup(actions) => Some(actions.iter()),
+                    _ => None,
+                })
+                .flatten()
+                .filter_map(|action| match action {
+                    Obligation::EndStorage(place) => Some((
+                        place.root.span.bytes(),
+                        place.field().map(|field| field.name.as_deref().unwrap()),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            // The later-declared backing must outlive the earlier holder, even
+            // though the holder's own internal edge can use reverse field order.
+            assert_eq!(
+                ends,
+                [
+                    (b"holder".as_slice(), Some("external")),
+                    (b"holder", Some("internal")),
+                    (b"holder", Some("owned")),
+                    (b"holder", None),
+                    (b"backing", Some("view")),
+                    (b"backing", Some("owned")),
+                    (b"backing", None),
+                    (b"seed: &bool", None),
+                ]
+            );
             assert!(path_drops(mir, mir.entry).is_empty());
 
             let limits = AnalysisLimits {

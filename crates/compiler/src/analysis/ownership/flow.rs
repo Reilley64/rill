@@ -108,7 +108,9 @@ fn liveness(
         let instruction = code[pc];
         let use_one = |used, killed| ([used, None], killed);
         let (used, killed) = match instruction.action {
-            Action::None | Action::Cleanup(_) | Action::CheckRetained => use_one(None, None),
+            Action::None | Action::Cleanup(_) | Action::EndScope(_) | Action::CheckRetained => {
+                use_one(None, None)
+            }
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
             Action::Read { from, into }
             | Action::Move { from, into }
@@ -166,7 +168,7 @@ fn liveness(
             } => ([Some(operand), Some(payload)], Some(into)),
         };
         let cleaned = match instruction.action {
-            Action::Cleanup(index) => cleanups[index].as_slice(),
+            Action::Cleanup(index) | Action::EndScope(index) => cleanups[index].as_slice(),
             _ => &[],
         };
         let mut changed = false;
@@ -642,7 +644,10 @@ fn can_end_record_in_reverse_order(
 
 #[derive(Clone, Copy)]
 enum Boundary {
-    Scope { remainder: Option<Slot> },
+    End {
+        lexical: bool,
+        remainder: Option<Slot>,
+    },
     Replacement,
 }
 
@@ -696,7 +701,7 @@ fn cleanup_boundary<'g>(
         })?;
         if internal != 0
             && slots[slot].members != 0
-            && matches!(boundary, Boundary::Scope { .. })
+            && matches!(boundary, Boundary::End { lexical: true, .. })
             && can_end_record_in_reverse_order(slots, state, slot, budget)?
         {
             indegrees[i] -= internal;
@@ -727,8 +732,9 @@ fn cleanup_boundary<'g>(
         })?;
         scheduled += 1;
         if disposal_origin(&state[slot]).is_some()
-            && let Boundary::Scope {
+            && let Boundary::End {
                 remainder: Some(remainder),
+                ..
             } = boundary
             && remainder != slot
         {
@@ -1745,13 +1751,19 @@ pub(super) fn run<'g>(
                     state[region].fill(State::Vacant);
                     Operation::Export(local(slot))
                 }
-                Action::Cleanup(index) => cleanup_boundary(
+                Action::Cleanup(index) | Action::EndScope(index) => cleanup_boundary(
                     module,
                     &slots,
                     &mut state,
                     &cleanups[index],
                     &live[pc],
-                    (node, Boundary::Scope { remainder }),
+                    (
+                        node,
+                        Boundary::End {
+                            lexical: matches!(action, Action::EndScope(_)),
+                            remainder,
+                        },
+                    ),
                     budget,
                 )?,
                 Action::End(slot) => {

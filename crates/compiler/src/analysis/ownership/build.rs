@@ -1251,6 +1251,20 @@ impl<'a, 'g> Build<'a, 'g> {
     }
 
     pub(super) fn cleanup(&mut self, node: NodeId, slots: &[Slot], next: Pc) -> ResultOf<Pc> {
+        self.emit_cleanup(node, slots, next, Action::Cleanup)
+    }
+
+    pub(super) fn cleanup_scope(&mut self, node: NodeId, slots: &[Slot], next: Pc) -> ResultOf<Pc> {
+        self.emit_cleanup(node, slots, next, Action::EndScope)
+    }
+
+    fn emit_cleanup(
+        &mut self,
+        node: NodeId,
+        slots: &[Slot],
+        next: Pc,
+        action: fn(usize) -> Action<'g>,
+    ) -> ResultOf<Pc> {
         if slots.is_empty() {
             return Ok(next);
         }
@@ -1258,7 +1272,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let index = self.cleanups.len();
         // Locals are collected in declaration order, and get consecutive slot ids.
         self.cleanups.push(slots.to_vec());
-        self.emit(node, Action::Cleanup(index), Edges::Next(next))
+        self.emit(node, action(index), Edges::Next(next))
     }
 
     fn bool_deref_descriptor_slot(&mut self, node: NodeId, path: &PlacePath<'g>) -> ResultOf<Slot> {
@@ -1324,16 +1338,16 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                 }
                 let exits = Exits {
-                    returning: self.cleanup(node, &locals, exits.returning)?,
+                    returning: self.cleanup_scope(node, &locals, exits.returning)?,
                     looping: match exits.looping {
                         Some(looping) => Some(Loop {
-                            breaks: self.cleanup(node, &locals, looping.breaks)?,
-                            continues: self.cleanup(node, &locals, looping.continues)?,
+                            breaks: self.cleanup_scope(node, &locals, looping.breaks)?,
+                            continues: self.cleanup_scope(node, &locals, looping.continues)?,
                         }),
                         None => None,
                     },
                 };
-                let mut tail = self.cleanup(node, &locals, next)?;
+                let mut tail = self.cleanup_scope(node, &locals, next)?;
                 if node == self.body {
                     tail = self.check_retained(node, tail)?;
                 }

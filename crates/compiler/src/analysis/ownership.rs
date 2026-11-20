@@ -628,7 +628,7 @@ fn lower<'g>(
         Some(frame) => build.cleanup(body, &[frame.remainder], end)?,
         None => end,
     };
-    let finish = build.cleanup(body, &params, end)?;
+    let finish = build.cleanup_scope(body, &params, end)?;
     let entry = build.statement(
         body,
         finish,
@@ -895,6 +895,7 @@ enum Action<'g> {
     CheckRetained,
     End(Slot),
     Cleanup(usize),
+    EndScope(usize),
     Export(Slot),
 }
 
