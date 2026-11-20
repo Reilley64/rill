@@ -1143,6 +1143,24 @@ Standards review found that grouped operands of `&mut saved.child.flag` bypassed
 
 At `1e2484a`, 56 focused M5 tests passed, including the records, cancellation, retained-call, field-route and multi-module probes. Compiler-library and M5-target Clippy, formatting and whitespace checks passed. The staged baseline, eight cancellation fixtures, the retaining-caller pair, both record matrices, the grouped-borrow fixture and the multi-module graph each issued normal and test M4 receipts with ownership and execution unperformed. The preceding `0fbf765` [hosted scaffold run](https://github.com/Reilley64/rill/actions/runs/44693310458) passed all four profiles; its [native jobs](https://github.com/Reilley64/rill/actions/runs/44693310414) failed at unimplemented `test:runtime`. No Rill program ran.
 
+## Checking loaded startup, expectation and implementation roots
+
+At `8497c39`, [`roots.rs`](m5/roots.rs) uses `lower_root` with a module and `BodyOwner` from the same installed typed capture. Startup moves `text` into `taken` and drops only `taken`; a second initialized owner drops first. Each unused plain application implementation gets its own parameter storage. An expectation calls the canonical helper once, exports a Bool after temporary cleanup and ends with `FinishExpectation`, not a callable return. A false expression is not an ownership error. Neither `FinishStartup` nor `FinishExpectation` runs a module or test.
+
+Reading the moved owner a second time in imported startup, an uncalled implementation, or a helper reached from an expectation gives `R0200` at the second read, related to the first move. The affected root has no MIR. The unrelated entry function still has ordinary MIR. Both load modes check these roots. Foreign captures are invalid requests even at zero proof budget. These queries do not give non-function roots a cancellation proof; an active custom disposer and a standard provider do not become plain application implementations.
+
+| Root in the installed fixture | Checked: work / entries / depth | Rejected: work / entries / depth |
+| --- | ---: | ---: |
+| Imported startup | 2,025 / 91 / 3 | 2,041 / 101 / 3 |
+| Plain implementation | 2,092 / 134 / 3 | 2,056 / 116 / 3 |
+| Expectation with reached helper | 4,058 / 205 / 3 | 4,026 / 189 / 3 |
+
+At each exact limit the outcome is unchanged; one short in any dimension gives `ResourceLimit` without MIR or a finding. Review found that valid root lookup and publishing a finding were uncharged, and that an unsupported startup cleanup cycle pointed to the whole module. The corrected cycle remains `Incomplete`, with its blocker on the last reached startup assignment `b[0] = &a[1];`, not on unrelated declarations.
+
+An external installed probe queried every listed startup, function, expectation and implementation **individually**, with a fresh budget per query. On the positive two-module capture, both modes had 173 roots: all eight application roots and 17 standard startups produced MIR; 18 standard functions and 130 standard implementations were `Incomplete`. Repeating the inventory on each of the three invalid fixtures changed only the expected root outcomes, including the bad helper and its dependent expectation. The 25 successful root queries do not establish a shared-budget graph pass or an ownership receipt. Standard/provider blockers are included, not waived.
+
+At `8497c39`, 37 focused installed tests, compiler-library and M5-target Clippy, formatting and whitespace passed. The staged M4 baseline, four root fixtures and prior multi-module integration source issued typed receipts in both modes with ownership and execution unperformed. [#74 closed](https://github.com/Reilley64/rill/issues/74) at the preceding `7a4c273`: all four [scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44704164796) passed; all four [native jobs](https://github.com/Reilley64/rill/actions/runs/44704164827) failed at the `test:runtime` stub. #69 still blocks #70, and #71 still blocks #72. No Rill program ran.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
