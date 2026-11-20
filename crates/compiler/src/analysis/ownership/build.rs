@@ -99,7 +99,7 @@ enum OptionPayload<'t, 'g> {
 #[derive(Clone, Copy)]
 enum OptionTakeSource {
     Move(Slot),
-    CopyShared(NodeId, Slot),
+    ReadReferenceCarrier(NodeId, Slot),
     Constructor,
     Factory,
     PipeStep,
@@ -3548,19 +3548,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             let take = match payload {
                 OptionPayload::Bool => None,
-                OptionPayload::Reference { ty, exclusive }
-                    if syntax.kind == NodeKind::Propagate =>
-                {
+                OptionPayload::Reference { ty, .. } if syntax.kind == NodeKind::Propagate => {
                     // These loans are checked only through a named whole carrier.
                     let (name, _) = self.ungroup_expression_at(source, depth)?;
                     let (_, path) = self.named_owned_place(name)?.ok_or(Stop::Pending(node))?;
                     let from = self.resolve_place(name, path)?;
-                    let source = if exclusive {
-                        OptionTakeSource::Move(from)
-                    } else {
-                        OptionTakeSource::CopyShared(name, from)
-                    };
-                    Some((ty, source))
+                    // Stage under the source place's own classification: an
+                    // exclusive Some or parent moves, but known None copies.
+                    Some((ty, OptionTakeSource::ReadReferenceCarrier(name, from)))
                 }
                 OptionPayload::Reference { .. } => return Err(Stop::Pending(node)),
                 OptionPayload::Text(ty) => {
@@ -3826,7 +3821,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 depth,
                 Some(ExpressionProof::CallCarrier(operand)),
             )
-        } else if let Some((_, OptionTakeSource::CopyShared(name, from))) = option_take {
+        } else if let Some((_, OptionTakeSource::ReadReferenceCarrier(name, from))) = option_take {
             self.emit(
                 name,
                 Action::Read {

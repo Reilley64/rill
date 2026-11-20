@@ -496,14 +496,99 @@ fn exclusive_option_postfix_checks_reached_moves_and_loans() {
             let mir = empty.mir().unwrap();
             let path = linear(mir, mir.entry);
             assert!(matches!(path.as_slice(),
-                [Operation::ConstructVariant { payload: None, into: input, .. }, Operation::Move { from, into: Some(stage) },
+                [Operation::ConstructVariant { payload: None, into: input, .. }, Operation::Copy { from, into: Some(stage) },
                  Operation::EndEmptyOption(ended), ..] if input.root.node == from.root.node && stage.root.node == ended.root.node));
+            let original = match path[0] {
+                Operation::ConstructVariant { into, .. } => into.root.node,
+                _ => unreachable!(),
+            };
+            let export = path
+                .iter()
+                .position(|op| matches!(op, Operation::Export(_)))
+                .unwrap();
+            assert!(path[export+1..].iter().any(|op|matches!(op,Operation::Cleanup(items) if items.iter().any(|item|matches!(item,Obligation::EndStorage(p) if p.root.node==original)))));
             assert_return(
                 &path,
                 &typed.option_role().unwrap().none.id,
                 false,
                 &[b"tail: string"],
             );
+        },
+    );
+}
+
+#[test]
+fn reborrowing_an_extracted_exclusive_descriptor_preserves_its_restriction() {
+    probe(
+        "propagation::reborrowing_an_extracted_exclusive_descriptor_preserves_its_restriction",
+        r#"
+        function suspended(input: Option<&mut bool>): Option<&mut bool> {
+            let view = input?; let result = Option.Some(&mut *view);
+            let bad = *view; return result;
+        }
+        function resumed(input: Option<&mut bool>): Option<bool> {
+            let view = input?;
+            { let child = &mut *view; let bit = *child; }
+            return Option.Some(*view);
+        }
+        function escaped(): Option<&mut bool> {
+            let mut flag = false; let owner: Option<&mut bool> = Option.Some(&mut flag);
+            let view = owner?; return Option.Some(&mut *view);
+        }
+    "#,
+        |_, module, receipt| {
+            let run = |name: &str| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap()
+            };
+            for (name, code, site, related) in [
+                (
+                    "suspended",
+                    "R0201",
+                    b"*view".as_slice(),
+                    b"&mut *view".as_slice(),
+                ),
+                (
+                    "escaped",
+                    "R0202",
+                    b"return Option.Some(&mut *view);",
+                    b"flag",
+                ),
+            ] {
+                let report = run(name);
+                assert_eq!(report.completion(), Completion::SourceRejected);
+                assert!(report.mir().is_none());
+                let [f] = report.findings() else {
+                    panic!("one reached invalid access")
+                };
+                assert_eq!(
+                    (f.code(), f.site.span.bytes(), f.related.span.bytes()),
+                    (code, site, related)
+                );
+            }
+            let resumed = run("resumed");
+            let mir = resumed.mir().unwrap();
+            let (yes, _) = branch_targets(mir);
+            let path = linear(mir, yes);
+            let at = path
+                .iter()
+                .position(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow {
+                            exclusive: true,
+                            ..
+                        }
+                    )
+                })
+                .unwrap();
+            assert!(path[at + 1..].iter().any(
+                |op| matches!(op,Operation::Dereference(view) if view.root.span.bytes()==b"view")
+            ));
         },
     );
 }
