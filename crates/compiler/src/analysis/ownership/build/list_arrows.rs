@@ -13,6 +13,8 @@ struct ListArrowPlan<'a, 'g> {
     source: Slot,
     exclusive: bool,
     op: ListI32Read<'a, 'g>,
+    read_type: &'a Type<'g>,
+    comparison: Option<(NodeId, i32)>,
     output: &'a Type<'g>,
     closure: &'a Type<'g>,
 }
@@ -39,9 +41,19 @@ pub(in crate::analysis::ownership) enum ArrowBody<'g> {
     Reference(Type<'g>),
 }
 
-pub(super) fn scalar_pair(ty: &Type<'_>) -> bool {
-    matches!(ty.as_ref(), TypeTerm::Tuple(items) if matches!(items.as_slice(), [a, b]
-        if scalar::scalar(a) == Some(Primitive::I32) && scalar::scalar(b) == Some(Primitive::I32)))
+pub(super) fn list_arrow_result_pair(ty: &Type<'_>, scoped: bool) -> bool {
+    let TypeTerm::Tuple(items) = ty.as_ref() else {
+        return false;
+    };
+    let [a, b] = items.as_slice() else {
+        return false;
+    };
+    match (scalar::scalar(a), scalar::scalar(b)) {
+        (Some(Primitive::I32), Some(Primitive::I32)) => true,
+        (Some(Primitive::I32), Some(Primitive::Bool))
+        | (Some(Primitive::Bool), Some(Primitive::I32)) => scoped,
+        _ => false,
+    }
 }
 
 impl<'a, 'g> Build<'a, 'g, '_> {
@@ -192,7 +204,6 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         };
         if !std::ptr::eq(arrow.site.module, &self.module.key)
             || !std::ptr::eq(capture.site.module, &self.module.key)
-            || scalar::scalar(&arrow.result) != Some(Primitive::I32)
             || capture.storage.as_ref() != Some(&capture.ty)
         {
             return Err(pending);
@@ -203,11 +214,48 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             self.depth(expression_depth + 1)?;
             expression_depth += 2;
         }
-        let (read, depth) = self.ungroup_expression_at(child.expression, expression_depth)?;
-        let value = self.normal_value(read)?;
-        let read_op = self.check_list_i32_read(read, value, depth, exclusive)?;
-        let base = read_op.base;
+        let (result, result_depth) =
+            self.ungroup_expression_at(child.expression, expression_depth)?;
+        let value = self.normal_value(result)?;
+        if arrow.result != value.ty {
+            return Err(pending);
+        }
         let nodes = &self.module.syntax.nodes;
+        let (read, depth, comparison) = match scalar::scalar(&value.ty) {
+            Some(Primitive::I32) => (result, result_depth, None),
+            Some(Primitive::Bool) if scoped && !exclusive => {
+                let (NodeKind::Binary("=="), [lhs, rhs]) =
+                    (nodes[result].kind, nodes[result].children.as_slice())
+                else {
+                    return Err(pending);
+                };
+                let (read, depth) = self.ungroup_expression_at(*lhs, result_depth + 1)?;
+                let (literal, _) = self.ungroup_expression_at(*rhs, result_depth + 1)?;
+                let rhs = self.normal_value(literal)?;
+                let Some(LiteralValue::Integer {
+                    magnitude,
+                    negative: false,
+                }) = rhs.literal.map(|l| l.value)
+                else {
+                    return Err(pending);
+                };
+                if nodes[literal].kind != NodeKind::Literal
+                    || scalar::scalar(&rhs.ty) != Some(Primitive::I32)
+                {
+                    return Err(pending);
+                }
+                let rhs = i32::try_from(magnitude).map_err(|_| Stop::Pending(literal))?;
+                (read, depth, Some((result, rhs)))
+            }
+            _ => return Err(pending),
+        };
+        let read_facts = if comparison.is_some() {
+            self.normal_value(read)?
+        } else {
+            value
+        };
+        let read_op = self.check_list_i32_read(read, read_facts, depth, exclusive)?;
+        let base = read_op.base;
         let (NodeKind::Prefix(operator), [operand]) =
             (nodes[base].kind, nodes[base].children.as_slice())
         else {
@@ -244,6 +292,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             source,
             exclusive,
             op: read_op,
+            read_type: &read_facts.ty,
+            comparison,
             output: &value.ty,
             closure,
         })
@@ -260,6 +310,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             operand,
             source,
             op: read_op,
+            read_type,
+            comparison,
             output,
             closure,
             ..
@@ -273,19 +325,20 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Ok((receiver, staged, None));
         }
 
-        // Check the actual read in a separate frame using a transferred view.
+        // Check the actual expression in a separate frame using a transferred view.
         // The backing proxy is initialized but is not owned by this frame and
         // must not join its cleanup list. No second borrow is acquired here.
+        let result = comparison.map_or(read, |(node, _)| node);
         let mut frame = Build::with_facts(
             self.typed,
             self.module,
-            read,
+            result,
             None,
             BuildFacts::Local(BTreeMap::new()),
             self.budget,
         );
         let view = frame.slot(base, view_ty)?;
-        let output = frame.slot(read, output)?;
+        let output = frame.slot(result, output)?;
         frame.budget.reserve(4)?;
         let incoming = frame.slots.len();
         frame.slots.push(Local {
@@ -295,13 +348,28 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             ..backing
         });
         frame.incoming_list_arrow = Some((view, incoming));
-        let end = frame.emit(read, Action::None, Edges::End)?;
-        let cleanup = frame.cleanup(read, &[view], end)?;
-        let exported = frame.emit(read, Action::Export(output), Edges::Next(cleanup))?;
+        let end = frame.emit(result, Action::None, Edges::End)?;
+        let cleanup = frame.cleanup(result, &[view], end)?;
+        let exported = frame.emit(result, Action::Export(output), Edges::Next(cleanup))?;
+        let (read_into, after_read) = if let Some((node, literal)) = comparison {
+            let scratch = frame.slot(read, read_type)?;
+            let compare = frame.emit(
+                node,
+                Action::EqualI32Literal {
+                    from: scratch,
+                    literal,
+                    into: output,
+                },
+                Edges::Next(exported),
+            )?;
+            (scratch, compare)
+        } else {
+            (output, exported)
+        };
         let entry = frame.emit(
             read,
-            read_op.action(view, Some(output)),
-            Edges::Next(exported),
+            read_op.action(view, Some(read_into)),
+            Edges::Next(after_read),
         )?;
         let capture = frame.slots[view].place(self.module);
         let incoming_backing = frame.slots[incoming].place(self.module);

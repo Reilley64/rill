@@ -639,7 +639,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     arrow,
                     (&stored, slot_path),
                     state,
-                    scoped.is_some(),
+                    scoped.map(|_| [out0, out1][1 - i]),
                     depth + 1,
                 )?
                 else {
@@ -793,7 +793,7 @@ impl<'a, 'g> Check<'a, 'g> {
         arrow: &crate::analysis::generics::callables::ArrowFacts<'g>,
         (stored, slot): (&[Located<'g>], ResultComponent<'g>),
         caller: &Residence<'g>,
-        scoped: bool,
+        scoped_sibling: Option<&Type<'g>>,
         depth: usize,
     ) -> Work<Option<(Option<NodeId>, Vec<Located<'g>>)>> {
         let nodes = &self.module.syntax.nodes;
@@ -826,7 +826,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     (
                         CaptureForm::ExplicitBorrow { mutable: true },
                         Some(InvocationMode::Mutable),
-                    ) if scoped => Some((capture, true)),
+                    ) if scoped_sibling.is_some() => Some((capture, true)),
                     _ => return Ok(None),
                 }
             }
@@ -870,16 +870,27 @@ impl<'a, 'g> Check<'a, 'g> {
         } else {
             None
         };
-        let Some(root) = self.closed_child_expression(body, list, depth + 1)? else {
+        let compare = capture.is_some_and(|(_, exclusive)| !exclusive)
+            && scoped_sibling.is_some_and(
+                |ty| matches!(ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"),
+            );
+        let Some(root) = self.closed_child_expression(body, list, compare, depth + 1)? else {
             return Ok(None);
         };
-        let list_read = (list.is_some()
-            && nodes[root].kind == NodeKind::Index
-            && matches!(arrow.result.as_ref(), TypeTerm::Primitive(p) if p.name()=="i32"))
+        let list_result = (list.is_some()
+            && match nodes[root].kind {
+                NodeKind::Index => {
+                    matches!(arrow.result.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+                }
+                NodeKind::Binary("==") if compare => {
+                    matches!(arrow.result.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+                }
+                _ => false,
+            })
         .then_some(body);
-        // Prove the scalar read's Result residence, not permission to use
-        // the captured access. M5 checks the loan when the environment forms.
-        if capture.is_some_and(|(_, exclusive)| exclusive) && list_read.is_none() {
+        // Prove the actual expression's Result residence, not permission to
+        // use the captured access. M5 checks the loan when the environment forms.
+        if capture.is_some_and(|(_, exclusive)| exclusive) && list_result.is_none() {
             return Ok(None);
         }
         let Some(value) = self.expression_facts(body)? else {
@@ -903,7 +914,7 @@ impl<'a, 'g> Check<'a, 'g> {
             && result
                 .iter()
                 .all(|v| matches!(v.content, Content::Test(_, _))))
-        .then_some((list_read, result)))
+        .then_some((list_result, result)))
     }
 
     fn pair_environment(
@@ -944,6 +955,7 @@ impl<'a, 'g> Check<'a, 'g> {
         &mut self,
         node: NodeId,
         list: Option<(&'g DeclarationId, NodeId)>,
+        compare: bool,
         depth: usize,
     ) -> Work<Option<NodeId>> {
         self.depth(depth)?;
@@ -957,11 +969,34 @@ impl<'a, 'g> Check<'a, 'g> {
         if value.ordinary_context.is_some() || value.call.is_some() || !facts.flow.normal {
             return Ok(None);
         }
+        let nodes = &self.module.syntax.nodes;
         let checked = match &value.data {
+            None if compare && nodes[node].kind == NodeKind::Binary("==") => {
+                let [left, right] = nodes[node].children.as_slice() else {
+                    return Ok(None);
+                };
+                let Some(read) = self.closed_child_expression(*left, list, false, depth + 1)?
+                else {
+                    return Ok(None);
+                };
+                let Some(literal) = self.closed_child_expression(*right, None, false, depth + 1)?
+                else {
+                    return Ok(None);
+                };
+                nodes[read].kind == NodeKind::Index
+                    && nodes[literal].kind == NodeKind::Literal
+                    && self.expression_facts(read)?.is_some_and(
+                        |e| matches!(e.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"),
+                    )
+                    && self.expression_facts(literal)?.is_some_and(
+                        |e| matches!(e.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"),
+                    )
+                    && matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+            }
             Some(DataExpression::Tuple { elements }) => {
                 for &element in elements {
                     if self
-                        .closed_child_expression(element, list, depth + 1)?
+                        .closed_child_expression(element, list, false, depth + 1)?
                         .is_none()
                     {
                         return Ok(None);

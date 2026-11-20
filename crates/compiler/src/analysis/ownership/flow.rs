@@ -183,6 +183,7 @@ fn liveness(
                 descriptor, into, ..
             } => use_one(Some(descriptor), Some(into)),
             Action::ReadListI32 { view, into, .. } => use_one(Some(view), into),
+            Action::EqualI32Literal { from, into, .. } => use_one(Some(from), Some(into)),
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
@@ -1044,6 +1045,7 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
             scalar_implementation: None,
         } => matches!(slots[operand].cleanup, StorageCleanup::DisposeListI32(_)),
         Action::ReadListI32 { .. }
+        | Action::EqualI32Literal { .. }
         | Action::None
         | Action::BudgetBackedge
         | Action::Init(_)
@@ -3552,6 +3554,26 @@ pub(super) fn run<'a, 'g>(
                         owner,
                         representation,
                         provider,
+                    }
+                }
+                Action::EqualI32Literal {
+                    from,
+                    literal,
+                    into,
+                } => {
+                    budget.step(1)?;
+                    require_initialized(&slots, &state, from, node, budget)?;
+                    if !matches!(state[into], State::Vacant) {
+                        return Err(Stop::Pending(node));
+                    }
+                    // Both slots are fresh scalars in the List child, with
+                    // no incoming aliases to the read scratch or result.
+                    state[from] = State::Vacant;
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::EqualI32Literal {
+                        from: local(from),
+                        literal,
+                        into: local(into),
                     }
                 }
                 Action::CopyThrough { descriptor, into } => {

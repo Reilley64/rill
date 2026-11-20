@@ -54,8 +54,13 @@ impl<'g> Child<'g> {
     ) -> ResultOf<Self> {
         budget.step(4)?;
         let pending = Stop::Pending(node);
-        let [_, _, _, _] = frame.body.blocks.as_slice() else {
-            return Err(pending);
+        let compared = match frame.body.blocks.len() {
+            4 => false,
+            5 if frame.incoming_list_backing.is_some() => {
+                budget.step(1)?;
+                true
+            }
+            _ => return Err(pending),
         };
         let successor = |block: &Block<'g>| match block.terminator {
             Terminator::Goto(next) => frame.body.blocks.get(next).ok_or(Stop::Pending(node)),
@@ -85,7 +90,22 @@ impl<'g> Child<'g> {
             ) if !same_root(from.root, output.root) => (*from, *output),
             _ => return Err(pending),
         };
-        let export = successor(entry)?;
+        let (output, export) = if compared {
+            let comparison = successor(entry)?;
+            let Operation::EqualI32Literal { from, into, .. } = comparison.operation else {
+                return Err(pending);
+            };
+            if !at_root(from, output.root)
+                || output.projection.is_some()
+                || same_root(from.root, into.root)
+                || same_root(view.root, into.root)
+            {
+                return Err(pending);
+            }
+            (into, successor(comparison)?)
+        } else {
+            (output, successor(entry)?)
+        };
         let end = successor(export)?;
         let returned = successor(end)?;
         let (
@@ -114,8 +134,9 @@ impl<'g> Child<'g> {
         }
         // This entry has exactly one owned initialized input: the transferred
         // capture. A List backing proxy is non-owning. The result is vacant
-        // before the read or copy and leaves the frame at export. Thus this
-        // EndStorage is also the entire cleanup on delivery at child entry.
+        // before the expression and leaves the frame at export. A comparison
+        // consumes its scratch read before export. Thus this EndStorage is
+        // also the entire cleanup on delivery at child entry.
         Ok(Self {
             backing: frame.backing,
             reference: frame.incoming_list_backing.is_none(),

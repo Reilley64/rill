@@ -6631,7 +6631,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return self.stage_scoped_reference_results(node, join, into, next, depth);
         }
-        if checked_carrier.is_none() && list_arrows::scalar_pair(&facts.ty) {
+        if checked_carrier.is_none()
+            && list_arrows::list_arrow_result_pair(&facts.ty, call.scoped_join.is_some())
+        {
             let route = if let Some(join) = call.scoped_join.as_deref() {
                 Some(list_arrows::ListArrowUse::Scoped(join))
             } else if call.selection.is_some() {

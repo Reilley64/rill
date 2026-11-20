@@ -437,6 +437,13 @@ pub enum Operation<'g> {
         representation: CollectionArtifact<'g>,
         provider: CollectionArtifact<'g>,
     },
+    /// Compare the initialized i32 scratch value with the written literal,
+    /// ending the scratch and initializing the bool result.
+    EqualI32Literal {
+        from: Place<'g>,
+        literal: i32,
+        into: Place<'g>,
+    },
     /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
@@ -1909,6 +1916,11 @@ enum Action<'g> {
         owner: &'g DeclarationId,
         representation: CollectionArtifact<'g>,
         provider: CollectionArtifact<'g>,
+    },
+    EqualI32Literal {
+        from: Slot,
+        literal: i32,
+        into: Slot,
     },
     Call(usize),
     CopyClosure {
