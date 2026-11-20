@@ -1392,6 +1392,18 @@ impl<'a, 'g> Build<'a, 'g> {
                                 Some(ExpressionProof::NestedRecordConstruction),
                             );
                         }
+                        if self.module.syntax.nodes[initializer].kind == NodeKind::Construction
+                            && let Some(entry) = self.initialize_propagating_record(
+                                value,
+                                initializer,
+                                into,
+                                next,
+                                exits.returning,
+                                depth + 1,
+                            )?
+                        {
+                            return Ok(entry);
+                        }
                         let temporary = self.temporary_projection(initializer, false)?;
                         let tail = if let Some(temp) = temporary {
                             self.cleanup(node, &[temp.scratch], next)?
@@ -3402,6 +3414,88 @@ impl<'a, 'g> Build<'a, 'g> {
             }
         }
         Ok(())
+    }
+
+    fn initialize_propagating_record(
+        &mut self,
+        value: NodeId,
+        node: NodeId,
+        into: Slot,
+        next: Pc,
+        returning: Pc,
+        depth: usize,
+    ) -> ResultOf<Option<Pc>> {
+        self.budget.step(1)?;
+        let Some(DataExpression::Construction(data)) = &self.value(node)?.data else {
+            return Ok(None);
+        };
+        if data.base.is_some() || !data.arguments.is_empty() {
+            return Ok(None);
+        }
+        let mut postfix = None;
+        for (position, field) in data.fields.iter().enumerate() {
+            self.budget.step(1)?;
+            let root = self.ungroup(field.expression)?;
+            if self.module.syntax.nodes[root].kind == NodeKind::Propagate
+                && postfix.replace((position, root)).is_some()
+            {
+                return Err(Stop::Pending(node));
+            }
+        }
+        let Some((position, postfix)) = postfix else {
+            return Ok(None);
+        };
+        if self.slots[into].contains_guard()
+            || self.record_fields(&data.ty)?.is_none()
+            || self.slots[into].members != data.fields.len()
+            || self.contains_unadmitted_propagation(value, Some(postfix), depth)?
+        {
+            return Err(Stop::Pending(node));
+        }
+        self.budget.step(2)?;
+        let checked = self.checked_propagation(postfix, self.value(postfix)?)?;
+        let flow = &self.facts[&node].flow;
+        if self.bool_option_role(checked.operand).is_none()
+            || flow.pending
+            || flow.normal != checked.exit.can_continue
+            || flow.returns != checked.exit.can_return
+            || !flow.breaks.is_empty()
+            || !flow.continues.is_empty()
+        {
+            return Err(Stop::Pending(node));
+        }
+        let mut failure = returning;
+        if checked.exit.can_return {
+            // The record header is still vacant. End just the reached fields,
+            // in reverse written order, before the regular lexical cleanup.
+            for field in &data.fields[..position] {
+                let slot = self.field(node, into, &field.field.id)?;
+                failure = self.emit(postfix, Action::End(slot), Edges::Next(failure))?;
+            }
+        }
+        let (reached, mut tail) = if checked.exit.can_continue {
+            (
+                data.fields.len(),
+                self.emit(node, Action::Init(into), Edges::Next(next))?,
+            )
+        } else {
+            (position + 1, next)
+        };
+        for (index, field) in data.fields[..reached].iter().enumerate().rev() {
+            self.budget.step(1)?;
+            if index == position {
+                let target = checked
+                    .exit
+                    .can_continue
+                    .then(|| self.field(node, into, &field.field.id))
+                    .transpose()?;
+                tail = self.propagate(postfix, target, tail, failure, depth + 1)?;
+            } else {
+                let target = self.field(node, into, &field.field.id)?;
+                tail = self.expression(field.expression, Some(target), tail, depth + 1)?;
+            }
+        }
+        Ok(Some(tail))
     }
 
     fn initialize_members(

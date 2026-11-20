@@ -1927,6 +1927,393 @@ fn owned_record_projections() {
     );
 }
 
+#[test]
+fn interrupted_record_initialization_cleans_only_the_reached_fields() {
+    use compiler::analysis::{ownership::Place, scalars::NodeFactKind};
+    use compiler::parser::NodeKind;
+
+    probe_with_typed(
+        "records::interrupted_record_initialization_cleans_only_the_reached_fields",
+        r#"
+            import std::core::dispose as release;
+            type Pack = { first: string; check: bool; second: string; last: string; }
+            type Custom = { first: string; check: bool; second: string; last: string; }
+            implement release(value: Custom): void {}
+            function select(value: Custom): void { release(value); }
+            function interrupted(a: string, gate: Option<bool>, b: string, c: string, spare: string): Option<bool> {
+                let kept = spare;
+                let packed = Pack { second: c, first: a, check: gate?, last: b };
+                return Option.Some(true);
+            }
+            function interruptedCustom(a: string, gate: Option<bool>, b: string, c: string, spare: string): Option<bool> {
+                let kept = spare;
+                let packed = Custom { second: c, first: a, check: (gate?), last: b };
+                return Option.Some(true);
+            }
+            function movedPrefix(a: string, gate: Option<bool>, b: string, c: string): Option<bool> {
+                let prior = a;
+                let packed = Pack { first: a, second: c, check: gate?, last: b };
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let lower = |name, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let explicit = module
+                .syntax
+                .nodes
+                .iter()
+                .position(|node| {
+                    node.kind == NodeKind::Call && node.span.bytes() == b"release(value)"
+                })
+                .unwrap();
+            let NodeFactKind::Expression(call) =
+                &typed.bodies().node(module, explicit).unwrap().unwrap().kind
+            else {
+                panic!("expected typed canonical disposer call");
+            };
+            let call = call.call.as_deref().unwrap();
+            assert_eq!(call.callee, &typed.dispose_role().unwrap().id);
+            let selected = call.selection.as_ref().unwrap().implementation;
+
+            let role = typed.option_role().unwrap();
+            let root = |place: &Place<'_>, bytes: &[u8]| {
+                place.root.module == &module.key
+                    && place.root.span.bytes() == bytes
+                    && place.projection.is_none()
+            };
+            for (name, record) in [("interrupted", "Pack"), ("interruptedCustom", "Custom")] {
+                let report = lower(name, AnalysisLimits::default());
+                assert_eq!(
+                    report.completion(),
+                    Completion::Checked,
+                    "{name} at {:?}",
+                    report
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string())
+                );
+                let mir = report.mir().unwrap();
+                let member = |place: &Place<'_>, bytes: &[u8], name| {
+                    place.root.module == &module.key
+                        && place.root.span.bytes() == bytes
+                        && place.field().is_some_and(|field| {
+                            &field.id == canonical_record_field(typed, &module.key, record, name)
+                        })
+                };
+                let field = |place: &Place<'_>, name| member(place, b"packed", name);
+                let prefix: Vec<_> = straight_blocks(mir, mir.entry)
+                    .into_iter()
+                    .filter(|block| !matches!(block.operation, Operation::None))
+                    .collect();
+                let [kept, second, first, gate, split] = prefix.as_slice() else {
+                    panic!("{name}: expected the written prefix and one carrier evaluation");
+                };
+                assert!(
+                    matches!(kept.operation, Operation::Move { from, into: Some(into) } if root(&from, b"spare: string") && root(&into, b"kept"))
+                );
+                assert!(
+                    matches!(second.operation, Operation::Move { from, into: Some(into) } if root(&from, b"c: string") && field(&into, "second"))
+                );
+                assert!(
+                    matches!(first.operation, Operation::Move { from, into: Some(into) } if root(&from, b"a: string") && field(&into, "first"))
+                );
+                let Operation::Copy {
+                    from,
+                    into: Some(carrier),
+                } = gate.operation
+                else {
+                    panic!("{name}: expected a staged carrier");
+                };
+                assert!(root(&from, b"gate: Option<bool>") && root(&carrier, b"gate"));
+                assert!(
+                    matches!(split.operation, Operation::TestVariant { operand, success }
+                    if root(&operand, b"gate") && operand.root.node == carrier.root.node && success == &role.some.id)
+                );
+                let Terminator::Branch { yes, no } = split.terminator else {
+                    panic!("expected both variants")
+                };
+                let effects = |edge| {
+                    linear(mir, edge)
+                        .into_iter()
+                        .filter(|op| !matches!(op, Operation::None))
+                        .collect::<Vec<_>>()
+                };
+                let failure = effects(no);
+                assert!(
+                    matches!(failure.as_slice(), [
+                    Operation::ConstructVariant { variant, payload: None, into }, Operation::Export(export),
+                    Operation::Drop(first), Operation::Drop(second), Operation::Cleanup(locals), Operation::Cleanup(inputs),
+                ] if *variant == &role.none.id && root(into, b"gate?") && root(export, b"gate?") && into.root.node == export.root.node
+                    && field(first, "first") && field(second, "second")
+                    && matches!(locals.as_slice(), [Obligation::Drop(kept)] if root(kept, b"kept"))
+                    && matches!(inputs.as_slice(), [Obligation::Drop(b), Obligation::EndStorage(gate)] if root(b, b"b: string") && root(gate, b"gate: Option<bool>"))),
+                    "{name} None: {failure:?}"
+                );
+
+                let success = effects(yes);
+                let [
+                    Operation::CopyOptionPayload {
+                        operand,
+                        into: check,
+                    },
+                    Operation::Move {
+                        from: b,
+                        into: Some(last),
+                    },
+                    Operation::Initialize(packed),
+                    Operation::Initialize(payload),
+                    Operation::ConstructVariant {
+                        variant,
+                        payload: Some(carried),
+                        into,
+                    },
+                    Operation::Export(export),
+                    Operation::Cleanup(locals),
+                    Operation::Cleanup(inputs),
+                ] = success.as_slice()
+                else {
+                    panic!("{name} Some: {success:?}")
+                };
+                assert!(
+                    root(operand, b"gate")
+                        && operand.root.node == carrier.root.node
+                        && field(check, "check")
+                );
+                assert!(root(b, b"b: string") && field(last, "last") && root(packed, b"packed"));
+                assert!(
+                    root(payload, b"true")
+                        && root(carried, b"true")
+                        && carried.root.node == payload.root.node
+                );
+                assert_eq!(*variant, &role.some.id);
+                assert!(
+                    root(into, b"Option.Some(true)")
+                        && root(export, b"Option.Some(true)")
+                        && into.root.node == export.root.node
+                );
+                assert!(
+                    matches!(inputs.as_slice(), [Obligation::EndStorage(gate)] if root(gate, b"gate: Option<bool>"))
+                );
+                if record == "Custom" {
+                    assert!(
+                        matches!(locals.as_slice(), [Obligation::InvokeDisposer { operand, implementation }, Obligation::Drop(kept)]
+                        if root(operand, b"packed") && operand.root.node == packed.root.node && *implementation == selected && root(kept, b"kept"))
+                    );
+                    let active = mir.disposer(selected).unwrap();
+                    assert!(
+                        matches!(path_drops(active, active.entry).as_slice(), [Obligation::Drop(last), Obligation::Drop(second), Obligation::Drop(first)]
+                        if member(last, b"{}", "last") && member(second, b"{}", "second") && member(first, b"{}", "first"))
+                    );
+                } else {
+                    assert!(
+                        matches!(locals.as_slice(), [Obligation::Drop(last), Obligation::Drop(second), Obligation::EndStorage(check), Obligation::Drop(first), Obligation::EndStorage(owner), Obligation::Drop(kept)]
+                        if field(last, "last") && field(second, "second") && field(check, "check") && field(first, "first")
+                        && root(owner, b"packed") && owner.root.node == packed.root.node && root(kept, b"kept"))
+                    );
+                }
+
+                let stats = report.statistics();
+                let exact = AnalysisLimits {
+                    max_work: stats.work,
+                    max_entries: stats.entries,
+                    max_depth: stats.max_depth,
+                };
+                assert!(lower(name, exact).mir().is_some());
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = lower(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+
+            let bad = lower("movedPrefix", AnalysisLimits::default());
+            assert_eq!(bad.completion(), Completion::SourceRejected);
+            assert!(bad.mir().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected only the moved prefix finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            let offset = |bytes: &[u8]| {
+                module
+                    .syntax
+                    .nodes
+                    .iter()
+                    .find(|node| node.span.bytes() == bytes)
+                    .unwrap()
+                    .span
+                    .start()
+            };
+            for (site, start) in [
+                (
+                    finding.related,
+                    offset(b"let prior = a;") + b"let prior = ".len(),
+                ),
+                (
+                    finding.site,
+                    offset(b"Pack { first: a, second: c, check: gate?, last: b }")
+                        + b"Pack { first: ".len(),
+                ),
+            ] {
+                assert_eq!(site.module, &module.key);
+                assert_eq!(site.span.bytes(), b"a");
+                assert_eq!(site.span.start(), start);
+            }
+        },
+    );
+}
+
+#[test]
+fn interrupted_record_initialization_keeps_unreached_and_unsupported_shapes_separate() {
+    probe_with_typed(
+        "records::interrupted_record_initialization_keeps_unreached_and_unsupported_shapes_separate",
+        r#"
+            type Pack = { first: string; check: bool; last: string; }
+            type Pair = { check: bool; again: bool; }
+            type Deeper = { inner: Pack; check: bool; }
+            type Protected = { held: LockGuard<i32>; check: bool; }
+            type Number = { data: i32; }
+            function relay(flag: bool): bool { return flag; }
+            function certainNone(a: string, b: string): Option<bool> {
+                let kept = b;
+                let packed = Pack { first: a, check: Option<bool>.None?, last: b };
+                return Option.Some(true);
+            }
+            function certainSome(a: string, b: string): Option<bool> {
+                let packed = (Pack { first: a, check: Option<bool>.Some(true)?, last: b });
+                return Option.Some(packed.check);
+            }
+            function embedded(gate: Option<bool>, a: string, b: string): Option<bool> {
+                let packed = Pack { first: a, check: relay(gate?), last: b };
+                return Option.Some(true);
+            }
+            function second(gate: Option<bool>): Option<bool> {
+                let packed = Pair { check: Option<bool>.None?, again: gate? };
+                return Option.Some(true);
+            }
+            function deeper(inner: Pack, gate: Option<bool>): Option<bool> {
+                let packed = Deeper { inner: inner, check: gate? };
+                return Option.Some(true);
+            }
+            function protected(held: LockGuard<i32>, gate: Option<bool>): Option<bool> {
+                let packed = Protected { held: held, check: gate? };
+                return Option.Some(true);
+            }
+            function rebuild(base: Pack, gate: Option<bool>): Option<bool> {
+                let packed = Pack { ...base, check: gate? };
+                return Option.Some(true);
+            }
+            function unnamed(a: string, gate: Option<bool>, b: string): Option<bool> {
+                let _ = Pack { first: a, check: gate?, last: b };
+                return Option.Some(true);
+            }
+            function wider(): Option<bool> {
+                let packed = Number { data: Option<i32>.Some(1i32)? };
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            let role = typed.option_role().unwrap();
+            for (name, variant, drop_names) in [
+                ("certainNone", &role.none.id, ["first", "kept"]),
+                ("certainSome", &role.some.id, ["last", "first"]),
+            ] {
+                let report = lower(name);
+                let mir = report.mir().unwrap_or_else(|| {
+                    panic!(
+                        "{name}: {:?} at {:?}",
+                        report.completion(),
+                        report.blocked_at().map(|site| site
+                            .span
+                            .bytes()
+                            .escape_ascii()
+                            .to_string())
+                    )
+                });
+                let path = linear(mir, mir.entry);
+                let exports: Vec<_> = path
+                    .iter()
+                    .filter_map(|op| match op {
+                        Operation::Export(place) => Some(place),
+                        _ => None,
+                    })
+                    .collect();
+                let [export] = exports.as_slice() else {
+                    panic!("{name}: expected one export");
+                };
+                assert!(path.iter().any(|op| matches!(op, Operation::ConstructVariant { variant: made, into, .. }
+                    if *made == variant && into.root.node == export.root.node && into.projection.is_none())));
+                assert_eq!(path.iter().any(|op| matches!(op, Operation::Initialize(place) if place.root.span.bytes() == b"packed")), name == "certainSome");
+                let drops = path_drops(mir, mir.entry);
+                let [Obligation::Drop(first), Obligation::Drop(second)] = drops.as_slice() else {
+                    panic!("{name}: expected two drops");
+                };
+                for (place, name) in [(first, drop_names[0]), (second, drop_names[1])] {
+                    if name == "kept" {
+                        assert_eq!(place.root.span.bytes(), b"kept");
+                        assert!(place.projection.is_none());
+                    } else {
+                        assert_eq!(place.root.span.bytes(), b"packed");
+                        assert_eq!(
+                            place.field().map(|field| &field.id),
+                            Some(canonical_record_field(typed, &module.key, "Pack", name))
+                        );
+                    }
+                }
+            }
+            for (name, blocked) in [
+                (
+                    "embedded",
+                    b"Pack { first: a, check: relay(gate?), last: b }".as_slice(),
+                ),
+                (
+                    "second",
+                    b"Pair { check: Option<bool>.None?, again: gate? }",
+                ),
+                ("deeper", b"Deeper { inner: inner, check: gate? }"),
+                ("protected", b"Protected { held: held, check: gate? }"),
+                ("rebuild", b"Pack { ...base, check: gate? }"),
+                ("unnamed", b"Pack { first: a, check: gate?, last: b }"),
+                ("wider", b"Option<i32>.Some(1i32)?"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(
+                    report.mir().is_none() && report.findings().is_empty(),
+                    "{name}"
+                );
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), blocked, "{name}");
+            }
+        },
+    );
+}
+
 fn dropped_fields<'g>(mir: &Mir<'g>) -> Vec<&'g str> {
     path_drops(mir, mir.entry)
         .into_iter()
