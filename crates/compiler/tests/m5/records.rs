@@ -965,6 +965,10 @@ fn replacing_an_initialized_nested_string_leaf_preserves_its_neighbors() {
                 saved.child.first = fresh;
                 return true;
             }
+            function groupedUnsupported(seed: Outer): void {
+                let mut saved = seed;
+                saved.child.first = (((((((((((((((((("new"))))))))))))))))));
+            }
             function movedChild(seed: Outer, fresh: string): void {
                 let mut saved = seed;
                 let taken = saved.child;
@@ -973,6 +977,7 @@ fn replacing_an_initialized_nested_string_leaf_preserves_its_neighbors() {
             function movedRoot(seed: Outer, fresh: string): void {
                 let mut saved = seed;
                 let taken = saved;
+                let alreadyMoved = fresh;
                 saved.child.first = fresh;
             }
         "#,
@@ -1003,12 +1008,46 @@ fn replacing_an_initialized_nested_string_leaf_preserves_its_neighbors() {
                     path.projections,
                     [PathProjection::Field(child), PathProjection::Field(first)]
                 );
-                let source = rhs.path.as_ref().unwrap();
-                assert_eq!(source.root.kind, loader::DeclarationKind::Parameter);
-                assert!(source.projections.is_empty());
                 assert!(matches!(lhs.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string"));
                 assert_eq!(lhs.ty, rhs.ty);
+                if let Some(source) = &rhs.path {
+                    assert_eq!(source.root.kind, loader::DeclarationKind::Parameter);
+                    assert!(source.projections.is_empty());
+                } else {
+                    assert_eq!(
+                        module.syntax.nodes[assignment.children[1]].span.bytes(),
+                        b"((((((((((((((((((\"new\"))))))))))))))))))"
+                    );
+                }
             }
+            let decl = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("groupedUnsupported"))
+                .unwrap();
+            let grouped = |limits| lower_body(receipt, module, &decl.id, limits).unwrap();
+            let unsupported = grouped(AnalysisLimits::default());
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert_eq!(
+                unsupported.blocked_at().unwrap().span.bytes(),
+                b"((((((((((((((((((\"new\"))))))))))))))))))"
+            );
+            assert!(unsupported.mir().is_none());
+            let exact_depth = unsupported.statistics().max_depth;
+            assert_eq!(
+                grouped(AnalysisLimits {
+                    max_depth: exact_depth,
+                    ..AnalysisLimits::default()
+                })
+                .completion(),
+                Completion::Incomplete
+            );
+            let one_short = grouped(AnalysisLimits {
+                max_depth: exact_depth - 1,
+                ..AnalysisLimits::default()
+            });
+            assert_eq!(one_short.completion(), Completion::ResourceLimit);
+            assert!(one_short.findings().is_empty() && one_short.mir().is_none());
 
             for (name, moved_at) in [
                 ("replace", None),
@@ -1049,6 +1088,12 @@ fn replacing_an_initialized_nested_string_leaf_preserves_its_neighbors() {
                     continue;
                 }
 
+                let limited = grouped(AnalysisLimits {
+                    max_depth: report.statistics().max_depth,
+                    ..AnalysisLimits::default()
+                });
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
                 let mir = report.mir().unwrap();
                 let ops = linear(mir, mir.entry);
                 let from_fresh = |op: &&Operation<'_>| {

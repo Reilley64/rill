@@ -213,7 +213,7 @@ enum Binding<'a, 'g> {
 }
 
 #[derive(Clone, Copy)]
-enum AssignmentSource<'a, 'g> {
+enum AssignmentPlan<'a, 'g> {
     General,
     Exact(&'a Type<'g>),
     NestedTuple(Slot),
@@ -984,7 +984,8 @@ impl<'a, 'g> Build<'a, 'g> {
         left: NodeId,
         facts: &'a ExpressionFacts<'g>,
         value: NodeId,
-    ) -> ResultOf<(Slot, AssignmentSource<'a, 'g>)> {
+        rhs_depth: usize,
+    ) -> ResultOf<(Slot, AssignmentPlan<'a, 'g>)> {
         let path = facts.path.as_ref().ok_or(Stop::Pending(left))?;
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
@@ -997,7 +998,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 let from = self
                     .nested_tuple_transfer_source(value, &facts.ty)?
                     .ok_or(Stop::Pending(value))?;
-                return Ok((target, AssignmentSource::NestedTuple(from)));
+                return Ok((target, AssignmentPlan::NestedTuple(from)));
             }
         }
         if facts.place == TypedPlace::Writable
@@ -1008,7 +1009,7 @@ impl<'a, 'g> Build<'a, 'g> {
             if self.value(value)?.ty != facts.ty {
                 return Err(Stop::Pending(value));
             }
-            return Ok((target, AssignmentSource::Exact(&facts.ty)));
+            return Ok((target, AssignmentPlan::Exact(&facts.ty)));
         }
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
@@ -1028,7 +1029,7 @@ impl<'a, 'g> Build<'a, 'g> {
             if source.ty != facts.ty {
                 return Err(Stop::Pending(value));
             }
-            return Ok((child, AssignmentSource::Exact(&source.ty)));
+            return Ok((child, AssignmentPlan::Exact(&source.ty)));
         }
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
@@ -1039,7 +1040,8 @@ impl<'a, 'g> Build<'a, 'g> {
             && let Some(root) = self.nested_record_root(path)?
         {
             let (child, target) = self.nested_field(left, root, outer, inner)?;
-            let Some((source, _)) = self.whole_named_owned_place(value)? else {
+            let (name, _) = self.ungroup_expression_at(value, rhs_depth)?;
+            let Some((source, _)) = self.named_owned_place(name)? else {
                 return Err(Stop::Pending(value));
             };
             self.budget.step(1)?;
@@ -1048,13 +1050,13 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             return Ok((
                 target,
-                AssignmentSource::NestedRecordLeaf {
+                AssignmentPlan::NestedRecordLeaf {
                     ty: &source.ty,
                     child,
                 },
             ));
         }
-        Ok((self.resolve_place(left, path)?, AssignmentSource::General))
+        Ok((self.resolve_place(left, path)?, AssignmentPlan::General))
     }
 
     fn nested_transfer_slot(
@@ -1567,17 +1569,17 @@ impl<'a, 'g> Build<'a, 'g> {
                     )?;
                     return self.expression(value, Some(incoming), install, depth + 1);
                 }
-                let (target, source) = self.assignment_target(left, facts, value)?;
+                let (target, source) = self.assignment_target(left, facts, value, depth + 1)?;
                 if self.slots[target].projection.is_some()
                     && self.slots[target].guard_release().is_some()
                 {
                     return Err(Stop::Pending(left));
                 }
-                let (incoming, temporary) = if let AssignmentSource::NestedTuple(from) = source {
+                let (incoming, temporary) = if let AssignmentPlan::NestedTuple(from) = source {
                     (self.clone_region(from, value)?, None)
                 } else {
-                    let ty = if let AssignmentSource::Exact(ty)
-                    | AssignmentSource::NestedRecordLeaf { ty, .. } = source
+                    let ty = if let AssignmentPlan::Exact(ty)
+                    | AssignmentPlan::NestedRecordLeaf { ty, .. } = source
                     {
                         ty
                     } else {
@@ -1603,7 +1605,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     Action::Displace { target, incoming },
                     Edges::Next(install),
                 )?;
-                if let AssignmentSource::NestedTuple(from) = source {
+                if let AssignmentPlan::NestedTuple(from) = source {
                     return self.expression_with_proof(
                         value,
                         Some(incoming),
@@ -1614,7 +1616,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
                 let stage =
                     self.stage_named_transfer(value, incoming, displace, temporary, depth + 1)?;
-                if let AssignmentSource::NestedRecordLeaf { child, .. } = source {
+                if let AssignmentPlan::NestedRecordLeaf { child, .. } = source {
                     return self.emit(
                         node,
                         Action::CheckNestedFieldBase(child),
@@ -2041,6 +2043,13 @@ impl<'a, 'g> Build<'a, 'g> {
         node: NodeId,
     ) -> ResultOf<Option<(&'a ExpressionFacts<'g>, &'a PlacePath<'g>)>> {
         let name = self.ungroup(node)?;
+        self.named_owned_place(name)
+    }
+
+    fn named_owned_place(
+        &mut self,
+        name: NodeId,
+    ) -> ResultOf<Option<(&'a ExpressionFacts<'g>, &'a PlacePath<'g>)>> {
         self.budget.step(1)?;
         if self.module.syntax.nodes[name].kind != NodeKind::ValueReference {
             return Ok(None);
