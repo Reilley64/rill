@@ -1861,32 +1861,22 @@ fn installed_pair_invocation(request: &InstalledRequest) {
                 .iter()
                 .find(|d| d.name.as_deref() == Some(name))
                 .unwrap();
-            // Local scalar index support does not do any child-frame work at
-            // these unrelated blockers. Both fit the 9b020d1 caps.
-            let (max_work, max_entries, max_depth) = if name == "shared" {
-                (3338, 467, 5)
+            let (limits, expected) = if name == "shared" {
+                (AnalysisLimits::default(), Completion::Checked)
             } else {
-                (2462, 300, 0)
+                // The mixed output remains unsupported at the old pending cap.
+                (
+                    AnalysisLimits {
+                        max_work: 2462,
+                        max_entries: 300,
+                        max_depth: 0,
+                    },
+                    Completion::Incomplete,
+                )
             };
-            let local = lower_body(
-                &receipt,
-                app,
-                &user.id,
-                AnalysisLimits {
-                    max_work,
-                    max_entries,
-                    max_depth,
-                },
-            )
-            .unwrap();
-            assert_eq!(local.completion(), Completion::Incomplete);
-            assert!(local.mir().is_none());
-            if name == "shared" {
-                assert_eq!(
-                    local.blocked_at().unwrap().span.bytes(),
-                    b"join([() => (&numbers)[0u64], () => (&numbers)[1u64]])",
-                );
-            }
+            let local = lower_body(&receipt, app, &user.id, limits).unwrap();
+            assert_eq!(local.completion(), expected);
+            assert_eq!(local.mir().is_some(), expected == Completion::Checked);
         }
         let s = receipt.statistics();
         let exact = AnalysisLimits {
@@ -1921,9 +1911,12 @@ fn installed_pair_invocation(request: &InstalledRequest) {
             let mut numbers = input;
             return join([() => (&numbers)[0u64], () => (&mut numbers)[1u64]]);
         }", TypedCompletion::Incomplete, true, None),
-        ("function erased(job: () => i32): [i32, i32] {
-            return join([() => 1i32, job]);
+        ("function erased(left: List<i32>, right: () => i32): [i32, i32] {
+            return join([() => (&left)[0u64], right]);
         }", TypedCompletion::Incomplete, false, None),
+        ("function escaping(input: List<i32>): [&i32, i32] {
+            return join([() => { let child = 1i32; return &child; }, () => (&input)[0u64]]);
+        }", TypedCompletion::Incomplete, true, None),
         ("function nested(): void {
             let outputs = join([(): [Result<bool, i32>, i32] => [Result.Ok(true), 1i32], () => false]);
         }", TypedCompletion::Incomplete, false, None),

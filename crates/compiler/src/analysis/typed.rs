@@ -40,6 +40,7 @@ pub use ownership::{
     OwnershipRule,
 };
 pub use primitive::{Primitive, PrimitiveOperation, PrimitiveValue};
+pub(in crate::analysis) use result_use::{PairCall, PairChild};
 pub use result_use::{
     PendingResultUse, ResultComponent, ResultDiscard, ResultDiscardKind, ResultUseBlocker,
     ResultUseReport,

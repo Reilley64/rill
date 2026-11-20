@@ -20,13 +20,19 @@ pub enum GraphObligation {
     EmbeddedAndUnreachedSource,
 }
 
-/// The frame or terminal contract required at a reached site. Only direct
-/// calls and active disposers have body checks here; other contracts stay pending.
+/// The frame or terminal contract required at a reached site. Closed
+/// specializations check their own bodies without closing unbound source roots.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DependencyContract<'g> {
     OrdinaryCall,
     /// Closed at the call by ordinary flow; the open source root is separate.
     CallableTransfer(CallableLayout),
+    /// Closed ordinary specialization. `body` belongs to the implementation's
+    /// module; `arrow_bodies` are the two checked arrow bodies in the caller.
+    SynchronousListArrows {
+        body: NodeId,
+        arrow_bodies: [NodeId; 2],
+    },
     ActiveDisposer,
     BuiltinDispose,
     ProtectedRelease {
@@ -539,6 +545,7 @@ fn analyze<'g>(
                     if matches!(
                         edge.contract,
                         DependencyContract::CallableTransfer(_)
+                            | DependencyContract::SynchronousListArrows { .. }
                             | DependencyContract::ListI32Disposal { .. }
                     ) {
                         // Specialized evidence closes this ordinary edge,
@@ -964,6 +971,20 @@ pub(super) fn visit_dependencies<'g>(
             }
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
+            }
+            Operation::CallListArrows {
+                implementation,
+                body,
+                ref slots,
+            } => {
+                emit(
+                    implementation,
+                    SynchronousListArrows {
+                        body: body.node,
+                        arrow_bodies: [slots[0].body_site.node, slots[1].body_site.node],
+                    },
+                    budget,
+                )?;
             }
             Operation::CopyClosure { ref captures, .. } => {
                 budget.step(captures.len())?;

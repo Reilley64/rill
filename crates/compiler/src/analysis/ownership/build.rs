@@ -23,6 +23,9 @@ use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
+mod list_arrows;
+pub(super) use list_arrows::ListArrowPair;
+
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
     // A named destination or statement discard uses the same exact call proof.
@@ -315,6 +318,29 @@ struct ProjectedTemporary {
     member: Slot,
 }
 
+struct ListI32Read<'a, 'g> {
+    base: NodeId,
+    base_depth: usize,
+    view: &'a ExpressionFacts<'g>,
+    index: u64,
+    owner: &'g DeclarationId,
+    representation: CollectionArtifact<'g>,
+    provider: CollectionArtifact<'g>,
+}
+
+impl<'g> ListI32Read<'_, 'g> {
+    fn action(self, view: Slot, into: Option<Slot>) -> Action<'g> {
+        Action::ReadListI32 {
+            view,
+            index: self.index,
+            into,
+            owner: self.owner,
+            representation: self.representation,
+            provider: self.provider,
+        }
+    }
+}
+
 impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     pub(super) fn new(
         typed: &'a TypedReport<'g>,
@@ -342,7 +368,25 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             BuildFacts::Local(facts)
         };
-        Ok(Self {
+        Ok(Self::with_facts(
+            typed,
+            module,
+            body,
+            return_contract,
+            facts,
+            budget,
+        ))
+    }
+
+    fn with_facts(
+        typed: &'a TypedReport<'g>,
+        module: &'g Module,
+        body: NodeId,
+        return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
+        facts: BuildFacts<'a, 'g>,
+        budget: &'b mut Budget,
+    ) -> Self {
+        Self {
             typed,
             module,
             body,
@@ -359,6 +403,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             slots: Vec::new(),
             code: Vec::new(),
             calls: Vec::new(),
+            list_arrow_pairs: Vec::new(),
+            incoming_list_arrow: None,
             cleanups: Vec::new(),
             body_scope: None,
             scalar_copy_read: None,
@@ -368,7 +414,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             callable_frame: None,
             proved_variant_cleanup: Vec::new(),
             budget,
-        })
+        }
     }
 
     fn fact(&self, node: &NodeId) -> Option<&'a NodeFacts<'g>> {
@@ -4575,14 +4621,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok((descriptor, Projection::Field(member.declaration)))
     }
 
-    fn read_list_i32(
+    fn check_list_i32_read(
         &mut self,
         node: NodeId,
         facts: &ExpressionFacts<'g>,
-        into: Option<Slot>,
-        next: Pc,
         depth: usize,
-    ) -> ResultOf<Pc> {
+    ) -> ResultOf<ListI32Read<'a, 'g>> {
         let pending = || Stop::Pending(node);
         let Some(DataExpression::ListIndex {
             declaration,
@@ -4652,6 +4696,33 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
         }
         let representation = representation.ok_or_else(pending)?;
+        Ok(ListI32Read {
+            base,
+            base_depth,
+            view,
+            index,
+            owner: &list.declaration.id,
+            representation,
+            provider,
+        })
+    }
+
+    fn read_list_i32(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let read = self.check_list_i32_read(node, facts, depth)?;
+        let ListI32Read {
+            base,
+            base_depth,
+            view,
+            ..
+        } = read;
         let (slot, temporary) = match self.module.syntax.nodes[base].kind {
             NodeKind::ValueReference => {
                 let path = view.path.as_ref().ok_or_else(pending)?;
@@ -4675,18 +4746,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         } else {
             next
         };
-        let read = self.emit(
-            node,
-            Action::ReadListI32 {
-                view: slot,
-                index,
-                into,
-                owner: &list.declaration.id,
-                representation,
-                provider,
-            },
-            Edges::Next(next),
-        )?;
+        let read = self.emit(node, read.action(slot, into), Edges::Next(next))?;
         if temporary {
             self.expression(base, Some(slot), read, base_depth)
         } else {
@@ -6528,6 +6588,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 return self.copy_closure(node, facts, call, into, next, depth);
             }
             return self.written_scalar_copy(node, facts, call, into, next, depth);
+        }
+        if checked_carrier.is_none()
+            && call.selection.is_some()
+            && list_arrows::scalar_pair(&facts.ty)
+            && let Some(uses) = self.typed.result_use()
+            && let Some(pair) = uses.pair_call(&self.module.key, node, self.budget)?
+        {
+            return self.call_list_arrows(node, pair, into, next, depth);
         }
         if !Self::direct_application_call(call)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())

@@ -73,12 +73,28 @@ pub struct PendingResultUse<'g> {
     pub blocker: ResultUseBlocker,
 }
 
+pub(in crate::analysis) use pairs::{PairCall, PairChild};
+
 #[derive(Debug, Default)]
 pub struct ResultUseReport<'g> {
     discards: Vec<ResultDiscard<'g>>,
     pending: Vec<PendingResultUse<'g>>,
+    pair_calls: BTreeMap<(&'g ModuleKey, NodeId), PairCall<'g>>,
 }
 impl<'g> ResultUseReport<'g> {
+    pub(in crate::analysis) fn pair_call(
+        &self,
+        module: &'g ModuleKey,
+        node: NodeId,
+        budget: &mut Budget,
+    ) -> Work<Option<&PairCall<'g>>> {
+        if self.pair_calls.is_empty() {
+            return Ok(None);
+        }
+        budget.step(module.path.len() + 1)?;
+        Ok(self.pair_calls.get(&(module, node)))
+    }
+
     pub fn discards(&self) -> &[ResultDiscard<'g>] {
         &self.discards
     }

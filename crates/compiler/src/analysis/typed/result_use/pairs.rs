@@ -5,7 +5,30 @@ use crate::analysis::generics::{GoalFacts, GoalJudgment, GoalState, callables::C
 use crate::analysis::ordinary::RequirementTarget;
 use crate::analysis::scalars::CallFacts;
 
-pub(super) type PairBodies<'g> = BTreeMap<&'g DeclarationId, [Slot<'g>; 2]>;
+pub(super) type PairBodies<'g> = BTreeMap<&'g DeclarationId, PairBody<'g>>;
+
+#[derive(Clone, Copy)]
+pub(super) struct PairBody<'g> {
+    body: Site<'g>,
+    slots: [Slot<'g>; 2],
+}
+
+/// Exact source routing and concrete environments proved at one call. This
+/// does not acquire loans or prove ownership, cleanup, or cancellation.
+#[derive(Debug)]
+pub(in crate::analysis) struct PairCall<'g> {
+    pub implementation: &'g DeclarationId,
+    pub body: Site<'g>,
+    pub children: [PairChild<'g>; 2],
+}
+
+#[derive(Debug)]
+pub(in crate::analysis) struct PairChild<'g> {
+    pub invocation: Site<'g>,
+    pub body: Site<'g>,
+    pub expression: NodeId,
+    pub arrow: Arc<crate::analysis::generics::callables::ArrowFacts<'g>>,
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct Slot<'g> {
@@ -13,6 +36,7 @@ pub(super) struct Slot<'g> {
     result: (&'g DeclarationId, usize),
     // Written callableOnce, sendable(job), sendable(result), respectively.
     requirements: [NodeId; 3],
+    invocation: Site<'g>,
 }
 
 pub(super) fn summary<'g>(
@@ -22,7 +46,7 @@ pub(super) fn summary<'g>(
     bodies: &GenericReport<'g>,
     nodes: &Nodes<'_, 'g>,
     budget: &mut Budget,
-) -> Work<Option<[Slot<'g>; 2]>> {
+) -> Work<Option<PairBody<'g>>> {
     let modules = inventory.graph().modules();
     budget.step(modules.len())?;
     let Some(module) = modules
@@ -31,11 +55,13 @@ pub(super) fn summary<'g>(
     else {
         return Ok(None);
     };
-    let Some((returned, tuple)) = module.syntax.nodes[signature.declaration.node]
+    let Some(&body) = module.syntax.nodes[signature.declaration.node]
         .children
         .get(1)
-        .and_then(|body| single_return(module, *body))
     else {
+        return Ok(None);
+    };
+    let Some((returned, tuple)) = single_return(module, body) else {
         return Ok(None);
     };
     let tuple = values::ungroup(module, tuple, budget)?;
@@ -62,7 +88,15 @@ pub(super) fn summary<'g>(
         bodies,
         nodes,
         (returned, tuple, calls),
-    ))
+    )
+    .map(|slots| PairBody {
+        body: Site {
+            module: &module.key,
+            node: body,
+            span: &module.syntax.nodes[body].span,
+        },
+        slots,
+    }))
 }
 
 // The entire body must consume jobs[i]() exactly once into return slot i. This
@@ -119,7 +153,8 @@ fn summarize<'g>(
         return None;
     }
     let slot = |i: usize, call: NodeId| {
-        let invocation = fact(call)?.callable.as_ref()?.invocation.as_ref()?;
+        let call_fact = fact(call)?;
+        let invocation = call_fact.callable.as_ref()?.invocation.as_ref()?;
         let path = invocation.path.as_ref()?;
         let receiver = expression(invocation.receiver)?;
         if syntax[call].kind != NodeKind::Call
@@ -162,6 +197,7 @@ fn summarize<'g>(
             job: binder(job)?,
             result: binder(output)?,
             requirements: [assumption.source.node, send(job)?, send(output)?],
+            invocation: call_fact.site,
         })
     };
     Some([slot(0, calls[0])?, slot(1, calls[1])?])
@@ -217,7 +253,7 @@ impl<'a, 'g> Check<'a, 'g> {
         value: &ExpressionFacts<'g>,
         call: &CallFacts<'g>,
         state: &mut Residence<'g>,
-        slots: [Slot<'g>; 2],
+        pair: PairBody<'g>,
         depth: usize,
     ) -> Work<bool> {
         self.depth(depth)?;
@@ -295,9 +331,10 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(false);
         }
         let mut outputs = [Vec::new(), Vec::new()];
+        let mut children = [None, None];
         for (i, ((origin, job, output), slot)) in [(first, job0, out0), (second, job1, out1)]
             .into_iter()
-            .zip(slots)
+            .zip(pair.slots)
             .enumerate()
         {
             let sub = |(binder, position): (&DeclarationId, usize)| {
@@ -360,12 +397,18 @@ impl<'a, 'g> Check<'a, 'g> {
                 return Ok(false);
             }
             let slot_path = ResultComponent::TupleElement(i);
-            let Some(result) =
+            let Some((expression, result)) =
                 self.pair_child(origin, arrow, &stored, slot_path, state, depth + 1)?
             else {
                 return Ok(false);
             };
             outputs[i] = result;
+            children[i] = Some(PairChild {
+                invocation: slot.invocation,
+                body: self.site(self.module.syntax.nodes[origin].children[1]),
+                expression,
+                arrow: Arc::clone(arrow),
+            });
         }
         // Commit only after both exact environments and both outgoing residences
         // checked. Sibling residences in the caller are not changed or observed.
@@ -377,6 +420,19 @@ impl<'a, 'g> Check<'a, 'g> {
                 &[ResultComponent::TupleElement(i)],
                 self.budget,
             )?;
+        }
+        // Every reached alternative derives the same two source occurrences;
+        // the receipt separately requires all residence checks to close.
+        self.budget.step(self.module.key.path.len() + 1)?;
+        if let std::collections::btree_map::Entry::Vacant(entry) =
+            self.report.pair_calls.entry((&self.module.key, node))
+        {
+            self.budget.reserve(3)?;
+            entry.insert(PairCall {
+                implementation: selected.implementation,
+                body: pair.body,
+                children: children.map(Option::unwrap),
+            });
         }
         Ok(true)
     }
@@ -431,7 +487,7 @@ impl<'a, 'g> Check<'a, 'g> {
         slot: ResultComponent<'g>,
         caller: &Residence<'g>,
         depth: usize,
-    ) -> Work<Option<Vec<Located<'g>>>> {
+    ) -> Work<Option<(NodeId, Vec<Located<'g>>)>> {
         let nodes = &self.module.syntax.nodes;
         let body = nodes[origin].children[1];
         let body = if nodes[body].kind == NodeKind::Block {
@@ -548,7 +604,7 @@ impl<'a, 'g> Check<'a, 'g> {
             && result
                 .iter()
                 .all(|v| matches!(v.content, Content::Test(_, _))))
-        .then_some(result))
+        .then_some((body, result)))
     }
 
     fn closed_child_expression(

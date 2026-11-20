@@ -5,6 +5,303 @@ use compiler::analysis::typed::{
 };
 use compiler::analysis::{QueryError, Statistics, scalars::ScalarFindingKind};
 
+const TWO_ARROW_BODY: &str = r#"
+    function runTwo<W, R>(jobs: W): R;
+    implement<F, G, A, B> runTwo<[F, G], [A, B]>(jobs: [F, G]): [A, B]
+    where callableOnce(F, [], A), callableOnce(G, [], B), sendable(F), sendable(G), sendable(A), sendable(B) {
+        return [jobs[0](), jobs[1]()];
+    }
+"#;
+
+#[test]
+fn installed_two_list_arrow_frames() {
+    use compiler::analysis::generics::{GoalState, callables::CaptureForm};
+    use compiler::analysis::ownership::{GraphCompletion, GraphReport};
+
+    let source = format!(
+        "{TWO_ARROW_BODY}{}",
+        r#"
+        import helper::work as join;
+        function sameRoot(input: List<i32>): [i32, i32] {
+            let numbers = input;
+            let [a, b] = runTwo([() => (&numbers)[0u64], () => (&numbers)[1u64]]);
+            dispose(numbers);
+            return [a, b];
+        }
+        function swapped(left: List<i32>, right: List<i32>): [i32, i32] {
+            let [a, b] = join([(() => { return (&right)[(1u64)]; }), () => (&left)[0u64]]);
+            return [a, b];
+        }
+        function conflicting(input: List<i32>): [i32, i32] {
+            let mut numbers = input;
+            let exclusive = &mut numbers;
+            let [a, b] = runTwo([() => (&numbers)[0u64], () => (&numbers)[1u64]]);
+            let later = exclusive;
+            return [a, b];
+        }
+        function unknown(input: List<i32>): [i32, i32] {
+            return runTwo([() => (&input)[0u64], () => 5i32]);
+        }
+        "#,
+    );
+    let helper = TWO_ARROW_BODY
+        .replace("runTwo", "work")
+        .replace("function work", "export function work");
+    probe_report_with_modules(
+        "scoped_jobs::installed_two_list_arrow_frames",
+        &source,
+        &[("helper.rill", &helper)],
+        |request, module, typed| {
+            let receipt = typed
+                .receipt()
+                .unwrap_or_else(|| panic!("{:?}", typed.result_use()));
+            let decl = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower = |name| {
+                lower_body(&receipt, module, &decl(name).id, AnalysisLimits::default()).unwrap()
+            };
+            let graph = analyze_ownership(&receipt, AnalysisLimits::default());
+            let root = |graph: &GraphReport<'_>, name| {
+                graph
+                    .roots()
+                    .iter()
+                    .position(|r| {
+                        r.site().module == &module.key && r.site().node == decl(name).node
+                    })
+                    .unwrap()
+            };
+            for (name, expected_backings, expected_selectors, expected_module) in [
+                ("sameRoot", ["numbers", "numbers"], [0, 1], "main.rill"),
+                (
+                    "swapped",
+                    ["right: List<i32>", "left: List<i32>"],
+                    [1, 0],
+                    "helper.rill",
+                ),
+            ] {
+                let local = lower(name);
+                let reached = &graph.roots()[root(&graph, name)];
+                assert_eq!(
+                    local.completion(),
+                    Completion::Checked,
+                    "{name}: {:?}",
+                    local.blocked_at()
+                );
+                assert_eq!(
+                    reached.completion(),
+                    Completion::Checked,
+                    "{name}: {:?}",
+                    reached.blocked_at()
+                );
+                for mir in [local.mir().unwrap(), reached.mir().unwrap()] {
+                    assert!(mir.cancellation().is_none());
+                    let path = straight_blocks(mir, mir.entry);
+                    let (call_pc, block) = path
+                        .iter()
+                        .enumerate()
+                        .find(|(_, block)| {
+                            matches!(block.operation, Operation::CallListArrows { .. })
+                        })
+                        .unwrap();
+                    let Operation::CallListArrows {
+                        implementation,
+                        body,
+                        slots,
+                    } = &block.operation
+                    else {
+                        unreachable!()
+                    };
+                    let ordinary = typed
+                        .bodies()
+                        .ordinary_call(module, block.site.node)
+                        .unwrap()
+                        .unwrap();
+                    assert!(ordinary.checked && ordinary.premise.is_none());
+                    let goal = typed
+                        .bodies()
+                        .goal(ordinary.goal.as_ref().unwrap())
+                        .unwrap();
+                    assert_eq!(goal.state, GoalState::Proved);
+                    assert!(std::ptr::eq(
+                        goal.selection.as_ref().unwrap().implementation,
+                        *implementation
+                    ));
+                    assert_eq!(implementation.module.origin, Origin::Application);
+                    assert_eq!(implementation.module.path, expected_module);
+                    assert_eq!(
+                        body.span.bytes(),
+                        b"{\n        return [jobs[0](), jobs[1]()];\n    }"
+                    );
+                    assert_ne!(slots[0].origin.node, slots[1].origin.node);
+                    assert!(!std::ptr::eq(
+                        slots[0].body.as_ref(),
+                        slots[1].body.as_ref()
+                    ));
+                    let frames = goal
+                        .dependencies
+                        .iter()
+                        .filter_map(|id| {
+                            let dep = typed.bodies().goal(id).unwrap();
+                            assert_eq!(dep.state, GoalState::Proved);
+                            assert!(dep.premise.is_none());
+                            dep.arrow_origin.as_deref()
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(frames.len(), 2);
+                    let mut acquisition_pc = Vec::new();
+                    for (i, slot) in slots.iter().enumerate() {
+                        assert_eq!(slot.origin.node, frames[i].site.node);
+                        let [capture] = frames[i].captures.as_slice() else {
+                            panic!("singleton proved capture")
+                        };
+                        assert_eq!(capture.form, CaptureForm::ExplicitBorrow { mutable: false });
+                        assert_eq!(slot.capture.root.node, capture.site.node);
+                        assert_eq!(
+                            slot.backing.root.span.bytes(),
+                            expected_backings[i].as_bytes()
+                        );
+                        assert_eq!(
+                            slot.invocation.span.bytes(),
+                            [b"jobs[0]()", b"jobs[1]()"][i]
+                        );
+                        assert_eq!(slot.result.tuple_element(), Some(i));
+                        let before_call = &path[..call_pc];
+                        let borrow = before_call.iter().position(|block| matches!(block.operation, Operation::Borrow { source, holder, exclusive: false }
+                            if source.root.node == slot.backing.root.node && holder.root.node == slot.capture.root.node)).unwrap();
+                        let formation = before_call.iter().position(|block| matches!(block.operation, Operation::FormClosure { closure, capture, .. }
+                            if closure.node == slot.environment.root.node && capture.node == slot.capture.root.node)).unwrap();
+                        assert!(borrow < formation);
+                        acquisition_pc.push((borrow, formation));
+                        let child = straight_blocks(&slot.body, slot.body.entry);
+                        let [read, cleanup, export, end] = child.as_slice() else {
+                            panic!("read, cleanup, export, return")
+                        };
+                        let Operation::ReadListI32 {
+                            view,
+                            backing,
+                            index,
+                            into: Some(output),
+                            ..
+                        } = read.operation
+                        else {
+                            panic!("checked child read")
+                        };
+                        assert_eq!(view.root.node, slot.capture.root.node);
+                        assert_eq!(backing.root.node, slot.incoming_backing.root.node);
+                        assert_eq!(index, expected_selectors[i]);
+                        let Operation::Cleanup(items) = &cleanup.operation else {
+                            panic!("one child cleanup")
+                        };
+                        assert!(
+                            matches!(items.as_slice(), [Obligation::EndStorage(place)] if place.root.node == slot.capture.root.node)
+                        );
+                        assert!(
+                            matches!(export.operation, Operation::Export(place) if place.root.node == output.root.node)
+                        );
+                        assert!(matches!(end.terminator, Terminator::Return));
+                        assert!(slot.body.cancellation().is_none());
+                        assert!(!path_drops(mir, mir.entry).iter().any(|item| matches!(item,
+                            Obligation::EndStorage(place) if [slot.capture.root.node, slot.environment.root.node].contains(&place.root.node))));
+                    }
+                    assert!(acquisition_pc[0].1 < acquisition_pc[1].0);
+                    assert!(path[call_pc + 1..].iter().any(|block| matches!(&block.operation, Operation::Cleanup(items)
+                        if items.iter().any(|item| matches!(item, Obligation::DisposeListI32 { operand, .. }
+                            if operand.root.node == slots[0].backing.root.node)))));
+                    assert!(reached.dependencies().iter().any(|edge| std::ptr::eq(
+                        edge.declaration,
+                        *implementation
+                    ) && edge.contract
+                        == DependencyContract::SynchronousListArrows {
+                            body: body.node,
+                            arrow_bodies: [slots[0].body_site.node, slots[1].body_site.node],
+                        }));
+                }
+                if name == "sameRoot" {
+                    check_exact(&receipt, module, &decl(name).id, local.statistics());
+                }
+            }
+            let conflict = lower("conflicting");
+            let [finding] = conflict.findings() else {
+                panic!("{:?} at {:?}", conflict.completion(), conflict.blocked_at())
+            };
+            assert_eq!(conflict.completion(), Completion::SourceRejected);
+            assert!(conflict.mir().is_none());
+            assert_eq!(finding.code(), "R0201");
+            assert_eq!(finding.site.span.bytes(), b"&numbers");
+            assert_eq!(finding.related.span.bytes(), b"&mut numbers");
+            assert_eq!(
+                graph.roots()[root(&graph, "conflicting")].completion(),
+                Completion::SourceRejected
+            );
+            assert_eq!(lower("unknown").completion(), Completion::Incomplete);
+            assert!(graph.roots()[root(&graph, "unknown")].mir().is_none());
+            assert!(
+                graph
+                    .open_obligations()
+                    .contains(&GraphObligation::MaskingAndJoin)
+            );
+
+            let Statistics {
+                work,
+                entries,
+                max_depth,
+            } = graph.statistics();
+            let exact = AnalysisLimits {
+                max_work: work,
+                max_entries: entries,
+                max_depth,
+            };
+            let exact_graph = analyze_ownership(&receipt, exact);
+            assert!(
+                exact_graph.roots()[root(&exact_graph, "sameRoot")]
+                    .mir()
+                    .is_some()
+            );
+            for caps in [
+                AnalysisLimits {
+                    max_work: work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = analyze_ownership(&receipt, caps);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+            }
+            let foreign = loader::load_installed(request.clone()).unwrap();
+            let foreign_module = foreign
+                .modules()
+                .iter()
+                .find(|m| m.key == module.key)
+                .unwrap();
+            let foreign_id = &foreign_module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("sameRoot"))
+                .unwrap()
+                .id;
+            for (module, id) in [(module, foreign_id), (foreign_module, &decl("sameRoot").id)] {
+                assert_eq!(
+                    lower_body(&receipt, module, id, AnalysisLimits::default()).unwrap_err(),
+                    QueryError::InvalidRequest
+                );
+            }
+        },
+    );
+}
+
 #[test]
 fn shared_job_source_moves_and_releases_through_the_installed_list_backing() {
     let mut observed = Vec::new();

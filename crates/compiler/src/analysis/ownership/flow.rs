@@ -32,6 +32,7 @@ struct Held {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CallableOwner {
     LocalCapture(NodeId),
+    ListArrow(NodeId),
     LocalExclusive,
     Pair(CallableLayout),
     Formal(CallableLayout),
@@ -41,7 +42,9 @@ enum CallableOwner {
 impl CallableOwner {
     fn transport_cleanup(self) -> Option<CallableLayout> {
         match self {
-            Self::LocalCapture(_) | Self::LocalExclusive | Self::Pair(_) => None,
+            Self::LocalCapture(_) | Self::ListArrow(_) | Self::LocalExclusive | Self::Pair(_) => {
+                None
+            }
             Self::Formal(layout) | Self::Returned(layout) => Some(layout),
         }
     }
@@ -191,6 +194,10 @@ fn liveness(
                 into,
                 ..
             } => ([Some(capture), second], Some(into)),
+            Action::FormListArrow { capture, into } => use_one(Some(capture), Some(into)),
+            Action::CallListArrows {
+                receivers, into, ..
+            } => (receivers.map(Some), Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
             Action::CopyClosure { from, into } => use_one(Some(from), Some(into)),
             Action::InvokeClosurePair { receiver, into, .. }
@@ -2045,6 +2052,8 @@ pub(super) fn run<'a, 'g>(
         slots,
         code,
         calls,
+        list_arrow_pairs,
+        incoming_list_arrow,
         mut cleanups,
         body_scope,
         dispose,
@@ -2091,6 +2100,18 @@ pub(super) fn run<'a, 'g>(
                 ..Held::default()
             });
         }
+    }
+    if let Some((view, backing)) = incoming_list_arrow {
+        budget.reserve(1)?;
+        state[view] = State::Initialized(Held {
+            loans: Arc::from([Loan {
+                source: backing,
+                site: slots[view].node,
+                exclusive: false,
+                kind: LoanKind::Backing,
+            }]),
+            ..Held::default()
+        });
     }
     let mut callable_exported = false;
     let mut unsupported_cleanup = Vec::new();
@@ -2177,6 +2198,11 @@ pub(super) fn run<'a, 'g>(
         if active.is_some() && matches!(action, Action::BudgetBackedge) {
             single_active_call = false;
         }
+        if matches!(action, Action::CallListArrows { .. }) {
+            candidate = false;
+            replacement_candidate = false;
+            single_active_call = false;
+        }
         // Tag reached sites during the ordinary visit without a second walk.
         if candidate {
             flat &= flat_action(action, &slots);
@@ -2209,6 +2235,7 @@ pub(super) fn run<'a, 'g>(
                         | Action::WrapResultFailure { .. }
                         | Action::DropResultFailure { .. }
                         | Action::CopyClosure { .. }
+                        | Action::CallListArrows { .. }
                         | Action::InvokeClosurePair { .. }
                         | Action::InvokeMutableI32Cell { .. }
                 ) || unsupported_cleanup
@@ -2879,6 +2906,81 @@ pub(super) fn run<'a, 'g>(
                         }
                     } else {
                         Operation::Call(call.callee)
+                    }
+                }
+                Action::FormListArrow { capture, into } => {
+                    let staged = initialized(&state[capture], node)?;
+                    state[into] = State::Initialized(Held {
+                        loans: staged.loans.clone(),
+                        callable_owner: Some(CallableOwner::ListArrow(node)),
+                        ..Held::default()
+                    });
+                    state[capture] = State::Vacant;
+                    Operation::FormClosure {
+                        closure: local(into).root,
+                        capture: local(capture).root,
+                        mode: InvocationMode::ReadOnly,
+                    }
+                }
+                Action::CallListArrows {
+                    pair,
+                    receivers,
+                    into,
+                } => {
+                    let pair = &list_arrow_pairs[pair];
+                    budget.reserve(2)?;
+                    let mut invoke = |position: usize| -> ResultOf<ListArrowFrame<'g>> {
+                        let receiver = receivers[position];
+                        let body = &pair.children[position];
+                        let environment = local(receiver);
+                        let origin = environment.root;
+                        let held = initialized(&state[receiver], node)?;
+                        budget.step(1)?;
+                        if held.callable_owner != Some(CallableOwner::ListArrow(origin.node))
+                            || !matches!(held.loans.as_ref(), [Loan {
+                                source, site, exclusive: false, kind: LoanKind::Backing,
+                            }] if *source == body.source && *site == body.capture.root.node)
+                        {
+                            return Err(Stop::Pending(node));
+                        }
+                        require_initialized(&slots, &state, body.source, node, budget)?;
+                        for (slot, access) in [
+                            (receiver, Access::Exclusive),
+                            (body.source, Access::Observe),
+                        ] {
+                            conflict(
+                                &slots,
+                                &state,
+                                &live[pc],
+                                slot,
+                                (node, Conflict::Access),
+                                access,
+                                budget,
+                            )?;
+                        }
+                        // The single loan moves into the child descriptor and
+                        // ends at its checked cleanup, not again in the caller.
+                        state[receiver] = State::Moved(node);
+                        retire_loans(&slots, &mut state, &[receiver], budget)?;
+                        state[into + 1 + position] = State::Initialized(empty.clone());
+                        Ok(ListArrowFrame {
+                            origin,
+                            invocation: body.invocation,
+                            body_site: body.body_site,
+                            environment,
+                            capture: body.capture,
+                            backing: local(body.source),
+                            incoming_backing: body.incoming_backing,
+                            result: local(into + 1 + position),
+                            body: Arc::clone(&body.body),
+                        })
+                    };
+                    let slots = Box::new([invoke(0)?, invoke(1)?]);
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::CallListArrows {
+                        implementation: pair.implementation,
+                        body: pair.body,
+                        slots,
                     }
                 }
                 Action::FormClosure {

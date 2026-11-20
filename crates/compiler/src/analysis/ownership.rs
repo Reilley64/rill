@@ -475,6 +475,13 @@ pub enum Operation<'g> {
         layout: CallableLayout,
         body: Arc<Mir<'g>>,
     },
+    /// Invoke the selected ordinary application body, not a joined child
+    /// operation. Both transferred environments end on the normal edge.
+    CallListArrows {
+        implementation: &'g DeclarationId,
+        body: Site<'g>,
+        slots: Box<[ListArrowFrame<'g>; 2]>,
+    },
     /// Call the selected scalar copy body, ending only the argument stage.
     CallScalarCopy {
         implementation: &'g DeclarationId,
@@ -656,6 +663,22 @@ pub enum Operation<'g> {
         field: Site<'g>,
     },
     Cleanup(Vec<Cleanup<'g>>),
+}
+
+/// Entry and return bindings for one normal arrow frame. The transferred
+/// environment supplies `capture`; its `EndStorage` ends that loan. `backing`
+/// stays in the caller; `incoming_backing` is its non-owning name in `body`.
+#[derive(Debug)]
+pub struct ListArrowFrame<'g> {
+    pub origin: Site<'g>,
+    pub invocation: Site<'g>,
+    pub body_site: Site<'g>,
+    pub environment: Place<'g>,
+    pub capture: Place<'g>,
+    pub backing: Place<'g>,
+    pub incoming_backing: Place<'g>,
+    pub result: Place<'g>,
+    pub body: Arc<Mir<'g>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1942,6 +1965,15 @@ enum Action<'g> {
         origin: &'g Span,
         cause_display: &'g DeclarationId,
     },
+    FormListArrow {
+        capture: Slot,
+        into: Slot,
+    },
+    CallListArrows {
+        pair: usize,
+        receivers: [Slot; 2],
+        into: Slot,
+    },
     FormClosure {
         capture: Slot,
         second: Option<Slot>,
@@ -2057,6 +2089,9 @@ struct Build<'a, 'g, 'b> {
     slots: Vec<Local<'g>>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'a, 'g>>,
+    list_arrow_pairs: Vec<build::ListArrowPair<'g>>,
+    // A transferred descriptor and its external backing, not a new acquisition.
+    incoming_list_arrow: Option<(Slot, Slot)>,
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
     scalar_copy_read: Option<NodeId>,
