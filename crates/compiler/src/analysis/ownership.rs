@@ -95,7 +95,8 @@ impl<'g> Mir<'g> {
         self.disposer_bodies.get(implementation)
     }
 
-    /// Intrinsic cancellation proof for this frame in the supported flat subset.
+    /// Intrinsic cancellation proof for a supported flat frame, including
+    /// its suspended state at an admitted retaining call into a second frame.
     /// `None` means unknown, not that cancellation is impossible. `Some` does
     /// not certify enclosing callers, deferred regions, or graph-wide roots.
     pub fn cancellation(&self) -> Option<&Cancellation<'g>> {
@@ -144,7 +145,8 @@ pub struct RetainingCallCancellation<'g> {
     /// Its entry and reached backedges carry the callee's terminal cleanup.
     pub body: Mir<'g>,
     pub destination: Place<'g>,
-    /// The checked slot can retain old or compatible new backing, never the access stage.
+    /// Conservative backing for caller cleanup at either delivery site, not
+    /// the exact contents at a single checkpoint. Excludes the access stage.
     pub possible_backing: Vec<Place<'g>>,
     /// Runs only after the callee checks the slot and cleans its frame, for either delivery site.
     pub caller_cleanup: Vec<Cleanup<'g>>,

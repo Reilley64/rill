@@ -179,7 +179,7 @@ function safeBody(slot: &mut &bool, input: &bool, enter: bool): void {
     let flag = true;
     *slot = &flag;
     *slot = input;
-    while (enter) { continue; }
+    while ((((((((enter)))))))) { continue; }
 }
 function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
     let flag = true;
@@ -362,7 +362,12 @@ function callerOfNestedBody(enter: bool): void {
                 else {
                     panic!("expected the feasible callee backedge");
                 };
-                assert_eq!(backedge.site.span.bytes(), b"while (enter) { continue; }");
+                let loop_site: &[u8] = if name == "good" {
+                    b"while ((((((((enter)))))))) { continue; }"
+                } else {
+                    b"while (enter) { continue; }"
+                };
+                assert_eq!(backedge.site.span.bytes(), loop_site);
                 let retained = on_delivery.retained.as_ref().unwrap();
                 assert_place(retained.parameter, parameters[0], module);
                 let repair = retained.last_store.unwrap();
@@ -387,15 +392,15 @@ function callerOfNestedBody(enter: bool): void {
                     .map(|place| place.root.span.bytes())
                     .collect::<std::collections::BTreeSet<_>>();
                 assert_eq!(backing, [b"prior".as_slice(), b"input"].into());
-                let mut ended = Vec::new();
-                let mut dropped = Vec::new();
-                for action in &call.caller_cleanup {
-                    match action {
-                        MirCleanup::EndStorage(place) => ended.push(place.root.span.bytes()),
-                        MirCleanup::Drop(place) => dropped.push(place.root.span.bytes()),
+                let cleanup: Vec<_> = call
+                    .caller_cleanup
+                    .iter()
+                    .map(|action| match action {
+                        MirCleanup::EndStorage(place) => ("end", place.root.span.bytes()),
+                        MirCleanup::Drop(place) => ("drop", place.root.span.bytes()),
                         other => panic!("unexpected caller delivery cleanup: {other:?}"),
-                    }
-                }
+                    })
+                    .collect();
                 let Terminator::Goto(next) = block.terminator else {
                     panic!("missing ordinary call continuation");
                 };
@@ -411,16 +416,16 @@ function callerOfNestedBody(enter: bool): void {
                     // Both possible backing owners were declared after slot; without
                     // the retained dependencies they would retire before the slot.
                     assert_eq!(
-                        ended,
+                        cleanup,
                         [
-                            b"slot".as_slice(),
-                            b"input",
-                            b"prior",
-                            b"initial",
-                            b"enter: bool"
+                            ("end", b"slot".as_slice()),
+                            ("end", b"input"),
+                            ("end", b"prior"),
+                            ("end", b"initial"),
+                            ("drop", b"callerText"),
+                            ("end", b"enter: bool")
                         ]
                     );
-                    assert_eq!(dropped, [b"callerText"]);
                     assert!(
                         normal
                             .iter()
@@ -431,10 +436,15 @@ function callerOfNestedBody(enter: bool): void {
                         if suffix.root.span.bytes() == b"callerSuffix" && text.root.span.bytes() == b"callerText")
                     );
                 } else {
-                    assert!(locals.is_empty() && dropped.is_empty());
+                    assert!(locals.is_empty());
                     assert_eq!(
-                        ended,
-                        [b"slot".as_slice(), b"input", b"prior", b"enter: bool"]
+                        cleanup,
+                        [
+                            ("end", b"slot".as_slice()),
+                            ("end", b"input"),
+                            ("end", b"prior"),
+                            ("end", b"enter: bool")
+                        ]
                     );
                     let start = straight_blocks(body, body.entry);
                     let Terminator::Branch { no, .. } = start.last().unwrap().terminator else {
@@ -461,6 +471,10 @@ function callerOfNestedBody(enter: bool): void {
                         },
                         AnalysisLimits {
                             max_entries: used.entries - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_depth: used.max_depth - 1,
                             ..exact
                         },
                     ] {
