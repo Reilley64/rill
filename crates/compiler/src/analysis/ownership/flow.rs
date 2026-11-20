@@ -2027,6 +2027,7 @@ pub(super) fn run<'a, 'g>(
     let mut replacement_candidate = application_function && build.retained.is_empty();
     let Build {
         typed,
+        copied_origins,
         module,
         body,
         mut facts,
@@ -2850,12 +2851,21 @@ pub(super) fn run<'a, 'g>(
                     let drop_of = |slot: Slot| {
                         (slots[slot].cleanup == StorageCleanup::Drop).then_some(slots[slot].node)
                     };
+                    let track_single = if second.is_none()
+                        && cell_addend.is_none()
+                        && !copied_origins.is_empty()
+                    {
+                        budget.step(1)?;
+                        copied_origins.contains(&node)
+                    } else {
+                        false
+                    };
                     state[into] = State::Initialized(Held {
                         loans,
                         capture_drops: [drop_of(capture), second.and_then(drop_of)],
                         callable_owner: if local_exclusive {
                             Some(CallableOwner::LocalExclusive)
-                        } else if second.is_none() && cell_addend.is_none() {
+                        } else if track_single {
                             Some(CallableOwner::LocalCapture(node))
                         } else {
                             layout.map(CallableOwner::Pair)
@@ -2937,6 +2947,7 @@ pub(super) fn run<'a, 'g>(
                         let effect = match capture.action {
                             CaptureCopyAction::Scalar(p) => CaptureCopyEffect::Scalar {
                                 field,
+                                implementation: &p.implementation.id,
                                 primitive: p.primitive,
                             },
                             CaptureCopyAction::Text { copy, dispose } => {

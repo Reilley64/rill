@@ -691,6 +691,7 @@ pub enum CallableField {
 pub enum CaptureCopyEffect<'g> {
     Scalar {
         field: Site<'g>,
+        implementation: &'g DeclarationId,
         primitive: super::typed::Primitive,
     },
     Text {
@@ -1988,6 +1989,7 @@ struct Build<'a, 'g, 'b> {
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
     scalar_copy_read: Option<NodeId>,
+    copied_origins: BTreeSet<NodeId>,
     dispose: Option<&'g DeclarationId>,
     return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
     callable_frame: Option<(CallableLayout, Slot)>,

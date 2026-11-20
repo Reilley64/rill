@@ -355,6 +355,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             cleanups: Vec::new(),
             body_scope: None,
             scalar_copy_read: None,
+            copied_origins: BTreeSet::new(),
             dispose: typed.dispose_role().map(|d| &d.id),
             return_contract,
             callable_frame: None,
@@ -4930,6 +4931,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 (capture, written, None)
             }
             [first, second] => {
+                let (body, depth) = self.ungroup_expression_at(body, depth)?;
                 self.budget.step(1)?;
                 let Some(DataExpression::Tuple { elements }) = &self.value(body)?.data else {
                     return Err(Stop::Pending(node));
@@ -5763,6 +5765,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // This immediate borrow has no separately live descriptor. The copy
         // action checks shared access to the named source at this point.
         let from = self.resolve_place(owner, path)?;
+        let Some(DataExpression::CallableCopy(copy)) = &facts.data else {
+            return Err(pending());
+        };
+        self.budget.reserve(1)?;
+        self.copied_origins.insert(copy.origin.node);
         self.emit(node, Action::CopyClosure { from, into }, Edges::Next(next))
     }
 

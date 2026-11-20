@@ -957,6 +957,14 @@ pub(super) fn visit_dependencies<'g>(
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
             }
+            Operation::CopyClosure { ref captures, .. } => {
+                budget.step(captures.len())?;
+                for capture in captures {
+                    if let CaptureCopyEffect::Scalar { implementation, .. } = capture {
+                        emit(implementation, OrdinaryCall, budget)?;
+                    }
+                }
+            }
             Operation::CallScalarCopy { implementation, .. }
             | Operation::CallScalarDispose { implementation, .. } => {
                 emit(implementation, OrdinaryCall, budget)?

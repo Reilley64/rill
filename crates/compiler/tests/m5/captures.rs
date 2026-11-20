@@ -10,7 +10,7 @@ use compiler::analysis::{
 
 #[test]
 fn canonical_copy_keeps_the_scalar_environment_owner_available() {
-    probe(
+    probe_with_typed(
         "captures::canonical_copy_keeps_the_scalar_environment_owner_available",
         r#"
             function duplicate(seed: bool): void {
@@ -20,18 +20,28 @@ fn canonical_copy_keeps_the_scalar_environment_owner_available() {
                 let _ = job;
             }
         "#,
-        |request, module, receipt| {
-            use compiler::analysis::typed::Primitive;
+        |request, module, receipt, typed| {
+            use compiler::analysis::typed::{Primitive, PrimitiveRole};
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             assert_eq!(graph.context(), receipt.context());
             assert_eq!(graph.test_mode(), request.test_mode);
             let root = check_local_capture_root(module, receipt, &graph, "duplicate", None);
-            for mir in [
-                root.mir().unwrap(),
-                capture_graph_root(module, &graph, capture_declaration(module, "duplicate"))
-                    .mir()
-                    .unwrap(),
-            ] {
+            let caller =
+                capture_graph_root(module, &graph, capture_declaration(module, "duplicate"));
+            let [edge] = caller.dependencies() else {
+                panic!("the scalar field must depend on its selected copy body")
+            };
+            let provider = typed
+                .primitive_providers()
+                .iter()
+                .find(|p| p.primitive == Primitive::Bool && p.role == PrimitiveRole::Copy)
+                .unwrap();
+            assert!(std::ptr::eq(edge.declaration, &provider.implementation.id));
+            assert_eq!(
+                edge.contract,
+                compiler::analysis::ownership::DependencyContract::OrdinaryCall
+            );
+            for mir in [root.mir().unwrap(), caller.mir().unwrap()] {
                 let ops = linear(mir, mir.entry);
                 let [
                     Operation::CopyClosure {
@@ -49,8 +59,8 @@ fn canonical_copy_keeps_the_scalar_environment_owner_available() {
                     panic!("expected exactly one environment-copy effect")
                 };
                 assert!(
-                    matches!(captures.as_slice(), [CaptureCopyEffect::Scalar { field, primitive: Primitive::Bool }]
-                    if field.span.bytes() == b"seed")
+                    matches!(captures.as_slice(), [CaptureCopyEffect::Scalar { field, implementation, primitive: Primitive::Bool }]
+                    if field.span.bytes() == b"seed" && std::ptr::eq(*implementation, edge.declaration))
                 );
                 assert_eq!(from.root.span.bytes(), b"job");
                 assert_eq!(into.root.span.bytes(), b"other");
@@ -71,10 +81,14 @@ fn canonical_copy_of_owned_text_uses_the_pinned_effect_and_cleans_both_owners() 
         r#"
             import std::core::copy as duplicate;
             function textCopies(left: string, right: string): void {
-                let job: once () => [string, string] = () => [right, left];
+                let job: once () => [string, string] = () => ([right, left]);
                 let other = duplicate((&(job)));
                 let _ = job;
                 let _ = other;
+            }
+            function invokeBoth(first: string, second: string): [string, string] {
+                let job: once () => [string, string] = () => [first, second];
+                let other = duplicate(&job); let _ = other(); return job();
             }
             function reuse(text: string): void {
                 let job: once () => string = () => text;
@@ -88,6 +102,18 @@ fn canonical_copy_of_owned_text_uses_the_pinned_effect_and_cleans_both_owners() 
             assert_eq!(graph.test_mode(), request.test_mode);
             let report = check_local_capture_root(module, receipt, &graph, "textCopies", None);
             let decl = capture_declaration(module, "textCopies");
+            let both = check_local_capture_root(module, receipt, &graph, "invokeBoth", None);
+            let mir = both.mir().unwrap();
+            let owners: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::InvokeClosurePair { receiver, .. } => {
+                        Some(receiver.root.span.bytes())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(owners, [b"other".as_slice(), b"job"]);
             let check_mir = |mir: &Mir<'_>| {
                 let path = straight_blocks(mir, mir.entry);
                 let [block] = path
@@ -124,7 +150,7 @@ fn canonical_copy_of_owned_text_uses_the_pinned_effect_and_cleans_both_owners() 
                 assert!(std::ptr::eq(checked.family, call.callee));
                 assert_ne!(from.root.node, into.root.node);
                 assert_eq!(origin.node, checked.origin.node);
-                assert_eq!(origin.span.bytes(), b"() => [right, left]");
+                assert_eq!(origin.span.bytes(), b"() => ([right, left])");
                 let [right, left] = checked.captures.as_slice() else {
                     panic!("typed pair layout")
                 };
@@ -300,6 +326,84 @@ fn canonical_copy_does_not_admit_unknown_origins_or_unrelated_families() {
                 call.selection.as_ref().unwrap().implementation.module.path,
                 "unrelated.rill"
             );
+        },
+    );
+}
+
+#[test]
+fn callable_copy_checks_actual_type_and_exclusive_evidence_before_mir() {
+    let test = "captures::callable_copy_checks_actual_type_and_exclusive_evidence_before_mir";
+    for (expression, target, expected) in [
+        ("() => seed", "copy<once () => bool>", "checked"),
+        ("() => seed", "copy<once () => i32>", "mismatch"),
+        (
+            "() => { let _ = &mut flag; return seed; }",
+            "copy",
+            "exclusive",
+        ),
+    ] {
+        let source = format!(
+            "function copyIt(seed: bool): void {{ let mut flag = seed; let job: once () => bool = {expression}; let _ = {target}(&job); let _ = job; }}"
+        );
+        probe_report(test, &source, |_, module, typed| {
+            use compiler::analysis::{scalars::ScalarFindingKind, typed::TypedCompletion};
+            match expected {
+                "checked" => {
+                    let receipt = typed
+                        .receipt()
+                        .expect("the explicit argument agrees with the independent borrow");
+                    let report = lower_capture_root(module, &receipt, "copyIt");
+                    let mir = report.mir().expect("checked owned scalar copy");
+                    assert_eq!(
+                        linear(mir, mir.entry)
+                            .iter()
+                            .filter(|op| matches!(op, Operation::CopyClosure { .. }))
+                            .count(),
+                        1
+                    );
+                }
+                "mismatch" => {
+                    assert!(typed.receipt().is_none());
+                    assert!(
+                        typed
+                            .bodies()
+                            .findings()
+                            .iter()
+                            .any(|f| f.kind == ScalarFindingKind::TypeMismatch)
+                    );
+                }
+                _ => {
+                    assert_eq!(typed.completion(), TypedCompletion::SourceRejected);
+                    assert!(typed.receipt().is_none());
+                    let f = typed
+                        .bodies()
+                        .findings()
+                        .iter()
+                        .find(|f| f.kind == ScalarFindingKind::MissingRequirement)
+                        .unwrap();
+                    assert_eq!(f.site.span.bytes(), b"copy(&job)");
+                    assert_eq!(f.related.unwrap().span.bytes(), b"&mut flag");
+                }
+            }
+        });
+    }
+}
+
+#[test]
+fn unused_scalar_closure_origins_coalesce_after_replacement() {
+    probe(
+        "captures::unused_scalar_closure_origins_coalesce_after_replacement",
+        r#"
+function discard(flag: bool, a: bool, b: bool): void {
+    let mut job: () => bool = () => a;
+    if (flag) { job = () => b; }
+    let _ = job;
+}
+"#,
+        |_, module, receipt| {
+            let report = lower_capture_root(module, receipt, "discard");
+            let mir = report.mir().unwrap();
+            assert_eq!(mir.blocks.iter().filter(|b|matches!(b.operation, Operation::Move{from,..} if from.root.span.bytes()==b"job")).count(),1,"uncopied scalar environments need not split the final discard");
         },
     );
 }

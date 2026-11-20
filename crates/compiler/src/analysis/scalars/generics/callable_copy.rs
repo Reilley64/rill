@@ -88,10 +88,6 @@ impl<'r, 'g> Checker<'r, 'g> {
         {
             return Ok(false);
         }
-        let Some(captures) = self.direct_copy_layout(module, &arrow)? else {
-            return Ok(false);
-        };
-
         // Use the captured, closed family, and do not filter by explicit
         // arguments here: no ordinary contender may overlap this input.
         // Neither origins nor requirement truth participate in ordinary ranking.
@@ -112,12 +108,34 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(false);
         }
 
-        if let Some(capture) = captures.into_iter().flatten().find(|capture| {
-            matches!(
-                capture.form,
-                CaptureForm::ExplicitBorrow { mutable: true }
-                    | CaptureForm::CarriedReference { mutable: true }
-            )
+        // One definite exclusive capture disproves duplication, regardless of
+        // whether we can lower the rest of the environment as a positive layout.
+        if !std::ptr::eq(arrow.site.module, &module.key)
+            || arrow.premise.is_some()
+            || arrow.mode.is_none()
+        {
+            return Ok(false);
+        }
+        self.elab.step(arrow.captures.len())?;
+        if let Some(capture) = arrow.captures.iter().find(|capture| {
+            capture.reachable
+                && capture.through.is_none()
+                && capture.path.projections.is_empty()
+                && std::ptr::eq(capture.site.module, &module.key)
+                && matches!(
+                    capture.ty.as_ref(),
+                    TypeTerm::Reference { mutable: true, .. }
+                )
+                && matches!(
+                    (capture.form, capture.access),
+                    (
+                        CaptureForm::ExplicitBorrow { mutable: true },
+                        data::Access::Writable
+                    ) | (
+                        CaptureForm::CarriedReference { mutable: true },
+                        data::Access::Owned
+                    )
+                )
         }) {
             self.finding(module, node, ScalarFindingKind::MissingRequirement)?;
             self.elab.step(self.facts.findings.len())?;
@@ -136,6 +154,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(true);
         }
 
+        let Some(captures) = self.direct_copy_layout(module, &arrow)? else {
+            return Ok(false);
+        };
         self.elab.reserve(1 + captures.len())?;
         let mut actions = Vec::new();
         for capture in captures.into_iter().flatten() {
@@ -270,26 +291,6 @@ impl<'r, 'g> Checker<'r, 'g> {
                 (CaptureForm::Value, NodeKind::ValueReference, TypeTerm::Primitive(p))
                     if capture.access == data::Access::Owned
                         && Primitive::named(p.name()).is_some() => {}
-                (
-                    CaptureForm::ExplicitBorrow { mutable: true },
-                    NodeKind::Prefix("&mut"),
-                    TypeTerm::Reference {
-                        mutable: true,
-                        referent,
-                    },
-                ) if primitive_name(referent) == Some("bool")
-                    && capture.path.root.kind == DeclarationKind::Binding
-                    && capture.access == data::Access::Writable => {}
-                (
-                    CaptureForm::CarriedReference { mutable: true },
-                    NodeKind::ValueReference,
-                    TypeTerm::Reference {
-                        mutable: true,
-                        referent,
-                    },
-                ) if primitive_name(referent) == Some("bool")
-                    && capture.access == data::Access::Owned
-                    && capture.demand == Some(InvocationMode::Once) => {}
                 _ => return Ok(None),
             }
         }

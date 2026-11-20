@@ -300,6 +300,29 @@ impl<'r, 'g> Checker<'r, 'g> {
                 {
                     continue;
                 }
+                // A named borrow of a known callable does not get its type from
+                // the explicit copy argument. Let its independent type arrive.
+                if module.syntax.nodes[leaf].kind == NodeKind::Prefix("&")
+                    && matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if matches!(referent.as_ref(), TypeTerm::Callable { .. }))
+                    && self
+                        .primitives
+                        .and_then(|core| core.copy)
+                        .is_some_and(|copy| std::ptr::eq(&copy.id, call.fact.callee))
+                {
+                    let owner = self.source_leaf(module, module.syntax.nodes[leaf].children[0])?;
+                    if module.syntax.nodes[owner].kind == NodeKind::ValueReference
+                        && inference.slots[&owner].ordinary_context.is_none()
+                    {
+                        let TypeTerm::Reference { referent, .. } = ty.as_ref() else {
+                            unreachable!()
+                        };
+                        if let Some(actual) = &inference.slots[&owner].ty
+                            && self.same(actual, referent)?
+                        {
+                            continue;
+                        }
+                    }
+                }
                 if !inference.ordinary_tuples.contains(&leaf) {
                     // List get has a width context only after the receiver is
                     // known and ordinary context agreement establishes u64.
