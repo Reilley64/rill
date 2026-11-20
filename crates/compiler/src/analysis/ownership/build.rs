@@ -31,7 +31,7 @@ enum PropagatingCallOutput<'a, 'g> {
 enum ExpressionProof<'t, 'g> {
     CallCarrier(&'t Type<'g>),
     NestedTupleParent(&'t PlacePath<'g>),
-    NestedTuplePatternSource(Slot),
+    NestedTupleSource(Slot),
     NestedRecordConstruction,
 }
 
@@ -947,8 +947,22 @@ impl<'a, 'g> Build<'a, 'g> {
         left: NodeId,
         facts: &'a ExpressionFacts<'g>,
         value: NodeId,
-    ) -> ResultOf<(Slot, Option<&'a Type<'g>>)> {
+    ) -> ResultOf<(Slot, Option<&'a Type<'g>>, Option<Slot>)> {
         let path = facts.path.as_ref().ok_or(Stop::Pending(left))?;
+        if facts.access == Access::Owned
+            && facts.place == TypedPlace::Writable
+            && matches!(facts.ty.as_ref(), TypeTerm::Tuple(_))
+            && path.projections.is_empty()
+            && !self.nested_tuple_bindings.is_empty()
+        {
+            self.budget.step(1)?;
+            if let Some(&(target, _)) = self.nested_tuple_bindings.get(path.root) {
+                let from = self
+                    .nested_tuple_transfer_source(value, &facts.ty)?
+                    .ok_or(Stop::Pending(value))?;
+                return Ok((target, None, Some(from)));
+            }
+        }
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
             && let [PathProjection::Field(field)] = path.projections.as_slice()
@@ -967,9 +981,9 @@ impl<'a, 'g> Build<'a, 'g> {
             if source.ty != facts.ty {
                 return Err(Stop::Pending(value));
             }
-            return Ok((child, Some(&source.ty)));
+            return Ok((child, Some(&source.ty), None));
         }
-        Ok((self.resolve_place(left, path)?, None))
+        Ok((self.resolve_place(left, path)?, None, None))
     }
 
     fn nested_transfer_slot(
@@ -993,6 +1007,37 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(value));
         }
         self.clone_region(from, dest).map(Some)
+    }
+
+    fn nested_tuple_transfer_source(
+        &mut self,
+        value: NodeId,
+        expected: &Type<'g>,
+    ) -> ResultOf<Option<Slot>> {
+        if !matches!(expected.as_ref(), TypeTerm::Tuple(_))
+            || self.nested_tuple_parameters.is_empty() && self.nested_tuple_bindings.is_empty()
+        {
+            return Ok(None);
+        }
+        let Some((facts, path)) = self.whole_named_owned_place(value)? else {
+            return Ok(None);
+        };
+        self.budget.step(1)?;
+        let from = match path.root.kind {
+            DeclarationKind::Parameter => self.nested_tuple_parameters.get(path.root).copied(),
+            _ => self
+                .nested_tuple_bindings
+                .get(path.root)
+                .map(|&(slot, _)| slot),
+        };
+        let Some(from) = from else {
+            return Ok(None);
+        };
+        self.budget.step(self.slots[from].storage(from).len())?;
+        if facts.ty != *expected {
+            return Err(Stop::Pending(value));
+        }
+        Ok(Some(from))
     }
 
     fn clone_region(&mut self, from: Slot, dest: NodeId) -> ResultOf<Slot> {
@@ -1261,7 +1306,24 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
                 match binding {
                     Binding::Discard => self.discard(node, value, next, depth + 1),
-                    Binding::Name { declaration, .. } => {
+                    Binding::Name {
+                        declaration, ty, ..
+                    } => {
+                        if matches!(ty.as_ref(), TypeTerm::Tuple(_))
+                            && !self.nested_tuple_bindings.is_empty()
+                        {
+                            self.budget.step(1)?;
+                            if let Some(&(into, from)) = self.nested_tuple_bindings.get(declaration)
+                            {
+                                return self.expression_with_proof(
+                                    value,
+                                    Some(into),
+                                    next,
+                                    depth + 1,
+                                    Some(ExpressionProof::NestedTupleSource(from)),
+                                );
+                            }
+                        }
                         let (into, nested) = self.binding_destination(node, declaration)?;
                         if nested {
                             return self.expression_with_proof(
@@ -1322,21 +1384,26 @@ impl<'a, 'g> Build<'a, 'g> {
                     )?;
                     return self.expression(value, Some(incoming), install, depth + 1);
                 }
-                let (target, proved_type) = self.assignment_target(left, facts, value)?;
+                let (target, proved_type, tuple_source) =
+                    self.assignment_target(left, facts, value)?;
                 if self.slots[target].projection.is_some()
                     && self.slots[target].guard_release().is_some()
                 {
                     return Err(Stop::Pending(left));
                 }
-                let ty = if let Some(ty) = proved_type {
-                    ty
+                let (incoming, temporary) = if let Some(from) = tuple_source {
+                    (self.clone_region(from, value)?, None)
                 } else {
-                    self.budget.step(1)?;
-                    &self.value(value)?.ty
+                    let ty = if let Some(ty) = proved_type {
+                        ty
+                    } else {
+                        self.budget.step(1)?;
+                        &self.value(value)?.ty
+                    };
+                    let incoming = self.slot(value, ty)?;
+                    let initializer = self.ungroup(value)?;
+                    (incoming, self.temporary_projection(initializer, false)?)
                 };
-                let incoming = self.slot(value, ty)?;
-                let initializer = self.ungroup(value)?;
-                let temporary = self.temporary_projection(initializer, false)?;
                 let next = if let Some(temp) = temporary {
                     self.cleanup(node, &[temp.scratch], next)?
                 } else {
@@ -1352,13 +1419,26 @@ impl<'a, 'g> Build<'a, 'g> {
                     Action::Displace { target, incoming },
                     Edges::Next(install),
                 )?;
+                if let Some(from) = tuple_source {
+                    return self.expression_with_proof(
+                        value,
+                        Some(incoming),
+                        displace,
+                        depth + 1,
+                        Some(ExpressionProof::NestedTupleSource(from)),
+                    );
+                }
                 self.stage_value(value, incoming, displace, temporary, depth + 1)
             }
             NodeKind::Return => {
                 let returning = self.check_retained(node, exits.returning)?;
                 if let Some(&value) = children.first() {
                     let ty = self.value(value)?.ty.clone();
-                    let output = if let Some(slot) =
+                    let tuple_source =
+                        self.nested_tuple_transfer_source(value, self.return_contract.1)?;
+                    let output = if let Some(from) = tuple_source {
+                        self.clone_region(from, value)?
+                    } else if let Some(slot) =
                         self.nested_transfer_slot(value, value, self.return_contract.1)?
                     {
                         slot
@@ -1369,6 +1449,15 @@ impl<'a, 'g> Build<'a, 'g> {
                         return Err(Stop::Pending(value));
                     }
                     let export = self.emit(node, Action::Export(output), Edges::Next(returning))?;
+                    if let Some(from) = tuple_source {
+                        return self.expression_with_proof(
+                            value,
+                            Some(output),
+                            export,
+                            depth + 1,
+                            Some(ExpressionProof::NestedTupleSource(from)),
+                        );
+                    }
                     let projected = self.ungroup(value)?;
                     let temporary = self.temporary_projection(projected, true)?;
                     let finish = if let Some(temp) = temporary {
@@ -1722,6 +1811,11 @@ impl<'a, 'g> Build<'a, 'g> {
                     self.budget.reserve(1)?;
                     self.nested_record_values.insert(declaration, slot);
                     slot
+                } else if let Some(from) = self.nested_tuple_transfer_source(initializer, ty)? {
+                    let slot = self.clone_region(from, site)?;
+                    self.budget.reserve(1)?;
+                    self.nested_tuple_bindings.insert(declaration, (slot, from));
+                    slot
                 } else {
                     self.local(declaration, site, ty)?
                 };
@@ -1995,7 +2089,7 @@ impl<'a, 'g> Build<'a, 'g> {
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
         let proof = tuple_source
-            .map(ExpressionProof::NestedTuplePatternSource)
+            .map(ExpressionProof::NestedTupleSource)
             .or_else(|| nested_reborrow.map(ExpressionProof::NestedTupleParent));
         self.expression_with_proof(source, Some(scratch), tail, depth, proof)
     }
@@ -3042,9 +3136,9 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
             NodeKind::ValueReference => Action::Read {
-                // Only owned pattern staging supplies this proved slot.
+                // Only exact named transfers and owned pattern staging supply this slot.
                 from: match proof {
-                    Some(ExpressionProof::NestedTuplePatternSource(slot)) => slot,
+                    Some(ExpressionProof::NestedTupleSource(slot)) => slot,
                     _ => self.read_value_place(node, facts)?,
                 },
                 into,
