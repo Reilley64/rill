@@ -4575,6 +4575,110 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok((descriptor, Projection::Field(member.declaration)))
     }
 
+    fn read_list_i32(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let Some(DataExpression::ListIndex {
+            declaration,
+            base,
+            selector,
+        }) = facts.data.as_ref()
+        else {
+            return Err(pending());
+        };
+        let list = self.typed.list_role().ok_or_else(pending)?;
+        if !std::ptr::eq(*declaration, &list.declaration.id)
+            || facts.access != Access::ReadOnly
+            || facts.place != TypedPlace::ReadOnly
+            || scalar::scalar(&facts.ty) != Some(Primitive::I32)
+        {
+            return Err(pending());
+        }
+        let index = self.normal_value(*selector)?;
+        self.depth(depth + 1)?;
+        let Some(LiteralValue::Integer {
+            magnitude,
+            negative: false,
+        }) = index.literal.map(|literal| literal.value)
+        else {
+            return Err(pending());
+        };
+        if self.module.syntax.nodes[*selector].kind != NodeKind::Literal
+            || scalar::scalar(&index.ty) != Some(Primitive::U64)
+        {
+            return Err(pending());
+        }
+        let index = u64::try_from(magnitude).map_err(|_| pending())?;
+        let (base, base_depth) = self.ungroup_expression_at(*base, depth + 1)?;
+        let view = self.normal_value(base)?;
+        if !matches!(view.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+            if self.is_list_i32(referent))
+        {
+            return Err(pending());
+        }
+        // Index syntax uses the linked index action, not selection of `get`
+        // (the latter returns an Option and does not trap on missing elements).
+        let provider = self.typed.list_operations_artifact().ok_or_else(pending)?;
+        let mut representation = None;
+        for repr in self.typed.collection_representations() {
+            self.budget.step(1)?;
+            if repr.storage == CollectionStorage::Elements
+                && std::ptr::eq(repr.declaration, list.declaration)
+                && std::ptr::eq(repr.artifact.context(), provider.context())
+            {
+                representation = Some(repr.artifact);
+                break;
+            }
+        }
+        let representation = representation.ok_or_else(pending)?;
+        let (slot, temporary) = match self.module.syntax.nodes[base].kind {
+            NodeKind::ValueReference => {
+                let path = view.path.as_ref().ok_or_else(pending)?;
+                if !path.projections.is_empty() {
+                    return Err(pending());
+                }
+                (self.resolve_place(base, path)?, false)
+            }
+            NodeKind::Prefix("&") => {
+                let operand = self.module.syntax.nodes[base].children[0];
+                let (operand, _) = self.ungroup_expression_at(operand, base_depth + 1)?;
+                if self.module.syntax.nodes[operand].kind != NodeKind::ValueReference {
+                    return Err(pending());
+                }
+                (self.slot(base, &view.ty)?, true)
+            }
+            _ => return Err(pending()),
+        };
+        let next = if temporary {
+            self.cleanup(node, &[slot], next)?
+        } else {
+            next
+        };
+        let read = self.emit(
+            node,
+            Action::ReadListI32 {
+                view: slot,
+                index,
+                into,
+                owner: &list.declaration.id,
+                representation,
+                provider,
+            },
+            Edges::Next(next),
+        )?;
+        if temporary {
+            self.expression(base, Some(slot), read, base_depth)
+        } else {
+            Ok(read)
+        }
+    }
+
     fn expression_with_proof(
         &mut self,
         node: NodeId,
@@ -4721,6 +4825,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 );
             }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
+            NodeKind::Index => return self.read_list_i32(node, facts, into, next, depth),
             NodeKind::ValueReference => Action::Read {
                 // Only exact named transfers and owned pattern staging supply this slot.
                 from: match proof {

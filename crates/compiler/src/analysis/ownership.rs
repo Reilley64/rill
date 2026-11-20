@@ -7,7 +7,7 @@ use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
     TypeTerm, retained_bool_contents_type,
 };
-use crate::loader::{Declaration, DeclarationId, DeclarationKind};
+use crate::loader::{CollectionArtifact, Declaration, DeclarationId, DeclarationKind};
 use crate::source::Span;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
@@ -419,6 +419,19 @@ pub enum Operation<'g> {
         exclusive: bool,
     },
     Dereference(Place<'g>),
+    /// Copy an i32 through a shared view using the linked `List::index` action.
+    /// The full u64 is checked against the backing at evaluation; out of
+    /// bounds is fatal. Only success initializes `into` and reaches the
+    /// normal successor.
+    ReadListI32 {
+        view: Place<'g>,
+        backing: Place<'g>,
+        index: u64,
+        into: Option<Place<'g>>,
+        owner: &'g DeclarationId,
+        representation: CollectionArtifact<'g>,
+        provider: CollectionArtifact<'g>,
+    },
     /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
@@ -1856,6 +1869,14 @@ enum Action<'g> {
         projection: Projection<'g>,
         into: Slot,
         binding: BorrowedMemberBinding,
+    },
+    ReadListI32 {
+        view: Slot,
+        index: u64,
+        into: Option<Slot>,
+        owner: &'g DeclarationId,
+        representation: CollectionArtifact<'g>,
+        provider: CollectionArtifact<'g>,
     },
     Call(usize),
     CopyClosure {

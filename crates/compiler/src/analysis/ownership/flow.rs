@@ -173,6 +173,7 @@ fn liveness(
             Action::BindBorrowedMember {
                 descriptor, into, ..
             } => use_one(Some(descriptor), Some(into)),
+            Action::ReadListI32 { view, into, .. } => use_one(Some(view), into),
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
@@ -3217,6 +3218,53 @@ pub(super) fn run<'a, 'g>(
                     Operation::Install {
                         target: local(target),
                         incoming: local(incoming),
+                    }
+                }
+                Action::ReadListI32 {
+                    view,
+                    index,
+                    into,
+                    owner,
+                    representation,
+                    provider,
+                } => {
+                    budget.step(1)?;
+                    let held = initialized(&state[view], node)?;
+                    let [
+                        Loan {
+                            source: backing,
+                            exclusive: false,
+                            kind: LoanKind::Backing,
+                            ..
+                        },
+                    ] = held.loans.as_ref()
+                    else {
+                        return Err(Stop::Pending(node));
+                    };
+                    let backing = *backing;
+                    require_initialized(&slots, &state, backing, node, budget)?;
+                    for source in [view, backing] {
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            source,
+                            (node, Conflict::Access),
+                            Access::Observe,
+                            budget,
+                        )?;
+                    }
+                    if let Some(into) = into {
+                        state[into] = State::Initialized(empty.clone());
+                    }
+                    Operation::ReadListI32 {
+                        view: local(view),
+                        backing: local(backing),
+                        index,
+                        into: into.map(local),
+                        owner,
+                        representation,
+                        provider,
                     }
                 }
                 Action::CopyThrough { descriptor, into } => {

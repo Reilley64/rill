@@ -1,7 +1,9 @@
 use super::*;
-use compiler::analysis::Statistics;
 use compiler::analysis::ownership::{DependencyContract, GraphObligation, analyze_ownership};
-use compiler::analysis::typed::{CollectionOperation, CollectionStorage, OwnershipCoverage};
+use compiler::analysis::typed::{
+    CollectionOperation, CollectionStorage, OwnershipCoverage, ResultUseBlocker, TypedCompletion,
+};
+use compiler::analysis::{QueryError, Statistics, scalars::ScalarFindingKind};
 
 #[test]
 fn shared_job_source_moves_and_releases_through_the_installed_list_backing() {
@@ -310,6 +312,290 @@ fn list_backing_cleanup_follows_the_owner_not_the_parameter_slot() {
             let other = lower("other");
             assert_eq!(other.completion(), Completion::Incomplete);
             assert!(other.mir().is_none() && other.findings().is_empty());
+        },
+    );
+}
+
+#[test]
+fn installed_shared_list_literal_reads() {
+    probe_with_typed(
+        "scoped_jobs::installed_shared_list_literal_reads",
+        r#"
+            function first(input: List<i32>): i32 {
+                let numbers = input;
+                let view = &numbers;
+                let result = view[0u64];
+                dispose(numbers);
+                return result;
+            }
+            function second(input: List<i32>): i32 {
+                let numbers = input;
+                let result = (&numbers)[1u64];
+                dispose(numbers);
+                return result;
+            }
+            function zero(numbers: List<i32>): i32 { return (&numbers)[0u64]; }
+            function wide(input: List<i32>): i32 { return (&input)[18446744073709551615u64]; }
+            function unknown(view: &List<i32>): i32 { return view[0u64]; }
+            function exclusive(view: &mut List<i32>): i32 { return view[0u64]; }
+            function dynamic(input: List<i32>, index: u64): i32 { return (&input)[index]; }
+            function live(input: List<i32>): i32 {
+                let view = &input;
+                dispose(input);
+                return view[0u64];
+            }
+            function moved(input: List<i32>): i32 {
+                let numbers = input;
+                dispose(numbers);
+                return (&numbers)[0u64];
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let limits = AnalysisLimits::default();
+            let decl = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower = |name| lower_body(receipt, module, &decl(name).id, limits).unwrap();
+            let graph = analyze_ownership(receipt, limits);
+            let root = |name| {
+                graph
+                    .roots()
+                    .iter()
+                    .find(|root| {
+                        root.site().module == &module.key && root.site().node == decl(name).node
+                    })
+                    .unwrap()
+            };
+            assert!(
+                graph
+                    .open_obligations()
+                    .contains(&GraphObligation::MaskingAndJoin)
+            );
+            let list = typed.list_role().unwrap();
+            let representation = typed
+                .collection_representations()
+                .find(|repr| {
+                    repr.storage == CollectionStorage::Elements
+                        && std::ptr::eq(repr.declaration, list.declaration)
+                })
+                .unwrap()
+                .artifact;
+            let provider = typed.list_operations_artifact().unwrap();
+            assert_ne!(representation, provider);
+            for artifact in [representation, provider] {
+                assert_eq!(*artifact.context(), receipt.context());
+                assert!(artifact.executable().ends_with("bin/m5-probe"));
+            }
+            for (name, index, site, temporary) in [
+                ("first", 0, "view[0u64]", false),
+                ("second", 1, "(&numbers)[1u64]", true),
+                ("zero", 0, "(&numbers)[0u64]", true),
+                ("wide", u64::MAX, "(&input)[18446744073709551615u64]", true),
+            ] {
+                let report = lower(name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::Checked,
+                    "{name} {report:?}"
+                );
+                let root = root(name);
+                assert_eq!(root.completion(), Completion::Checked, "{name}");
+                // Brackets are the direct installed operation, not a call to `get`.
+                assert!(
+                    root.dependencies()
+                        .iter()
+                        .all(|edge| edge.site.span.bytes() != site.as_bytes())
+                );
+                for mir in [report.mir().unwrap(), root.mir().unwrap()] {
+                    let path = straight_blocks(mir, mir.entry);
+                    let [read_at] = path
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(at, block)| {
+                            matches!(block.operation, Operation::ReadListI32 { .. }).then_some(at)
+                        })
+                        .collect::<Vec<_>>()[..]
+                    else {
+                        panic!("exactly one checked read")
+                    };
+                    let Operation::ReadListI32 {
+                        view,
+                        backing,
+                        index: read_index,
+                        into: Some(result),
+                        owner,
+                        representation: repr,
+                        provider: linked,
+                    } = path[read_at].operation
+                    else {
+                        panic!("the read must produce an i32")
+                    };
+                    assert_eq!(path[read_at].site.span.bytes(), site.as_bytes());
+                    assert_eq!(read_index, index);
+                    assert!(std::ptr::eq(owner, &list.declaration.id));
+                    assert_eq!((repr, linked), (representation, provider));
+                    assert!(matches!(path[read_at - 1].operation,
+                        Operation::Borrow { source, holder, exclusive: false }
+                            if source.root.node == backing.root.node && holder.root.node == view.root.node));
+                    if temporary {
+                        assert!(
+                            matches!(&path[read_at + 1].operation, Operation::Cleanup(items)
+                            if matches!(items.as_slice(), [Obligation::EndStorage(ended)]
+                                if ended.root.node == view.root.node))
+                        );
+                    }
+                    let [Obligation::DisposeListI32 { operand, .. }] =
+                        path_drops(mir, mir.entry)[..]
+                    else {
+                        panic!("exactly one backing cleanup")
+                    };
+                    assert_eq!(operand.root.node, backing.root.node);
+                    assert!(path[read_at + 1..].iter().any(|block| matches!(&block.operation,
+                        Operation::Cleanup(items) if items.iter().any(|item|
+                            matches!(item, Obligation::DisposeListI32 { operand, .. } if operand.root.node == backing.root.node)))));
+                    let exported = path
+                        .iter()
+                        .find_map(|block| match block.operation {
+                            Operation::Export(place) => Some(place),
+                            _ => None,
+                        })
+                        .unwrap();
+                    assert!(exported.root.node == result.root.node || path[read_at + 1..].iter().any(|block|
+                        matches!(block.operation, Operation::Copy { from, into: Some(into) }
+                            if from.root.node == result.root.node && into.root.node == exported.root.node)));
+                    assert!(mir.cancellation().is_none());
+                }
+                if name == "second" {
+                    check_exact(receipt, module, &decl(name).id, report.statistics());
+                }
+            }
+            for (name, site) in [
+                ("unknown", "view[0u64]"),
+                ("exclusive", "view[0u64]"),
+                ("dynamic", "(&input)[index]"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site.as_bytes());
+                assert!(report.findings().is_empty() && report.mir().is_none());
+                assert_eq!(root(name).completion(), Completion::Incomplete);
+                assert!(root(name).mir().is_none());
+            }
+            for (name, code, site, related) in [
+                ("live", "R0203", "dispose(input)", "&input"),
+                ("moved", "R0200", "&numbers", "dispose(numbers)"),
+            ] {
+                let report = lower(name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::SourceRejected,
+                    "{name} {report:?}"
+                );
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("one ownership finding")
+                };
+                assert_eq!(
+                    (
+                        finding.code(),
+                        finding.site.span.bytes(),
+                        finding.related.span.bytes()
+                    ),
+                    (code, site.as_bytes(), related.as_bytes())
+                );
+                assert_eq!(root(name).completion(), Completion::SourceRejected);
+                assert!(root(name).mir().is_none());
+            }
+
+            let installed = loader::load_installed(request.clone()).unwrap();
+            let foreign = installed
+                .modules()
+                .iter()
+                .find(|m| m.key == module.key)
+                .unwrap();
+            let foreign_id = &foreign
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("first"))
+                .unwrap()
+                .id;
+            for (module, id) in [(foreign, &decl("first").id), (module, foreign_id)] {
+                assert_eq!(
+                    lower_body(receipt, module, id, limits).unwrap_err(),
+                    QueryError::InvalidRequest
+                );
+            }
+            let source_only = loader::load(installed.request().clone()).unwrap();
+            let wrong_target = loader::load_installed(InstalledRequest {
+                target: "wasm32-wasip1".into(),
+                ..request.clone()
+            })
+            .unwrap();
+            for graph in [&source_only, &wrong_target] {
+                let typed = analyze_typed(graph, limits);
+                assert!(typed.receipt().is_none());
+                assert!(typed.list_operations_artifact().is_none());
+                assert!(typed.collection_representations().next().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn overflowing_list_selector_is_static_invalid() {
+    probe_report(
+        "scoped_jobs::overflowing_list_selector_is_static_invalid",
+        "function invalid(numbers: List<i32>): i32 { return (&numbers)[18446744073709551616u64]; }",
+        |_, module, typed| {
+            // A static literal diagnostic can coexist with incomplete aggregate facts.
+            assert!(typed.receipt().is_none());
+            assert!(
+                typed
+                    .bodies()
+                    .findings()
+                    .iter()
+                    .any(|finding| finding.kind == ScalarFindingKind::LiteralRange
+                        && finding.site.module == &module.key
+                        && finding.site.span.bytes() == b"18446744073709551616u64")
+            );
+        },
+    );
+}
+
+#[test]
+fn list_arrow_invocations_still_need_typed_environment_evidence() {
+    probe_report(
+        "scoped_jobs::list_arrow_invocations_still_need_typed_environment_evidence",
+        r#"
+            function known(input: List<i32>): i32 {
+                let numbers = input;
+                let first = () => (&numbers)[0u64];
+                let second = () => (&numbers)[1u64];
+                return first() + second();
+            }
+            function erased(job: () => i32): i32 { return job(); }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.core_blockers().is_empty());
+            assert!(typed.receipt().is_none());
+            let pending = typed.result_use().unwrap().pending();
+            for (site, blocker) in [
+                ("first()", ResultUseBlocker::CallBoundary),
+                ("second()", ResultUseBlocker::CallBoundary),
+                ("job()", ResultUseBlocker::CallBoundary),
+            ] {
+                assert!(
+                    pending.iter().any(|use_| use_.blocker == blocker
+                        && use_.site.module == &module.key
+                        && use_.site.span.bytes() == site.as_bytes()),
+                    "{pending:?}"
+                );
+            }
         },
     );
 }
