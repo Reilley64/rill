@@ -1335,6 +1335,21 @@ At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github
 
 Native `test:runtime` is separate, unrun execution evidence. The hosted job reaches the unimplemented task; it does not run a Rill program. No work on M6 or #78 is part of this plan.
 
+## Forwarding a shared descriptor through an owned Option
+
+[`owned_option_postfix_preserves_shared_text_backing`](m5/propagation.rs) checks an **owned** `Option<&string>` with canonical variants and no custom disposer. Both possible payloads qualify for implicit copying under the pre-#78 rules. At `9727ee2`, `let view = input?` copies the named carrier once into a separate stage. `Some` takes the staged descriptor with its original backing; `None` ends the empty stage and exports canonical `None` before lexical cleanup. Neither edge borrows the carrier slot or consumes the named input. Returning `input` after the postfix checks, including with parentheses around the operand. This is an ordinary value use, not explicit canonical `dispose(place)`.
+
+| Installed contrast | M5 judgment |
+| --- | --- |
+| Forward incoming backing through `Option.Some(view)` | `Checked`. Only the descriptor is copied into the return value; the referent is not copied, dropped or borrowed again. |
+| Return a descriptor of the function's owned string | `R0202` at `return Option.Some(refValue);`, related to `local: string`; no MIR. |
+| Dispose the string while a descriptor or another carrier copy will be used | `R0203` at `dispose(local)`, related to `&local`; no MIR. Discard the last descriptor first, or leave a carrier with no later use, and disposal checks. |
+| Inferred `.None` versus a binding explicitly widened to the parent | The statically known `.None` has no success continuation. For the widened parent M4 supplies both edges; a second disposal on its success continuation gives `R0200`. M5 does not substitute runtime constant propagation for those typed facts. |
+
+`forward` checks at 3,735 work / 620 entries / depth 4; `ended` at 5,266 / 1,050 / 5. Each independent one-short target cap withholds MIR. Eleven previously measured Option and Result limits still give exactly their original results; the unsupported direct producer `return make(view);` also retains its old `Incomplete` cap. Eighteen focused M5 tests and two M4 controls passed. In the mixed installed graph `forward` has root MIR, `ended` has only targeted MIR (the root is blocked at `dispose(local)`), and the real `R0202`/`R0203` findings survive.
+
+A borrowed **whole** `&Option<&string>` still gives M4 `InvalidTarget`, with no receipt. `Option<&mut bool>` has a receipt but is M5 `Incomplete` at parameter storage, with no shared-copy permission or finding. Caller transport, exclusive transfer, iteration and cancellation are separate obligations. No Rill program ran.
+
 ## Returning from the right-hand side of an error wrap
 
 At `f3f1b34`, [`returning_wrap_rhs_forwards_instead_of_wrapping`](m5/propagation.rs) checks `input ? (marker()?)` through the installed compiler. The operands are owned scalar Results with `i32` errors. The marker constructs an error at its own source site and can wrap a prior cause. What the outer function does depends on which operand fails:
