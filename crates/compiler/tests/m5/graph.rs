@@ -241,6 +241,67 @@ fn targeted_callable_transfer_dependencies_share_the_module_scan() {
 }
 
 #[test]
+fn unsupported_nested_transfer_does_not_hide_an_independent_escape() {
+    probe(
+        "graph::unsupported_nested_transfer_does_not_hide_an_independent_escape",
+        r#"
+function forward(job: once () => [&bool, bool]): once () => [&bool, bool] { return job; }
+function independent(job: once () => [&bool, bool]): once () => [&bool, bool] {
+    let mut gate = false;
+    if (gate) {
+        let bit = true; let other = false; let _ = forward(() => [&bit, other]); return job;
+    }
+    let local = true; let _ = job; return () => [&local, local];
+}
+function beyond(job: once () => [&bool, bool]): once () => [&bool, bool] {
+    let bit = true; let other = false; let _ = forward(() => [&bit, other]);
+    let local = true; let _ = job; return () => [&local, local];
+}
+function bad(seed: bool): void { let bit = false; let _ = independent(() => [&seed, bit]); }
+function unknown(seed: bool): void { let bit = false; let _ = beyond(() => [&seed, bit]); }
+"#,
+        |_, module, receipt| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(report.completion(), GraphCompletion::SourceRejected);
+            for (prefix, expected) in [
+                (b"function bad(".as_slice(), Completion::SourceRejected),
+                (b"function unknown(", Completion::Incomplete),
+            ] {
+                let caller = root(&report, prefix);
+                assert_eq!(caller.ordinary_completion(), expected);
+                assert!(caller.mir().is_none());
+                let BodyOwner::Declaration(id) = caller.owner() else {
+                    panic!("named caller")
+                };
+                let target = lower_body(receipt, module, id, AnalysisLimits::default()).unwrap();
+                assert_eq!(target.completion(), expected);
+                assert!(target.mir().is_none());
+                if expected == Completion::Incomplete {
+                    assert!(target.findings().is_empty());
+                    continue;
+                }
+                for findings in [report.findings(), target.findings()] {
+                    let [finding] = findings else {
+                        panic!("expected the independent escape")
+                    };
+                    let producer = root(&report, b"function independent(").site().span;
+                    assert_eq!(finding.code(), "R0202");
+                    assert_eq!(finding.related.span.bytes(), b"&local");
+                    assert!(
+                        producer.start() <= finding.site.span.start()
+                            && finding.site.span.end() <= producer.end()
+                    );
+                    assert!(
+                        producer.start() <= finding.related.span.start()
+                            && finding.related.span.end() <= producer.end()
+                    );
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn closed_callable_transfer_preserves_the_callees_ordinary_finding() {
     probe(
         "graph::closed_callable_transfer_preserves_the_callees_ordinary_finding",

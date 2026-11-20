@@ -5456,8 +5456,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // actual environment cannot be admitted. Keep its original stage site.
         self.ungroup_expression_at(*argument, depth + 1)?;
         self.budget.step(1 + self.module.key.path.len())?;
-        if self.callable_frame.is_some()
-            || call.callee.module != self.module.key
+        // Record even a nested call in the CFG. Transfer-frame flow stops
+        // that path at the call without hiding a rejection on a sibling path.
+        if call.callee.module != self.module.key
             || call.pipe_input.is_some()
             || !call.defaults.is_empty()
             || call.selection.is_some()
