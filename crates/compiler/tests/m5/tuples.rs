@@ -2874,7 +2874,15 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             // Two more leaves must contribute to both the shape scan and type equality.
             assert!(wide.statistics().work >= narrow.statistics().work + 4);
 
-            let scoped = check("forwardsAlias");
+            // Bounds for the unchanged call-scope route before exclusive Option forwarding.
+            let scoped = lower(
+                "forwardsAlias",
+                AnalysisLimits {
+                    max_work: 6070,
+                    max_entries: 1218,
+                    max_depth: 6,
+                },
+            );
             let mir = scoped
                 .mir()
                 .expect("the returned view does not borrow the local descriptor slot");
@@ -2908,7 +2916,14 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
                 Operation::Copy { from, into: Some(result) }, Operation::Export(out)
             ] if from.root.node == target.root.node && result.root.node == out.root.node)
             );
-            let resumes = check("resumes");
+            let resumes = lower(
+                "resumes",
+                AnalysisLimits {
+                    max_work: 10671,
+                    max_entries: 2382,
+                    max_depth: 6,
+                },
+            );
             let mir = resumes
                 .mir()
                 .expect("both call-scoped loans end after their last use");

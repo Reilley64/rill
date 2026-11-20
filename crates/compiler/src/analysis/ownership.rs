@@ -1765,14 +1765,15 @@ struct Local<'g> {
     custom_disposer: Option<&'g DeclarationId>,
     /// Materialized backing or descriptor of a computed scalar borrow.
     scalar_borrow_temporary: bool,
-    shared_option: Option<SharedOption>,
+    reference_option: Option<ReferenceOption>,
     moves: bool,
     cleanup: StorageCleanup<'g>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum SharedOption {
-    MayCarry,
+enum ReferenceOption {
+    Shared,
+    Exclusive,
     Empty,
 }
 

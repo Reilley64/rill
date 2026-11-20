@@ -93,7 +93,7 @@ struct PropagatingArgument {
 enum OptionPayload<'t, 'g> {
     Bool,
     Text(&'t Type<'g>),
-    SharedText(&'t Type<'g>),
+    Reference { ty: &'t Type<'g>, exclusive: bool },
 }
 
 #[derive(Clone, Copy)]
@@ -735,7 +735,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     }
 
     pub(super) fn slot(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Slot> {
-        let mut shared_option = None;
+        let mut reference_option = None;
         let (moves, cleanup) = match ty.as_ref() {
             TypeTerm::Primitive(_) if owns_text(ty) => (true, StorageCleanup::Drop),
             TypeTerm::Primitive(_) => (false, StorageCleanup::End),
@@ -760,16 +760,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     OptionPayload::Text(_) => {
                         (true, StorageCleanup::DropOptionPayload(&role.some.id))
                     }
-                    OptionPayload::SharedText(_) => {
-                        let may_carry = !matches!(ty.as_ref(), TypeTerm::Variant { declaration, .. } if *declaration == &role.none.id);
-                        shared_option = Some(if may_carry {
-                            SharedOption::MayCarry
+                    OptionPayload::Reference { exclusive, .. } => {
+                        let storage = if matches!(ty.as_ref(), TypeTerm::Variant { declaration, .. } if *declaration == &role.none.id)
+                        {
+                            ReferenceOption::Empty
+                        } else if exclusive {
+                            ReferenceOption::Exclusive
                         } else {
-                            SharedOption::Empty
-                        });
-                        // Neither variant owns its referent. The checked default
-                        // cleanup permits an implicit copy of the whole carrier.
-                        (false, StorageCleanup::End)
+                            ReferenceOption::Shared
+                        };
+                        reference_option = Some(storage);
+                        // Neither variant owns its referent; only a shared descriptor can copy.
+                        (storage == ReferenceOption::Exclusive, StorageCleanup::End)
                     }
                 }
             }
@@ -822,7 +824,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             has_guard_field: false,
             custom_disposer: None,
             scalar_borrow_temporary: false,
-            shared_option,
+            reference_option,
             moves,
             cleanup,
         });
@@ -1127,16 +1129,26 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             TypeTerm::Reference {
                 mutable: false,
                 referent,
-            } if owns_text(referent) => OptionPayload::SharedText(payload),
+            } if owns_text(referent) => OptionPayload::Reference {
+                ty: payload,
+                exclusive: false,
+            },
+            TypeTerm::Reference {
+                mutable: true,
+                referent,
+            } if scalar::scalar(referent) == Some(Primitive::Bool) => OptionPayload::Reference {
+                ty: payload,
+                exclusive: true,
+            },
             _ => return None,
         };
         Some((role, payload))
     }
 
-    fn shared_option(&self, ty: &TypeTerm<'g>) -> bool {
+    fn reference_option(&self, ty: &TypeTerm<'g>) -> bool {
         matches!(
             self.admitted_option(ty),
-            Some((_, OptionPayload::SharedText(_)))
+            Some((_, OptionPayload::Reference { .. }))
         )
     }
 
@@ -1224,7 +1236,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             has_guard_field: false,
             custom_disposer,
             scalar_borrow_temporary: false,
-            shared_option: None,
+            reference_option: None,
             moves: custom_disposer.is_some(),
             cleanup: StorageCleanup::End,
         });
@@ -1267,7 +1279,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 has_guard_field: false,
                 custom_disposer: None,
                 scalar_borrow_temporary: false,
-                shared_option: None,
+                reference_option: None,
                 moves,
                 cleanup,
             });
@@ -2300,7 +2312,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     return self.terminal_two_hop_store(node, left, value, next, depth);
                 }
                 let (target, source) = self.assignment_target(left, facts, value, depth + 1)?;
-                if self.slots[target].shared_option.is_some()
+                if self.slots[target].reference_option.is_some()
                     || matches!(
                         self.slots[target].cleanup,
                         StorageCleanup::DisposeListI32(_)
@@ -2380,7 +2392,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         // Local List disposal does not prove a returned backing transfer.
                         return Err(Stop::Pending(value));
                     }
-                    if facts.call.is_some() && self.shared_option(&facts.ty) {
+                    if facts.call.is_some() && self.reference_option(&facts.ty) {
                         // The producer has no checked caller-backing contract.
                         // Do not allocate or prove return storage for its value.
                         return Err(Stop::Pending(value));
@@ -3519,26 +3531,38 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             (Some(error.wrapper), None)
         } else {
             let (role, payload) = self.admitted_option(operand).ok_or(Stop::Pending(node))?;
+            let forwards_reference = match &payload {
+                OptionPayload::Reference { ty: reference, .. } => {
+                    matches!(result.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                        if *declaration == &role.declaration.id
+                            && matches!(arguments.as_slice(), [ty] if ty == *reference))
+                }
+                _ => false,
+            };
             if wrap.is_some()
                 || exit.success != &role.some.id
                 || exit.failure != &role.none.id
-                || !(self.bool_option_role(result).is_some()
-                    || matches!(payload, OptionPayload::SharedText(_))
-                        && matches!(result.as_ref(), TypeTerm::Nominal { .. })
-                        && self.shared_option(result))
+                || !(self.bool_option_role(result).is_some() || forwards_reference)
             {
                 return Err(Stop::Pending(node));
             }
             let take = match payload {
                 OptionPayload::Bool => None,
-                OptionPayload::SharedText(ty) if syntax.kind == NodeKind::Propagate => {
-                    // Only a named whole carrier supplies a checked source on this route.
+                OptionPayload::Reference { ty, exclusive }
+                    if syntax.kind == NodeKind::Propagate =>
+                {
+                    // These loans are checked only through a named whole carrier.
                     let (name, _) = self.ungroup_expression_at(source, depth)?;
                     let (_, path) = self.named_owned_place(name)?.ok_or(Stop::Pending(node))?;
                     let from = self.resolve_place(name, path)?;
-                    Some((ty, OptionTakeSource::CopyShared(name, from)))
+                    let source = if exclusive {
+                        OptionTakeSource::Move(from)
+                    } else {
+                        OptionTakeSource::CopyShared(name, from)
+                    };
+                    Some((ty, source))
                 }
-                OptionPayload::SharedText(_) => return Err(Stop::Pending(node)),
+                OptionPayload::Reference { .. } => return Err(Stop::Pending(node)),
                 OptionPayload::Text(ty) => {
                     let source = if piped {
                         OptionTakeSource::PipeStep
@@ -4233,7 +4257,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // The declared result is the carrier to stage before branching.
         let (parameters, result) = self.direct_application_signature(node, call)?;
         let option = self.admitted_option(result);
-        if matches!(option, Some((_, OptionPayload::SharedText(_))))
+        if matches!(option, Some((_, OptionPayload::Reference { .. })))
             || !(option.is_some() || self.scalar_result_role(result).is_some())
         {
             return Err(Stop::Pending(node));
@@ -5006,7 +5030,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     }
                     if matches!(
                         self.admitted_option(&operand_facts.ty),
-                        Some((_, OptionPayload::Text(_) | OptionPayload::SharedText(_)))
+                        Some((_, OptionPayload::Text(_) | OptionPayload::Reference { .. }))
                     ) {
                         return Err(Stop::Pending(node));
                     }
@@ -6655,7 +6679,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let result = checked_carrier.unwrap_or(&facts.ty);
         // A local cleanup or payload transfer does not establish the callee's
         // ownership of a returned backing or its caller retention contract.
-        if self.is_list_i32(result) || self.shared_option(result) {
+        if self.is_list_i32(result) || self.reference_option(result) {
             return Err(Stop::Pending(node));
         }
         if checked_carrier.is_none() && matches!(result.as_ref(), TypeTerm::Callable { .. }) {
@@ -6726,7 +6750,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 pipe_formal = Some(position);
             }
             let ty = self.value(arg)?.ty.clone();
-            if self.shared_option(&ty) {
+            if self.reference_option(&ty) {
                 return Err(Stop::Pending(arg));
             }
             if retained_two_hop_bool_type(&ty).is_some() {

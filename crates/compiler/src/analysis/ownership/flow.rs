@@ -2097,8 +2097,8 @@ pub(super) fn run<'a, 'g>(
     let mut state: Vec<_> = slots
         .iter()
         .map(|slot| {
-            // The shared Option transfer has only an ordinary-exit proof.
-            if slot.shared_option.is_some() {
+            // Reference-carrying Option transfer has only an ordinary-exit proof.
+            if slot.reference_option.is_some() {
                 candidate = false;
                 replacement_candidate = false;
             }
@@ -2121,14 +2121,21 @@ pub(super) fn run<'a, 'g>(
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
-        if slots[slot].shared_option == Some(SharedOption::MayCarry) {
+        if let Some(option @ (ReferenceOption::Shared | ReferenceOption::Exclusive)) =
+            slots[slot].reference_option
+        {
+            let exclusive = option == ReferenceOption::Exclusive;
             budget.reserve(1)?;
             state[slot] = State::Initialized(Held {
                 loans: Arc::from([Loan {
                     source: slot,
                     site: slots[slot].node,
-                    exclusive: false,
-                    kind: LoanKind::IncomingSharedOptionBacking,
+                    exclusive,
+                    kind: if exclusive {
+                        LoanKind::IncomingExclusive
+                    } else {
+                        LoanKind::IncomingSharedOptionBacking
+                    },
                 }]),
                 ..Held::default()
             });
@@ -2448,7 +2455,10 @@ pub(super) fn run<'a, 'g>(
                     let value = std::mem::replace(&mut state[operand], State::Vacant);
                     // On the Some edge, take the descriptor and its backing,
                     // not a reference to the staged carrier slot.
-                    state[into] = if slots[operand].shared_option == Some(SharedOption::MayCarry) {
+                    state[into] = if matches!(
+                        slots[operand].reference_option,
+                        Some(ReferenceOption::Shared | ReferenceOption::Exclusive)
+                    ) {
                         value
                     } else {
                         State::Initialized(empty.clone())
@@ -2471,7 +2481,10 @@ pub(super) fn run<'a, 'g>(
                     state[into] = if let Some(payload) = payload {
                         initialized(&state[payload], node)?;
                         let value = std::mem::replace(&mut state[payload], State::Vacant);
-                        if slots[into].shared_option == Some(SharedOption::MayCarry) {
+                        if matches!(
+                            slots[into].reference_option,
+                            Some(ReferenceOption::Shared | ReferenceOption::Exclusive)
+                        ) {
                             value
                         } else {
                             State::Initialized(empty.clone())
