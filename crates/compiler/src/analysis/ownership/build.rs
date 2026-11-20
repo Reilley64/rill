@@ -2083,7 +2083,21 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         access,
                         nested_reborrow,
                         ..
-                    } => self.bind_product(node, facts, access, nested_reborrow, next, depth + 1),
+                    } => {
+                        let record = (access == Access::Owned
+                            && self.module.syntax.nodes[initializer].kind
+                                == NodeKind::Construction)
+                            .then_some(initializer)
+                            .zip(exits.returning);
+                        self.bind_product(
+                            node,
+                            facts,
+                            (access, nested_reborrow),
+                            record,
+                            next,
+                            depth + 1,
+                        )
+                    }
                     Binding::IrrefutableVariant {
                         source,
                         from,
@@ -3051,8 +3065,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         &mut self,
         node: NodeId,
         facts: &PatternFacts<'g>,
-        access: Access,
-        nested_reborrow: Option<&PlacePath<'g>>,
+        (access, nested_reborrow): (Access, Option<&PlacePath<'g>>),
+        record: Option<(NodeId, Pc)>,
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
@@ -3201,6 +3215,21 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 tail,
                 source_depth,
             );
+        }
+        // `tail` starts binder commitment. An interrupted construction returns
+        // directly through prefix and lexical cleanup, bypassing that tail.
+        if !nested_record
+            && let Some((constructor, returning)) = record
+            && let Some(entry) = self.initialize_propagating_record(
+                source,
+                constructor,
+                scratch,
+                tail,
+                Some(returning),
+                depth,
+            )?
+        {
+            return Ok(entry);
         }
         let proof = tuple_source
             .map(ExpressionProof::NestedTupleSource)

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "patterns/commitment.rs"]
+mod commitment;
+
 #[test]
 fn owned_narrow_variant_exports_the_lexical_payload() {
     use compiler::analysis::{
