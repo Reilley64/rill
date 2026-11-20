@@ -16,7 +16,7 @@ use crate::analysis::scalars::{
 };
 use crate::analysis::typed::{
     ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
-    OptionRole, OwnershipCoverage, OwnershipRule, ResultRole,
+    OptionRole, OwnershipCoverage, OwnershipRule, PrimitiveCoverage, PrimitiveRole, ResultRole,
 };
 use crate::loader::Origin;
 use crate::parser::NodeKind;
@@ -435,6 +435,7 @@ impl<'a, 'g> Build<'a, 'g> {
             reference_member: false,
             has_guard_field: false,
             custom_disposer: None,
+            scalar_borrow_temporary: false,
             moves,
             cleanup,
         });
@@ -791,6 +792,7 @@ impl<'a, 'g> Build<'a, 'g> {
             reference_member: false,
             has_guard_field: false,
             custom_disposer,
+            scalar_borrow_temporary: false,
             moves: custom_disposer.is_some(),
             cleanup: StorageCleanup::End,
         });
@@ -832,6 +834,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 reference_member,
                 has_guard_field: false,
                 custom_disposer: None,
+                scalar_borrow_temporary: false,
                 moves,
                 cleanup,
             });
@@ -921,6 +924,20 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(node));
         };
         Ok(value)
+    }
+
+    fn normal_value(&self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
+        let facts = self.value(node)?;
+        let flow = &self.facts[&node].flow;
+        if !flow.normal
+            || flow.pending
+            || flow.returns
+            || !flow.breaks.is_empty()
+            || !flow.continues.is_empty()
+        {
+            return Err(Stop::Pending(node));
+        }
+        Ok(facts)
     }
 
     fn place(&mut self, node: NodeId) -> ResultOf<Slot> {
@@ -1435,6 +1452,14 @@ impl<'a, 'g> Build<'a, 'g> {
                                 Some(ExpressionProof::NamedRecordRebuild),
                             );
                         }
+                        if matches!(
+                            self.module.syntax.nodes[initializer].kind,
+                            NodeKind::Prefix("*" | "&")
+                        ) && let Some(entry) =
+                            self.binding_temporary_borrow(node, value, into, next, depth + 1)?
+                        {
+                            return Ok(entry);
+                        }
                         let temporary = self.temporary_projection(initializer, false)?;
                         let tail = if let Some(temp) = temporary {
                             self.cleanup(node, &[temp.scratch], next)?
@@ -1622,6 +1647,112 @@ impl<'a, 'g> Build<'a, 'g> {
             NodeKind::Continue => Ok(exits.looping.ok_or(Stop::Pending(node))?.continues),
             _ => Err(Stop::Pending(node)),
         }
+    }
+
+    fn binding_temporary_borrow(
+        &mut self,
+        statement: NodeId,
+        value: NodeId,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Option<Pc>> {
+        let (root, depth) = self.ungroup_expression_at(value, depth)?;
+        let (read, borrow, depth) = if self.module.syntax.nodes[root].kind == NodeKind::Prefix("*")
+        {
+            let (borrow, depth) =
+                self.ungroup_expression_at(self.module.syntax.nodes[root].children[0], depth + 1)?;
+            (Some(root), borrow, depth)
+        } else {
+            (None, root, depth)
+        };
+        let syntax = &self.module.syntax.nodes[borrow];
+        if syntax.kind != NodeKind::Prefix("&") {
+            return Ok(None);
+        }
+        let producer = syntax.children[0];
+        let call_node = self.ungroup(producer)?;
+        if self.module.syntax.nodes[call_node].kind != NodeKind::Call {
+            return Ok(None);
+        }
+        let produced = self.value(call_node)?;
+        let Some(call) = produced.call.as_deref() else {
+            return Ok(None);
+        };
+        let descriptor = self.normal_value(borrow)?;
+        if !matches!(produced.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+            || produced.path.is_some()
+            || produced.access != Access::Owned
+            || !matches!(descriptor.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if *referent == produced.ty)
+        {
+            return Ok(None);
+        }
+        if let Some(read) = read
+            && self.normal_value(read)?.ty != produced.ty
+        {
+            return Ok(None);
+        }
+        self.depth(depth)?;
+        self.check_exact_primitive_call(call_node, call, &produced.ty)?;
+        // The pinned Bool disposer has no effect. Do not silently replace a
+        // selected user disposer, or assume default cleanup when coverage is pending.
+        let cleanup = self.typed.primitive_protection();
+        self.budget.step(cleanup.len())?;
+        if !cleanup.iter().any(|scope| {
+            Some(scope.family) == self.dispose
+                && scope.role == PrimitiveRole::Dispose
+                && scope.primitive.name() == "bool"
+                && scope.coverage == PrimitiveCoverage::Clear
+                && scope.required_winner.is_some()
+        }) {
+            return Err(Stop::Pending(call_node));
+        }
+
+        let backing = self.slot(call_node, &produced.ty)?;
+        self.slots[backing].scalar_borrow_temporary = true;
+        let (holder, after_borrow) = if let Some(read) = read {
+            let holder = self.slot(borrow, &descriptor.ty)?;
+            self.slots[holder].scalar_borrow_temporary = true;
+            let finish = self.cleanup(statement, &[backing, holder], next)?;
+            let observe = self.emit(
+                read,
+                Action::Dereference {
+                    from: holder,
+                    into: Some(into),
+                },
+                Edges::Next(finish),
+            )?;
+            (holder, observe)
+        } else {
+            // The binding is lexical, but the backing is not. Liveness at
+            // this cleanup decides whether an outstanding use needs the loan.
+            (into, self.cleanup(statement, &[backing], next)?)
+        };
+        let take = self.emit(
+            borrow,
+            Action::Borrow {
+                from: backing,
+                into: holder,
+                exclusive: false,
+                retained_target: false,
+            },
+            Edges::Next(after_borrow),
+        )?;
+        self.expression(producer, Some(backing), take, depth + 1)
+            .map(Some)
+    }
+
+    fn ungroup_expression_at(
+        &mut self,
+        mut node: NodeId,
+        mut depth: usize,
+    ) -> ResultOf<(NodeId, usize)> {
+        while self.module.syntax.nodes[node].kind == NodeKind::Group {
+            self.budget.step(1)?;
+            node = self.module.syntax.nodes[node].children[0];
+            depth += 1;
+        }
+        Ok((node, depth))
     }
 
     fn temporary_projection(
@@ -3328,16 +3459,7 @@ impl<'a, 'g> Build<'a, 'g> {
             self.budget.step(2)?;
         }
         let syntax = &self.module.syntax.nodes[node];
-        let facts = self.value(node)?;
-        let flow = &self.facts[&node].flow;
-        if !flow.normal
-            || flow.pending
-            || flow.returns
-            || !flow.breaks.is_empty()
-            || !flow.continues.is_empty()
-        {
-            return Err(Stop::Pending(node));
-        }
+        let facts = self.normal_value(node)?;
         if let Some(DataExpression::Construction(data)) = &facts.data
             && (self.admitted_option(&data.ty).is_some()
                 || self.scalar_result_role(&data.ty).is_some())

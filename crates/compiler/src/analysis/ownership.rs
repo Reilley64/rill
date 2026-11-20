@@ -161,6 +161,11 @@ pub enum Operation<'g> {
         exclusive: bool,
     },
     Dereference(Place<'g>),
+    /// Copy a scalar through a statement-local borrow into its destination.
+    CopyReferent {
+        from: Place<'g>,
+        into: Place<'g>,
+    },
     /// Bind a fixed projection relative to a borrow's referent.
     /// No mode moves a member out of the aggregate.
     BindBorrowedMember {
@@ -181,6 +186,12 @@ pub enum Operation<'g> {
         mode: InvocationMode,
     },
     Call(&'g DeclarationId),
+    /// Evaluate a direct producer into the statement's owned backing storage.
+    CallIntoTemporary {
+        callee: &'g DeclarationId,
+        arguments: Vec<Place<'g>>,
+        into: Place<'g>,
+    },
     /// Consume a known once environment and transfer its two captured values
     /// into the corresponding result tuple positions.
     InvokeClosurePair {
@@ -440,6 +451,7 @@ fn checked_graph<'g>(
             budget.step(1)?;
             let call = match block.operation {
                 Operation::Call(callee)
+                | Operation::CallIntoTemporary { callee, .. }
                 | Operation::CallRetaining { callee, .. }
                 | Operation::CallRetainingPair { callee, .. } => Some((callee, false)),
                 _ => None,
@@ -716,6 +728,8 @@ struct Local<'g> {
     reference_member: bool,
     has_guard_field: bool,
     custom_disposer: Option<&'g DeclarationId>,
+    /// Materialized backing or descriptor of a computed scalar borrow.
+    scalar_borrow_temporary: bool,
     moves: bool,
     cleanup: StorageCleanup<'g>,
 }

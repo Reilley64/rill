@@ -1355,7 +1355,14 @@ pub(super) fn run<'g>(
                     if let Some(into) = into {
                         state[into] = State::Initialized(empty.clone());
                     }
-                    Operation::Dereference(local(from))
+                    if let Some(into) = into.filter(|_| slots[from].scalar_borrow_temporary) {
+                        Operation::CopyReferent {
+                            from: local(from),
+                            into: local(into),
+                        }
+                    } else {
+                        Operation::Dereference(local(from))
+                    }
                 }
                 Action::BindBorrowedMember {
                     descriptor,
@@ -1495,6 +1502,16 @@ pub(super) fn run<'g>(
                                 destination,
                                 input: local(retention.input),
                             }
+                        }
+                    } else if let Some(into) = call
+                        .into
+                        .filter(|&slot| slots[slot].scalar_borrow_temporary)
+                    {
+                        budget.reserve(call.args.len())?;
+                        Operation::CallIntoTemporary {
+                            callee: call.callee,
+                            arguments: call.args.iter().copied().map(local).collect(),
+                            into: local(into),
                         }
                     } else {
                         Operation::Call(call.callee)

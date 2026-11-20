@@ -8,6 +8,241 @@ fn require_mir<'a, 'g>(report: &'a Report<'g>, name: &str) -> &'a Mir<'g> {
 }
 
 #[test]
+fn observes_borrowed_scalar_temporary_within_its_statement() {
+    probe_with_typed(
+        "field_routes::observes_borrowed_scalar_temporary_within_its_statement",
+        r#"
+            function make(bit: bool): bool { return bit; }
+            function same(flag: bool): bool {
+                let observed = *(&make(flag));
+                return observed;
+            }
+            function grouped(flag: bool): bool {
+                let observed = ( ( * ( ( & ( ( make((flag)) ) ) ) ) ) );
+                return observed;
+            }
+            function broken(bit: bool): bool {
+                let text = "moved";
+                dispose(text);
+                dispose(text);
+                return bit;
+            }
+            function reached(flag: bool): bool {
+                let observed = *(&broken(flag));
+                return observed;
+            }
+            function literal(): bool {
+                let observed = *(&true);
+                return observed;
+            }
+        "#,
+        |_, module, receipt, _| {
+            use compiler::analysis::ownership::Cleanup::EndStorage;
+
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let check =
+                |name, limits| lower_body(receipt, module, &declaration(name).id, limits).unwrap();
+            let mut plain_depth = 0;
+            for name in ["same", "grouped"] {
+                let report = check(name, AnalysisLimits::default());
+                let mir = require_mir(&report, name);
+                assert!(report.findings().is_empty());
+                let ops: Vec<_> = linear(mir, mir.entry)
+                    .into_iter()
+                    .filter(|op| !matches!(op, Operation::None))
+                    .collect();
+                let [
+                    Operation::Copy {
+                        from: flag,
+                        into: Some(argument),
+                    },
+                    Operation::CallIntoTemporary {
+                        callee,
+                        arguments,
+                        into: backing,
+                    },
+                    Operation::Borrow {
+                        source,
+                        holder,
+                        exclusive: false,
+                    },
+                    Operation::CopyReferent {
+                        from: dereferenced,
+                        into: observed,
+                    },
+                    Operation::Cleanup(statement_end),
+                    Operation::Copy {
+                        from: returned,
+                        into: Some(result),
+                    },
+                    Operation::Export(output),
+                    Operation::Cleanup(lexical_end),
+                    Operation::Cleanup(parameter_end),
+                ] = ops.as_slice()
+                else {
+                    panic!(
+                        "expected argument, call, borrow, observation, statement cleanup and return: {ops:?}"
+                    );
+                };
+                let [call_argument] = arguments.as_slice() else {
+                    panic!("expected one call argument");
+                };
+                assert_eq!(call_argument.root.node, argument.root.node);
+                assert_eq!(*callee, &declaration("make").id);
+                assert_eq!(flag.root.span.bytes(), b"flag: bool");
+                let producer_site: &[u8] = if name == "same" {
+                    b"make(flag)"
+                } else {
+                    b"make((flag))"
+                };
+                assert_eq!(backing.root.span.bytes(), producer_site);
+                assert_ne!(backing.root.node, flag.root.node);
+                assert_ne!(backing.root.node, argument.root.node);
+                assert_eq!(source.root.node, backing.root.node);
+                assert_eq!(holder.root.node, dereferenced.root.node);
+                assert!(
+                    [backing, source, holder, dereferenced, observed]
+                        .iter()
+                        .all(|place| place.projection.is_none())
+                );
+                assert_eq!(observed.root.span.bytes(), b"observed");
+                assert_eq!(returned.root.node, observed.root.node);
+                assert_eq!(result.root.node, output.root.node);
+                assert!(
+                    matches!(statement_end.as_slice(), [EndStorage(view), EndStorage(temp)]
+                    if view.root.node == holder.root.node && temp.root.node == backing.root.node)
+                );
+                assert!(
+                    matches!(lexical_end.as_slice(), [EndStorage(place)] if place.root.node == observed.root.node)
+                );
+                assert!(
+                    matches!(parameter_end.as_slice(), [EndStorage(place)] if place.root.node == flag.root.node)
+                );
+
+                let stats = report.statistics();
+                if name == "same" {
+                    plain_depth = stats.max_depth;
+                } else {
+                    assert!(stats.max_depth > plain_depth);
+                    let exact = AnalysisLimits {
+                        max_work: stats.work,
+                        max_entries: stats.entries,
+                        max_depth: stats.max_depth,
+                    };
+                    assert!(check(name, exact).mir().is_some());
+                    for short in [
+                        AnalysisLimits {
+                            max_work: exact.max_work - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_entries: exact.max_entries - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_depth: exact.max_depth - 1,
+                            ..exact
+                        },
+                    ] {
+                        let limited = check(name, short);
+                        assert_eq!(limited.completion(), Completion::ResourceLimit);
+                        assert!(limited.mir().is_none());
+                    }
+                }
+            }
+            let reached = check("reached", AnalysisLimits::default());
+            assert_eq!(reached.completion(), Completion::SourceRejected);
+            assert!(reached.mir().is_none());
+            assert_eq!(reached.findings()[0].code(), "R0200");
+
+            let literal = check("literal", AnalysisLimits::default());
+            assert_eq!(literal.completion(), Completion::Incomplete);
+            assert!(literal.mir().is_none());
+        },
+    );
+}
+
+#[test]
+fn later_use_requires_a_named_scalar_owner() {
+    probe_with_typed(
+        "field_routes::later_use_requires_a_named_scalar_owner",
+        r#"
+            function make(bit: bool): bool { return bit; }
+            function named(flag: bool): bool {
+                let owner = make(flag);
+                let view = &owner;
+                return *view;
+            }
+            function later(flag: bool): bool {
+                let view = &make(flag);
+                return *view;
+            }
+            function unused(flag: bool): bool {
+                let view = &make(flag);
+                return flag;
+            }
+        "#,
+        |_, module, receipt, _| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            let named = lower("named");
+            assert!(named.findings().is_empty());
+            let mir = require_mir(&named, "named");
+            assert!(linear(mir, mir.entry).iter().any(
+                |op| matches!(op, Operation::Borrow { source, holder, exclusive: false }
+                if source.root.span.bytes() == b"owner" && holder.root.span.bytes() == b"view")
+            ));
+
+            let later = lower("later");
+            assert_eq!(
+                later.completion(),
+                Completion::SourceRejected,
+                "{:?}",
+                later
+                    .blocked_at()
+                    .map(|site| site.span.bytes().escape_ascii().to_string())
+            );
+            assert!(later.mir().is_none());
+            assert!(later.blocked_at().is_none());
+            let [finding] = later.findings() else {
+                panic!("expected one temporary backing release finding");
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"let view = &make(flag);");
+            assert_eq!(finding.related.span.bytes(), b"&make(flag)");
+
+            let unused = lower("unused");
+            assert!(unused.findings().is_empty());
+            let mir = require_mir(&unused, "unused");
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| !matches!(op, Operation::None))
+                .collect();
+            assert!(
+                matches!(ops.as_slice(), [Operation::Copy { .. }, Operation::CallIntoTemporary { into, .. },
+                Operation::Borrow { source, holder, exclusive: false }, Operation::Cleanup(statement_end),
+                Operation::Copy { .. }, Operation::Export(_), Operation::Cleanup(lexical_end), Operation::Cleanup(_)]
+                if source.root.node == into.root.node && holder.root.span.bytes() == b"view"
+                && matches!(statement_end.as_slice(), [compiler::analysis::ownership::Cleanup::EndStorage(place)] if place.root.node == source.root.node)
+                && matches!(lexical_end.as_slice(), [compiler::analysis::ownership::Cleanup::EndStorage(place)] if place.root.node == holder.root.node))
+            );
+        },
+    );
+}
+
+#[test]
 fn incoming_shared_record_copies_carried_field() {
     use compiler::analysis::ownership::{
         BorrowedMemberBinding::{CopyReference, SharedSlot},
