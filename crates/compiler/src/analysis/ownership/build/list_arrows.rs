@@ -10,7 +10,7 @@ pub(super) enum ListArrowUse<'a, 'g> {
 struct ListArrowPlan<'a, 'g> {
     read: NodeId,
     operand: NodeId,
-    source: Slot,
+    path: &'a PlacePath<'g>,
     exclusive: bool,
     op: ListI32Read<'a, 'g>,
     read_type: &'a Type<'g>,
@@ -40,6 +40,46 @@ pub(in crate::analysis::ownership) enum ArrowBody<'g> {
         mir: Arc<Mir<'g>>,
     },
     Reference(Type<'g>),
+}
+
+/// Called only on the reached call instruction. Reuse the immutable typed
+/// routes and the caller slots to which capture formation bound them.
+pub(in crate::analysis::ownership) fn reached_exclusive_pair<'a, 'g>(
+    typed: &'a TypedReport<'g>,
+    module: &'g Module,
+    facts: &'a NodeIndex<'a, 'g>,
+    node: NodeId,
+    (sources, depth): ([Slot; 2], usize),
+    slots: &[Local<'g>],
+    budget: &mut Budget,
+) -> ResultOf<ListArrowPair<'g>> {
+    let mut build = Build::with_facts(
+        typed,
+        module,
+        node,
+        None,
+        BuildFacts::Indexed(facts),
+        budget,
+    );
+    build.budget.step(1)?;
+    let join = build
+        .value(node)?
+        .call
+        .as_ref()
+        .and_then(|call| call.scoped_join.as_deref())
+        .ok_or(Stop::Pending(node))?;
+    let [first, second] = join.slots.each_ref().map(|s| &s.child);
+    let left = build.list_arrow_plan(first, depth + 1, true)?;
+    let right = build.list_arrow_plan(second, depth + 1, true)?;
+    build.budget.reserve(3)?;
+    Ok(ListArrowPair {
+        implementation: &join.role.implementation.id,
+        body: first.invocation,
+        children: [
+            build.list_child(first, left, sources[0], slots[sources[0]])?,
+            build.list_child(second, right, sources[1], slots[sources[1]])?,
+        ],
+    })
 }
 
 pub(super) fn list_arrow_result_pair(ty: &Type<'_>, scoped: bool) -> bool {
@@ -105,17 +145,46 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         }
         let left = self.list_arrow_plan(first, tuple_depth + 1, scoped.is_some())?;
         let right = self.list_arrow_plan(second, tuple_depth + 1, scoped.is_some())?;
-        // A pair on the same whole List cannot commit if either input is
-        // exclusive. Still lower the acquisitions so the second one reports
-        // the actual conflict, without building unreachable child frames.
-        let overlap = left.source == right.source && (left.exclusive || right.exclusive);
+        let mut storage = |child: &PairChild<'g>, plan: &ListArrowPlan<'a, 'g>| -> ResultOf<_> {
+            let source = self.resolve_place(plan.operand, plan.path)?;
+            let backing = self.slots[source];
+            if !matches!(backing.cleanup, StorageCleanup::DisposeListI32(_))
+                || backing.projection.is_some()
+            {
+                return Err(Stop::Pending(node));
+            }
+            let receiver = self.slot(child.arrow.site.node, plan.closure)?;
+            let capture = self.slot(plan.op.base, &plan.op.view.ty)?;
+            Ok((source, receiver, capture))
+        };
+        let (left_source, a, a_capture) = storage(first, &left)?;
+        let (right_source, b, b_capture) = storage(second, &right)?;
         let sources = [
-            (left.source, left.exclusive),
-            (right.source, right.exclusive),
+            (left_source, left.exclusive),
+            (right_source, right.exclusive),
         ];
-        let (a, a_capture, a_body) = self.list_arrow(first, left, overlap)?;
-        let (b, b_capture, b_body) = self.list_arrow(second, right, overlap)?;
-        let action = if let (Some(a_body), Some(b_body)) = (a_body, b_body) {
+        let action = if left.exclusive || right.exclusive {
+            // The second source may already be borrowed on this path. Even
+            // for distinct roots, no child can start until both captures form.
+            if left_source == right_source {
+                Action::OverlappingScopedJoin {
+                    receivers: [a, b],
+                    into,
+                }
+            } else {
+                Action::ScopedJoin {
+                    pair: ScopedFrames::DisjointExclusive {
+                        sources: [left_source, right_source],
+                        tuple_depth,
+                    },
+                    receivers: [a, b],
+                    into,
+                    role: scoped.ok_or(Stop::Pending(node))?,
+                }
+            }
+        } else {
+            let a_body = self.list_child(first, left, left_source, self.slots[left_source])?;
+            let b_body = self.list_child(second, right, right_source, self.slots[right_source])?;
             self.budget.reserve(3)?;
             let index = self.list_arrow_pairs.len();
             self.list_arrow_pairs.push(ListArrowPair {
@@ -125,7 +194,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             });
             if let Some(role) = scoped {
                 Action::ScopedJoin {
-                    pair: index,
+                    pair: ScopedFrames::Prepared(index),
                     receivers: [a, b],
                     into,
                     role,
@@ -136,11 +205,6 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                     receivers: [a, b],
                     into,
                 }
-            }
-        } else {
-            Action::OverlappingScopedJoin {
-                receivers: [a, b],
-                into,
             }
         };
         let mut next = self.emit(node, action, Edges::Next(next))?;
@@ -280,18 +344,11 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         {
             return Err(pending);
         }
-        let source = self.resolve_place(operand, path)?;
-        let backing = self.slots[source];
-        if !matches!(backing.cleanup, StorageCleanup::DisposeListI32(_))
-            || backing.projection.is_some()
-        {
-            return Err(pending);
-        }
         let closure = &self.normal_value(origin)?.ty;
         Ok(ListArrowPlan {
             read,
             operand,
-            source,
+            path,
             exclusive,
             op: read_op,
             read_type: &read_facts.ty,
@@ -301,32 +358,25 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         })
     }
 
-    fn list_arrow(
+    fn list_child(
         &mut self,
         child: &PairChild<'g>,
         plan: ListArrowPlan<'a, 'g>,
-        overlap: bool,
-    ) -> ResultOf<(Slot, Slot, Option<ListArrow<'g>>)> {
+        source: Slot,
+        backing: Local<'g>,
+    ) -> ResultOf<ListArrow<'g>> {
         let ListArrowPlan {
             read,
             operand,
-            source,
             exclusive,
             op: read_op,
             read_type,
             comparison,
             output,
-            closure,
+            ..
         } = plan;
         let base = read_op.base;
         let view_ty = &read_op.view.ty;
-        let backing = self.slots[source];
-        let receiver = self.slot(child.arrow.site.node, closure)?;
-        let staged = self.slot(base, view_ty)?;
-        if overlap {
-            return Ok((receiver, staged, None));
-        }
-
         // Check the actual expression in a separate frame using a transferred view.
         // The backing proxy is initialized but is not owned by this frame and
         // must not join its cleanup list. No second borrow is acquired here.
@@ -376,20 +426,16 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let capture = frame.slots[view].place(self.module);
         let incoming_backing = frame.slots[incoming].place(self.module);
         let body = flow::run(frame, entry, vec![view, incoming], None, false, None)?.mir;
-        Ok((
-            receiver,
-            staged,
-            Some(ListArrow {
-                invocation: child.invocation,
-                body_site: child.body,
-                source,
-                capture,
-                body: ArrowBody::List {
-                    incoming_backing,
-                    exclusive,
-                    mir: Arc::new(body),
-                },
-            }),
-        ))
+        Ok(ListArrow {
+            invocation: child.invocation,
+            body_site: child.body,
+            source,
+            capture,
+            body: ArrowBody::List {
+                incoming_backing,
+                exclusive,
+                mir: Arc::new(body),
+            },
+        })
     }
 }

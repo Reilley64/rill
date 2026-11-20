@@ -3052,7 +3052,25 @@ pub(super) fn run<'a, 'g>(
                     if active.is_some() {
                         return Err(Stop::Pending(node));
                     }
-                    let frames = &list_arrow_pairs[pair];
+                    let deferred;
+                    let frames = match pair {
+                        ScopedFrames::Prepared(index) => &list_arrow_pairs[index],
+                        ScopedFrames::DisjointExclusive {
+                            sources,
+                            tuple_depth,
+                        } => {
+                            deferred = build::reached_exclusive_pair(
+                                typed,
+                                module,
+                                facts.nodes(),
+                                node,
+                                (sources, tuple_depth),
+                                &slots,
+                                budget,
+                            )?;
+                            &deferred
+                        }
+                    };
                     budget.reserve(2)?;
                     for (receiver, child) in receivers.into_iter().zip(&frames.children) {
                         if matches!(child.body, build::ArrowBody::Reference(_)) {

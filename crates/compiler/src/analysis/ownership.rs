@@ -1870,6 +1870,16 @@ enum PairCall {
 }
 
 #[derive(Clone, Copy)]
+enum ScopedFrames {
+    Prepared(usize),
+    /// Captures are checked in caller flow before either body proof is built.
+    DisjointExclusive {
+        sources: [Slot; 2],
+        tuple_depth: usize,
+    },
+}
+
+#[derive(Clone, Copy)]
 enum Action<'g> {
     None,
     BudgetBackedge,
@@ -2001,7 +2011,7 @@ enum Action<'g> {
         into: Slot,
     },
     ScopedJoin {
-        pair: usize,
+        pair: ScopedFrames,
         receivers: [Slot; 2],
         into: Slot,
         role: super::typed::RoutineRole<'g>,

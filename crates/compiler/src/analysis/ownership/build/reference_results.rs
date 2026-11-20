@@ -117,7 +117,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             let receivers = [a, b];
             (
                 Action::ScopedJoin {
-                    pair,
+                    pair: ScopedFrames::Prepared(pair),
                     receivers,
                     into,
                     role: join.role,

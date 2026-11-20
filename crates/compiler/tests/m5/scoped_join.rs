@@ -1540,14 +1540,19 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                         assert!(report.receipt().is_none());
                     }
                     let stats = local.statistics();
-                    assert_eq!(
-                        observed(stats),
-                        if live {
-                            (4412, 979, 10)
-                        } else {
-                            (40420, 28112, 10)
-                        }
-                    );
+                    // This acquisition already rejected before child-frame lowering
+                    // was admitted. It must still fit the 81f5264 target budget.
+                    if live {
+                        let old = AnalysisLimits {
+                            max_work: 4159,
+                            max_entries: 838,
+                            max_depth: 10,
+                        };
+                        let stopped = lower_body(&receipt, module, &caller.id, old).unwrap();
+                        assert_eq!(stopped.completion(), Completion::SourceRejected);
+                        assert!(stopped.mir().is_none());
+                        assert_eq!(stopped.findings()[0].code(), "R0201");
+                    }
                     let (exact, short) = budget_caps(stats);
                     let replay = lower_body(&receipt, module, &caller.id, exact).unwrap();
                     assert_eq!(
@@ -1560,14 +1565,16 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                         assert!(report.mir().is_none());
                     }
                     let graph_stats = owned.statistics();
-                    assert_eq!(
-                        observed(graph_stats),
-                        if live {
-                            (213436, 5743, 10)
-                        } else {
-                            (249447, 32880, 10)
-                        }
-                    );
+                    if live {
+                        let old = AnalysisLimits {
+                            max_work: 213183,
+                            max_entries: 5602,
+                            max_depth: 10,
+                        };
+                        let stopped = analyze_ownership(&receipt, old);
+                        assert_eq!(stopped.completion(), GraphCompletion::SourceRejected);
+                        assert_eq!(stopped.findings()[0].code(), "R0201");
+                    }
                     let (exact, short) = budget_caps(graph_stats);
                     let replay = analyze_ownership(&receipt, exact);
                     assert_eq!(
