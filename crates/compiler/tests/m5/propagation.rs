@@ -62,12 +62,12 @@ fn owned_option_postfix_preserves_shared_text_backing() {
             let [moved, test] = prefix.as_slice() else {
                 panic!("stage one carrier and branch on it");
             };
-            let Operation::Move {
+            let Operation::Copy {
                 from,
                 into: Some(carrier),
             } = moved.operation
             else {
-                panic!("the by-value parameter is consumed, not borrowed");
+                panic!("copy the eligible carrier; consume only the stage");
             };
             assert_eq!(from.root.span.bytes(), b"input: Option<&string>");
             assert!(!same(from, carrier));
@@ -136,12 +136,12 @@ fn owned_option_postfix_preserves_shared_text_backing() {
             };
             assert_eq!(variant, &option.some.id);
             assert!(same(holder, payload));
-            let Operation::Move {
+            let Operation::Copy {
                 from,
                 into: Some(carrier),
             } = moved.operation
             else {
-                panic!("consume the local carrier");
+                panic!("stage an independent copy of the local carrier");
             };
             assert!(same(from, input));
             assert!(
@@ -225,6 +225,83 @@ fn owned_option_postfix_preserves_shared_text_backing() {
                     assert!(limited.mir().is_none() && limited.findings().is_empty());
                 }
             }
+        },
+    );
+}
+
+#[test]
+fn shared_option_copies_keep_the_named_carrier_and_its_backing() {
+    probe(
+        "propagation::shared_option_copies_keep_the_named_carrier_and_its_backing",
+        r#"
+        function make(view: &string): Option<&string> { return Option.Some(view); }
+        function producer(view: &string): Option<&string> { return make(view); }
+        function reuse(input: Option<&string>): Option<&string> {
+            let view = input?; return input;
+        }
+        function grouped(input: Option<&string>): Option<&string> {
+            let view = (((((((input)))))))?; return input;
+        }
+        function live(local: string): Option<bool> {
+            let input: Option<&string> = Option.Some(&local);
+            let _ = input?; dispose(local); let _ = input?; return Option.Some(true);
+        }
+        function beforeTake(local: string): Option<bool> {
+            let input: Option<&string> = Option.Some(&local);
+            let other = input; dispose(local); let _ = other?; return Option.Some(true);
+        }
+        function unused(local: string): Option<bool> {
+            let input: Option<&string> = Option.Some(&local);
+            dispose(local); return Option.Some(true);
+        }
+    "#,
+        |_, module, receipt| {
+            let run = |name: &str, limits| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, limits).unwrap()
+            };
+            let default = AnalysisLimits::default();
+            // The unsupported producer fit these exact limits before shared payload storage.
+            let limit = AnalysisLimits {
+                max_work: 2054,
+                max_entries: 120,
+                max_depth: 2,
+            };
+            let producer = run("producer", limit);
+            assert_eq!(producer.completion(), Completion::Incomplete);
+            assert!(producer.mir().is_none());
+            for name in ["reuse", "grouped"] {
+                let report = run(name, default);
+                let mir = report.mir().expect("copy retains the named source");
+                let (yes, _) = branch_targets(mir);
+                assert!(matches!(
+                    straight_blocks(mir, mir.entry)[0].operation,
+                    Operation::Copy { .. }
+                ));
+                assert!(linear(mir,yes).iter().any(|op| matches!(op,Operation::Copy { from, into: Some(_) } if from.root.span.bytes()==b"input: Option<&string>")));
+            }
+            let limit = AnalysisLimits {
+                max_depth: run("reuse", default).statistics().max_depth,
+                ..default
+            };
+            let short = run("grouped", limit);
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
+            for name in ["live", "beforeTake"] {
+                let report = run(name, default);
+                assert_eq!(report.completion(), Completion::SourceRejected);
+                assert!(report.mir().is_none());
+                let [f] = report.findings() else { panic!() };
+                assert_eq!(
+                    (f.code(), f.site.span.bytes(), f.related.span.bytes()),
+                    ("R0203", b"dispose(local)".as_slice(), b"&local".as_slice())
+                );
+            }
+            assert!(run("unused", default).mir().is_some());
         },
     );
 }

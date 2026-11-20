@@ -94,6 +94,7 @@ enum OptionPayload<'t, 'g> {
 #[derive(Clone, Copy)]
 enum OptionTakeSource {
     Move(Slot),
+    CopyShared(NodeId, Slot),
     Constructor,
     Factory,
     PipeStep,
@@ -712,7 +713,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         } else {
                             SharedOption::Empty
                         });
-                        (may_carry, StorageCleanup::End)
+                        // Neither variant owns its referent. The checked default
+                        // cleanup permits an implicit copy of the whole carrier.
+                        (false, StorageCleanup::End)
                     }
                 }
             }
@@ -2254,7 +2257,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         )?;
                         return self.stage_named_transfer(value, output, checked, None, depth + 1);
                     }
-                    let ty = self.value(value)?.ty.clone();
+                    let facts = self.value(value)?;
+                    if facts.call.is_some() && self.shared_option(&facts.ty) {
+                        // The producer has no checked caller-backing contract.
+                        // Do not allocate or prove return storage for its value.
+                        return Err(Stop::Pending(value));
+                    }
+                    let ty = facts.ty.clone();
                     let tuple_source = self.nested_tuple_transfer_source(value, result)?;
                     let output = if let Some(from) = tuple_source {
                         self.clone_region(from, value)?
@@ -3339,6 +3348,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         &mut self,
         node: NodeId,
         facts: &'a ExpressionFacts<'g>,
+        depth: usize,
     ) -> ResultOf<CheckedPropagation<'a, 'g>> {
         let syntax = &self.module.syntax.nodes[node];
         let (id, result) = self.return_contract.ok_or(Stop::Pending(node))?;
@@ -3401,9 +3411,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 OptionPayload::Bool => None,
                 OptionPayload::SharedText(ty) if syntax.kind == NodeKind::Propagate => {
                     // Only a named whole carrier supplies a checked source on this route.
-                    let (_, path) = self.named_owned_place(source)?.ok_or(Stop::Pending(node))?;
-                    let from = self.resolve_place(source, path)?;
-                    Some((ty, OptionTakeSource::Move(from)))
+                    let (name, _) = self.ungroup_expression_at(source, depth)?;
+                    let (_, path) = self.named_owned_place(name)?.ok_or(Stop::Pending(node))?;
+                    let from = self.resolve_place(name, path)?;
+                    Some((ty, OptionTakeSource::CopyShared(name, from)))
                 }
                 OptionPayload::SharedText(_) => return Err(Stop::Pending(node)),
                 OptionPayload::Text(ty) => {
@@ -3482,7 +3493,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<Pc> {
         self.depth(depth)?;
         let facts = self.value(node)?;
-        let checked = self.checked_propagation(node, facts)?;
+        let checked = self.checked_propagation(node, facts, depth)?;
         self.lower_checked_propagation(node, into, next, return_cleanup, depth, checked)
     }
 
@@ -3669,6 +3680,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 depth,
                 Some(ExpressionProof::CallCarrier(operand)),
             )
+        } else if let Some((_, OptionTakeSource::CopyShared(name, from))) = option_take {
+            self.emit(
+                name,
+                Action::Read {
+                    from,
+                    into: Some(scratch),
+                },
+                Edges::Next(split),
+            )
         } else if let Some((_, OptionTakeSource::Move(from))) = option_take {
             self.depth(depth)?;
             self.emit(
@@ -3722,7 +3742,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             self.depth(depth)?;
             self.budget.step(2)?;
             let facts = self.value(root)?;
-            let checked = self.checked_propagation(root, facts)?;
+            let checked = self.checked_propagation(root, facts, depth)?;
             if let Some(wrap) = checked.wrap
                 && checked.exit.can_return
             {
@@ -4183,7 +4203,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .then(|| self.slot(right, &data.payload))
             .transpose()?;
         let (rhs, temporary) = if postfix {
-            let checked = self.checked_propagation(root, facts)?;
+            let checked = self.checked_propagation(root, facts, root_depth)?;
             if checked.wrapper != Some(data.wrapper)
                 || flow.normal != checked.exit.can_continue
                 || flow.returns != checked.exit.can_return
@@ -5097,7 +5117,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(Stop::Pending(node));
         }
         self.budget.step(4)?;
-        let checked = self.checked_propagation(postfix, self.value(postfix)?)?;
+        let checked = self.checked_propagation(postfix, self.value(postfix)?, depth)?;
         let flow = &self.fact(&node).ok_or(Stop::Pending(node))?.flow;
         if self.bool_option_role(checked.operand).is_none()
             || flow.pending
