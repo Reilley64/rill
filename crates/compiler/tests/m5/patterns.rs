@@ -1,6 +1,202 @@
 use super::*;
 
 #[test]
+fn constructed_nested_record_pattern_cleans_named_binding_on_option_exits() {
+    use compiler::analysis::ownership::{Place, Projection};
+
+    probe_with_typed(
+        "patterns::constructed_nested_record_pattern_cleans_named_binding_on_option_exits",
+        r#"
+            type Inner = { text: string; };
+            type Outer = { first: Inner; second: Inner; };
+            function exits(early: Inner, late: Inner, input: Option<bool>): Option<bool> {
+                let owner = Outer { second: late, first: early };
+                let Outer { first: Inner { text: selected } } = owner;
+                let bit = input?;
+                let tail = selected;
+                return Option.Some(bit);
+            }
+            function movedBeforePattern(early: Inner, late: Inner): void {
+                let owner = Outer { second: late, first: early };
+                let moved = owner;
+                let Outer { first: Inner { text: selected } } = owner;
+            }
+            function movedByPattern(early: Inner, late: Inner): void {
+                let owner = Outer { second: late, first: early };
+                let Outer { first: Inner { text: selected } } = owner;
+                let reused = owner;
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower = |name| {
+                lower_body(
+                    receipt,
+                    module,
+                    &declaration(name).id,
+                    AnalysisLimits::default(),
+                )
+                .unwrap()
+            };
+            let field = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.id.kind == loader::DeclarationKind::Field
+                            && d.name.as_deref() == Some(name)
+                    })
+                    .unwrap()
+                    .id
+            };
+            let role = typed.option_role().expect("admitted Option role");
+            let report = lower("exits");
+            let mir = report.mir().unwrap_or_else(|| {
+                panic!(
+                    "exits: {:?} at {:?}",
+                    report.completion(),
+                    report.blocked_at().map(|s| s.span.bytes())
+                )
+            });
+            let whole = |place: &Place<'_>, root: &Place<'_>| {
+                place.root.node == root.root.node
+                    && place.projection.is_none()
+                    && root.projection.is_none()
+            };
+            let member = |place: &Place<'_>, root: &Place<'_>, name| {
+                place.root.node == root.root.node
+                    && place.field().is_some_and(|d| &d.id == field(name))
+            };
+            let leaf = |place: &Place<'_>, root: &Place<'_>, child| {
+                place.root.node == root.root.node
+                    && matches!(place.projection, Some(Projection::NestedField { outer, inner })
+                        if &outer.id == field(child) && &inner.id == field("text"))
+            };
+            let prefix = straight_blocks(mir, mir.entry);
+            let (test, setup) = prefix.split_last().unwrap();
+            let (Operation::TestVariant { operand, success }, Terminator::Branch { yes, no }) =
+                (&test.operation, test.terminator)
+            else {
+                panic!("postfix Option must test a variant with two feasible exits");
+            };
+            let ops: Vec<_> = setup
+                .iter()
+                .map(|block| &block.operation)
+                .filter(|op| !matches!(op, Operation::None))
+                .collect();
+            let [
+                Operation::Move {
+                    from: late,
+                    into: Some(second),
+                },
+                Operation::Move {
+                    from: early,
+                    into: Some(first),
+                },
+                Operation::Initialize(owner),
+                Operation::Move {
+                    from: source,
+                    into: Some(scratch),
+                },
+                Operation::Move {
+                    from: text,
+                    into: Some(selected),
+                },
+                Operation::Cleanup(remainder),
+                Operation::Copy {
+                    from: input,
+                    into: Some(staged),
+                },
+            ] = ops.as_slice()
+            else {
+                panic!(
+                    "expected construction, one pattern stage, temporary cleanup, then propagation"
+                );
+            };
+            for (place, span) in [
+                (late, b"late: Inner".as_slice()),
+                (early, b"early: Inner"),
+                (owner, b"owner"),
+                (scratch, b"owner"),
+                (selected, b"selected"),
+                (input, b"input: Option<bool>"),
+            ] {
+                assert_eq!(place.root.span.bytes(), span);
+                assert!(place.projection.is_none());
+            }
+            assert_ne!(owner.root.node, scratch.root.node);
+            assert!(member(second, owner, "second") && member(first, owner, "first"));
+            assert!(whole(source, owner) && leaf(text, scratch, "first"));
+            assert!(
+                matches!(remainder.as_slice(), [Obligation::Drop(unbound), Obligation::EndStorage(second), Obligation::EndStorage(first), Obligation::EndStorage(root)]
+                if leaf(unbound, scratch, "second") && member(second, scratch, "second")
+                    && member(first, scratch, "first") && whole(root, scratch))
+            );
+            assert!(whole(operand, staged));
+            assert_eq!(*success, &role.some.id);
+
+            let path = |entry| {
+                linear(mir, entry)
+                    .into_iter()
+                    .filter(|op| !matches!(op, Operation::None))
+                    .collect::<Vec<_>>()
+            };
+            assert!(
+                matches!(path(yes).as_slice(), [
+                Operation::CopyOptionPayload { operand, into: bit },
+                Operation::Move { from, into: Some(tail) },
+                Operation::Copy { from: result, into: Some(payload) },
+                Operation::ConstructVariant { variant, payload: Some(value), into: output },
+                Operation::Export(export),
+                Operation::Cleanup(locals),
+                Operation::Cleanup(parameters),
+            ] if whole(operand, staged) && whole(from, selected)
+                && tail.root.span.bytes() == b"tail" && tail.projection.is_none()
+                && bit.root.span.bytes() == b"bit" && whole(result, bit) && whole(value, payload)
+                && *variant == &role.some.id && whole(export, output)
+                && matches!(locals.as_slice(), [Obligation::Drop(bound), Obligation::EndStorage(flag)]
+                    if whole(bound, tail) && whole(flag, bit))
+                && matches!(parameters.as_slice(), [Obligation::EndStorage(param)] if whole(param, input))),
+                "Some must export the bound payload before dropping tail"
+            );
+            assert!(
+                matches!(path(no).as_slice(), [
+                Operation::ConstructVariant { variant, payload: None, into: output },
+                Operation::Export(export),
+                Operation::Cleanup(locals),
+                Operation::Cleanup(parameters),
+            ] if *variant == &role.none.id && whole(export, output)
+                && matches!(locals.as_slice(), [Obligation::Drop(bound)] if whole(bound, selected))
+                && matches!(parameters.as_slice(), [Obligation::EndStorage(param)] if whole(param, input))),
+                "None must export before dropping the still-initialized selected binding"
+            );
+
+            for name in ["movedBeforePattern", "movedByPattern"] {
+                let rejected = lower(name);
+                assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                assert!(rejected.mir().is_none(), "{name}");
+                let [finding] = rejected.findings() else {
+                    panic!("{name}: expected one moved-owner finding");
+                };
+                assert_eq!(finding.code(), "R0200", "{name}");
+                assert_eq!(finding.site.span.bytes(), b"owner", "{name}");
+                assert_eq!(finding.related.span.bytes(), b"owner", "{name}");
+                assert!(
+                    finding.related.span.start() < finding.site.span.start(),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
     probe(
         "patterns::owned_record_binding_transfers_fields_and_cleans_the_remainder",
