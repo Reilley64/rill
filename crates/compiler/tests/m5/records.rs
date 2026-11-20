@@ -2379,6 +2379,248 @@ fn interrupted_record_initialization_keeps_unreached_and_unsupported_shapes_sepa
     );
 }
 
+#[test]
+fn named_flat_rebuild_stages_before_displacement_and_transfers_cleanup() {
+    probe_with_typed(
+        "records::named_flat_rebuild_stages_before_displacement_and_transfers_cleanup",
+        r#"
+            type Pack = { keep: string; mark: bool; last: string; }
+            function rebuilt(base: Pack, replacement: string): void {
+                let saved = Pack { ...base, last: replacement, mark: base.mark };
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let declaration = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("rebuilt"))
+                .unwrap();
+            let lower = |limits| lower_body(receipt, module, &declaration.id, limits).unwrap();
+            let default = AnalysisLimits::default();
+            let report = lower(default);
+            let mir = report.mir().unwrap_or_else(|| {
+                panic!(
+                    "rebuild: {:?} at {:?}",
+                    report.completion(),
+                    report
+                        .blocked_at()
+                        .map(|s| s.span.bytes().escape_ascii().to_string())
+                )
+            });
+            let field = |name| canonical_record_field(typed, &module.key, "Pack", name);
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    !matches!(op, Operation::None)
+                        && !matches!(op, Operation::Cleanup(actions) if actions.is_empty())
+                })
+                .collect();
+            let [
+                Operation::Move {
+                    from: replacement,
+                    into: Some(last_stage),
+                },
+                Operation::Copy {
+                    from: original_mark,
+                    into: Some(mark_stage),
+                },
+                Operation::Drop(displaced_last),
+                Operation::Install {
+                    target: last,
+                    incoming: new_last,
+                },
+                Operation::Install {
+                    target: mark,
+                    incoming: new_mark,
+                },
+                Operation::Move {
+                    from: base,
+                    into: Some(saved),
+                },
+                Operation::Cleanup(exit),
+            ] = ops.as_slice()
+            else {
+                panic!("expected only stages, replacements, handoff and exit")
+            };
+            assert_eq!(replacement.root.span.bytes(), b"replacement: string");
+            assert_eq!(base.root.span.bytes(), b"base: Pack");
+            assert_eq!(saved.root.span.bytes(), b"saved");
+            for whole in [
+                replacement,
+                last_stage,
+                mark_stage,
+                new_last,
+                new_mark,
+                base,
+                saved,
+            ] {
+                assert!(whole.projection.is_none());
+            }
+            assert_eq!(last_stage.root.node, new_last.root.node);
+            assert_eq!(mark_stage.root.node, new_mark.root.node);
+            assert_ne!(last_stage.root.node, mark_stage.root.node);
+            for (place, name) in [(original_mark, "mark"), (mark, "mark"), (last, "last")] {
+                assert_eq!(place.root.node, base.root.node);
+                assert_eq!(&place.field().unwrap().id, field(name));
+            }
+            assert_eq!(displaced_last.root.node, base.root.node);
+            assert_eq!(&displaced_last.field().unwrap().id, field("last"));
+            assert!(
+                matches!(exit.as_slice(), [Obligation::Drop(last), Obligation::EndStorage(mark), Obligation::Drop(keep), Obligation::EndStorage(whole)]
+                if whole.root.node == saved.root.node && whole.projection.is_none() && [last, mark, keep].iter().zip(["last", "mark", "keep"]).all(|(place, name)| place.root.node == saved.root.node && &place.field().unwrap().id == field(name)))
+            );
+
+            let exact = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                max_depth: report.statistics().max_depth,
+            };
+            assert!(lower(exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower(short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn flat_rebuild_distinguishes_moved_inputs_live_loans_and_unsupported_bases() {
+    probe(
+        "records::flat_rebuild_distinguishes_moved_inputs_live_loans_and_unsupported_bases",
+        r#"
+            type Pack = { keep: string; mark: bool; last: string; }
+            type Flags = { mark: bool; }
+            type Outer = { child: Pack; }
+            function reused(base: Pack, replacement: string): string {
+                let saved = Pack { ...base, last: replacement, mark: base.mark };
+                return base.keep;
+            }
+            function movedBase(base: Pack, replacement: string): void {
+                let consumed = base;
+                let saved = Pack { ...base, last: replacement };
+            }
+            function movedReplacement(base: Pack, replacement: string): void {
+                let consumed = replacement;
+                let saved = Pack { ...base, last: replacement };
+            }
+            function movedField(base: Pack): void {
+                let consumed = base.last;
+                let saved = Pack { ...base, last: base.last };
+            }
+            function moveOriginal(base: Pack): void {
+                let saved = Pack { ...base, last: base.last };
+            }
+            function conflict(base: Pack, replacement: string): &string {
+                let view = &base.keep;
+                let saved = Pack { ...base, last: replacement };
+                return view;
+            }
+            function repair(base: Pack, replacement: string): void {
+                let hole = base.last;
+                let saved = Pack { ...base, last: replacement };
+            }
+            function pass(base: Pack): Pack { return base; }
+            function computed(base: Pack, replacement: string): void {
+                let saved = Pack { ...pass(base), last: replacement };
+            }
+            function nested(base: Outer, replacement: string): void {
+                let saved = Pack { ...base.child, last: replacement };
+            }
+            function copyOnly(base: Flags): void {
+                let saved = Flags { ...base, mark: true };
+            }
+            function direct(base: Pack, replacement: string): Pack {
+                return Pack { ...base, last: replacement };
+            }
+            function interrupted(base: Pack, replacement: string, gate: Option<bool>): Option<bool> {
+                let saved = Pack { ...base, last: replacement, mark: gate? };
+                return gate;
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            for (name, code, site, related) in [
+                (
+                    "reused",
+                    "R0200",
+                    "base.keep",
+                    "Pack { ...base, last: replacement, mark: base.mark }",
+                ),
+                ("movedBase", "R0200", "base", "base"),
+                ("movedReplacement", "R0200", "replacement", "replacement"),
+                ("movedField", "R0200", "base.last", "base.last"),
+                (
+                    "conflict",
+                    "R0203",
+                    "Pack { ...base, last: replacement }",
+                    "&base.keep",
+                ),
+            ] {
+                let report = lower(name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::SourceRejected,
+                    "{name}: {:?}",
+                    report
+                        .blocked_at()
+                        .map(|s| s.span.bytes().escape_ascii().to_string())
+                );
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected one finding for {name}")
+                };
+                assert_eq!(finding.code(), code, "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+                assert!(finding.related.span.end() <= finding.site.span.start());
+            }
+            for (name, site) in [
+                ("repair", "Pack { ...base, last: replacement }"),
+                ("moveOriginal", "base.last"),
+                ("computed", "Pack { ...pass(base), last: replacement }"),
+                ("nested", "Pack { ...base.child, last: replacement }"),
+                ("copyOnly", "Flags { ...base, mark: true }"),
+                ("direct", "Pack { ...base, last: replacement }"),
+                (
+                    "interrupted",
+                    "Pack { ...base, last: replacement, mark: gate? }",
+                ),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
 fn dropped_fields<'g>(mir: &Mir<'g>) -> Vec<&'g str> {
     path_drops(mir, mir.entry)
         .into_iter()

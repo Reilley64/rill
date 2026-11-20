@@ -791,6 +791,12 @@ enum Action<'g> {
         from: Slot,
         into: Option<Slot>,
     },
+    CheckRebuild {
+        base: Slot,
+        // None selects the base; Some is the contiguous stage range at commit.
+        staged: Option<(Slot, usize)>,
+    },
+    UnloweredRebuildRead(Slot),
     ForbiddenBorrowedMove(Slot),
     Borrow {
         from: Slot,
