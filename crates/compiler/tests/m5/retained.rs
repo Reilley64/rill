@@ -1,5 +1,5 @@
 use super::*;
-use compiler::analysis::ownership::{Place, RetainedPlace};
+use compiler::analysis::ownership::{Place, Report, RetainedPlace};
 
 #[test]
 fn caller_owned_descriptor_cannot_retain_body_local_sources() {
@@ -1304,6 +1304,34 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 let access = slot;
                 if (choose) { let holder = src; *access = &*holder; }
             }
+            function scalar(flag: &mut bool): bool { return *flag; }
+            function broaderCaller(seed: &bool): bool {
+                let mut flag = true;
+                let mut marker = false;
+                let access = &mut flag;
+                let mut out = seed;
+                broaderContract(&mut out, access, scalar(&mut marker));
+                marker = true;
+                let snapshot = *out;
+                let after = *access;
+                return snapshot;
+            }
+            function broaderLocal(slot: &mut &bool, src: &mut bool, extra: bool): void {
+                let local = true;
+                *slot = &local;
+            }
+            function broaderLocalEarly(slot: &mut &bool, src: &mut bool, extra: bool): void {
+                let mut local = true;
+                let holder = &mut local;
+                if (extra) { *slot = &*holder; return; }
+                *slot = &*src;
+            }
+            function broaderReachesBad(seed: &bool): bool {
+                let mut flag = true;
+                let mut out = seed;
+                broaderLocalEarly(&mut out, &mut flag, false);
+                return *out;
+            }
             function forwardsLocalReborrow(slot: &mut &bool, input: &bool): void {
                 let mut local = true;
                 let src = &mut local;
@@ -1452,41 +1480,295 @@ fn forwarding_reborrows_the_descriptor_and_keeps_its_contents() {
                 assert_eq!(report.completion(), Completion::Checked, "{name}");
                 assert!(report.mir().is_some(), "{name}");
             }
-            for name in ["broaderContract", "broaderMoved"] {
-                let pending = lower(name);
-                assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
-                assert!(pending.mir().is_none(), "{name}");
-                let store = if name == "broaderMoved" {
-                    "*access = &*holder;"
-                } else {
-                    "*slot = &*src;"
+            let broader = lower("broaderContract");
+            let mir = require_mir(&broader, "broaderContract");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Reborrow { .. } | Operation::InstallThrough { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(route.as_slice(), [
+                Operation::Reborrow { parent: src, holder, exclusive: false },
+                Operation::InstallThrough { descriptor: slot, incoming },
+            ] if src.root.span.bytes() == b"src: &mut bool" && slot.root.span.bytes() == b"slot: &mut &bool"
+                && holder.root.node == incoming.root.node));
+
+            let moved = lower("broaderMoved");
+            let mir = require_mir(&moved, "broaderMoved");
+            let prefix = straight_blocks(mir, mir.entry);
+            let Terminator::Branch { yes, no } = prefix.last().unwrap().terminator else {
+                panic!("expected both normal exits")
+            };
+            let [access] = prefix
+                .iter()
+                .filter_map(|block| match block.operation {
+                    Operation::Move {
+                        from,
+                        into: Some(access),
+                    } if from.root.span.bytes() == b"slot: &mut &bool" => Some(access),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()[..]
+            else {
+                panic!("expected a moved destination descriptor")
+            };
+            let stored: Vec<_> = linear(mir, yes)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Move { .. }
+                            | Operation::Reborrow { .. }
+                            | Operation::InstallThrough { .. }
+                    )
+                })
+                .collect();
+            assert!(matches!(stored.as_slice(), [
+                Operation::Move { from: src, into: Some(moved) },
+                Operation::Reborrow { parent, holder, exclusive: false },
+                Operation::InstallThrough { descriptor, incoming },
+            ] if src.root.span.bytes() == b"src: &mut bool" && parent.root.node == moved.root.node
+                && descriptor.root.node == access.root.node && holder.root.node == incoming.root.node));
+            assert!(
+                !linear(mir, no)
+                    .iter()
+                    .any(|op| matches!(op, Operation::InstallThrough { .. }))
+            );
+
+            for (name, site, related) in [
+                ("broaderLocal", "*slot = &local;", "&local"),
+                ("broaderLocalEarly", "*slot = &*holder;", "&mut local"),
+                ("broaderReachesBad", "*slot = &*holder;", "&mut local"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one escape")
                 };
-                assert_eq!(
-                    std::str::from_utf8(pending.blocked_at().unwrap().span.bytes()),
-                    Ok(store),
-                    "{name}"
-                );
+                assert_eq!(finding.code(), "R0202", "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
             }
 
-            let limits = AnalysisLimits {
-                max_work: caller.statistics().work,
-                max_entries: caller.statistics().entries,
-                ..AnalysisLimits::default()
+            let reached = lower("broaderCaller");
+            let mir = require_mir(&reached, "broaderCaller");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Borrow { source, .. } => {
+                        matches!(source.root.span.bytes(), b"out" | b"marker")
+                    }
+                    Operation::Reborrow { .. }
+                    | Operation::Call(_)
+                    | Operation::CallRetainingWithBool { .. }
+                    | Operation::Install { .. }
+                    | Operation::Dereference(_) => true,
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source: out, holder: destination_stage, exclusive: true },
+                Operation::Reborrow { parent, holder: source_stage, exclusive: true },
+                Operation::Borrow { source: marker, exclusive: true, .. },
+                Operation::Call(scalar),
+                Operation::CallRetainingWithBool { callee, destination: RetainedPlace::Local(destination), arguments, input, second_input: None },
+                Operation::Install { target, .. },
+                Operation::Dereference(view),
+                Operation::Dereference(resumed),
+            ] if *scalar == &declaration("scalar").id && *callee == &declaration("broaderContract").id
+                && out.root.span.bytes() == b"out" && [destination, view].iter().all(|place| place.root.node == out.root.node)
+                && marker.root.span.bytes() == b"marker" && target.root.node == marker.root.node
+                && parent.root.span.bytes() == b"access" && resumed.root.node == parent.root.node
+                && input.root.node == source_stage.root.node && matches!(arguments.as_slice(), [dest, src, flag]
+                    if dest.root.node == destination_stage.root.node && src.root.node == source_stage.root.node
+                    && flag.root.span.bytes() == b"scalar(&mut marker)")),
+                "{route:?}"
+            );
+
+            for (name, report) in [("caller", caller), ("broaderCaller", reached)] {
+                let stats = report.statistics();
+                let limits = AnalysisLimits {
+                    max_work: stats.work,
+                    max_entries: stats.entries,
+                    max_depth: stats.max_depth,
+                };
+                assert!(check(name, limits).mir().is_some());
+                for short in [
+                    AnalysisLimits {
+                        max_work: limits.max_work - 1,
+                        ..limits
+                    },
+                    AnalysisLimits {
+                        max_entries: limits.max_entries - 1,
+                        ..limits
+                    },
+                    AnalysisLimits {
+                        max_depth: limits.max_depth - 1,
+                        ..limits
+                    },
+                ] {
+                    let limited = check(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none(), "{name}");
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn scalar_stages_do_not_narrow_or_extend_retained_backing() {
+    probe(
+        "retained::scalar_stages_do_not_narrow_or_extend_retained_backing",
+        r#"
+            function scalar(flag: &mut bool): bool { return *flag; }
+            function pair(first: &mut bool, choose: bool, slot: &mut &bool, second: &mut bool): void {
+                if (choose) { *slot = &*first; return; }
+            }
+            function piped(seed: &bool, unused: &mut bool): bool {
+                let mut flag = true;
+                let mut marker = false;
+                let access = &mut flag;
+                let mut out = seed;
+                scalar(&mut marker) |> pair(access, _, &mut out, unused);
+                marker = true;
+                let snapshot = *out;
+                let resumed = *unused;
+                return snapshot;
+            }
+            function forwarded(slot: &mut &bool, first: &mut bool, second: &mut bool, choose: bool): void {
+                let out = slot;
+                pair(first, choose, out, (second));
+            }
+            function keepsUnused(seed: &bool, first: &mut bool, unused: &mut bool): bool {
+                let mut out = seed;
+                pair(first, false, &mut out, unused);
+                let early = *unused;
+                return *out;
+            }
+            function keepsOld(first: &mut bool, unused: &mut bool): bool {
+                let mut old = true;
+                let prior = &mut old;
+                let mut out = &*prior;
+                pair(first, true, &mut out, unused);
+                let early = *prior;
+                return *out;
+            }
+            function overlap(slot: &mut &bool, first: &mut bool, unused: &mut bool): void {
+                pair(first, scalar(first), slot, unused);
+            }
+            function unproved(slot: &mut &bool, src: &mut bool, one: bool, two: bool): void {
+                *slot = &*src;
+            }
+            function reachesUnproved(slot: &mut &bool, src: &mut bool): void {
+                unproved(slot, src, false, true);
+            }
+        "#,
+        |_, module, receipt| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
             };
-            assert!(check("caller", limits).mir().is_some());
-            for short in [
-                AnalysisLimits {
-                    max_work: limits.max_work - 1,
-                    ..limits
-                },
-                AnalysisLimits {
-                    max_entries: limits.max_entries - 1,
-                    ..limits
-                },
+            let lower = |name| {
+                lower_body(
+                    receipt,
+                    module,
+                    &declaration(name).id,
+                    AnalysisLimits::default(),
+                )
+                .unwrap()
+            };
+            let pair = lower("pair");
+            let mir = require_mir(&pair, "pair");
+            let (returned, fallthrough) = branch_targets(mir);
+            assert!(
+                matches!(linear(mir, returned).into_iter().filter(|op| matches!(op, Operation::InstallThrough { .. })).collect::<Vec<_>>().as_slice(), [
+                Operation::InstallThrough { descriptor, incoming },
+            ] if descriptor.root.span.bytes() == b"slot: &mut &bool" && incoming.root.span.bytes() == b"&*first")
+            );
+            assert!(
+                !linear(mir, fallthrough)
+                    .iter()
+                    .any(|op| matches!(op, Operation::InstallThrough { .. }))
+            );
+
+            let piped = lower("piped");
+            let mir = require_mir(&piped, "piped");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| match op {
+                    Operation::Borrow { source, .. } => {
+                        matches!(source.root.span.bytes(), b"marker" | b"out")
+                    }
+                    Operation::Call(_)
+                    | Operation::Reborrow { .. }
+                    | Operation::CallRetainingWithBool { .. } => true,
+                    _ => false,
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Borrow { source: marker, exclusive: true, .. },
+                Operation::Call(scalar),
+                Operation::Reborrow { parent: first, holder: first_stage, exclusive: true },
+                Operation::Borrow { source: out, holder: out_stage, exclusive: true },
+                Operation::Reborrow { parent: second, holder: second_stage, exclusive: true },
+                Operation::CallRetainingWithBool { callee, destination: RetainedPlace::Local(slot), arguments, input, second_input: Some(retained_second) },
+            ] if marker.root.span.bytes() == b"marker" && *scalar == &declaration("scalar").id
+                && first.root.span.bytes() == b"access" && second.root.span.bytes() == b"unused: &mut bool"
+                && *callee == &declaration("pair").id && out.root.span.bytes() == b"out" && slot.root.node == out.root.node
+                && input.root.node == first_stage.root.node && retained_second.root.node == second_stage.root.node
+                && matches!(arguments.as_slice(), [a, b, c, d] if a.root.node == first_stage.root.node
+                    && b.root.span.bytes() == b"scalar(&mut marker)" && c.root.node == out_stage.root.node
+                    && d.root.node == second_stage.root.node)),
+                "{route:?}"
+            );
+
+            let forwarded = lower("forwarded");
+            let mir = require_mir(&forwarded, "forwarded");
+            assert!(
+                matches!(linear(mir, mir.entry).into_iter().filter(|op| matches!(op, Operation::CallRetainingWithBool { .. })).collect::<Vec<_>>().as_slice(), [
+                Operation::CallRetainingWithBool { destination: RetainedPlace::ThroughParameterAlias { descriptor, parameter }, arguments, .. },
+            ] if descriptor.root.span.bytes() == b"out" && parameter.root.span.bytes() == b"slot: &mut &bool"
+                && arguments[3].root.span.bytes() == b"(second)")
+            );
+
+            for (name, site, related) in [
+                ("keepsUnused", "*unused", "unused"),
+                ("keepsOld", "*prior", "&*prior"),
+                ("overlap", "first", "first"),
             ] {
-                let limited = check("caller", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected one access conflict")
+                };
+                assert_eq!(finding.code(), "R0201", "{name}");
+                assert_eq!(finding.site.span.bytes(), site.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), related.as_bytes(), "{name}");
+            }
+            for (name, blocked) in [
+                ("unproved", "*slot = &*src;"),
+                ("reachesUnproved", "unproved(slot, src, false, true)"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    blocked.as_bytes(),
+                    "{name}"
+                );
             }
         },
     );
@@ -2716,6 +2998,17 @@ fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
             }
         },
     );
+}
+
+fn require_mir<'a, 'g>(report: &'a Report<'g>, name: &str) -> &'a Mir<'g> {
+    report.mir().unwrap_or_else(|| {
+        panic!(
+            "{name}: {:?}, {:?}, {:?}",
+            report.completion(),
+            report.blocked_at(),
+            report.findings()
+        )
+    })
 }
 
 fn field_named<'g>(module: &'g loader::Module, name: &str) -> &'g loader::Declaration {

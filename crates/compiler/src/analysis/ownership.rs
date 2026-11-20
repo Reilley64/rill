@@ -213,6 +213,15 @@ pub enum Operation<'g> {
         destination: RetainedPlace<'g>,
         inputs: [Place<'g>; 2],
     },
+    /// Stages in formal order, with only the compatible reference inputs
+    /// contributing backing to the destination. The Bool stage carries none.
+    CallRetainingWithBool {
+        callee: &'g DeclarationId,
+        destination: RetainedPlace<'g>,
+        arguments: Vec<Place<'g>>,
+        input: Place<'g>,
+        second_input: Option<Place<'g>>,
+    },
     /// Select the success variant of a staged propagation or wrapping operand.
     TestVariant {
         operand: Place<'g>,
@@ -453,7 +462,8 @@ fn checked_graph<'g>(
                 Operation::Call(callee)
                 | Operation::CallIntoTemporary { callee, .. }
                 | Operation::CallRetaining { callee, .. }
-                | Operation::CallRetainingPair { callee, .. } => Some((callee, false)),
+                | Operation::CallRetainingPair { callee, .. }
+                | Operation::CallRetainingWithBool { callee, .. } => Some((callee, false)),
                 _ => None,
             };
             let cleanup = match &block.operation {
@@ -541,23 +551,15 @@ fn lower<'g>(
         return Err(Stop::Pending(entry_site));
     };
     let mut retains_exclusive_bool = false;
-    if matches!(parameters.len(), 2 | 3) {
+    if matches!(parameters.len(), 2..=4) {
         budget.step(parameters.len())?;
         if let Some(destination) = parameters
             .iter()
             .position(|parameter| retained_bool_contents_type(&parameter.ty).is_some())
         {
-            budget.step(2 * parameters.len())?;
-            retains_exclusive_bool = retained_bool_call_types(&header.shape, destination)
-                .is_some_and(|(_, formals)| {
-                    formals.iter().enumerate().any(|(index, formal)| {
-                        index != destination
-                            && matches!(
-                                formal.ty.as_ref(),
-                                TypeTerm::Reference { mutable: true, .. }
-                            )
-                    })
-                });
+            retains_exclusive_bool =
+                retained_bool_contract(parameters, result, destination, budget)?
+                    .is_some_and(|contract| contract.exclusive_source);
         }
     }
     let mut build = Build {
@@ -655,34 +657,62 @@ fn lower<'g>(
     flow::run(build, entry, &params, active)
 }
 
-// A scalar retention call has one destination and one or two compatible
-// sources. Each input can supply a shared view of the same Bool backing.
-fn retained_bool_call_types<'a, 'g>(
-    shape: &'a DeclarationShape<'g>,
+struct RetainedBoolContract<'a, 'g> {
+    contents: &'a Type<'g>,
+    scalar: Option<usize>,
+    exclusive_source: bool,
+}
+
+// Only one destination, one or two compatible sources and at most one
+// independent Bool. Check the same declared contract at calls and exits.
+fn retained_bool_contract<'a, 'g>(
+    parameters: &'a [super::MemberType<'g>],
+    result: &Type<'g>,
     destination: usize,
-) -> Option<(&'a Type<'g>, &'a [super::MemberType<'g>])> {
-    let DeclarationShape::Function { parameters, result } = shape else {
-        return None;
-    };
-    if !matches!(parameters.len(), 2 | 3)
+    budget: &mut Budget,
+) -> ResultOf<Option<RetainedBoolContract<'a, 'g>>> {
+    if !matches!(parameters.len(), 2..=4)
         || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
     {
-        return None;
+        return Ok(None);
     }
-    let contents = retained_bool_contents_type(&parameters.get(destination)?.ty)?;
+    budget.step(1)?;
+    let Some(contents) = parameters
+        .get(destination)
+        .and_then(|formal| retained_bool_contents_type(&formal.ty))
+    else {
+        return Ok(None);
+    };
+    let mut scalar = None;
+    let mut sources = 0;
+    let mut exclusive_source = false;
     for (index, formal) in parameters.iter().enumerate() {
-        if index == destination || formal.ty == *contents {
+        budget.step(1)?;
+        if index == destination {
             continue;
         }
-        if !matches!((contents.as_ref(), formal.ty.as_ref()), (
+        if formal.ty == *contents {
+            sources += 1;
+        } else if matches!((contents.as_ref(), formal.ty.as_ref()), (
             TypeTerm::Reference { referent: stored, .. },
             TypeTerm::Reference { mutable: true, referent: source },
         ) if stored == source)
         {
-            return None;
+            sources += 1;
+            exclusive_source = true;
+        } else if matches!(formal.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+            && scalar.is_none()
+        {
+            scalar = Some(index);
+        } else {
+            return Ok(None);
         }
     }
-    Some((contents, parameters))
+    Ok(matches!(sources, 1 | 2).then_some(RetainedBoolContract {
+        contents,
+        scalar,
+        exclusive_source,
+    }))
 }
 
 fn site_at(module: &Module, node: NodeId) -> Site<'_> {
@@ -978,13 +1008,15 @@ struct Call<'g> {
 #[derive(Clone, Copy)]
 struct CallDestination {
     storage: CallStorage,
+    argument: Slot,
     input: Slot,
     second_input: Option<Slot>,
+    has_scalar: bool,
 }
 
 #[derive(Clone, Copy)]
 enum CallStorage {
     Local(Slot),
     ThroughParameter { descriptor: Slot, contents: Slot },
-    ThroughAlias { descriptor: Slot, argument: Slot },
+    ThroughAlias { descriptor: Slot },
 }

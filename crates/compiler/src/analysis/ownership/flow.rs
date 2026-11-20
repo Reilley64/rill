@@ -1414,30 +1414,29 @@ pub(super) fn run<'g>(
                                 contents,
                                 RetainedPlace::ThroughParameter(local(descriptor)),
                             ),
-                            CallStorage::ThroughAlias {
-                                descriptor,
-                                argument,
-                            } => match exact_target(&state, argument, node, budget)? {
-                                ExactTarget::Local(target) => (
-                                    descriptor,
-                                    target,
-                                    RetainedPlace::ThroughAlias {
-                                        descriptor: local(descriptor),
-                                        target: local(target),
-                                    },
-                                ),
-                                ExactTarget::Caller {
-                                    parameter,
-                                    contents,
-                                } => (
-                                    descriptor,
-                                    contents,
-                                    RetainedPlace::ThroughParameterAlias {
-                                        descriptor: local(descriptor),
-                                        parameter: local(parameter),
-                                    },
-                                ),
-                            },
+                            CallStorage::ThroughAlias { descriptor } => {
+                                match exact_target(&state, destination.argument, node, budget)? {
+                                    ExactTarget::Local(target) => (
+                                        descriptor,
+                                        target,
+                                        RetainedPlace::ThroughAlias {
+                                            descriptor: local(descriptor),
+                                            target: local(target),
+                                        },
+                                    ),
+                                    ExactTarget::Caller {
+                                        parameter,
+                                        contents,
+                                    } => (
+                                        descriptor,
+                                        contents,
+                                        RetainedPlace::ThroughParameterAlias {
+                                            descriptor: local(descriptor),
+                                            parameter: local(parameter),
+                                        },
+                                    ),
+                                }
+                            }
                         };
                         initialized(&state[access], node)?;
                         let mut loans = BTreeSet::new();
@@ -1490,7 +1489,17 @@ pub(super) fn run<'g>(
                     }
                     if let Some((destination, contents, retention, held)) = contents {
                         state[contents] = State::Initialized(held);
-                        if let Some(second) = retention.second_input {
+                        if retention.has_scalar {
+                            budget.step(call.args.len())?;
+                            budget.reserve(call.args.len())?;
+                            Operation::CallRetainingWithBool {
+                                callee: call.callee,
+                                destination,
+                                arguments: call.args.iter().copied().map(local).collect(),
+                                input: local(retention.input),
+                                second_input: retention.second_input.map(local),
+                            }
+                        } else if let Some(second) = retention.second_input {
                             Operation::CallRetainingPair {
                                 callee: call.callee,
                                 destination,

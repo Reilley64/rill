@@ -4098,35 +4098,28 @@ impl<'a, 'g> Build<'a, 'g> {
         self.slot(node, &capture.ty)
     }
 
-    fn retained_call_contents(
+    fn retained_call_contract(
         &mut self,
         node: NodeId,
         call: &crate::analysis::scalars::CallFacts<'g>,
         position: usize,
-    ) -> ResultOf<Type<'g>> {
+        result: &Type<'g>,
+    ) -> ResultOf<RetainedBoolContract<'a, 'g>> {
         // The declaration determines the possible inputs. Do not use the
         // callee body to narrow them.
-        self.budget.step(1)?;
-        let signature = self
-            .typed
-            .inventory()
-            .type_facts()
-            .declarations
-            .get(call.callee)
-            .ok_or(Stop::Pending(node))?;
-        self.budget.step(call.arguments.len().min(3))?;
-        let (contents, formals) =
-            retained_bool_call_types(&signature.shape, position).ok_or(Stop::Pending(node))?;
-        if formals.len() != call.arguments.len() {
+        let (formals, declared_result) = self.direct_application_signature(node, call)?;
+        if declared_result != result {
             return Err(Stop::Pending(node));
         }
+        let contract = retained_bool_contract(formals, declared_result, position, self.budget)?
+            .ok_or(Stop::Pending(node))?;
         for (formal, &actual) in formals.iter().zip(&call.arguments) {
             self.budget.step(1)?;
             if self.value(actual)?.ty != formal.ty {
                 return Err(Stop::Pending(node));
             }
         }
-        Ok(contents.clone())
+        Ok(contract)
     }
 
     fn call_destination(
@@ -4134,13 +4127,23 @@ impl<'a, 'g> Build<'a, 'g> {
         call: &crate::analysis::scalars::CallFacts<'g>,
         position: usize,
         args: &[Slot],
-        contents: &Type<'g>,
+        contract: RetainedBoolContract<'a, 'g>,
+        depth: usize,
     ) -> ResultOf<CallDestination> {
         self.budget.step(args.len())?;
-        let mut sources = (0..args.len()).filter(|&i| i != position).map(|i| args[i]);
+        let mut sources = (0..args.len())
+            .filter(|&i| i != position && contract.scalar != Some(i))
+            .map(|i| args[i]);
         let input = sources.next().unwrap();
         let second_input = sources.next();
-        let argument = self.ungroup(call.arguments[position])?;
+        let destination = |storage| CallDestination {
+            storage,
+            argument: args[position],
+            input,
+            second_input,
+            has_scalar: contract.scalar.is_some(),
+        };
+        let (argument, _) = self.ungroup_expression_at(call.arguments[position], depth)?;
         let syntax = &self.module.syntax.nodes[argument];
         if syntax.kind == NodeKind::ValueReference {
             self.budget.step(1)?;
@@ -4158,18 +4161,11 @@ impl<'a, 'g> Build<'a, 'g> {
                     contents,
                 }
             } else if path.root.kind == DeclarationKind::Binding {
-                CallStorage::ThroughAlias {
-                    descriptor,
-                    argument: args[position],
-                }
+                CallStorage::ThroughAlias { descriptor }
             } else {
                 return Err(Stop::Pending(argument));
             };
-            return Ok(CallDestination {
-                storage,
-                input,
-                second_input,
-            });
+            return Ok(destination(storage));
         }
         if syntax.kind != NodeKind::Prefix("&mut") {
             return Err(Stop::Pending(argument));
@@ -4181,7 +4177,7 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(target));
         };
         if facts.access != Access::Owned
-            || facts.ty != *contents
+            || facts.ty != *contract.contents
             || path.root.kind != DeclarationKind::Binding
         {
             return Err(Stop::Pending(target));
@@ -4190,11 +4186,7 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(target));
         }
         let place = self.resolve_place(target, path)?;
-        Ok(CallDestination {
-            storage: CallStorage::Local(place),
-            input,
-            second_input,
-        })
+        Ok(destination(CallStorage::Local(place)))
     }
 
     fn invoke_closure_pair(&mut self, node: NodeId, into: Slot, next: Pc) -> ResultOf<Pc> {
@@ -4445,7 +4437,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let mut pipe_retention = None;
         if ordinary_pipe && !tuple_or_leaf_admitted {
             // Prove the exact retaining signature before building slots.
-            if !matches!(call.arguments.len(), 2 | 3)
+            if !matches!(call.arguments.len(), 2..=4)
                 || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
             {
                 return Err(Stop::Pending(node));
@@ -4453,8 +4445,10 @@ impl<'a, 'g> Build<'a, 'g> {
             for (position, &arg) in call.arguments.iter().enumerate() {
                 self.budget.step(1)?;
                 if retained_bool_contents_type(&self.value(arg)?.ty).is_some() {
-                    pipe_retention =
-                        Some((position, self.retained_call_contents(node, call, position)?));
+                    pipe_retention = Some((
+                        position,
+                        self.retained_call_contract(node, call, position, result)?,
+                    ));
                     break;
                 }
             }
@@ -4509,13 +4503,16 @@ impl<'a, 'g> Build<'a, 'g> {
         let index = self.calls.len();
         let retention = match (pipe_retention, destination) {
             (Some(checked), _) => Some(checked),
-            (None, Some(position)) => {
-                Some((position, self.retained_call_contents(node, call, position)?))
-            }
+            (None, Some(position)) => Some((
+                position,
+                self.retained_call_contract(node, call, position, result)?,
+            )),
             (None, None) => None,
         };
         let destination = retention
-            .map(|(position, contents)| self.call_destination(call, position, &args, &contents))
+            .map(|(position, contract)| {
+                self.call_destination(call, position, &args, contract, depth + 1)
+            })
             .transpose()?;
         self.calls.push(Call {
             callee: call.callee,
@@ -4530,7 +4527,11 @@ impl<'a, 'g> Build<'a, 'g> {
         for (i, arg) in argument_staging_order(&call.arguments, pipe_formal).rev() {
             self.budget.step(1)?;
             let slot = self.calls[index].args[i];
-            let root = self.ungroup(arg)?;
+            let root = if destination.is_some() {
+                self.ungroup_expression_at(arg, depth + 1)?.0
+            } else {
+                self.ungroup(arg)?
+            };
             let existing_exclusive = matches!(
                 self.value(arg)?.ty.as_ref(),
                 TypeTerm::Reference { mutable: true, .. }
@@ -4546,9 +4547,9 @@ impl<'a, 'g> Build<'a, 'g> {
                         storage:
                             CallStorage::ThroughParameter { descriptor, .. }
                             | CallStorage::ThroughAlias { descriptor, .. },
-                        input,
-                        second_input,
-                    }) if input != slot && second_input != Some(slot) => descriptor,
+                        argument,
+                        ..
+                    }) if argument == slot => descriptor,
                     _ => {
                         self.budget.step(1)?;
                         self.place(root)?
