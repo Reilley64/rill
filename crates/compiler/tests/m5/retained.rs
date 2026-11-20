@@ -13,15 +13,17 @@ fn original_two_hop_bool_store_distinguishes_incoming_and_local_backing() {
             }
         "#,
         |_, module, receipt| {
-            let lower = |name| {
+            let check = |name, limits| {
                 let decl = module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap();
-                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+                lower_body(receipt, module, &decl.id, limits).unwrap()
             };
+            let lower = |name| check(name, AnalysisLimits::default());
             let keep = lower("keep");
+            assert_retained_call_limits(&keep, |limits| check("keep", limits));
             let mir = require_mir(&keep, "keep");
             let path: Vec<_> = linear(mir, mir.entry)
                 .into_iter()
@@ -87,6 +89,18 @@ fn original_two_hop_relay_checks_reached_bodies_and_preserves_backing() {
                 keep(slot, input);
                 let read = *source;
             }
+            function keptOld(slot: &mut &mut &bool, input: &bool): void {
+                let mut a = true; let mut b = false;
+                let first = &mut a; let second = &mut b;
+                keep(slot, &*first); keep(slot, &*second);
+                let read = *first;
+            }
+            function keptNew(slot: &mut &mut &bool, input: &bool): void {
+                let mut a = true; let mut b = false;
+                let first = &mut a; let second = &mut b;
+                keep(slot, &*first); keep(slot, &*second);
+                let read = *second;
+            }
             function expires(slot: &mut &mut &bool, input: &bool): void {
                 { let flag = true; keep(slot, &flag); }
                 keep(slot, input);
@@ -100,10 +114,10 @@ fn original_two_hop_relay_checks_reached_bodies_and_preserves_backing() {
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap()
             };
-            let lower = |name| {
-                lower_body(receipt, module, &decl(name).id, AnalysisLimits::default()).unwrap()
-            };
+            let check = |name, limits| lower_body(receipt, module, &decl(name).id, limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
             let relay = lower("relay");
+            assert_retained_call_limits(&relay, |limits| check("relay", limits));
             assert_eq!(
                 relay.completion(),
                 Completion::Checked,
@@ -164,6 +178,13 @@ fn original_two_hop_relay_checks_reached_bodies_and_preserves_backing() {
             }
             for (name, code, site, related) in [
                 (
+                    "keptOld",
+                    "R0201",
+                    b"*first".as_slice(),
+                    b"&*first".as_slice(),
+                ),
+                ("keptNew", "R0201", b"*second", b"&*second"),
+                (
                     "exclusiveSource",
                     "R0201",
                     b"*source".as_slice(),
@@ -215,6 +236,7 @@ fn two_hop_relay_does_not_admit_aliases_or_changed_descriptors() {
                 let inner = *slot;
                 keep(slot, input);
             }
+            function reachesInnerMoved(slot: &mut &mut &bool, input: &bool): void { innerMoved(slot, input); }
             function piped(slot: &mut &mut &bool, input: &bool): void {
                 input |> keep(slot, _);
             }
@@ -232,6 +254,7 @@ fn two_hop_relay_does_not_admit_aliases_or_changed_descriptors() {
                 ("moved", b"alias".as_slice()),
                 ("borrowed", b"&mut *slot"),
                 ("innerMoved", b"*slot"),
+                ("reachesInnerMoved", b"*slot"),
                 ("piped", b"input |> keep(slot, _)"),
             ] {
                 let report = lower(name);

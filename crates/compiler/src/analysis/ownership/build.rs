@@ -1349,11 +1349,14 @@ impl<'a, 'g> Build<'a, 'g> {
             .ok_or(Stop::Pending(node))
     }
 
-    fn immutable_named_root(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<&'g DeclarationId> {
+    fn immutable_named_value(
+        &mut self,
+        node: NodeId,
+    ) -> ResultOf<(&'g DeclarationId, &'a Type<'g>)> {
+        self.budget.step(1)?;
         let facts = self.normal_value(node)?;
         let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
         if self.module.syntax.nodes[node].kind != NodeKind::ValueReference
-            || facts.ty != *ty
             || facts.place != TypedPlace::ReadOnly
             || facts.access != Access::Owned
             || facts.binding != Some(path.root)
@@ -1362,15 +1365,14 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return Err(Stop::Pending(node));
         }
-        Ok(path.root)
+        Ok((path.root, &facts.ty))
     }
 
     fn original_two_hop_parameter(
         &mut self,
         node: NodeId,
-        ty: &Type<'g>,
+        root: &DeclarationId,
     ) -> ResultOf<OriginalTwoHopBool> {
-        let root = self.immutable_named_root(node, ty)?;
         if root.kind != DeclarationKind::Parameter {
             return Err(Stop::Pending(node));
         }
@@ -1396,7 +1398,7 @@ impl<'a, 'g> Build<'a, 'g> {
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        self.budget.step(3)?;
+        self.budget.step(1)?;
         // Match the typed handoff's flat terminal shape. No earlier action
         // may touch the outer or inner descriptor.
         let binding = match self.module.syntax.nodes[self.body].children.as_slice() {
@@ -1405,18 +1407,20 @@ impl<'a, 'g> Build<'a, 'g> {
             _ => return Err(Stop::Pending(left)),
         };
         let nodes = &self.module.syntax.nodes;
+        self.depth(depth + 1)?;
         let (NodeKind::Prefix("*"), [inner]) = (nodes[left].kind, nodes[left].children.as_slice())
         else {
             return Err(Stop::Pending(left));
         };
+        self.depth(depth + 2)?;
         let (NodeKind::Prefix("*"), [parameter]) =
             (nodes[*inner].kind, nodes[*inner].children.as_slice())
         else {
             return Err(Stop::Pending(*inner));
         };
         self.depth(depth + 3)?;
-        let parameter_ty = &self.value(*parameter)?.ty;
-        let route = self.original_two_hop_parameter(*parameter, parameter_ty)?;
+        let (root, parameter_ty) = self.immutable_named_value(*parameter)?;
+        let route = self.original_two_hop_parameter(*parameter, root)?;
         let TypeTerm::Reference {
             mutable: true,
             referent: inner_ty,
@@ -1425,7 +1429,6 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(*parameter));
         };
         let shared_ty = retained_bool_contents_type(inner_ty).ok_or(Stop::Pending(*inner))?;
-        let root = self.value(*parameter)?.binding;
         for (hop, ty, projections) in [
             (*inner, inner_ty, &[PathProjection::Dereference][..]),
             (
@@ -1443,7 +1446,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 || !facts
                     .path
                     .as_ref()
-                    .is_some_and(|path| Some(path.root) == root && path.projections == projections)
+                    .is_some_and(|path| path.root == root && path.projections == projections)
             {
                 return Err(Stop::Pending(hop));
             }
@@ -1455,6 +1458,7 @@ impl<'a, 'g> Build<'a, 'g> {
             else {
                 return Err(Stop::Pending(binding));
             };
+            self.depth(depth + 1)?;
             let (NodeKind::Prefix("&"), [flag]) = (nodes[rhs].kind, nodes[rhs].children.as_slice())
             else {
                 return Err(Stop::Pending(rhs));
@@ -1465,8 +1469,10 @@ impl<'a, 'g> Build<'a, 'g> {
             else {
                 return Err(Stop::Pending(rhs));
             };
-            let backing = self.immutable_named_root(*flag, bool_ty)?;
-            if self.normal_value(rhs)?.ty != *shared_ty
+            self.depth(depth + 2)?;
+            let (backing, backing_ty) = self.immutable_named_value(*flag)?;
+            if backing_ty != bool_ty
+                || self.normal_value(rhs)?.ty != *shared_ty
                 || nodes[*name].kind != NodeKind::NamePattern
                 || nodes[*literal].kind != NodeKind::Literal
                 || self.normal_value(*literal)?.ty != *bool_ty
@@ -1475,8 +1481,12 @@ impl<'a, 'g> Build<'a, 'g> {
             {
                 return Err(Stop::Pending(rhs));
             }
-        } else if self.immutable_named_root(rhs, shared_ty)?.kind != DeclarationKind::Parameter {
-            return Err(Stop::Pending(rhs));
+        } else {
+            self.depth(depth + 1)?;
+            let (source, source_ty) = self.immutable_named_value(rhs)?;
+            if source_ty != shared_ty || source.kind != DeclarationKind::Parameter {
+                return Err(Stop::Pending(rhs));
+            }
         }
         let incoming = self.slot(rhs, shared_ty)?;
         let install = self.emit(
@@ -4411,6 +4421,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let [destination, input] = call.arguments.as_slice() else {
             return Err(Stop::Pending(node));
         };
+        self.budget.step(1)?;
         if self.module.syntax.nodes[node].kind != NodeKind::Call
             || call.pipe_input.is_some()
             || !call.defaults.is_empty()
@@ -4419,7 +4430,7 @@ impl<'a, 'g> Build<'a, 'g> {
         {
             return Err(Stop::Pending(node));
         }
-        self.budget.step(2)?;
+        self.budget.step(1)?;
         let header = self
             .typed
             .inventory()
@@ -4433,7 +4444,11 @@ impl<'a, 'g> Build<'a, 'g> {
             return Err(Stop::Pending(*input));
         }
         let (destination, _) = self.ungroup_expression_at(*destination, depth)?;
-        self.original_two_hop_parameter(destination, &formal.ty)
+        let (root, ty) = self.immutable_named_value(destination)?;
+        if *ty != formal.ty {
+            return Err(Stop::Pending(destination));
+        }
+        self.original_two_hop_parameter(destination, root)
     }
 
     fn call_destination(
