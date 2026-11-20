@@ -307,6 +307,58 @@ fn shared_option_copies_keep_the_named_carrier_and_its_backing() {
 }
 
 #[test]
+fn shared_option_postfix_uses_the_static_variant_edges() {
+    probe(
+        "propagation::shared_option_postfix_uses_the_static_variant_edges",
+        r#"
+        function widened(local: string): Option<bool> {
+            let input: Option<&string> = Option<&string>.None;
+            let _ = input?; dispose(local); dispose(local); return Option.Some(true);
+        }
+        function empty(local: string): Option<bool> {
+            let input = Option<&string>.None;
+            let _ = input?; dispose(local); dispose(local); return Option.Some(true);
+        }
+    "#,
+        |_, module, receipt| {
+            let check = |name: &str| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap()
+            };
+            let parent = check("widened");
+            assert_eq!(parent.completion(), Completion::SourceRejected);
+            assert!(parent.mir().is_none());
+            let [finding] = parent.findings() else {
+                panic!("one reached use after disposal")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"dispose(local)");
+            assert_eq!(finding.related.span.bytes(), b"dispose(local)");
+            assert!(finding.site.span.start() > finding.related.span.start());
+            let known = check("empty");
+            let mir = known
+                .mir()
+                .expect("no success edge for the statically known None");
+            let path = linear(mir, mir.entry);
+            assert!(
+                path.iter()
+                    .any(|op| matches!(op, Operation::EndEmptyOption(_)))
+            );
+            assert!(!path.iter().any(|op| matches!(
+                op,
+                Operation::TestVariant { .. }
+                    | Operation::TakeOptionPayload { .. }
+                    | Operation::Dispose { .. }
+            )));
+        },
+    );
+}
+
+#[test]
 fn borrowing_the_whole_shared_text_option_is_not_a_postfix_target() {
     use compiler::analysis::scalars::ScalarFindingKind;
     probe_report(
