@@ -9,8 +9,10 @@ use crate::analysis::conversions::ConversionReport;
 pub use conversion_uses::ConversionUse;
 pub(super) use evidence::ConversionWork;
 pub(in crate::analysis) use evidence::check_pair_candidates;
+mod callable_copy;
 mod ordinary_callbacks;
 mod ordinary_calls;
+pub use callable_copy::{CallableCopy, CaptureCopy, CaptureCopyAction};
 pub use ordinary_callbacks::OrdinaryCallbackContext;
 pub use ordinary_calls::{
     ConditionalFinding, OrdinaryCall, OrdinaryCandidate, OrdinaryValue, OutputAgreement,

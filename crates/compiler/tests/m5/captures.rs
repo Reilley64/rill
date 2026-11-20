@@ -1,12 +1,363 @@
 use super::*;
 use compiler::analysis::{
     ownership::{
-        CallableField, CallableLayout, Cleanup as Obligation, GraphCompletion, GraphReport, Place,
-        RootReport, analyze_ownership,
+        CallableField, CallableLayout, CaptureCopyEffect, Cleanup as Obligation, GraphCompletion,
+        GraphReport, Place, RootReport, analyze_ownership,
     },
     scalars::{data::Access, generics::callables::CaptureForm},
     typed::ResultUseBlocker,
 };
+
+#[test]
+fn canonical_copy_keeps_the_scalar_environment_owner_available() {
+    probe(
+        "captures::canonical_copy_keeps_the_scalar_environment_owner_available",
+        r#"
+            function duplicate(seed: bool): void {
+                let job: () => bool = () => seed;
+                let other = copy(&job);
+                let _ = other;
+                let _ = job;
+            }
+        "#,
+        |request, module, receipt| {
+            use compiler::analysis::typed::Primitive;
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(graph.context(), receipt.context());
+            assert_eq!(graph.test_mode(), request.test_mode);
+            let root = check_local_capture_root(module, receipt, &graph, "duplicate", None);
+            for mir in [
+                root.mir().unwrap(),
+                capture_graph_root(module, &graph, capture_declaration(module, "duplicate"))
+                    .mir()
+                    .unwrap(),
+            ] {
+                let ops = linear(mir, mir.entry);
+                let [
+                    Operation::CopyClosure {
+                        from,
+                        into,
+                        captures,
+                        ..
+                    },
+                ] = ops
+                    .iter()
+                    .copied()
+                    .filter(|op| matches!(op, Operation::CopyClosure { .. }))
+                    .collect::<Vec<_>>()[..]
+                else {
+                    panic!("expected exactly one environment-copy effect")
+                };
+                assert!(
+                    matches!(captures.as_slice(), [CaptureCopyEffect::Scalar { field, primitive: Primitive::Bool }]
+                    if field.span.bytes() == b"seed")
+                );
+                assert_eq!(from.root.span.bytes(), b"job");
+                assert_eq!(into.root.span.bytes(), b"other");
+                assert!(path_drops(mir, mir.entry).is_empty());
+            }
+        },
+    );
+}
+
+#[test]
+fn canonical_copy_of_owned_text_uses_the_pinned_effect_and_cleans_both_owners() {
+    use compiler::analysis::{
+        scalars::{NodeFactKind, data::DataExpression, generics::CaptureCopyAction},
+        typed::PrimitiveOperation,
+    };
+    probe_with_typed(
+        "captures::canonical_copy_of_owned_text_uses_the_pinned_effect_and_cleans_both_owners",
+        r#"
+            import std::core::copy as duplicate;
+            function textCopies(left: string, right: string): void {
+                let job: once () => [string, string] = () => [right, left];
+                let other = duplicate((&(job)));
+                let _ = job;
+                let _ = other;
+            }
+            function reuse(text: string): void {
+                let job: once () => string = () => text;
+                let _ = job;
+                let _ = duplicate(&job);
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(graph.context(), receipt.context());
+            assert_eq!(graph.test_mode(), request.test_mode);
+            let report = check_local_capture_root(module, receipt, &graph, "textCopies", None);
+            let decl = capture_declaration(module, "textCopies");
+            let check_mir = |mir: &Mir<'_>| {
+                let path = straight_blocks(mir, mir.entry);
+                let [block] = path
+                    .iter()
+                    .filter(|block| matches!(block.operation, Operation::CopyClosure { .. }))
+                    .copied()
+                    .collect::<Vec<_>>()[..]
+                else {
+                    panic!("expected exactly one environment-copy effect")
+                };
+                let Operation::CopyClosure {
+                    from,
+                    into,
+                    origin,
+                    captures,
+                } = &block.operation
+                else {
+                    unreachable!()
+                };
+                let fact = typed
+                    .bodies()
+                    .node(module, block.site.node)
+                    .unwrap()
+                    .unwrap();
+                let NodeFactKind::Expression(value) = &fact.kind else {
+                    panic!("typed call")
+                };
+                let Some(DataExpression::CallableCopy(checked)) = &value.data else {
+                    panic!("typed selection")
+                };
+                let call = value.call.as_ref().unwrap();
+                assert!(call.selection.is_none(), "not an ordinary selected body");
+                assert!(std::ptr::eq(call.callee, &typed.copy_role().unwrap().id));
+                assert!(std::ptr::eq(checked.family, call.callee));
+                assert_ne!(from.root.node, into.root.node);
+                assert_eq!(origin.node, checked.origin.node);
+                assert_eq!(origin.span.bytes(), b"() => [right, left]");
+                let [right, left] = checked.captures.as_slice() else {
+                    panic!("typed pair layout")
+                };
+                let [right_effect, left_effect] = captures.as_slice() else {
+                    panic!("pair effects")
+                };
+                for (evidence, effect, name) in [
+                    (right, right_effect, b"right".as_slice()),
+                    (left, left_effect, b"left".as_slice()),
+                ] {
+                    let CaptureCopyAction::Text {
+                        copy: provider,
+                        dispose: cleanup,
+                    } = evidence.action
+                    else {
+                        panic!("pinned owned text providers")
+                    };
+                    let &CaptureCopyEffect::Text {
+                        field,
+                        copy,
+                        dispose,
+                    } = effect
+                    else {
+                        panic!("no raw owner copy")
+                    };
+                    assert_eq!(field.node, evidence.site.node);
+                    assert_eq!(field.span.bytes(), name);
+                    assert!(std::ptr::eq(provider.family, call.callee));
+                    assert!(std::ptr::eq(
+                        cleanup.family,
+                        &typed.dispose_role().unwrap().id
+                    ));
+                    assert_eq!(provider.binding.unwrap().operation, copy);
+                    assert_eq!(cleanup.binding.unwrap().operation, dispose);
+                    assert_eq!(copy, PrimitiveOperation::CopyText);
+                    assert_eq!(dispose, PrimitiveOperation::DisposeText);
+                    let source = String::from("owned λ");
+                    let duplicate = copy.copy_text(&source).unwrap();
+                    assert_eq!(source, duplicate);
+                    assert_ne!(source.as_ptr(), duplicate.as_ptr());
+                    dispose.dispose_text(source).unwrap();
+                    assert_eq!(duplicate, "owned λ");
+                    dispose.dispose_text(duplicate).unwrap();
+                }
+                assert!(path.iter().all(|block| !matches!(
+                    block.operation,
+                    Operation::InvokeClosurePair { .. }
+                        | Operation::InvokeReadOnlyClosurePair { .. }
+                        | Operation::Call(_)
+                )));
+                let drops = path_drops(mir, mir.entry);
+                let pairs: Vec<_> = drops
+                    .iter()
+                    .map(|drop| match drop {
+                        Obligation::DropCapture { closure, field } => (closure.node, field.node),
+                        other => panic!("unexpected extra cleanup {other:?}"),
+                    })
+                    .collect();
+                // The explicit discards consume each distinct owner, with its own
+                // fields cleaned in reverse formation order and no staging drops.
+                assert!(
+                    matches!(pairs.as_slice(), [(a, l1), (b, r1), (c, l2), (d, r2)]
+                    if a == b && c == d && a != c
+                        && *l1 == left.site.node && *l2 == left.site.node
+                        && *r1 == right.site.node && *r2 == right.site.node)
+                );
+            };
+            check_mir(report.mir().unwrap());
+            check_mir(capture_graph_root(module, &graph, decl).mir().unwrap());
+            check_local_capture_root(
+                module,
+                receipt,
+                &graph,
+                "reuse",
+                Some(("R0200", "duplicate(&job)", "job")),
+            );
+            let run = |limits| lower_body(receipt, module, &decl.id, limits).unwrap();
+            let bounds = |used: compiler::analysis::Statistics| AnalysisLimits {
+                max_work: used.work,
+                max_entries: used.entries,
+                max_depth: used.max_depth,
+            };
+            let exact = bounds(report.statistics());
+            check_mir(run(exact).mir().unwrap());
+            for short in short_capture_limits(exact) {
+                let short = run(short);
+                assert_eq!(short.completion(), Completion::ResourceLimit);
+                assert!(short.mir().is_none() && short.findings().is_empty());
+            }
+            let exact = bounds(graph.statistics());
+            let exact_graph = analyze_ownership(receipt, exact);
+            assert_eq!(exact_graph.statistics(), graph.statistics());
+            check_mir(
+                capture_graph_root(module, &exact_graph, decl)
+                    .mir()
+                    .unwrap(),
+            );
+            for short in short_capture_limits(exact) {
+                let short = analyze_ownership(receipt, short);
+                assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+                assert!(short.roots().iter().all(|root| root.mir().is_none()));
+            }
+        },
+    );
+}
+
+#[test]
+fn canonical_copy_does_not_admit_unknown_origins_or_unrelated_families() {
+    use compiler::analysis::{
+        scalars::{NodeFactKind, ScalarUnsupported, data::DataExpression},
+        typed::TypedCompletion,
+    };
+    const TEST: &str =
+        "captures::canonical_copy_does_not_admit_unknown_origins_or_unrelated_families";
+    for (source, pending_call) in [
+        (
+            "function erased(job: once () => &mut bool): once () => &mut bool { return copy(&job); }
+            function concrete(seed: bool): void {
+                let mut flag = seed;
+                let job: once () => &mut bool = () => &mut flag;
+                let _ = erased(job);
+            }",
+            "copy(&job)",
+        ),
+        (
+            "function computed(seed: bool): () => bool {
+                let job: () => bool = () => !seed;
+                return copy(&job);
+            }",
+            "copy(&job)",
+        ),
+    ] {
+        probe_report(TEST, source, |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            assert!(typed.bodies().findings().is_empty());
+            let pending = typed.bodies().obligations().iter().find(|obligation|
+                obligation.site.module == &module.key && obligation.site.span.bytes() == pending_call.as_bytes()).unwrap();
+            assert_eq!(pending.reason, ScalarUnsupported::FamilySelection);
+            assert!(typed.bodies().node(module, pending.site.node).unwrap().is_none());
+        });
+    }
+    probe_report_with_modules(
+        TEST,
+        r#"
+            import unrelated::copy as inspect;
+            function usingOrdinary(seed: bool): bool {
+                let job: () => bool = () => seed;
+                return inspect(&job);
+            }
+        "#,
+        &[(
+            "unrelated.rill",
+            "export function copy<T>(value: &T): bool;
+            implement<T> copy(value: &T): bool { return false; }",
+        )],
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Checked);
+            let node = module
+                .syntax
+                .nodes
+                .iter()
+                .position(|node| node.span.bytes() == b"inspect(&job)")
+                .unwrap();
+            let fact = typed.bodies().node(module, node).unwrap().unwrap();
+            let NodeFactKind::Expression(value) = &fact.kind else {
+                panic!("expected call")
+            };
+            assert!(!matches!(value.data, Some(DataExpression::CallableCopy(_))));
+            let call = value.call.as_ref().unwrap();
+            assert_ne!(call.callee, &typed.copy_role().unwrap().id);
+            assert_eq!(
+                call.selection.as_ref().unwrap().implementation.module.path,
+                "unrelated.rill"
+            );
+        },
+    );
+}
+
+#[test]
+fn canonical_copy_typed_handoff_is_exactly_bounded() {
+    use compiler::analysis::typed::TypedCompletion;
+    installed(
+        "captures::canonical_copy_typed_handoff_is_exactly_bounded",
+        |request| {
+            let base = include_str!("../../../../tests/installed/typed/main.rill");
+            fs::write(
+                request.entry.with_file_name("checks.rill"),
+                include_str!("../../../../tests/installed/typed/checks.rill"),
+            )
+            .unwrap();
+            fs::write(
+                &request.entry,
+                format!(
+                    "{base}\n{}",
+                    r#"
+            function copied(left: string, right: string): void {
+                let job: once () => [string, string] = () => [left, right];
+                let other = copy(&job);
+                let _ = other;
+                let _ = job;
+            }
+        "#
+                ),
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let check = |limits| analyze_typed(&graph, limits);
+                let typed = check(AnalysisLimits::default());
+                assert!(typed.receipt().is_some());
+                let used = typed.statistics();
+                let exact = AnalysisLimits {
+                    max_work: used.work,
+                    max_entries: used.entries,
+                    max_depth: used.max_depth,
+                };
+                let exact_typed = check(exact);
+                assert_eq!(exact_typed.statistics(), used);
+                assert_eq!(exact_typed.receipt().unwrap().context(), graph.id());
+                for short in short_capture_limits(exact) {
+                    let short = check(short);
+                    assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
+                    assert!(short.receipt().is_none());
+                }
+            }
+        },
+    );
+}
 
 #[test]
 fn local_exclusive_capture_transfers_the_loan_until_discard() {
@@ -727,9 +1078,9 @@ fn exclusive_capture_evidence_distinguishes_disproved_from_unresolved() {
         ),
         (
             &transfer("once () => &mut bool", "", "copy(&other)"),
-            TypedCompletion::Incomplete,
+            TypedCompletion::SourceRejected,
             "copy(&other)",
-            Some(ScalarUnsupported::FamilySelection),
+            None,
         ),
         (
             &transfer("Holder<once () => &mut bool>", wrapped, "copy(&packed)"),
@@ -750,9 +1101,14 @@ fn exclusive_capture_evidence_distinguishes_disproved_from_unresolved() {
                 assert!(typed.core_blockers().is_empty());
                 if completion == TypedCompletion::SourceRejected {
                     let [finding] = typed.bodies().findings() else {
-                        panic!("expected only the noBorrow failure")
+                        panic!("expected only the selected requirement failure")
                     };
                     assert_eq!(finding.kind.code(), Some("R0302"));
+                    if call == "copy(&other)" {
+                        let related = finding.related.expect("actual exclusive capture");
+                        assert!(std::ptr::eq(related.module, &module.key));
+                        assert_eq!(related.span.bytes(), b"&mut flag");
+                    }
                     assert!(std::ptr::eq(finding.site.module, &module.key));
                     assert_eq!(finding.site.span.bytes(), call.as_bytes());
                     assert_eq!(

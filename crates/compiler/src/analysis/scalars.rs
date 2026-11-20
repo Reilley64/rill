@@ -250,6 +250,7 @@ impl ScalarFindingKind {
 pub struct ScalarFinding<'g> {
     pub site: Site<'g>,
     pub kind: ScalarFindingKind,
+    pub related: Option<Site<'g>>,
     pub actual: Option<Type<'g>>,
     pub expected: Option<Type<'g>>,
     pub bindings: Vec<&'g Binding>,
@@ -638,6 +639,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.facts.findings.push(ScalarFinding {
                 site: Self::site(module, node),
                 kind,
+                related: None,
                 actual: None,
                 expected: None,
                 bindings: Vec::new(),

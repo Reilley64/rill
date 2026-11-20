@@ -138,7 +138,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<bool> {
         if matches!(
             inference.slots[&node].installed_operation,
-            Some(data::DataExpression::NativeOwnership(_))
+            Some(data::DataExpression::NativeOwnership(_) | data::DataExpression::CallableCopy(_))
         ) {
             return Ok(false);
         }
@@ -222,6 +222,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             mut outcome,
             blocker,
         } = compared?;
+        if consistent
+            && viable.is_empty()
+            && self.known_callable_copy(inference, node, &mut call, &inputs)?
+        {
+            self.elab.reserve(1)?;
+            inference.calls.insert(node, call);
+            return Ok(false);
+        }
         let mut callbacks = Vec::new();
         if !consistent {
             outcome = None;
@@ -1434,6 +1442,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             finding: ScalarFinding {
                 site: Self::site(module, node),
                 kind,
+                related: None,
                 actual: None,
                 expected: None,
                 bindings: Vec::new(),
@@ -1540,7 +1549,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             if !call.family
                 || matches!(
                     inference.slots[&node].installed_operation,
-                    Some(data::DataExpression::NativeOwnership(_))
+                    Some(
+                        data::DataExpression::NativeOwnership(_)
+                            | data::DataExpression::CallableCopy(_)
+                    )
                 )
                 || self
                     .ordinary_calls

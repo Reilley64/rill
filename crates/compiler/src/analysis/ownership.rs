@@ -443,6 +443,15 @@ pub enum Operation<'g> {
         captures: [Site<'g>; 2],
         mode: InvocationMode,
     },
+    /// Copy the initialized fields in selection order into distinct owned
+    /// storage. Scalar fields use the checked scalar copy; text fields execute
+    /// CopyText and acquire their own DropCapture obligation. No invocation.
+    CopyClosure {
+        from: Place<'g>,
+        into: Place<'g>,
+        origin: Site<'g>,
+        captures: Vec<CaptureCopyEffect<'g>>,
+    },
     Call(&'g DeclarationId),
     /// Move a staged pair owner through a closed ordinary specialization, not
     /// an erased invocation or a proof for the callee's open source root.
@@ -674,6 +683,21 @@ pub enum CallableField {
     OwnedPrimitive(&'static str),
     SharedPrimitive(&'static str),
     OwnedString,
+}
+
+/// Effect on one initialized field of the source environment, not a call
+/// into the closure body or a bytewise copy of its representation.
+#[derive(Clone, Copy, Debug)]
+pub enum CaptureCopyEffect<'g> {
+    Scalar {
+        field: Site<'g>,
+        primitive: super::typed::Primitive,
+    },
+    Text {
+        field: Site<'g>,
+        copy: super::typed::PrimitiveOperation,
+        dispose: super::typed::PrimitiveOperation,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1789,6 +1813,10 @@ enum Action<'g> {
         binding: BorrowedMemberBinding,
     },
     Call(usize),
+    CopyClosure {
+        from: Slot,
+        into: Slot,
+    },
     InvokeClosurePair {
         receiver: Slot,
         into: Slot,

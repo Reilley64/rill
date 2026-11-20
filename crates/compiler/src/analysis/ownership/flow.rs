@@ -31,6 +31,7 @@ struct Held {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CallableOwner {
+    LocalCapture(NodeId),
     LocalExclusive,
     Pair(CallableLayout),
     Formal(CallableLayout),
@@ -40,7 +41,7 @@ enum CallableOwner {
 impl CallableOwner {
     fn transport_cleanup(self) -> Option<CallableLayout> {
         match self {
-            Self::LocalExclusive | Self::Pair(_) => None,
+            Self::LocalCapture(_) | Self::LocalExclusive | Self::Pair(_) => None,
             Self::Formal(layout) | Self::Returned(layout) => Some(layout),
         }
     }
@@ -184,6 +185,7 @@ fn liveness(
                 ..
             } => ([Some(capture), second], Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
+            Action::CopyClosure { from, into } => use_one(Some(from), Some(into)),
             Action::InvokeClosurePair { receiver, into, .. }
             | Action::InvokeMutableI32Cell { receiver, into } => {
                 use_one(Some(receiver), Some(into))
@@ -2179,6 +2181,7 @@ pub(super) fn run<'a, 'g>(
                         | Action::Dispose { .. }
                         | Action::ConstructResultError { .. }
                         | Action::WrapResultFailure { .. }
+                        | Action::CopyClosure { .. }
                         | Action::InvokeClosurePair { .. }
                         | Action::InvokeMutableI32Cell { .. }
                 ) || unsupported_cleanup
@@ -2852,6 +2855,8 @@ pub(super) fn run<'a, 'g>(
                         capture_drops: [drop_of(capture), second.and_then(drop_of)],
                         callable_owner: if local_exclusive {
                             Some(CallableOwner::LocalExclusive)
+                        } else if second.is_none() && cell_addend.is_none() {
+                            Some(CallableOwner::LocalCapture(node))
                         } else {
                             layout.map(CallableOwner::Pair)
                         },
@@ -2880,6 +2885,97 @@ pub(super) fn run<'a, 'g>(
                             capture: local(capture).root,
                             mode,
                         }
+                    }
+                }
+                Action::CopyClosure { from, into } => {
+                    use crate::analysis::{
+                        scalars::{data::DataExpression, generics::CaptureCopyAction},
+                        typed::PrimitiveOperation,
+                    };
+                    budget.step(facts.nodes().len().checked_ilog2().unwrap_or(0) as usize + 1)?;
+                    let Some(NodeFactKind::Expression(value)) =
+                        facts.nodes().get(&node).map(|f| &f.kind)
+                    else {
+                        return Err(Stop::Pending(node));
+                    };
+                    let Some(DataExpression::CallableCopy(selection)) = &value.data else {
+                        return Err(Stop::Pending(node));
+                    };
+                    let source = initialized(&state[from], node)?;
+                    let origin = match source.callable_owner {
+                        Some(CallableOwner::LocalCapture(origin)) => Some(origin),
+                        Some(CallableOwner::Pair(_)) => {
+                            source.pair_origin.map(|(origin, _)| origin)
+                        }
+                        _ => None,
+                    };
+                    if origin != Some(selection.origin.node)
+                        || !source.loans.is_empty()
+                        || matches!(&state[into], State::Initialized(_))
+                    {
+                        return Err(Stop::Pending(node));
+                    }
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        from,
+                        (node, Conflict::Access),
+                        Access::Observe,
+                        budget,
+                    )?;
+                    let mut drops = [None; 2];
+                    let fields = selection.captures.len();
+                    if fields == 0 || fields > drops.len() {
+                        return Err(Stop::Pending(node));
+                    }
+                    budget.step(fields)?;
+                    budget.reserve(fields)?;
+                    let mut captures = Vec::with_capacity(fields);
+                    for (drop, capture) in drops.iter_mut().zip(&selection.captures) {
+                        let field = capture.site;
+                        let effect = match capture.action {
+                            CaptureCopyAction::Scalar(p) => CaptureCopyEffect::Scalar {
+                                field,
+                                primitive: p.primitive,
+                            },
+                            CaptureCopyAction::Text { copy, dispose } => {
+                                let (Some(copy), Some(dispose)) = (copy.binding, dispose.binding)
+                                else {
+                                    return Err(Stop::Pending(node));
+                                };
+                                if copy.operation != PrimitiveOperation::CopyText
+                                    || dispose.operation != PrimitiveOperation::DisposeText
+                                {
+                                    return Err(Stop::Pending(node));
+                                }
+                                *drop = Some(field.node);
+                                CaptureCopyEffect::Text {
+                                    field,
+                                    copy: copy.operation,
+                                    dispose: dispose.operation,
+                                }
+                            }
+                        };
+                        captures.push(effect);
+                    }
+                    if source.capture_drops != drops {
+                        return Err(Stop::Pending(node));
+                    }
+                    // The effect initializes a fresh owner, not another
+                    // descriptor of the source environment. Its cleanup starts
+                    // only after both capture copy actions (if present).
+                    state[into] = State::Initialized(Held {
+                        capture_drops: drops,
+                        callable_owner: source.callable_owner,
+                        pair_origin: source.pair_origin,
+                        ..Held::default()
+                    });
+                    Operation::CopyClosure {
+                        from: local(from),
+                        into: local(into),
+                        origin: selection.origin,
+                        captures,
                     }
                 }
                 Action::InvokeMutableI32Cell { receiver, into } => {

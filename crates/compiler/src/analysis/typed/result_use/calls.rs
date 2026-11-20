@@ -24,6 +24,25 @@ impl<'a, 'g> Check<'a, 'g> {
         for argument in call.argument_evaluation_order() {
             states = self.stage_argument(argument, states, depth + 1)?;
         }
+        if settled
+            && let Some(DataExpression::CallableCopy(copy)) = &value.data
+            && let [argument] = call.arguments.as_slice()
+        {
+            // The borrow is evaluated, but neither it nor a Result residence
+            // enters the new owner: the checked fields are independent primitives.
+            let borrowed = Root::Temporary(*argument);
+            for state in &mut states {
+                let contents = state.take(borrowed, &[], self.budget)?;
+                self.discard(contents, borrowed, *argument, ResultDiscardKind::Expression)?;
+                state.store(
+                    Root::Temporary(node),
+                    &[],
+                    Content::Callable(copy.origin.node),
+                    self.budget,
+                )?;
+            }
+            return Ok(states);
+        }
         self.budget.step(self.core.collections.protection.len())?;
         if settled
             && let [argument] = call.arguments.as_slice()

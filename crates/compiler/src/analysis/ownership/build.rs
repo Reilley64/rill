@@ -5738,6 +5738,34 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(*argument)
     }
 
+    fn copy_closure(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let into = into.ok_or_else(pending)?;
+        let argument = self.written_scalar_argument(node, facts, call, depth)?;
+        let (borrow, depth) = self.ungroup_expression_at(argument, depth + 1)?;
+        let syntax = &self.module.syntax.nodes[borrow];
+        let (NodeKind::Prefix("&"), [owner]) = (syntax.kind, syntax.children.as_slice()) else {
+            return Err(pending());
+        };
+        let (owner, _) = self.ungroup_expression_at(*owner, depth + 1)?;
+        let (value, path) = self.named_owned_place(owner)?.ok_or_else(pending)?;
+        if value.ty != facts.ty {
+            return Err(pending());
+        }
+        // This immediate borrow has no separately live descriptor. The copy
+        // action checks shared access to the named source at this point.
+        let from = self.resolve_place(owner, path)?;
+        self.emit(node, Action::CopyClosure { from, into }, Edges::Next(next))
+    }
+
     fn written_scalar_copy(
         &mut self,
         node: NodeId,
@@ -6025,6 +6053,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             if checked_carrier.is_some() {
                 return Err(Stop::Pending(node));
+            }
+            if matches!(&facts.data, Some(DataExpression::CallableCopy(_))) {
+                return self.copy_closure(node, facts, call, into, next, depth);
             }
             return self.written_scalar_copy(node, facts, call, into, next, depth);
         }
