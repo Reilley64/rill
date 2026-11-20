@@ -160,6 +160,7 @@ pub struct DeferredResume {
 
 #[derive(Debug)]
 pub enum ReplacementSuccessor<'a, 'g> {
+    Check(PostInstallCheck<'a, 'g>),
     Continue {
         block: usize,
         request: ReplacementRequest,
@@ -192,27 +193,45 @@ impl<'g> ReplacementCancellation<'g> {
         if delivery_enabled && request == ReplacementRequest::Pending {
             self.terminal(ReplacementTrigger::UnmaskAfterInstall)
         } else {
-            ReplacementSuccessor::Continue {
-                block: self.post_install_call,
+            ReplacementSuccessor::Check(PostInstallCheck {
+                interval: self,
                 request,
-            }
+                delivery_enabled,
+            })
         }
     }
+}
 
-    /// Only on a continuing path: a *new* request at the following budget
-    /// check can deliver at an enabled actual yield, not at a non-yielding check.
-    pub fn at_post_install_check(
-        &self,
-        request: ReplacementRequest,
-        yielded: bool,
-        delivery_enabled: bool,
-    ) -> ReplacementSuccessor<'_, 'g> {
-        if yielded && delivery_enabled && request == ReplacementRequest::Pending {
-            self.terminal(ReplacementTrigger::PostInstallYield)
+/// Only an installation that did not deliver reaches this check. No intervening
+/// operation can change the enclosing mask or clear a pending request.
+#[derive(Debug)]
+pub struct PostInstallCheck<'a, 'g> {
+    interval: &'a ReplacementCancellation<'g>,
+    request: ReplacementRequest,
+    delivery_enabled: bool,
+}
+
+impl<'a, 'g> PostInstallCheck<'a, 'g> {
+    pub fn block(&self) -> usize {
+        self.interval.post_install_call
+    }
+    pub fn request(&self) -> ReplacementRequest {
+        self.request
+    }
+
+    /// The inputs are events at this check, not a replacement mask or a new
+    /// value for carried state. A fresh request delivers only at an enabled yield.
+    pub fn advance(self, fresh_request: bool, yielded: bool) -> ReplacementSuccessor<'a, 'g> {
+        if self.delivery_enabled && fresh_request && yielded {
+            self.interval.terminal(ReplacementTrigger::PostInstallYield)
         } else {
             ReplacementSuccessor::Continue {
-                block: self.ordinary_suffix,
-                request,
+                block: self.interval.ordinary_suffix,
+                request: if fresh_request {
+                    ReplacementRequest::Pending
+                } else {
+                    self.request
+                },
             }
         }
     }

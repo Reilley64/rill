@@ -312,6 +312,15 @@ fn assert_initialized(
     };
     let resumed = masked.after_masked_yield(Pending);
     assert_eq!((resumed.block, resumed.request), (masked.resume, Pending));
+    let check = |request, enabled| {
+        let ReplacementSuccessor::Check(check) = proof.after_install(request, enabled) else {
+            panic!("expected to reach the next check")
+        };
+        assert_eq!(check.block(), proof.post_install_call);
+        assert_eq!(check.request(), request);
+        check
+    };
+    let clear = masked.after_masked_yield(Clear).request;
     // At unmask a pending request requires no second yield. Fresh delivery
     // instead uses the later actual yield. Both exits dispose the new owner
     // under deferral, with no normal successor to export it or redeliver.
@@ -321,7 +330,7 @@ fn assert_initialized(
             ReplacementTrigger::UnmaskAfterInstall,
         ),
         (
-            proof.at_post_install_check(Pending, true, true),
+            check(clear, true).advance(true, true),
             ReplacementTrigger::PostInstallYield,
         ),
     ] {
@@ -337,21 +346,16 @@ fn assert_initialized(
         assert_dispose_actions(cleanup, target, proof.implementation);
         assert!(std::ptr::eq(deferred, masked));
     }
-    assert!(
-        matches!(proof.after_install(resumed.request, false), ReplacementSuccessor::Continue {block,request:Pending} if block==proof.post_install_call)
-    );
-    let none = masked.after_masked_yield(Clear);
-    assert!(
-        matches!(proof.after_install(none.request, true), ReplacementSuccessor::Continue {block,request:Clear} if block==proof.post_install_call)
-    );
     let suffix = goto(post_install.terminator);
-    for (request, yielded, enabled) in [
-        (Pending, false, true),
-        (Pending, true, false),
-        (Clear, true, true),
+    for (next, expected) in [
+        (check(resumed.request, false).advance(false, true), Pending),
+        (check(resumed.request, false).advance(true, true), Pending),
+        (check(clear, false).advance(true, true), Pending),
+        (check(clear, true).advance(true, false), Pending),
+        (check(clear, true).advance(false, true), Clear),
     ] {
         assert!(
-            matches!(proof.at_post_install_check(request,yielded,enabled), ReplacementSuccessor::Continue {block,request:held} if block==suffix && held==request)
+            matches!(next, ReplacementSuccessor::Continue {block,request} if block==suffix && request==expected)
         );
     }
     assert!(path_drops(mir, proof.post_install_call).is_empty());
