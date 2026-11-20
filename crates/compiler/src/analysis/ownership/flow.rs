@@ -4,6 +4,13 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
+// Unregistered until the installed provider and role can supply these premises.
+#[allow(
+    dead_code,
+    reason = "scoped join is not yet admitted by the installed checker"
+)]
+pub(super) mod scoped_join;
+
 // Retain distinct continuing states at a join. Every feasible incoming state
 // must authorize a read, and each MIR successor cleans only what it still owns.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3594,6 +3601,26 @@ pub(super) fn run<'a, 'g>(
             }
             Err(stop) => return Err(stop),
         };
+        #[cfg(test)]
+        if let Some(probe) = cache
+            .as_deref_mut()
+            .and_then(|cache| cache.join_probe.as_mut())
+        {
+            probe.observe(
+                &CancellationFrame {
+                    module,
+                    slots: &slots,
+                    locals: body_scope.map_or(&[], |scope| &cleanups[scope]),
+                    params: &params,
+                    retained: &retained,
+                    indexed: facts.is_indexed(),
+                },
+                (&input.state, &state),
+                action,
+                &operation,
+                site,
+            );
+        }
         if active.is_some()
             && let Operation::Call(id) = operation
         {
