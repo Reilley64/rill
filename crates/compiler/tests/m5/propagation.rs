@@ -3814,7 +3814,7 @@ fn propagating_calls_create_owning_results_only_on_success() {
             }
             function compound(bit: bool): [string, string] { return ["left", "right"]; }
             function unsupported(input: Option<bool>): Option<bool> {
-                compound(input?);
+                let output = compound(input?);
                 return Option.Some(true);
             }
         "#,
@@ -7161,6 +7161,313 @@ fn skipped_compositions_still_check_result_carrier_producers() {
                     producer,
                     "{name}"
                 );
+            }
+        },
+    );
+}
+
+#[test]
+fn discarded_compound_call_cleans_only_the_materialized_success_result() {
+    use compiler::analysis::{
+        TypeTerm,
+        scalars::{NodeFactKind, data::DataExpression},
+    };
+
+    probe_with_typed(
+        "propagation::discarded_compound_call_cleans_only_the_materialized_success_result",
+        r#"
+            function compound(bit: bool): [string, string] { return ["left", "right"]; }
+            function after(): bool { return true; }
+            function discardPair(input: Option<bool>, keep: string): Option<bool> {
+                compound(input?);
+                let bit = after();
+                return Option.Some(bit);
+            }
+        "#,
+        |request, module, receipt, typed| {
+            const CALL: &[u8] = b"compound(input?)";
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let node = |span| {
+                module
+                    .syntax
+                    .nodes
+                    .iter()
+                    .position(|node| node.span.bytes() == span)
+                    .unwrap()
+            };
+            let call = typed.bodies().node(module, node(CALL)).unwrap().unwrap();
+            let NodeFactKind::Expression(expression) = &call.kind else {
+                panic!("expected typed call facts");
+            };
+            assert!(matches!(expression.ty.as_ref(), TypeTerm::Tuple(leaves)
+                if leaves.len() == 2 && leaves.iter().all(|ty|
+                    matches!(ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string"))));
+            let application = expression.call.as_deref().unwrap();
+            assert_eq!(application.callee, id("compound"));
+            assert!(application.substitution.is_empty() && application.pipe_input.is_none());
+            let [argument] = application.arguments.as_slice() else {
+                panic!("expected one complete propagating argument");
+            };
+            let argument = typed.bodies().node(module, *argument).unwrap().unwrap();
+            assert_eq!(argument.site.span.bytes(), b"input?");
+            assert!(matches!(&argument.kind, NodeFactKind::Expression(facts)
+                if matches!(&facts.data, Some(DataExpression::Propagation(branch))
+                    if branch.can_continue && branch.can_return)));
+            let lower =
+                |name| lower_body(receipt, module, id(name), AnalysisLimits::default()).unwrap();
+            let producer = lower("compound");
+            assert!(
+                producer.mir().is_some(),
+                "tuple producer: {:?}",
+                producer.completion()
+            );
+            let report = lower("discardPair");
+            let mir = report.mir().unwrap_or_else(|| {
+                panic!(
+                    "test_mode={}: {:?} at {:?}",
+                    request.test_mode,
+                    report.completion(),
+                    report
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string())
+                )
+            });
+            let option = typed.option_role().unwrap();
+            let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            assert_eq!(calls_on_path(mir, [true]), [id("compound"), id("after")]);
+            assert!(calls_on_path(mir, [false]).is_empty());
+            assert_return(&linear(mir, no), &option.none.id, false, &[b"keep: string"]);
+            assert!(!linear(mir, no).iter().any(|op| matches!(op,
+                Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
+                    Obligation::EndStorage(place) if place.root.node == call.site.node)))));
+
+            let success = straight_blocks(mir, yes);
+            let called = success.iter().position(|b| matches!(&b.operation,
+                Operation::Call(callee) if *callee == id("compound") && b.site.node == call.site.node)).unwrap();
+            let after = success
+                .iter()
+                .position(|b| {
+                    matches!(&b.operation,
+                Operation::Call(callee) if *callee == id("after"))
+                })
+                .unwrap();
+            let mut drops = Vec::new();
+            for (index, block) in success.iter().enumerate() {
+                let mut record = |place: &compiler::analysis::ownership::Place<'_>| {
+                    if place.root.node == call.site.node {
+                        assert!(called < index && index < after);
+                        drops.push(place.tuple_element());
+                    }
+                };
+                match &block.operation {
+                    Operation::Drop(place) => record(place),
+                    Operation::Cleanup(actions) => {
+                        for action in actions {
+                            if let Obligation::Drop(place) = action {
+                                record(place);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(drops, [Some(1), Some(0)]);
+            let suffix: Vec<_> = success[after..]
+                .iter()
+                .map(|block| &block.operation)
+                .collect();
+            assert_return(&suffix, &option.some.id, true, &[b"keep: string"]);
+            let exact = AnalysisLimits {
+                max_work: report.statistics().work,
+                max_entries: report.statistics().entries,
+                max_depth: report.statistics().max_depth,
+            };
+            let bounded = |limits| lower_body(receipt, module, id("discardPair"), limits).unwrap();
+            assert!(bounded(exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = bounded(short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn discarded_compound_call_checks_only_reached_ownership() {
+    probe_with_typed(
+        "propagation::discarded_compound_call_checks_only_reached_ownership",
+        r#"
+            function broken(bit: bool): [string, string] {
+                let text = "owned";
+                dispose(text);
+                dispose(text);
+                return ["left", "right"];
+            }
+            function compound(bit: bool): [string, string] { return ["left", "right"]; }
+            function gate(text: string): Option<bool>.None { return Option<bool>.None; }
+            function after(): bool { return true; }
+            function stopped(input: Option<bool>.None, keep: string): Option<bool> {
+                broken((input?));
+                return Option.Some(after());
+            }
+            function reached(input: Option<bool>.Some): Option<bool> {
+                broken(input?);
+                return Option.Some(true);
+            }
+            function moved(text: string): Option<bool> {
+                dispose(text);
+                compound(gate(text)?);
+                return Option.Some(true);
+            }
+            function scalar(bit: bool): bool { return bit; }
+            function stoppedScalar(input: Option<bool>.None, keep: string): Option<bool> {
+                scalar(input?);
+                return Option.Some(after());
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let lower =
+                |name| lower_body(receipt, module, id(name), AnalysisLimits::default()).unwrap();
+            let stopped = lower("stopped");
+            let mir = stopped
+                .mir()
+                .expect("known None skips the invalid producer");
+            assert!(calls_on_path(mir, []).is_empty());
+            assert_return(
+                &linear(mir, mir.entry),
+                &typed.option_role().unwrap().none.id,
+                false,
+                &[b"keep: string"],
+            );
+            let scalar = lower("stoppedScalar");
+            // Disposer selection itself is metered; the resulting MIR has
+            // no extra tuple storage, cleanup, or call blocks.
+            assert_eq!(mir.blocks.len(), scalar.mir().unwrap().blocks.len());
+            assert!(!linear(mir, mir.entry).iter().any(|op| matches!(op,
+                Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
+                    Obligation::EndStorage(place) if place.root.span.bytes() == b"broken((input?))")))));
+            for (name, site) in [("reached", b"dispose(text)".as_slice()), ("moved", b"text")] {
+                let report = lower(name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::SourceRejected,
+                    "{name}: {:?}",
+                    report.blocked_at()
+                );
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected one moved-use finding for {name}")
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), site);
+                assert_eq!(finding.related.span.bytes(), b"dispose(text)");
+                assert!(finding.related.span.start() < finding.site.span.start());
+            }
+        },
+    );
+}
+
+#[test]
+fn compound_propagating_results_stay_outside_other_call_routes() {
+    probe(
+        "propagation::compound_propagating_results_stay_outside_other_call_routes",
+        r#"
+            function compound(bit: bool): [string, string] { return ["left", "right"]; }
+            function generic<T>(bit: bool): [string, string] { return ["left", "right"]; }
+            function mixed(bit: bool): [string, bool] { return ["left", bit]; }
+            function fromText(text: string): [string, string] { return [text, "right"]; }
+            function withBorrow(bit: bool, text: &string): [string, string] { return ["left", "right"]; }
+            function withGuard(bit: bool, lease: LockGuard<i32>): [string, string] { return ["left", "right"]; }
+            function gate(bit: bool): Option<bool> { return Option.Some(bit); }
+            function wildcard(input: Option<bool>): Option<bool> {
+                let _ = compound(input?);
+                return Option.Some(true);
+            }
+            function piped(input: Option<bool>): Option<bool> {
+                (input?) |> compound;
+                return Option.Some(true);
+            }
+            function returned(input: Option<bool>): Option<[string, string]> {
+                return Option.Some(compound(input?));
+            }
+            function embedded(input: Option<bool>): Option<bool> {
+                compound(gate(input?)?);
+                return Option.Some(true);
+            }
+            function skippedGeneric(input: Option<bool>.None): Option<bool> {
+                generic<bool>(input?);
+                return Option.Some(true);
+            }
+            function mixedResult(input: Option<bool>): Option<bool> {
+                mixed(input?);
+                return Option.Some(true);
+            }
+            function textCarrier(input: Option<string>): Option<bool> {
+                fromText(input?);
+                return Option.Some(true);
+            }
+            function resultCarrier(input: Result<bool, i32>): Result<bool, i32> {
+                compound(input?);
+                return Result.Ok(true);
+            }
+            function borrowed(input: Option<bool>, keep: string): Option<bool> {
+                withBorrow(input?, &keep);
+                return Option.Some(true);
+            }
+            function protectedArg(input: Option<bool>, lease: LockGuard<i32>): Option<bool> {
+                withGuard(input?, lease);
+                return Option.Some(true);
+            }
+        "#,
+        |_, module, receipt| {
+            for (name, site) in [
+                ("wildcard", b"compound(input?)".as_slice()),
+                ("piped", b"(input?) |> compound"),
+                ("returned", b"Option.Some(compound(input?))"),
+                ("embedded", b"compound(gate(input?)?)"),
+                ("skippedGeneric", b"generic<bool>(input?)"),
+                ("mixedResult", b"mixed(input?)"),
+                ("textCarrier", b"fromText(input?)"),
+                ("resultCarrier", b"compound(input?)"),
+                ("borrowed", b"withBorrow(input?, &keep)"),
+                ("protectedArg", b"withGuard(input?, lease)"),
+            ] {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let report =
+                    lower_body(receipt, module, &declaration.id, AnalysisLimits::default())
+                        .unwrap();
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site, "{name}");
             }
         },
     );

@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 enum PropagatingCallOutput<'a, 'g> {
     Value(&'a Type<'g>),
+    DiscardedTextPair(&'a Type<'g>),
     CheckedPipeCarrier { primitive_arguments_checked: bool },
 }
 
@@ -43,6 +44,7 @@ struct PropagatingValueCall<'a, 'g> {
     node: NodeId,
     call: &'a CallFacts<'g>,
     result: &'a Type<'g>,
+    discard_needs_cleanup: bool,
     arguments: PropagatingArguments,
 }
 
@@ -1354,9 +1356,12 @@ impl<'a, 'g> Build<'a, 'g> {
                     };
                     return self.propagate(initializer, into, next, exits.returning, depth + 1);
                 }
-                if let Some(call) =
-                    self.check_value_call_propagation(initializer, exits.returning, depth + 1)?
-                {
+                if let Some(call) = self.check_value_call_propagation(
+                    initializer,
+                    false,
+                    exits.returning,
+                    depth + 1,
+                )? {
                     let into = match binding {
                         Binding::Discard => None,
                         Binding::Name { declaration, .. } => {
@@ -1438,7 +1443,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 if self.propagates_directly(expression)? {
                     self.propagate(expression, None, next, exits.returning, depth + 1)
                 } else if let Some(call) =
-                    self.check_value_call_propagation(expression, exits.returning, depth + 1)?
+                    self.check_value_call_propagation(expression, true, exits.returning, depth + 1)?
                 {
                     self.lower_propagating_value_call(node, call, None, next, depth + 1)
                 } else {
@@ -2699,31 +2704,44 @@ impl<'a, 'g> Build<'a, 'g> {
     fn check_value_call_propagation(
         &mut self,
         node: NodeId,
+        statement_discard: bool,
         returning: Pc,
         depth: usize,
     ) -> ResultOf<Option<PropagatingValueCall<'a, 'g>>> {
         self.budget.step(1)?;
-        if !matches!(
-            self.module.syntax.nodes[node].kind,
-            NodeKind::Call | NodeKind::Pipe
-        ) {
+        let kind = self.module.syntax.nodes[node].kind;
+        if !matches!(kind, NodeKind::Call | NodeKind::Pipe) {
             return Ok(None);
         }
         self.budget.step(1)?;
         if let Some(fact) = self.facts.get(&node).copied()
             && let NodeFactKind::Expression(facts) = &fact.kind
             && let Some(call) = facts.call.as_deref()
-            && let Some(arguments) = self.propagating_arguments(
-                node,
-                PropagatingCallOutput::Value(&facts.ty),
-                call,
-                returning,
-                depth,
-            )?
         {
+            let mut output = PropagatingCallOutput::Value(&facts.ty);
+            if statement_discard
+                && kind == NodeKind::Call
+                && let TypeTerm::Tuple(elements) = facts.ty.as_ref()
+                && let [left, right] = elements.as_slice()
+            {
+                self.budget.step(2)?;
+                if owns_text(left) && owns_text(right) {
+                    output = PropagatingCallOutput::DiscardedTextPair(&facts.ty);
+                }
+            }
+            let text_pair = matches!(output, PropagatingCallOutput::DiscardedTextPair(_));
+            let Some(arguments) =
+                self.propagating_arguments(node, output, call, returning, depth)?
+            else {
+                return Ok(None);
+            };
             if fact.flow.pending
                 || fact.flow.normal != arguments.terminal_failure.is_none()
                 || fact.flow.returns != arguments.can_return
+                || text_pair
+                    && (fact.flow.diverges
+                        || !fact.flow.breaks.is_empty()
+                        || !fact.flow.continues.is_empty())
             {
                 return Err(Stop::Pending(node));
             }
@@ -2731,6 +2749,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 node,
                 call,
                 result: &facts.ty,
+                discard_needs_cleanup: text_pair || owns_text(&facts.ty),
                 arguments,
             }))
         } else {
@@ -2837,6 +2856,36 @@ impl<'a, 'g> Build<'a, 'g> {
                     return Err(Stop::Pending(node));
                 }
                 self.check_exact_primitive_call(node, call, expected)?;
+            }
+            PropagatingCallOutput::DiscardedTextPair(expected) => {
+                let ([arg], [postfix]) = (call.arguments.as_slice(), roots.as_slice()) else {
+                    return Err(Stop::Pending(node));
+                };
+                self.budget.step(4)?;
+                let syntax = &self.module.syntax.nodes[postfix.root];
+                let flow = &self.facts.get(arg).ok_or(Stop::Pending(*arg))?.flow;
+                if call.pipe_input.is_some()
+                    || syntax.kind != NodeKind::Propagate
+                    || flow.pending
+                    || flow.diverges
+                    || !flow.breaks.is_empty()
+                    || !flow.continues.is_empty()
+                    || flow.normal != terminal_root_index.is_none()
+                    || flow.returns != postfix.can_return
+                    || !matches!(self.value(*arg)?.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+                    || self
+                        .bool_option_role(&self.value(syntax.children[0])?.ty)
+                        .is_none()
+                    || self.contains_unadmitted_propagation(node, Some(postfix.root), depth)?
+                {
+                    return Err(Stop::Pending(node));
+                }
+                self.check_exact_primitive_call(node, call, expected)?;
+                // The reached route proves default cleanup when allocating the
+                // tuple slot. Prove it here if the postfix makes that impossible.
+                if terminal_root_index.is_some() && self.outer_disposer(node, expected)?.is_some() {
+                    return Err(Stop::Pending(node));
+                }
             }
             PropagatingCallOutput::CheckedPipeCarrier {
                 primitive_arguments_checked: true,
@@ -3979,12 +4028,13 @@ impl<'a, 'g> Build<'a, 'g> {
             node,
             call,
             result,
+            discard_needs_cleanup,
             arguments,
         } = checked;
         // Only a reached call can produce a discarded owner. Its cleanup
         // belongs to the call's normal continuation, not any argument exit.
         let (into, next) =
-            if into.is_none() && arguments.terminal_failure.is_none() && owns_text(result) {
+            if into.is_none() && arguments.terminal_failure.is_none() && discard_needs_cleanup {
                 let slot = self.slot(node, result)?;
                 (Some(slot), self.cleanup(statement, &[slot], next)?)
             } else {
