@@ -7344,6 +7344,30 @@ fn discarded_compound_call_cleans_only_the_materialized_success_result() {
 }
 
 #[test]
+fn nonpropagating_named_text_pair_keeps_the_ordinary_work_limit() {
+    probe(
+        "propagation::nonpropagating_named_text_pair_keeps_the_ordinary_work_limit",
+        "function pair(bit: bool): [string, string] { return [\"left\", \"right\"]; }\nfunction plain(bit: bool): void { let output = pair(bit); }\n",
+        |_, module, receipt| {
+            let decl = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("plain"))
+                .unwrap();
+            // Measured at ddb5df7; there is no propagating argument to check.
+            let exact = AnalysisLimits {
+                max_work: 4887,
+                max_entries: 394,
+                ..Default::default()
+            };
+            let result = lower_body(receipt, module, &decl.id, exact).unwrap();
+            assert_eq!(result.completion(), Completion::Checked);
+            assert!(result.mir().is_some());
+        },
+    );
+}
+
+#[test]
 fn named_compound_call_keeps_the_result_until_lexical_exit() {
     fn calls<'g>(ops: &[&Operation<'g>]) -> Vec<(usize, &'g loader::DeclarationId)> {
         ops.iter()
@@ -7517,9 +7541,27 @@ fn named_compound_call_keeps_the_result_until_lexical_exit() {
                     panic!("expected one moved-result finding");
                 };
                 assert_eq!(finding.code(), "R0200");
-                assert_eq!(finding.site.span.bytes(), b"output");
-                assert_eq!(finding.related.span.bytes(), b"output");
-                assert!(finding.related.span.start() < finding.site.span.start());
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| &d.id == id("reused"))
+                    .unwrap();
+                let nodes = &module.syntax.nodes;
+                let [_, taken, again, _] = nodes[nodes[decl.node].children[1]].children[..] else {
+                    panic!("expected two uses after the initializer")
+                };
+                for (site, statement, written) in [
+                    (finding.site, again, b"let again = output;".as_slice()),
+                    (finding.related, taken, b"let taken = output;"),
+                ] {
+                    let operand = *nodes[statement].children.last().unwrap();
+                    assert_eq!(nodes[statement].span.bytes(), written);
+                    assert_eq!(
+                        (site.module, site.node, site.span),
+                        (&module.key, operand, &nodes[operand].span)
+                    );
+                    assert_eq!(site.span.bytes(), b"output");
+                }
             }
         },
     );

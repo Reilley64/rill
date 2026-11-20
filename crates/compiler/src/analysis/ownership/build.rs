@@ -3459,18 +3459,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             && let NodeFactKind::Expression(facts) = &fact.kind
             && let Some(call) = facts.call.as_deref()
         {
-            let mut output = PropagatingCallOutput::Value(&facts.ty);
-            if allow_text_pair
+            let text_pair = allow_text_pair
                 && kind == NodeKind::Call
-                && let TypeTerm::Tuple(elements) = facts.ty.as_ref()
-                && let [left, right] = elements.as_slice()
-            {
-                self.budget.step(2)?;
-                if owns_text(left) && owns_text(right) {
-                    output = PropagatingCallOutput::TextPair(&facts.ty);
-                }
-            }
-            let text_pair = matches!(output, PropagatingCallOutput::TextPair(_));
+                && matches!(facts.ty.as_ref(), TypeTerm::Tuple(_));
+            let output = if text_pair {
+                PropagatingCallOutput::TextPair(&facts.ty)
+            } else {
+                PropagatingCallOutput::Value(&facts.ty)
+            };
             let Some(arguments) =
                 self.propagating_arguments(node, output, call, returning, depth)?
             else {
@@ -3600,6 +3596,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 self.check_exact_primitive_call(node, call, expected)?;
             }
             PropagatingCallOutput::TextPair(expected) => {
+                // Ordinary tuple calls never reach this arm. Pay for the
+                // component checks only after finding a propagating argument.
+                self.budget.step(2)?;
+                if !matches!(expected.as_ref(), TypeTerm::Tuple(fields)
+                    if matches!(fields.as_slice(), [left, right] if owns_text(left) && owns_text(right)))
+                {
+                    return Err(Stop::Pending(node));
+                }
                 let ([arg], [postfix]) = (call.arguments.as_slice(), roots.as_slice()) else {
                     return Err(Stop::Pending(node));
                 };
