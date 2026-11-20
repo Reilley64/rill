@@ -1756,6 +1756,7 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
     probe(
         "patterns::owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary",
         r#"
+            function untouched(value: [[string, bool], string, [bool, string]]): void {}
             function unpack(value: [[string, bool, string], string, [string, string], string]): string {
                 let ([([_, bit, (selected)]), tail, [_, _], _]) = (value);
                 return selected;
@@ -1765,11 +1766,13 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
                 let [[_, again], bit] = value;
                 return bit;
             }
-            function copied(value: [[bool, bool], bool]): bool {
-                let [[_, first], _] = value;
-                let [[_, _], again] = value;
+            function copied(value: [[bool, bool], bool, [bool, bool]]): bool {
+                let [[_, first], _, [_, other]] = value;
+                let [[_, _], again, [_, _]] = value;
                 return again;
             }
+            function depthBare(value: [[bool, bool], bool]): void { let [[_, _], _] = value; }
+            function depthGrouped(value: [[bool, bool], bool]): void { let [[_, _], _] = ((value)); }
             function ignore(value: [[string, string], string]): void {
                 let [[_, _], _] = value;
             }
@@ -1885,6 +1888,60 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
                     && name.projection.is_none() && flag.projection.is_none())
             );
             assert!(parameters.is_empty());
+            let untouched = lower("untouched", default);
+            let mir = untouched
+                .mir()
+                .expect("an untouched parameter also cleans its children");
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Cleanup(_) | Operation::Move { .. } | Operation::Drop(_)
+                    )
+                })
+                .collect();
+            let [Operation::Cleanup(cleanup)] = ops.as_slice() else {
+                panic!("expected only parameter cleanup")
+            };
+            let parts: Vec<_> = cleanup
+                .iter()
+                .map(|action| {
+                    let (drop, place) = match action {
+                        Obligation::Drop(place) => (true, place),
+                        Obligation::EndStorage(place) => (false, place),
+                        _ => panic!("expected only default cleanup"),
+                    };
+                    assert_eq!(
+                        place.root.span.bytes(),
+                        b"value: [[string, bool], string, [bool, string]]"
+                    );
+                    (
+                        drop,
+                        match place.projection {
+                            None => (None, None),
+                            Some(Projection::TupleElement(outer)) => (Some(outer), None),
+                            Some(Projection::NestedTupleElement { outer, inner }) => {
+                                (Some(outer), Some(inner))
+                            }
+                            _ => panic!("expected a tuple position"),
+                        },
+                    )
+                })
+                .collect();
+            assert_eq!(
+                parts,
+                [
+                    (true, (Some(2), Some(1))),
+                    (false, (Some(2), Some(0))),
+                    (false, (Some(2), None)),
+                    (true, (Some(1), None)),
+                    (false, (Some(0), Some(1))),
+                    (true, (Some(0), Some(0))),
+                    (false, (Some(0), None)),
+                    (false, (None, None)),
+                ]
+            );
             let ignored = lower("ignore", default);
             let mir = ignored
                 .mir()
@@ -1926,6 +1983,7 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
             let copies: Vec<_> = linear(mir, mir.entry)
                 .into_iter()
                 .filter_map(|op| match op {
+                    Operation::Move { .. } => panic!("an all-scalar tuple does not move"),
                     Operation::Copy {
                         from,
                         into: Some(dest),
@@ -1934,10 +1992,13 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
                 })
                 .collect();
             assert!(
-                matches!(copies.as_slice(), [(source, first), (leaf, binder), (reused, second), (sibling, again), (returned, _)]
-                if source.root.span.bytes() == b"value: [[bool, bool], bool]" && source.root.node == reused.root.node
-                    && first.root.node == leaf.root.node && matches!(leaf.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 1 }))
-                    && binder.root.span.bytes() == b"first" && second.root.node == sibling.root.node && sibling.tuple_element() == Some(1)
+                matches!(copies.as_slice(), [(source, first), (leaf, binder), (peer, other), (reused, second), (sibling, again), (returned, _)]
+                if source.root.span.bytes() == b"value: [[bool, bool], bool, [bool, bool]]" && source.root.node == reused.root.node
+                    && first.root.node != second.root.node && first.root.node == leaf.root.node && first.root.node == peer.root.node
+                    && matches!(leaf.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 1 }))
+                    && matches!(peer.projection, Some(Projection::NestedTupleElement { outer: 2, inner: 1 }))
+                    && binder.root.span.bytes() == b"first" && other.root.span.bytes() == b"other"
+                    && second.root.node == sibling.root.node && sibling.tuple_element() == Some(1)
                     && again.root.span.bytes() == b"again" && again.root.node == returned.root.node)
             );
             assert!(path_drops(mir, mir.entry).is_empty());
@@ -1959,6 +2020,17 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
                 ..default
             };
             assert!(lower("unpack", exact).mir().is_some());
+            let bare = lower("depthBare", default);
+            assert!(bare.mir().is_some());
+            assert!(lower("depthGrouped", default).mir().is_some());
+            let depth = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..default
+            };
+            assert!(lower("depthBare", depth).mir().is_some());
+            let grouped = lower("depthGrouped", depth);
+            assert_eq!(grouped.completion(), Completion::ResourceLimit);
+            assert!(grouped.mir().is_none());
             for short in [
                 AnalysisLimits {
                     max_work: exact.max_work - 1,

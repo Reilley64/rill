@@ -31,6 +31,7 @@ enum PropagatingCallOutput<'a, 'g> {
 enum ExpressionProof<'t, 'g> {
     CallCarrier(&'t Type<'g>),
     NestedTupleParent(&'t PlacePath<'g>),
+    NestedTuplePatternSource(Slot),
 }
 
 struct PropagatingValueCall<'a, 'g> {
@@ -1955,24 +1956,10 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
-        if let Some(from) = tuple_source {
-            self.emit(
-                source,
-                Action::Read {
-                    from,
-                    into: Some(scratch),
-                },
-                Edges::Next(tail),
-            )
-        } else {
-            self.expression_with_proof(
-                source,
-                Some(scratch),
-                tail,
-                depth,
-                nested_reborrow.map(ExpressionProof::NestedTupleParent),
-            )
-        }
+        let proof = tuple_source
+            .map(ExpressionProof::NestedTuplePatternSource)
+            .or_else(|| nested_reborrow.map(ExpressionProof::NestedTupleParent));
+        self.expression_with_proof(source, Some(scratch), tail, depth, proof)
     }
 
     fn propagates_directly(&mut self, node: NodeId) -> ResultOf<bool> {
@@ -3017,7 +3004,11 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
             NodeKind::ValueReference => Action::Read {
-                from: self.read_value_place(node, facts)?,
+                // Only owned pattern staging supplies this proved slot.
+                from: match proof {
+                    Some(ExpressionProof::NestedTuplePatternSource(slot)) => slot,
+                    _ => self.read_value_place(node, facts)?,
+                },
                 into,
             },
             NodeKind::Prefix("&" | "&mut") => {

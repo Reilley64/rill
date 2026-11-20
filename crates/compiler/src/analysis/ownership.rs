@@ -115,7 +115,7 @@ pub enum Projection<'g> {
         inner: &'g Declaration,
     },
     TupleElement(usize),
-    /// A borrowed pattern's two positions, relative to the descriptor's referent.
+    /// Two tuple positions relative to an owned root or a descriptor's referent.
     NestedTupleElement {
         outer: usize,
         inner: usize,
