@@ -4,7 +4,7 @@ The [owner approval](https://github.com/Reilley64/rill/issues/66#issuecomment-70
 
 ## Checked source
 
-[`installed_list_backing_on_budget_delivery`](m5/cancellation.rs) moves the incoming `List<i32>` to `numbers`, takes two shared views, and uses both after the loop. On the base `817c329`, it had an ordinary ownership result but no enabled delivery proof. At `fdb6904`, both installed modes produce these results in the targeted query and the graph's enabled-frame judgment:
+[`installed_list_backing_on_budget_delivery`](m5/cancellation.rs) moves the incoming `List<i32>` to `numbers`, takes two shared views, and uses both after the loop. At `afd1afd`, this body had ordinary MIR but no enabled delivery proof. At `810f679`, both installed modes produce these results in the targeted query and the graph's enabled-frame judgment:
 
 | Checkpoint | Checked terminal cleanup |
 | --- | --- |
@@ -13,9 +13,11 @@ The [owner approval](https://github.com/Reilley64/rill/issues/66#issuecomment-70
 
 The ordinary loop exit still reaches the source `dispose(numbers)` once. A second witness disposes `input` before the loop. Its backedge delivery does not dispose it again. A frame with an ordinary call and a loop keeps its delivery judgment unresolved. Entry-only List readers keep their ordinary-only contracts. The check reuses initialized ownership states and the compiler's lexical cleanup walk. It does not acquire another List owner, clone a child proof, or add a checkpoint to an index read or the List disposal bridge.
 
+The new proof is limited to a top-level `while` whose test reads an immutable Bool parameter and whose body is empty or just `continue`. No other reached conditional, backedge, or ordinary call can contribute a checkpoint in this List proof. The enabled walk must actually reach a backedge: an ordinary CFG backedge alone is insufficient. For example, `while (again) { if (again) { break; } }` cannot reach its backedge when both tests read the same immutable parameter. It keeps ordinary MIR but does not gain an entry-only delivery proof.
+
 ## Installed blockers
 
-The staged `shared/main.rill` and `erased-slot/main.rill` from `/tmp/rill-o16-d647.4S6RMi/cases` still exit at M3 in both modes with `R0400: import has no public target (import std::routine::join;)`. There is no typed receipt for either. The alias, competing capture, child-local escape, heterogeneous result and caller-backed result fixtures also stop at the import. These are import failures, not `R0201`, `R0202` or a canonical erasure judgment.
+The staged `shared` and `erased-slot` applications that import `std::routine::join` still exit at M3 in both modes with `R0400: import has no public target (import std::routine::join;)`. There is no typed receipt for either. The alias, competing capture, child-local escape, heterogeneous result and caller-backed result fixtures also stop at the import. These are import failures, not `R0201`, `R0202` or a canonical erasure judgment.
 
 Two independent boundaries remain after removing the import from the experiment:
 
@@ -28,8 +30,8 @@ The scoped proof still needs a distinct transition on the checked ownership stat
 
 ## Replay at the code pin
 
-At `fdb6904` on top of the reviewed correction `35b1dc7`, eight exact M5 tests and `installed_ownership_requires_the_built_archive` passed serially. They cover both installed modes, target and graph delivery, old fixed and exact/one-short caps, foreign capture rejection, ordinary overload and erased-slot controls. Scoped Clippy, changed-file formatting and `git diff --check` passed. The build used only `/tmp/e76.1PxxJn/target`, with debug info and incremental builds disabled and a short `TMPDIR`.
+At `810f679`, 21 focused M5 tests and `installed_ownership_requires_the_built_archive` passed, as did scoped Clippy, formatting and `git diff --check`. In the staged fixture the `read` body checks at 3,398 work / 703 entries / depth 5. The installed tests verify exact and independently one-short target and graph limits. A separate capture covers an entry-only reader, an ordinary call before the loop, a local condition, the correlated break above and a loop in a nested scope. All five retain their exact pre-change body budgets; the capture still fits its pre-change graph cap of 191,781 / 4,867 / 6. Each root retains ordinary MIR with unresolved delivery.
 
-The same-code executable-relative stage under `/tmp/e76.1PxxJn/join-final` contains the original 17 source files byte-for-byte. In 18 static fixture checks (normal and test in each), the baseline and both application `join` controls kept their typed receipts, with `[Ownership, Execution]` unperformed. The old Result discards, dormant implementation mismatch, non-Boolean expectation, mixed incomplete source, missing archive and corrupt pin kept their prior outcomes. The canonical fixtures had no receipt. The installed ownership regression separately checks the captured 17-key set. Local command logs are `/tmp/e76.1PxxJn/join-parent-red.log` and `/tmp/e76.1PxxJn/join-final-*.log`.
+The installed ownership regression checks the original 17-key standard-source set. The separately staged baseline produced M4 receipts in both modes, with `[Ownership, Execution]` unperformed; the synchronous `actual-shared` body kept its previous M5 result and limits. Both canonical import controls still had no receipt. Earlier staged comparisons on the List-leaf implementation also preserved Result discards, the dormant implementation mismatch, the non-Boolean expectation, the mixed incomplete source, missing archive and corrupt pin.
 
 No broad suite, Rill execution, scheduler run, ABI check, or native operation was performed.

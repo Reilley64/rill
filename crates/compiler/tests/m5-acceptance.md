@@ -1343,6 +1343,12 @@ A live exclusive access at capture staging gives `R0201` and no MIR. In a separa
 
 Fifteen focused M5 tests, 39 M4 tests and two Result-use unit tests passed, along with scoped Clippy and formatting. A separate 77-case staged replay retained the old positive, rejection and unavailable outcomes in both modes. This is **synchronous** call evidence: it does not show a stop request, a wait for two children, cancellation-time cleanup, or disposal of staged unpublished results. `MaskingAndJoin` remains open; the canonical `std::routine::join` import still gives `R0400`. No Rill program ran.
 
+## Delivery cleanup at a local List loop
+
+The [List delivery evidence and join handoff](o16-join-handoff.md) records one ordinary function, not two children. At `810f679`, delivery at entry cleans the incoming List owner. At a feasible top-level loop backedge after the move, delivery ends the two shared views before releasing the local List once. If the backing was already disposed, delivery does not dispose it again. Both modes check the terminal cleanup through targeted and graph queries. Indexing and disposal do not create additional yield sites.
+
+Entry-only, call-containing and unproved loops retain ordinary MIR without enabled-frame proofs. That includes a loop whose ordinary CFG contains a backedge but whose repeated immutable test prevents delivery there. The five control bodies and their mixed graph retain their exact pre-change caps. This does not prove that a stop request completes a child or that the parent may release a List before both children finish cleanup.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
