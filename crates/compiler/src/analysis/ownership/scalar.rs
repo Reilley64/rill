@@ -274,7 +274,7 @@ pub(super) fn call_target<'g>(
     node: NodeId,
     call: &CallFacts<'g>,
     facts: &ExpressionFacts<'g>,
-    input: &Type<'g>,
+    (input, text): (&Type<'g>, Option<TextElementDisposal<'g>>),
     budget: &mut Budget,
 ) -> ResultOf<&'g DeclarationId> {
     let pending = || Stop::Pending(node);
@@ -296,7 +296,12 @@ pub(super) fn call_target<'g>(
         (
             PrimitiveRole::Dispose,
             &dispose.id,
-            dispose_input(input, &facts.ty),
+            dispose_input(input, &facts.ty).or_else(|| {
+                (text.is_some()
+                    && matches!(input.as_ref(),TypeTerm::Primitive(p) if p.name()=="string")
+                    && matches!(facts.ty.as_ref(),TypeTerm::Primitive(p) if p.name()=="void"))
+                .then_some(Primitive::String)
+            }),
             input,
         )
     } else {
@@ -361,6 +366,13 @@ pub(super) fn call_target<'g>(
     let binder = &binder.declaration.id;
     if filter.binder != binder || substitution.binder != binder {
         return Err(pending());
+    }
+    if let Some(text) = text {
+        return (role == PrimitiveRole::Dispose
+            && primitive == Primitive::String
+            && std::ptr::eq(selection.implementation, text.implementation))
+        .then_some(text.implementation)
+        .ok_or_else(pending);
     }
     let provider =
         required_provider(typed, role, family_id, primitive, budget)?.ok_or_else(pending)?;

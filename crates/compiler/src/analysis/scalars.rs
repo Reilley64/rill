@@ -288,6 +288,8 @@ pub struct ScalarObligation<'g> {
 }
 #[derive(Debug, Default)]
 pub struct ScalarFacts<'g> {
+    /// Pending per-formal handoffs for the integrated report, by function and position.
+    text_iteration_sources: Vec<(&'g DeclarationId, usize)>,
     pub bodies: Vec<BodyFacts<'g>>,
     pub nodes: Vec<NodeFacts<'g>>,
     pub findings: Vec<ScalarFinding<'g>>,

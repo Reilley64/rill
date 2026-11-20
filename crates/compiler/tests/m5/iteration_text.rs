@@ -64,6 +64,129 @@ function postfix(xs: List<string>, gate: Option<bool>): Option<bool> {
 "#;
 
 #[test]
+fn unadmitted_text_parameters_keep_their_old_caps() {
+    probe(
+        "iteration::text::unadmitted_text_parameters_keep_their_old_caps",
+        r#"
+        function works(xs: List<string>): void { for (let item of xs) { break; } }
+        function postfix(xs: List<string>, gate: Option<bool>): Option<bool> {
+            for (let item of xs) { let bit=gate?; return Option.Some(bit); } return Option.None;
+        }
+        function unused(xs: List<string>): void {}
+        function wildcard(xs: List<string>): void { for (let (_) of xs) { break; } }
+        function sibling(xs: List<string>, other: List<string>): void { for (let item of xs) { break; } }
+        function grouped(xs: List<string>): void { for (let (item) of ((xs))) { dispose(item); break; } }
+    "#,
+        |_, module, receipt| {
+            let run = |name: &str, cap| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, cap).unwrap()
+            };
+            // Before the string cursor, all three stopped at the parameter.
+            for (name, max_work, max_entries) in [
+                ("postfix", 1966, 74),
+                ("unused", 1963, 73),
+                ("wildcard", 1963, 73),
+            ] {
+                let report = run(
+                    name,
+                    AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth: 0,
+                    },
+                );
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none());
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    b"xs: List<string>"
+                );
+            }
+            let other = run("sibling", AnalysisLimits::default());
+            assert!(other.mir().is_none());
+            assert_eq!(
+                other.blocked_at().unwrap().span.bytes(),
+                b"other: List<string>"
+            );
+            assert!(run("works", AnalysisLimits::default()).mir().is_some());
+        },
+    );
+}
+
+#[test]
+fn explicit_disposal_in_an_owning_text_loop_has_a_checked_element_edge() {
+    probe_with_typed(
+        "iteration::text::explicit_disposal_in_an_owning_text_loop_has_a_checked_element_edge",
+        r#"
+        import std::core::dispose as release;
+        function explicit(xs: List<string>): void { for (let item of xs) { (release)((item)); break; } }
+        function reuse(xs: List<string>): void { for (let item of xs) { break; } dispose(xs); }
+    "#,
+        |_, module, receipt, typed| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            let role = typed
+                .primitive_providers()
+                .iter()
+                .find(|p| p.role == PrimitiveRole::Dispose && p.primitive == Primitive::String)
+                .unwrap();
+            let bridge = &role.binding.unwrap().declaration.id;
+            for (name, expected) in [
+                ("explicit", Completion::Checked),
+                ("reuse", Completion::SourceRejected),
+            ] {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let local = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+                let root = report
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                    .unwrap();
+                assert_eq!(local.completion(), expected, "target {name}");
+                assert_eq!(root.ordinary_completion(), expected, "graph {name}");
+                if name == "explicit" {
+                    assert!(root.dependencies().iter().any(|e| e.site.span.bytes()
+                        == b"(release)((item))"
+                        && std::ptr::eq(e.declaration, &role.implementation.id)
+                        && e.contract == DependencyContract::ListTextElementDisposal { bridge }));
+                    for mir in [local.mir().unwrap(), root.mir().unwrap()] {
+                        let (yes, _) = branch_targets(mir);
+                        let path = straight_blocks(mir, yes);
+                        assert!(!obligations(&path).any(|c| matches!(c, Obligation::Drop(_))));
+                        assert_eq!(
+                            obligations(&path)
+                                .filter(|c| matches!(
+                                    c,
+                                    Obligation::DisposeOwnedListIterText { .. }
+                                ))
+                                .count(),
+                            1
+                        );
+                    }
+                } else {
+                    assert!(local.mir().is_none() && root.mir().is_none());
+                    let [f] = local.findings() else {
+                        panic!("one reached source reuse")
+                    };
+                    assert_eq!(
+                        (f.code(), f.site.span.bytes(), f.related.span.bytes()),
+                        ("R0200", b"dispose(xs)".as_slice(), b"xs".as_slice())
+                    );
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_consuming_string_iteration() {
     probe_with_typed(
         "iteration::text::installed_consuming_string_iteration",

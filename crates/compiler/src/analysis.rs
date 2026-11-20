@@ -96,6 +96,9 @@ pub struct Binder<'g> {
 pub struct MemberType<'g> {
     pub declaration: &'g Declaration,
     pub ty: Type<'g>,
+    /// Integrated body typing identified this formal as the direct source of
+    /// an ordinary named string yield. No storage/provider proof is implied.
+    pub(in crate::analysis) text_iteration_source: bool,
 }
 #[derive(Debug)]
 pub enum Payload<'g> {
@@ -959,7 +962,11 @@ impl<'g> Analyzer<'g> {
                 self.ty(module, module.syntax.nodes[member].children[1], binders, 1)?
             {
                 self.reserve(1)?;
-                members.push(MemberType { declaration, ty });
+                members.push(MemberType {
+                    declaration,
+                    ty,
+                    text_iteration_source: false,
+                });
             } else {
                 valid = false;
             }

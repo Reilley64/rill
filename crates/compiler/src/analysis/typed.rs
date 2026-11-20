@@ -313,7 +313,7 @@ impl<'g> TypedReport<'g> {
 }
 
 pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
-    let inventory = analyze_typed_inventory(graph, limits);
+    let mut inventory = analyze_typed_inventory(graph, limits);
     let mut budget = Budget {
         limits,
         statistics: inventory.statistics(),
@@ -405,6 +405,17 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         statistics: bodies.statistics(),
     };
     let mut completion = bodies.completion();
+    if completion != ScalarFailureKind::ResourceLimit {
+        for (owner, position) in bodies.take_text_iteration_sources() {
+            if inventory
+                .mark_text_iteration_source(owner, position, &mut budget)
+                .is_err()
+            {
+                completion = ScalarFailureKind::ResourceLimit;
+                break;
+            }
+        }
+    }
     if completion != ScalarFailureKind::ResourceLimit
         && core::check_providers(&inventory, &bodies, &mut budget, &mut core).is_err()
     {

@@ -1082,7 +1082,7 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
         // in this static frame. Neither introduces a call-entry checkpoint.
         Action::Dispose {
             operand,
-            scalar_implementation: None,
+            target: WrittenDisposal::Ordinary,
         } => matches!(slots[operand].cleanup, StorageCleanup::DisposeListI32(_)),
         Action::ReadListI32 { .. }
         | Action::EqualI32Literal { .. }
@@ -3579,7 +3579,7 @@ pub(super) fn run<'a, 'g>(
                 }
                 Action::Dispose {
                     operand: slot,
-                    scalar_implementation,
+                    target,
                 } => {
                     require_initialized(&slots, &state, slot, node, budget)?;
                     forbid_custom_partial(&slots, &state, slot, node)?;
@@ -3610,7 +3610,20 @@ pub(super) fn run<'a, 'g>(
                     } else if let StorageCleanup::DisposeListI32(disposal) = slots[slot].cleanup {
                         budget.reserve(1)?;
                         Operation::Cleanup(vec![disposal.cleanup(local(slot))])
-                    } else if let Some(implementation) = scalar_implementation {
+                    } else if let StorageCleanup::DisposeListText(disposal) = slots[slot].cleanup {
+                        budget.reserve(1)?;
+                        Operation::Cleanup(vec![Cleanup::DisposeListText {
+                            operand: local(slot),
+                            implementation: disposal.list.implementation,
+                            bridge: disposal.list.bridge,
+                            element: disposal.element,
+                        }])
+                    } else if let WrittenDisposal::Text(element) = target {
+                        Operation::DisposeText {
+                            operand: local(slot),
+                            element,
+                        }
+                    } else if let WrittenDisposal::Scalar(implementation) = target {
                         Operation::CallScalarDispose {
                             implementation,
                             operand: local(slot),

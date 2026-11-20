@@ -120,8 +120,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         if !self
             .dispose
             .is_some_and(|id| std::ptr::eq(id, &dispose.family.id))
-            || advance.artifact != open.artifact
-            || release.artifact != open.artifact
+            || !advance.artifact.same_link(open.artifact)
+            || !release.artifact.same_link(open.artifact)
         {
             return Err(pending());
         }
@@ -140,7 +140,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 .iteration_scope(node, list, CollectionOperation::DisposeList)?
                 .provider
                 .ok_or_else(pending)?;
-            if source_release.artifact != open.artifact
+            if !source_release.artifact.same_link(open.artifact)
                 || disposal.list.implementation != &source_release.implementation.id
                 || disposal.list.bridge != &source_release.bridge.id
             {
@@ -236,8 +236,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             self.budget.step(1)?;
             if std::ptr::eq(&repr.declaration.id, owner)
                 && repr.storage == storage
-                && std::ptr::eq(repr.artifact.context(), artifact.context())
-                && std::ptr::eq(repr.artifact.executable(), artifact.executable())
+                && repr.artifact.same_capture(artifact)
             {
                 return Ok(repr);
             }

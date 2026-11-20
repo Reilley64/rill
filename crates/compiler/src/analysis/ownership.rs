@@ -538,6 +538,11 @@ pub enum Operation<'g> {
         argument: Place<'g>,
         into: Option<Place<'g>>,
     },
+    /// Consume a named string through the selected, linked element disposer.
+    DisposeText {
+        operand: Place<'g>,
+        element: TextElementDisposal<'g>,
+    },
     /// Transfer the original named operand to the selected scalar disposer.
     /// The callee ends its parameter storage; there is no argument copy.
     CallScalarDispose {
@@ -1955,6 +1960,13 @@ enum ScopedFrames {
 }
 
 #[derive(Clone, Copy)]
+enum WrittenDisposal<'g> {
+    Ordinary,
+    Scalar(&'g DeclarationId),
+    Text(TextElementDisposal<'g>),
+}
+
+#[derive(Clone, Copy)]
 enum Action<'g> {
     None,
     BudgetBackedge,
@@ -2124,7 +2136,7 @@ enum Action<'g> {
     },
     Dispose {
         operand: Slot,
-        scalar_implementation: Option<&'g DeclarationId>,
+        target: WrittenDisposal<'g>,
     },
     Displace {
         target: Slot,
@@ -2227,6 +2239,8 @@ struct Build<'a, 'g, 'b> {
     incoming_exclusive_bools: Vec<Slot>,
     /// Incoming shared descriptors used by the exact scoped-join route.
     incoming_shared_i32: BTreeSet<Slot>,
+    /// Receipt-local storage proof opened by an eligible incoming List<string>.
+    text_list_disposal: Option<TextListDisposal<'g>>,
     slots: Vec<Local<'g>>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'a, 'g>>,

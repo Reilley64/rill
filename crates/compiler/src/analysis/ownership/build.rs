@@ -404,6 +404,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             retains_exclusive_bool: false,
             incoming_exclusive_bools: Vec::new(),
             incoming_shared_i32: BTreeSet::new(),
+            text_list_disposal: None,
             slots: Vec::new(),
             code: Vec::new(),
             calls: Vec::new(),
@@ -496,6 +497,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     pub(super) fn parameter(&mut self, parameter: &'a MemberType<'g>) -> ResultOf<Slot> {
         let node = parameter.declaration.node;
         let ty = &parameter.ty;
+        if self.is_list_text(ty) {
+            if !parameter.text_iteration_source {
+                return Err(Stop::Pending(node));
+            }
+            if self.text_list_disposal.is_none() {
+                self.text_list_disposal = Some(TextListDisposal {
+                    list: self.list_disposal(node)?,
+                    element: self.text_element_disposal(node)?,
+                });
+            }
+        }
         if matches!(ty.as_ref(), TypeTerm::Variant { declaration, .. } if declaration.module.origin == Origin::Application)
             && self.return_contract.is_some_and(|(owner, _)| {
                 owner.kind == DeclarationKind::Function
@@ -751,10 +763,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             ),
             TypeTerm::Nominal { .. } if self.is_list_text(ty) => (
                 true,
-                StorageCleanup::DisposeListText(TextListDisposal {
-                    list: self.list_disposal(node)?,
-                    element: self.text_element_disposal(node)?,
-                }),
+                StorageCleanup::DisposeListText(
+                    self.text_list_disposal.ok_or(Stop::Pending(node))?,
+                ),
             ),
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
                 if let Some((role, payload)) = self.admitted_option(ty) =>
@@ -880,8 +891,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 self.budget.step(1)?;
                 if repr.storage == CollectionStorage::Elements
                     && std::ptr::eq(repr.declaration, list.declaration)
-                    && std::ptr::eq(repr.artifact.context(), provider.artifact.context())
-                    && std::ptr::eq(repr.artifact.executable(), provider.artifact.executable())
+                    && repr.artifact.same_capture(provider.artifact)
                 {
                     return Ok(ListDisposal {
                         implementation: &provider.implementation.id,
@@ -6353,7 +6363,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             node,
             call,
             facts,
-            input,
+            (input, None),
             self.budget,
         )?;
         let (root, argument_depth) = self.ungroup_expression_at(argument, depth + 1)?;
@@ -6397,6 +6407,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         facts: &ExpressionFacts<'g>,
         call: &CallFacts<'g>,
         depth: usize,
+        text: Option<TextElementDisposal<'g>>,
     ) -> ResultOf<&'g DeclarationId> {
         let pending = || Stop::Pending(node);
         let argument = self.written_scalar_argument(node, facts, call, depth)?;
@@ -6416,7 +6427,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             node,
             call,
             facts,
-            &actual.ty,
+            (&actual.ty, text),
             self.budget,
         )
     }
@@ -6442,7 +6453,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let goal = self.typed.bodies().goal(goal).map_err(|_| pending())?;
         if facts.ordinary_context.is_some()
             || !call.defaults.is_empty()
-            || !self.is_list_i32(&named.ty)
+            || !(self.is_list_i32(&named.ty) || self.is_list_text(&named.ty))
             || actual.ty != named.ty
             || actual.access != Access::Owned
             || !matches!(&actual.path, Some(actual) if std::ptr::eq(actual.root, path.root) && actual.projections.is_empty())
@@ -6452,8 +6463,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if std::ptr::eq(*family, call.callee) && matches!(inputs.as_slice(), [input] if *input == actual.ty))
             || !goal.selection.as_ref().is_some_and(|s| {
                 s.implementation == disposal.implementation
-                    && matches!(s.substitution.as_slice(), [element]
-                        if scalar::scalar(&element.argument) == Some(Primitive::I32))
+                    && matches!(named.ty.as_ref(), TypeTerm::Nominal { arguments,.. } if matches!((arguments.as_slice(),s.substitution.as_slice()),([ty],[element]) if element.position==0 && *ty==element.argument))
             })
         {
             return Err(pending());
@@ -6607,7 +6617,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 return Err(Stop::Pending(node));
             };
             let operand = self.place(*arg)?;
-            let mut scalar_implementation = None;
+            let mut target = WrittenDisposal::Ordinary;
             if let Some(release) = self.slots[operand].guard_release() {
                 let Some(DataExpression::NativeOwnership(native)) = &facts.data else {
                     return Err(Stop::Pending(node));
@@ -6620,7 +6630,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 {
                     return Err(Stop::Pending(node));
                 }
-            } else if let StorageCleanup::DisposeListI32(disposal) = self.slots[operand].cleanup {
+            } else if let StorageCleanup::DisposeListI32(disposal)
+            | StorageCleanup::DisposeListText(TextListDisposal {
+                list: disposal, ..
+            }) = self.slots[operand].cleanup
+            {
                 self.check_list_dispose_call(node, facts, call, *arg, disposal, depth)?;
             } else {
                 let actual = self.value(*arg)?;
@@ -6630,8 +6644,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         .as_ref()
                         .is_some_and(|path| path.projections.is_empty())
                 {
-                    scalar_implementation =
-                        Some(self.scalar_dispose_target(node, facts, call, depth)?);
+                    target = WrittenDisposal::Scalar(
+                        self.scalar_dispose_target(node, facts, call, depth, None)?,
+                    );
+                } else if owns_text(&actual.ty)
+                    && let Some(disposal) = self.text_list_disposal
+                {
+                    self.scalar_dispose_target(node, facts, call, depth, Some(disposal.element))?;
+                    target = WrittenDisposal::Text(disposal.element);
                 } else if !matches!(actual.ty.as_ref(), TypeTerm::Primitive(_))
                     && !matches!((self.slots[operand].custom_disposer, &call.selection),
                         (Some(expected), Some(selection))
@@ -6645,14 +6665,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             } else {
                 next
             };
-            return self.emit(
-                node,
-                Action::Dispose {
-                    operand,
-                    scalar_implementation,
-                },
-                Edges::Next(next),
-            );
+            return self.emit(node, Action::Dispose { operand, target }, Edges::Next(next));
         }
         if self
             .typed

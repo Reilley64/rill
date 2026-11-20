@@ -233,6 +233,12 @@ impl<'g> GenericReport<'g> {
         &self.facts.nodes
     }
 
+    pub(in crate::analysis) fn take_text_iteration_sources(
+        &mut self,
+    ) -> Vec<(&'g DeclarationId, usize)> {
+        std::mem::take(&mut self.facts.text_iteration_sources)
+    }
+
     pub(in crate::analysis) fn typed_node_mut(&mut self, index: usize) -> &mut NodeFacts<'g> {
         &mut self.facts.nodes[index]
     }

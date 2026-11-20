@@ -1070,6 +1070,13 @@ pub(super) fn visit_dependencies<'g>(
             | Operation::CallScalarDispose { implementation, .. } => {
                 emit(implementation, OrdinaryCall, budget)?
             }
+            Operation::DisposeText { element, .. } => emit(
+                element.implementation,
+                ListTextElementDisposal {
+                    bridge: element.bridge,
+                },
+                budget,
+            )?,
             Operation::Dispose { callee, .. } => emit(callee, BuiltinDispose, budget)?,
             Operation::ConstructResultError { constructor, .. } => {
                 emit(constructor, ResultConstructor, budget)?

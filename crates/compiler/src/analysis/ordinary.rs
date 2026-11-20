@@ -169,6 +169,30 @@ impl<'g> OrdinaryAnalysis<'g> {
         self.statistics
     }
 
+    pub(super) fn mark_text_iteration_source(
+        &mut self,
+        owner: &DeclarationId,
+        position: usize,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        let width = owner.module.path.len().checked_add(4).ok_or(())?;
+        budget.step(
+            width
+                .checked_mul(self.types.declarations.len() + 1)
+                .ok_or(())?,
+        )?;
+        let header = self
+            .types
+            .declarations
+            .get_mut(owner)
+            .expect("checked named function");
+        let DeclarationShape::Function { parameters, .. } = &mut header.shape else {
+            unreachable!("checked function parameter")
+        };
+        parameters[position].text_iteration_source = true;
+        Ok(())
+    }
+
     pub fn type_facts(&self) -> &PartialFacts<'g> {
         &self.types
     }

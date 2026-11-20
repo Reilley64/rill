@@ -61,6 +61,33 @@ impl<'r, 'g> Checker<'r, 'g> {
             iteration.simple_body = simple;
         }
         let mut body = body?;
+        if simple
+            && context.scopes.last().is_some_and(|scope| scope.len() == 1)
+            && let (Some(iteration), Some(value), Some(header)) =
+                (&handoff, &source, context.signature)
+            && iteration.traversal == Some(ListTraversal::Owned)
+            && primitive_name(&iteration.yielded) == Some("string")
+            && header.declaration.id.kind == DeclarationKind::Function
+            && context.arrow_return.is_none()
+            && value.access == data::Access::Owned
+            && let Some(path) = value.path.as_ref()
+            && path.root.kind == DeclarationKind::Parameter
+            && path.projections.is_empty()
+            && let DeclarationShape::Function { parameters, .. } = &header.shape
+        {
+            // The pattern scope contains just the named yield (or is empty
+            // for `_`). This source hint does not select any M5 effects.
+            self.elab.step(parameters.len())?;
+            if let Some(i) = parameters
+                .iter()
+                .position(|formal| std::ptr::eq(&formal.declaration.id, path.root))
+            {
+                self.elab.reserve(1)?;
+                self.facts
+                    .text_iteration_sources
+                    .push((&header.declaration.id, i));
+            }
+        }
         context.loops.pop();
         context.scopes.pop();
 
