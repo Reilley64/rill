@@ -4887,13 +4887,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         let mut postfix = None;
         for (position, field) in data.fields.iter().enumerate() {
-            self.budget.step(1)?;
-            let (root, root_depth) =
-                if self.module.syntax.nodes[field.expression].kind == NodeKind::Group {
-                    self.ungroup_expression_at(field.expression, depth + 1)?
-                } else {
-                    (field.expression, depth + 1)
-                };
+            let (root, root_depth) = self.ungroup_expression_at(field.expression, depth + 1)?;
             if self.module.syntax.nodes[root].kind == NodeKind::Propagate
                 && postfix.replace((position, root, root_depth)).is_some()
             {

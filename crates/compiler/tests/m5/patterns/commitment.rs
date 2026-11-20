@@ -2,6 +2,55 @@ use super::*;
 use compiler::analysis::{DeclarationShape, ownership::analyze_ownership, scalars::BodyOwner};
 
 #[test]
+fn grouped_record_fields_keep_the_named_initializer_budget() {
+    probe(
+        "patterns::commitment::grouped_record_fields_keep_the_named_initializer_budget",
+        r#"
+        type Flags = { first: bool; second: bool; }
+        function supported(input: Option<bool>): Option<bool> {
+            let owner = Flags { first: (input?), second: true }; return Option.Some(owner.first);
+        }
+        function unsupported(input: Option<bool>): Option<bool> {
+            let owner = Flags { first: input?, second: ((((((((((input?)))))))))) }; return Option.Some(owner.first);
+        }
+    "#,
+        |_, module, receipt| {
+            let run = |name: &str, limits| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, limits).unwrap()
+            };
+            // Exact ff8f725 work and entry caps; grouping does not add a second terminal visit.
+            let good = run(
+                "supported",
+                AnalysisLimits {
+                    max_work: 4187,
+                    max_entries: 720,
+                    ..Default::default()
+                },
+            );
+            assert!(good.mir().is_some());
+            assert_eq!(
+                run("unsupported", AnalysisLimits::default()).completion(),
+                Completion::Incomplete
+            );
+            let short = run(
+                "unsupported",
+                AnalysisLimits {
+                    max_depth: good.statistics().max_depth,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
+        },
+    );
+}
+
+#[test]
 fn interrupted_record_commits_binders_only_on_success() {
     probe_with_typed(
         "patterns::commitment::interrupted_record_commits_binders_only_on_success",
