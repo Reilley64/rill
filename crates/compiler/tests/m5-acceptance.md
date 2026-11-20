@@ -1315,6 +1315,16 @@ The positive cases produce M4 receipts with `[Ownership, Execution]` unperformed
 
 This is not `std::routine::join`: the canonical import still fails with `R0400`, and an application alias named `join` gains no ownership operation. The [approved extension](https://github.com/Reilley64/rill/issues/66#issuecomment-7040596504) still needs distinct child environment transfers, retention of backing, proof of termination **and cleanup** for both children before publication or release, and disposition of unpublished results on cancellation. Until those transitions check, there is no installed join provider or child-completion MIR.
 
+## Keeping the local List backing alive before a scoped job
+
+[`scoped_jobs.rs`](m5/scoped_jobs.rs) checks the owner that two jobs would share, **without starting either job**. At `11f4ce8`, moving an installed `List<i32>` into `numbers` transfers the backing once. Two read-only descriptors can borrow it. Explicit disposal after their last uses, an early return, and an ordinary lexical exit each produce exactly one `DisposeListI32` for the initialized owner. Discarding a moved value cleans the stage, not the vacant parameter. The cleanup names the protected installed implementation and its bridge, matched to the canonical list declaration and element-storage representation in this capture. The scalar elements have no separate drop obligation.
+
+In both installed modes, repeated disposal gives `R0200` related to the first disposal. Disposal while the second loan will still be read gives `R0203` related to `&numbers`. Neither publishes MIR. The targeted and graph-root ordinary queries agree; the graph's specialized disposal edge does not certify the generic provider’s entire source root. The two-loan positive checks at 2,731 work / 410 entries / depth 5; removing one unit from any limit withholds MIR.
+
+Review found that admitting the local storage had also admitted returned List backings. Same-module and imported `relay(xs): List<i32>` calls now stay `Incomplete` with no MIR. A `void` consumer is different: the caller moves the backing once, the callee cleans it once, and the caller has no List left to drop. Nine focused M5 tests, two M4 controls and a 77-case staged replay passed. The original 17-source M4 receipt still fits 372,246 / 54,059 / 12.
+
+The ordinary two-job fixture has an M4 receipt but stops at the M5 call. A standalone pair of List-reading arrows still stops at M4 `Containment`. The canonical shared and erased join fixtures still fail to import `std::routine::join` (`R0400`). This local proof supplies no child-frame, index-read, cancellation, completion or execution evidence.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
