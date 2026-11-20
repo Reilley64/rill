@@ -28,6 +28,29 @@ fn incoming_shared_record_copies_carried_field() {
             function unsupportedSibling(x: &Wider): &bool { return x.value; }
             function slot(x: &Holder): &&bool { return &x.value; }
             function unsupportedSlot(x: &Wider): &&bool { return &x.value; }
+            function forwardSlot(x: &Holder): &&bool {
+                let view = &x.value;
+                let saved = view;
+                return saved;
+            }
+            function escapeSlotCopy(x: &Holder): &&&bool {
+                let view = &x.value;
+                return &view;
+            }
+            function overwriteSlotCopy(x: &Holder, other: &&bool): &&bool {
+                let mut view = &x.value;
+                let loan = &view;
+                view = other;
+                let observed = loan;
+                return view;
+            }
+            function overwriteAfterUse(x: &Holder, other: &&bool): &&bool {
+                let mut view = &x.value;
+                let loan = &view;
+                let observed = loan;
+                view = other;
+                return view;
+            }
             function localSlot(x: &Holder): &&bool {
                 let view = x.value;
                 return &view;
@@ -166,32 +189,87 @@ fn incoming_shared_record_copies_carried_field() {
                 assert!(path_drops(mir, mir.entry).is_empty());
             }
             if report.completion() == Completion::Checked {
-                let stats = report.statistics();
-                let exact = AnalysisLimits {
-                    max_work: stats.work,
-                    max_entries: stats.entries,
-                    max_depth: stats.max_depth,
-                };
-                assert!(check("project", exact).mir().is_some());
-                for short in [
-                    AnalysisLimits {
-                        max_work: exact.max_work - 1,
-                        ..exact
-                    },
-                    AnalysisLimits {
-                        max_entries: exact.max_entries - 1,
-                        ..exact
-                    },
+                let forwarded = lower("forwardSlot");
+                let mir = require_mir(&forwarded, "forwardSlot");
+                let route: Vec<_> = linear(mir, mir.entry)
+                    .into_iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::BindBorrowedMember { .. }
+                                | Operation::Borrow { .. }
+                                | Operation::Reborrow { .. }
+                                | Operation::Move { .. }
+                                | Operation::Copy { .. }
+                                | Operation::Export(_)
+                        )
+                    })
+                    .collect();
+                assert!(
+                    matches!(route.as_slice(), [Operation::BindBorrowedMember { binding: SharedSlot, into: view, .. },
+                    Operation::Copy { from: read, into: Some(saved) }, Operation::Copy { from: returned, into: Some(staged) }, Operation::Export(output)]
+                    if view.root.span.bytes() == b"view" && view.root.node == read.root.node && saved.root.span.bytes() == b"saved"
+                        && returned.root.node == saved.root.node && staged.root.node == output.root.node)
+                );
+                for (name, code, site, related) in [
+                    (
+                        "escapeSlotCopy",
+                        "R0202",
+                        b"return &view;".as_slice(),
+                        b"view".as_slice(),
+                    ),
+                    ("overwriteSlotCopy", "R0203", b"view = other;", b"&view"),
                 ] {
-                    let limited = check("project", short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none());
+                    let rejected = lower(name);
+                    assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                    assert!(rejected.mir().is_none());
+                    let [finding] = rejected.findings() else {
+                        panic!("expected one finding for {name}")
+                    };
+                    assert_eq!(finding.code(), code);
+                    assert_eq!(finding.site.span.bytes(), site);
+                    assert_eq!(finding.related.span.bytes(), related);
+                }
+                let released = lower("overwriteAfterUse");
+                assert!(
+                    require_mir(&released, "overwriteAfterUse")
+                        .blocks
+                        .iter()
+                        .any(|block| matches!(&block.operation,
+                    Operation::Install { target, .. } if target.root.span.bytes() == b"view"))
+                );
+                for name in ["project", "slot"] {
+                    let stats = lower(name).statistics();
+                    let exact = AnalysisLimits {
+                        max_work: stats.work,
+                        max_entries: stats.entries,
+                        max_depth: stats.max_depth,
+                    };
+                    assert!(check(name, exact).mir().is_some());
+                    for short in [
+                        AnalysisLimits {
+                            max_work: exact.max_work - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_entries: exact.max_entries - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_depth: exact.max_depth - 1,
+                            ..exact
+                        },
+                    ] {
+                        let limited = check(name, short);
+                        assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                        assert!(limited.mir().is_none());
+                    }
                 }
                 assert!(lower("grouped").mir().is_some());
                 let limited = check(
                     "grouped",
                     AnalysisLimits {
-                        max_depth: exact.max_depth,
+                        max_depth: report.statistics().max_depth,
                         ..AnalysisLimits::default()
                     },
                 );

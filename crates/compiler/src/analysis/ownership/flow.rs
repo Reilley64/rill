@@ -333,6 +333,52 @@ fn include_loans(
     })
 }
 
+fn borrowed_member_value(
+    binding: BorrowedMemberBinding,
+    held: &Held,
+    descriptor: Slot,
+    node: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<Held> {
+    Ok(match binding {
+        BorrowedMemberBinding::CopyScalar => Held::default(),
+        BorrowedMemberBinding::CopyReference => {
+            // Borrow marks every local-storage loan already in
+            // the aggregate as Contents. Only Backing describes
+            // the new access to the enclosing storage.
+            budget.step(held.loans.len())?;
+            budget.reserve(held.loans.len())?;
+            Held {
+                loans: Arc::from_iter(
+                    held.loans
+                        .iter()
+                        .copied()
+                        .filter(|loan| loan.kind != LoanKind::Backing),
+                ),
+                ..Held::default()
+            }
+        }
+        BorrowedMemberBinding::SharedSlot => {
+            budget.step(held.loans.len())?;
+            budget.reserve(held.loans.len() + 1)?;
+            let access = Loan {
+                source: descriptor,
+                site: node,
+                exclusive: false,
+                kind: LoanKind::IncomingSharedSlot,
+            };
+            Held {
+                loans: Arc::from_iter(held.loans.iter().copied().chain([access])),
+                ..Held::default()
+            }
+        }
+        BorrowedMemberBinding::SharedView | BorrowedMemberBinding::ExclusiveView => Held {
+            loans: held.loans.clone(),
+            ..Held::default()
+        },
+    })
+}
+
 fn loan_set(loans: BTreeSet<Loan>, budget: &mut Budget) -> ResultOf<Arc<[Loan]>> {
     budget.reserve(loans.len())?;
     Ok(Arc::from_iter(loans))
@@ -1332,44 +1378,9 @@ pub(super) fn run<'g>(
                         },
                         budget,
                     )?;
-                    state[into] = State::Initialized(match binding {
-                        BorrowedMemberBinding::CopyScalar => empty.clone(),
-                        BorrowedMemberBinding::CopyReference => {
-                            // Borrow marks every local-storage loan already in
-                            // the aggregate as Contents. Only Backing describes
-                            // the new access to the enclosing storage.
-                            budget.step(held.loans.len())?;
-                            budget.reserve(held.loans.len())?;
-                            Held {
-                                loans: Arc::from_iter(
-                                    held.loans
-                                        .iter()
-                                        .copied()
-                                        .filter(|loan| loan.kind != LoanKind::Backing),
-                                ),
-                                ..Held::default()
-                            }
-                        }
-                        BorrowedMemberBinding::SharedSlot => {
-                            budget.step(held.loans.len())?;
-                            budget.reserve(held.loans.len() + 1)?;
-                            let access = Loan {
-                                source: descriptor,
-                                site: node,
-                                exclusive: false,
-                                kind: LoanKind::IncomingSharedSlot,
-                            };
-                            Held {
-                                loans: Arc::from_iter(held.loans.iter().copied().chain([access])),
-                                ..Held::default()
-                            }
-                        }
-                        BorrowedMemberBinding::SharedView
-                        | BorrowedMemberBinding::ExclusiveView => Held {
-                            loans: held.loans.clone(),
-                            ..Held::default()
-                        },
-                    });
+                    state[into] = State::Initialized(borrowed_member_value(
+                        binding, held, descriptor, node, budget,
+                    )?);
                     if transfers {
                         state[descriptor] = State::Vacant;
                     }
@@ -1849,4 +1860,43 @@ pub(super) fn run<'g>(
         blocks,
         disposer_bodies: BTreeMap::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_slot_adds_incoming_storage_to_the_carried_restrictions() {
+        let mut budget = Budget {
+            limits: AnalysisLimits::default(),
+            statistics: Statistics::default(),
+        };
+        let carried = Loan {
+            source: 0,
+            site: 1,
+            exclusive: true,
+            kind: LoanKind::IncomingExclusive,
+        };
+        let access = Loan {
+            source: 2,
+            site: 3,
+            exclusive: false,
+            kind: LoanKind::IncomingSharedSlot,
+        };
+        let held = Held {
+            loans: Arc::from([carried]),
+            ..Held::default()
+        };
+        let mut bind = |kind| {
+            borrowed_member_value(kind, &held, access.source, access.site, &mut budget)
+                .ok()
+                .expect("default budget")
+        };
+        let copied = bind(BorrowedMemberBinding::CopyReference);
+        let slot = bind(BorrowedMemberBinding::SharedSlot);
+        assert_eq!(&*copied.loans, &[carried]);
+        assert_eq!(&*slot.loans, &[carried, access]);
+        assert!(access.kind.is_incoming() && !access.kind.borrows_local_storage());
+    }
 }

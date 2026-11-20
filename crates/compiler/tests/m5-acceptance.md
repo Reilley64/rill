@@ -1031,6 +1031,18 @@ Both independent reviews found no blocking defect. The follow-up pins the exact 
 
 Four focused installed tests passed at the review pin, including the carried-reference pattern and multi-module regression. Staged replay issued M4 receipts in both modes for the baseline, the projection fixture, and the multi-module graph, without ownership or execution. All four [hosted scaffold profiles](https://github.com/Reilley64/rill/actions/runs/44666614486) passed at `29eb176`; the [native jobs](https://github.com/Reilley64/rill/actions/runs/44666614536) stopped at unimplemented `test:runtime`.
 
+## Borrowing the field slot of an incoming shared record
+
+At [#68](https://github.com/Reilley64/rill/issues/68) review pin `439f46659fe89025af92f68c5db186ef579397f7`, `return &x.value` borrows the caller-owned field slot through the incoming `x: &Holder`. The original `return x.value` copies its stored reference. [`field_routes.rs`](m5/field_routes.rs) checks `SharedSlot` versus `CopyReference` on the same canonical field. The slot view retains the incoming storage dependency and existing restrictions; neither route identifies the actual caller object or implies static backing. No writable view or new call contract is admitted.
+
+The Spec review found no blocking defect. The follow-up verifies that a copy of the slot view can be exported, but a borrow of the local descriptor holding that view cannot escape. Returning that local borrow gives `R0202`; replacing the local descriptor with a still-live borrow gives `R0203`. Both rejections withhold MIR. Replacement after its last use checks. Returning `slot(&x)` from a caller still stops at the call, not at a proved escape finding; conservative transfer through the call belongs to #69.
+
+The Standards review found no documented violation. The exact and one-short work, entry and depth checks cover both `slot` and `project`. A focused flow test distinguishes their loan sets: copying the stored reference preserves the carried restriction, while borrowing its slot adds a shared dependency keyed by the incoming parameter, not local parameter storage.
+
+Four focused installed tests passed at the review pin. The baseline, field-slot source, and multi-module graph issued normal and test M4 receipts without ownership or execution. At the preceding `55572d7` head, all four [hosted scaffold jobs](https://github.com/Reilley64/rill/actions/runs/44668639037) passed. The [native jobs](https://github.com/Reilley64/rill/actions/runs/44668639048) stopped at unimplemented `test:runtime`.
+
+**Next #68 proof:** ADR 0007 permits using an unnamed borrow within the statement that owns its backing; it does not extend the backing to a later statement. In a separate installed preflight at `55572d7`, naming the result of `make(flag)`, borrowing it, and then reading it checked in both modes. The same-statement `*(&make(flag))` and later-statement use of `let view = &make(flag)` both got M4 receipts but stopped in M5 with no MIR. The latter is not yet an ownership rejection. This is a callee-local lifetime obligation, distinct from #69's caller retention contract.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
