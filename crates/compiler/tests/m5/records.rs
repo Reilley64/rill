@@ -1227,6 +1227,10 @@ fn nested_record_initializers_transfer_written_fields_into_canonical_storage() {
                 let taken = saved.last;
                 return saved.sibling;
             }
+            function passParts(parts: [string, string]): [string, string] { return parts; }
+            function projected(early: Inner, late: Inner, parts: [string, string]): void {
+                let saved = Outer { last: late, sibling: passParts(parts)[1], first: early };
+            }
             function duplicate(seed: Inner, text: string): void {
                 let saved = Outer { last: seed, sibling: text, first: seed };
             }
@@ -1329,6 +1333,57 @@ fn nested_record_initializers_transfer_written_fields_into_canonical_storage() {
                 parameters.is_empty(),
                 "the incoming fields transferred into the named local"
             );
+            let projected = lower("projected", default);
+            let mir = projected.mir().unwrap_or_else(|| {
+                panic!(
+                    "temporary primitive field: {:?} at {:?}",
+                    projected.completion(),
+                    projected.blocked_at().map(|site| site.span.bytes())
+                )
+            });
+            let ops: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .filter(|block| {
+                    matches!(
+                        block.operation,
+                        Operation::Move { .. }
+                            | Operation::Call(_)
+                            | Operation::Cleanup(_)
+                            | Operation::Initialize(_)
+                    )
+                })
+                .collect();
+            let [last_move, argument, call, read, end, first_move, root, _, _] = ops.as_slice()
+            else {
+                panic!("expected one temporary call and remainder cleanup in written field order")
+            };
+            let Operation::Initialize(owner) = root.operation else {
+                panic!("expected the named record to initialize last")
+            };
+            assert!(
+                matches!(last_move.operation, Operation::Move { from, into: Some(to) }
+                if from.root.span.bytes() == b"late: Inner" && to.root.node == owner.root.node && to.field().is_some_and(|member| &member.id == field("Outer", "last")))
+            );
+            assert!(
+                matches!(argument.operation, Operation::Move { from, .. } if from.root.span.bytes() == b"parts: [string, string]")
+            );
+            assert!(
+                matches!(call.operation, Operation::Call(callee) if callee == &module.declarations.iter().find(|decl| decl.name.as_deref() == Some("passParts")).unwrap().id)
+            );
+            assert!(
+                matches!(read.operation, Operation::Move { from, into: Some(to) }
+                if from.root.node == call.site.node && from.tuple_element() == Some(1) && to.root.node == owner.root.node
+                    && to.field().is_some_and(|member| &member.id == field("Outer", "sibling")))
+            );
+            assert!(matches!(&end.operation, Operation::Cleanup(actions)
+                if matches!(actions.as_slice(), [Obligation::Drop(remaining), Obligation::EndStorage(root)]
+                    if remaining.root.node == call.site.node && remaining.tuple_element() == Some(0)
+                        && root.root.node == call.site.node && root.projection.is_none())));
+            assert!(
+                matches!(first_move.operation, Operation::Move { from, into: Some(to) }
+                if from.root.span.bytes() == b"early: Inner" && to.root.node == owner.root.node && to.field().is_some_and(|member| &member.id == field("Outer", "first")))
+            );
+
             let split = lower("split", default);
             let mir = split.mir().expect("direct reads work after initialization");
             let ops = linear(mir, mir.entry);

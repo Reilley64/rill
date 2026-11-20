@@ -13,6 +13,10 @@ fn whole_nested_tuple_moves_preserve_initialization_at_scope_exit() {
                 let saved = input;
                 return (saved);
             }
+            function giveBare(input: [[string, bool], string, [string, i32]]): [[string, bool], string, [string, i32]] {
+                let saved = input;
+                return saved;
+            }
             function copyWhole(input: [[bool, i32], bool]): [[bool, i32], bool] {
                 let first = input;
                 let second = input;
@@ -105,6 +109,16 @@ fn whole_nested_tuple_moves_preserve_initialization_at_scope_exit() {
                 ..AnalysisLimits::default()
             };
             assert!(check("give", exact).mir().is_some());
+            let bare = lower("giveBare");
+            assert!(bare.mir().is_some());
+            let depth = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..exact
+            };
+            assert!(check("giveBare", depth).mir().is_some());
+            let grouped = check("give", depth);
+            assert_eq!(grouped.completion(), Completion::ResourceLimit);
+            assert!(grouped.mir().is_none());
             for short in [
                 AnalysisLimits {
                     max_work: exact.max_work - 1,
@@ -369,17 +383,17 @@ fn whole_nested_tuple_transfers_do_not_open_general_places_or_values() {
             function deeper(input: [[[string, bool]], string]): void { let saved = input; }
         "#,
         |_, module, receipt| {
-            for name in [
-                "index",
-                "borrow",
-                "writeMember",
-                "construct",
-                "replaceWithConstructed",
-                "localPattern",
-                "argument",
-                "result",
-                "reference",
-                "deeper",
+            for (name, site) in [
+                ("index", "saved[0][0]"),
+                ("borrow", "saved"),
+                ("writeMember", "saved[1]"),
+                ("construct", "saved"),
+                ("replaceWithConstructed", "[[fresh, true], \"tail\"]"),
+                ("localPattern", "saved"),
+                ("argument", "saved"),
+                ("result", "produce()"),
+                ("reference", "input: [[&string, bool], string]"),
+                ("deeper", "input: [[[string, bool]], string]"),
             ] {
                 let declaration = module
                     .declarations
@@ -391,6 +405,11 @@ fn whole_nested_tuple_transfers_do_not_open_general_places_or_values() {
                         .unwrap();
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none(), "{name}");
+                assert_eq!(
+                    report.blocked_at().unwrap().span.bytes(),
+                    site.as_bytes(),
+                    "{name}"
+                );
             }
         },
     );

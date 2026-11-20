@@ -4007,11 +4007,34 @@ fn discarded_string_result_is_distinct_from_the_staged_option_payload() {
                 .unwrap_or_else(|| panic!("complete: {:?}", complete.completion()));
             let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
             let (both, gate_no) = variant_edges(mir, yes, &option.some.id, b"gate");
+            let entry: Vec<_> = straight_blocks(mir, mir.entry)
+                .into_iter()
+                .map(|block| &block.operation)
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::TestVariant { .. }))
+                .collect();
+            let [
+                Operation::Move {
+                    from,
+                    into: Some(carrier),
+                },
+                Operation::TestVariant { operand, .. },
+            ] = entry.as_slice()
+            else {
+                panic!("expected one carrier move before testing the variant")
+            };
+            assert_eq!(from.root.span.bytes(), b"input: Option<string>");
+            assert_eq!(carrier.root.node, operand.root.node);
+            assert!(
+                [from, carrier, operand]
+                    .iter()
+                    .all(|place| place.projection.is_none())
+            );
             let staged = straight_blocks(mir, yes)
                 .into_iter()
                 .find_map(|block| match &block.operation {
                     Operation::TakeOptionPayload { operand, into }
-                        if operand.root.span.bytes() == b"input"
+                        if operand.root.node == carrier.root.node
+                            && operand.projection.is_none()
                             && into.root.span.bytes() == b"input?" =>
                     {
                         Some(into.root.node)

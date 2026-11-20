@@ -33,6 +33,7 @@ enum ExpressionProof<'t, 'g> {
     NestedTupleParent(&'t PlacePath<'g>),
     NestedTupleSource(Slot),
     NestedRecordConstruction,
+    NestedRecordFieldTemporary(ProjectedTemporary),
 }
 
 struct PropagatingValueCall<'a, 'g> {
@@ -1519,6 +1520,7 @@ impl<'a, 'g> Build<'a, 'g> {
         node: NodeId,
         allow_field: bool,
     ) -> ResultOf<Option<ProjectedTemporary>> {
+        self.budget.step(1)?;
         let facts = self.value(node)?;
         if facts.path.is_some() || facts.access != Access::Owned {
             return Ok(None);
@@ -1529,6 +1531,7 @@ impl<'a, 'g> Build<'a, 'g> {
         if !allow_field && matches!(projection, Projection::Field(_)) {
             return Ok(None);
         }
+        self.budget.step(1)?;
         let ty = self.value(base)?.ty.clone();
         let scratch = self.slot(base, &ty)?;
         let member = self.member(node, scratch, projection)?;
@@ -3111,6 +3114,13 @@ impl<'a, 'g> Build<'a, 'g> {
                 depth + 1,
             );
         }
+        if let Some(ExpressionProof::NestedRecordFieldTemporary(temp)) = proof
+            && node == temp.site
+        {
+            let into = into.ok_or(Stop::Pending(node))?;
+            let finish = self.cleanup(node, &[temp.scratch], next)?;
+            return self.stage_value(node, into, finish, Some(temp), depth + 1);
+        }
         if projection(facts).is_some() {
             let action = if facts.access != Access::Owned && owns_text(&facts.ty) {
                 let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
@@ -3234,7 +3244,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     .iter()
                     .enumerate()
                     .map(|(i, &value)| (Projection::TupleElement(i), value));
-                return self.initialize_members(node, into, next, depth + 1, initializers);
+                return self.initialize_members(node, into, next, depth + 1, initializers, false);
             }
             NodeKind::Construction => {
                 let into = into.ok_or(Stop::Pending(node))?;
@@ -3244,7 +3254,8 @@ impl<'a, 'g> Build<'a, 'g> {
                 if data.base.is_some() || !data.arguments.is_empty() {
                     return Err(Stop::Pending(node));
                 }
-                if matches!(proof, Some(ExpressionProof::NestedRecordConstruction)) {
+                let nested = matches!(proof, Some(ExpressionProof::NestedRecordConstruction));
+                if nested {
                     self.check_nested_record_fields(node, data)?;
                 } else if self.slots[into].members != data.fields.len() {
                     return Err(Stop::Pending(node));
@@ -3253,7 +3264,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     .fields
                     .iter()
                     .map(|field| (Projection::Field(field.field), field.expression));
-                return self.initialize_members(node, into, next, depth + 1, initializers);
+                return self.initialize_members(node, into, next, depth + 1, initializers, nested);
             }
             NodeKind::Arrow => {
                 return self.closure(node, into.ok_or(Stop::Pending(node))?, next, depth + 1);
@@ -3313,11 +3324,19 @@ impl<'a, 'g> Build<'a, 'g> {
         next: Pc,
         depth: usize,
         initializers: impl DoubleEndedIterator<Item = (Projection<'g>, NodeId)>,
+        nested: bool,
     ) -> ResultOf<Pc> {
         let mut tail = self.emit(node, Action::Init(into), Edges::Next(next))?;
         for (projection, value) in initializers.rev() {
             let target = self.member(node, into, projection)?;
-            tail = self.expression(value, Some(target), tail, depth)?;
+            let proof = if nested {
+                let initializer = self.ungroup(value)?;
+                self.temporary_projection(initializer, false)?
+                    .map(ExpressionProof::NestedRecordFieldTemporary)
+            } else {
+                None
+            };
+            tail = self.expression_with_proof(value, Some(target), tail, depth, proof)?;
         }
         Ok(tail)
     }
