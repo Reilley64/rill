@@ -16,6 +16,10 @@ pub struct Iteration<'g> {
     pub none: &'g DeclarationId,
     /// No storage handoff is implied by a user iterator's checked signatures.
     pub traversal: Option<ListTraversal>,
+    /// Ordinary local control, bindings, place reads/borrows or disposal;
+    /// excludes nested iteration, propagation and computed scalar expressions.
+    /// This describes the written body, not ownership of its operands.
+    pub(in crate::analysis) simple_body: bool,
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
@@ -31,7 +35,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         let before = self.marks();
         let source = self.expression(module, operand, None, context)?;
-        let handoff = if let Some(source) = &source
+        let mut handoff = if let Some(source) = &source
             && before == self.marks()
             && primitive_name(&source.ty) != Some("never")
         {
@@ -50,7 +54,13 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             self.pending_pattern(module, pattern, context)?;
         }
-        let mut body = self.statement(module, block, depth + 1, context)?;
+        let enclosing = std::mem::replace(&mut self.simple_iteration_body, handoff.is_some());
+        let body = self.statement(module, block, depth + 1, context);
+        let simple = std::mem::replace(&mut self.simple_iteration_body, enclosing);
+        if let Some(iteration) = &mut handoff {
+            iteration.simple_body = simple;
+        }
+        let mut body = body?;
         context.loops.pop();
         context.scopes.pop();
 
@@ -164,6 +174,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             some: &option.some.id,
             none: &option.none.id,
             traversal,
+            simple_body: false,
         }))
     }
 }

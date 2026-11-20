@@ -145,6 +145,115 @@ fn installed_consuming_list_iteration() {
     });
 }
 
+#[test]
+fn consuming_iteration_checks_each_items_lifetime_before_advancing() {
+    probe(
+        "iteration::consuming_iteration_checks_each_items_lifetime_before_advancing",
+        r#"
+        function released(xs: List<i32>): void { for (let item of xs) { dispose(item); } }
+        function twice(xs: List<i32>): void { for (let item of xs) { dispose(item); dispose(item); } }
+        function retained(xs: List<i32>, seed: i32): i32 {
+            let mut out = &seed;
+            for (let item of xs) { out = &item; continue; }
+            return *out;
+        }
+    "#,
+        |_, module, receipt| {
+            let lower = |name: &str| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap()
+            };
+            assert!(lower("released").mir().is_some());
+            for (name, code, site, related) in [
+                (
+                    "twice",
+                    "R0200",
+                    b"dispose(item)".as_slice(),
+                    b"dispose(item)".as_slice(),
+                ),
+                ("retained", "R0203", b"item", b"&item"),
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected);
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected a single invalid use")
+                };
+                assert_eq!(
+                    (
+                        finding.code(),
+                        finding.site.span.bytes(),
+                        finding.related.span.bytes()
+                    ),
+                    (code, site, related)
+                );
+                if name == "twice" {
+                    assert!(finding.related.span.start() < finding.site.span.start());
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn scalar_iteration_screens_unsupported_bodies_and_charges_binder_depth() {
+    probe(
+        "iteration::scalar_iteration_screens_unsupported_bodies_and_charges_binder_depth",
+        r#"
+        function propagates(xs: List<i32>, gate: Option<bool>): Option<bool> {
+            for (let item of xs) { let bit = gate?; return Option.Some(bit); }
+            return Option.None;
+        }
+        function arithmetic(xs: List<i32>): i32 { for (let item of xs) { return item+1i32; } return 0i32; }
+        function bare(xs: List<i32>): void { for (let item of xs) { let _ = item; break; } }
+        function grouped(xs: List<i32>): void { for (let (((((((((item))))))))) of xs) { let _ = item; break; } }
+    "#,
+        |_, module, receipt| {
+            let run = |name: &str, cap| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &d.id, cap).unwrap()
+            };
+            // Exact targeted caps of the published pre-iteration compiler, 72452b3.
+            for (name, max_work, max_entries) in
+                [("propagates", 3061, 261), ("arithmetic", 1971, 68)]
+            {
+                let pending = run(
+                    name,
+                    AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth: 3,
+                    },
+                );
+                assert_eq!(pending.completion(), Completion::Incomplete, "{name}");
+                assert!(pending.mir().is_none() && pending.findings().is_empty());
+            }
+            let default = AnalysisLimits::default();
+            let bare = run("bare", default);
+            let grouped = run("grouped", default);
+            assert!(bare.mir().is_some() && grouped.mir().is_some());
+            assert!(grouped.statistics().max_depth > bare.statistics().max_depth);
+            let short = run(
+                "grouped",
+                AnalysisLimits {
+                    max_depth: grouped.statistics().max_depth - 1,
+                    ..default
+                },
+            );
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
+        },
+    );
+}
+
 fn limits(s: Statistics) -> (AnalysisLimits, impl Iterator<Item = AnalysisLimits>) {
     let exact = AnalysisLimits {
         max_work: s.work,

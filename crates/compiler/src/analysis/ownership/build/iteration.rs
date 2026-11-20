@@ -16,7 +16,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         else {
             return Err(pending());
         };
-        if iteration.traversal != Some(ListTraversal::Owned)
+        if !iteration.simple_body
+            || iteration.traversal != Some(ListTraversal::Owned)
             || scalar::scalar(&iteration.yielded) != Some(Primitive::I32)
         {
             return Err(pending());
@@ -130,11 +131,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         }
         let backing = backing.ok_or_else(pending)?;
         self.check_i32_element_cleanup(node)?;
-        // No composition with a propagating exit is proved by this ordinary loop.
-        if self.contains_unadmitted_propagation(body, None, depth + 1)? {
-            return Err(pending());
-        }
-        let into = self.iteration_binder(pattern, binding, source, &iteration.yielded)?;
+        let into =
+            self.iteration_binder(pattern, binding, source, &iteration.yielded, depth + 1)?;
         let cursor = self.allocate_slot(
             node,
             true,
@@ -277,9 +275,19 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         facts: &PatternFacts<'g>,
         source: NodeId,
         yielded: &Type<'g>,
+        mut depth: usize,
     ) -> ResultOf<Option<Slot>> {
         let pending = Stop::Pending(pattern);
-        self.budget.step(1)?;
+        let mut leaf = pattern;
+        loop {
+            self.depth(depth)?;
+            let syntax = &self.module.syntax.nodes[leaf];
+            if syntax.kind != NodeKind::GroupPattern {
+                break;
+            }
+            leaf = syntax.children[0];
+            depth += 1;
+        }
         if facts.source.node != source
             || facts.ty != *yielded
             || facts.access != Access::Owned
@@ -288,9 +296,14 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending);
         }
         match (facts.pattern.as_ref(), facts.binders.as_slice()) {
-            (Pattern::Wildcard, []) => Ok(None),
+            (Pattern::Wildcard, [])
+                if self.module.syntax.nodes[leaf].kind == NodeKind::Wildcard =>
+            {
+                Ok(None)
+            }
             (Pattern::Any, [binder])
-                if !binder.mutable
+                if self.module.syntax.nodes[leaf].kind == NodeKind::NamePattern
+                    && !binder.mutable
                     && binder.projections.is_empty()
                     && binder.ty == *yielded
                     && binder.source_type == *yielded =>

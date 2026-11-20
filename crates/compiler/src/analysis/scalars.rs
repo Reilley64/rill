@@ -493,6 +493,8 @@ struct Checker<'r, 'g> {
     reached_bodies: bool,
     reached_startup: bool,
     reached_expectations: bool,
+    // Accumulate the written body shape while an iteration is being checked.
+    simple_iteration_body: bool,
     data: bool,
     integrated: bool,
     option: Option<super::typed::OptionRole<'g>>,
@@ -529,6 +531,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             reached_bodies: false,
             reached_startup: false,
             reached_expectations: false,
+            simple_iteration_body: false,
             data,
             integrated: false,
             option: None,
@@ -2712,6 +2715,18 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else {
                     None
                 };
+                if self.simple_iteration_body {
+                    self.simple_iteration_body = match module.syntax.nodes[node].kind {
+                        NodeKind::Literal
+                        | NodeKind::ValueReference
+                        | NodeKind::Group
+                        | NodeKind::Prefix("&" | "&mut" | "*") => true,
+                        NodeKind::Call => call
+                            .as_ref()
+                            .is_some_and(|call| call.callee == &self.input.graph.prelude().dispose),
+                        _ => false,
+                    };
+                }
                 let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),
@@ -2906,6 +2921,17 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(depth);
         let n = &module.syntax.nodes[node];
+        self.simple_iteration_body &= matches!(
+            n.kind,
+            NodeKind::Block
+                | NodeKind::Binding { .. }
+                | NodeKind::Return
+                | NodeKind::Break
+                | NodeKind::Continue
+                | NodeKind::IfStatement
+                | NodeKind::ExpressionStatement
+                | NodeKind::Assignment("=")
+        );
         let before = self.marks();
         let mut flow = Flow::normal();
         let mut kind = NodeFactKind::Statement;
