@@ -16,11 +16,72 @@ pub struct Iteration<'g> {
     pub none: &'g DeclarationId,
     /// No storage handoff is implied by a user iterator's checked signatures.
     pub traversal: Option<ListTraversal>,
-    /// Ordinary local control, bindings, place reads/borrows or disposal;
-    /// excludes nested iteration, propagation and computed scalar expressions.
-    /// This describes the written body, not ownership of its operands.
-    pub(in crate::analysis) simple_body: bool,
+    /// Checked shape of the written body, not ownership of its operands.
+    pub(in crate::analysis) body: Option<IterationBodyKind>,
     pub(super) text_input: Option<&'g DeclarationId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::analysis) enum IterationBodyKind {
+    Ordinary,
+    NamedBoolPostfix,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum DirectExpression {
+    BindingOrStatement(NodeId),
+    Return(NodeId),
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) enum IterationBody {
+    #[default]
+    Unsupported,
+    Ordinary,
+    TextOption {
+        direct: Option<DirectExpression>,
+        constructor: bool,
+        postfix: bool,
+    },
+}
+
+impl IterationBody {
+    fn finish(self) -> Option<IterationBodyKind> {
+        match self {
+            Self::TextOption { postfix: true, .. } => Some(IterationBodyKind::NamedBoolPostfix),
+            Self::Ordinary
+            | Self::TextOption {
+                constructor: false, ..
+            } => Some(IterationBodyKind::Ordinary),
+            _ => None,
+        }
+    }
+
+    pub(super) fn statement(&mut self, node: &crate::parser::Node) {
+        if !matches!(
+            node.kind,
+            NodeKind::Block
+                | NodeKind::Binding { .. }
+                | NodeKind::Return
+                | NodeKind::Break
+                | NodeKind::Continue
+                | NodeKind::IfStatement
+                | NodeKind::ExpressionStatement
+                | NodeKind::Assignment("=")
+        ) {
+            *self = Self::Unsupported;
+        } else if let Self::TextOption { direct, .. } = self {
+            *direct = match node.kind {
+                NodeKind::Binding { .. } | NodeKind::ExpressionStatement => node
+                    .children
+                    .last()
+                    .copied()
+                    .map(DirectExpression::BindingOrStatement),
+                NodeKind::Return => node.children.first().copied().map(DirectExpression::Return),
+                _ => None,
+            };
+        }
+    }
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
@@ -55,16 +116,40 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             self.pending_pattern(module, pattern, context)?;
         }
-        let enclosing = std::mem::replace(&mut self.simple_iteration_body, handoff.is_some());
+        let shape = match (&handoff, &source) {
+            (Some(iteration), Some(source))
+                if iteration.traversal == Some(ListTraversal::Owned)
+                    && primitive_name(&iteration.yielded) == Some("string")
+                    && source.access == data::Access::Owned
+                    && source.path.as_ref().is_some_and(|p| {
+                        p.root.kind == DeclarationKind::Parameter && p.projections.is_empty()
+                    })
+                    && self
+                        .propagation_target(context)
+                        .is_some_and(|(target, result)| {
+                            matches!(target, PropagationTarget::Callable(_))
+                                && result.is_some_and(|ty| self.is_iteration_bool_option(ty))
+                        }) =>
+            {
+                IterationBody::TextOption {
+                    direct: None,
+                    constructor: false,
+                    postfix: false,
+                }
+            }
+            (Some(_), _) => IterationBody::Ordinary,
+            _ => IterationBody::Unsupported,
+        };
+        let enclosing = std::mem::replace(&mut self.iteration_body, shape);
         let body = self.statement(module, block, depth + 1, context);
-        let simple = std::mem::replace(&mut self.simple_iteration_body, enclosing);
+        let shape = std::mem::replace(&mut self.iteration_body, enclosing);
         if let Some(iteration) = &mut handoff {
-            iteration.simple_body = simple;
+            iteration.body = shape.finish();
         }
         let mut body = body?;
-        if simple
-            && context.scopes.last().is_some_and(|scope| scope.len() == 1)
+        if context.scopes.last().is_some_and(|scope| scope.len() == 1)
             && let (Some(iteration), Some(value)) = (&mut handoff, &source)
+            && iteration.body.is_some()
             && iteration.traversal == Some(ListTraversal::Owned)
             && primitive_name(&iteration.yielded) == Some("string")
             && value.access == data::Access::Owned
@@ -72,8 +157,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             && path.root.kind == DeclarationKind::Parameter
             && path.projections.is_empty()
         {
-            // Written source only. The enclosing block separately knows whether
-            // its prefix can actually reach this loop.
+            // This hint uses the same body classification as M5. Only the
+            // enclosing block can establish that its prefix reaches the loop.
             iteration.text_input = Some(path.root);
         }
         context.loops.pop();
@@ -88,6 +173,101 @@ impl<'r, 'g> Checker<'r, 'g> {
             flow = self.union(flow, &body)?;
         }
         Ok((flow, handoff))
+    }
+
+    fn is_iteration_bool_option(&self, ty: &Type<'g>) -> bool {
+        let Some(role) = self.option else {
+            return false;
+        };
+        let ty = match ty.as_ref() {
+            TypeTerm::Variant {
+                parent,
+                declaration,
+            } if std::ptr::eq(*declaration, &role.some.id)
+                || std::ptr::eq(*declaration, &role.none.id) =>
+            {
+                parent
+            }
+            _ => ty,
+        };
+        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if std::ptr::eq(*declaration, &role.declaration.id)
+                && matches!(arguments.as_slice(), [payload] if primitive_name(payload) == Some("bool")))
+    }
+
+    // Use the existing charged statement/expression visits. No second body walk
+    // or recursive admission of expressions containing propagation is needed.
+    pub(super) fn iteration_expression(
+        &mut self,
+        inference: &Inference<'g>,
+        node: NodeId,
+        data: Option<&data::DataExpression<'g>>,
+        call: Option<&CallFacts<'g>>,
+    ) {
+        if matches!(self.iteration_body, IterationBody::Unsupported) {
+            return;
+        }
+        let syntax = &inference.module.syntax.nodes;
+        match syntax[node].kind {
+            NodeKind::Literal
+            | NodeKind::ValueReference
+            | NodeKind::Group
+            | NodeKind::Prefix("&" | "&mut" | "*") => return,
+            NodeKind::Call
+                if call.is_some_and(|call| call.callee == &self.input.graph.prelude().dispose) =>
+            {
+                return;
+            }
+            _ => (),
+        }
+        let IterationBody::TextOption {
+            direct,
+            mut constructor,
+            mut postfix,
+        } = self.iteration_body
+        else {
+            self.iteration_body = IterationBody::Unsupported;
+            return;
+        };
+        match (direct, syntax[node].kind, data) {
+            (
+                Some(DirectExpression::BindingOrStatement(root)),
+                NodeKind::Propagate,
+                Some(data::DataExpression::Propagation(exit)),
+            ) if root == node
+                && exit.error.is_none()
+                && self.named_iteration_gate(inference, syntax[node].children[0]) =>
+            {
+                postfix = true
+            }
+            (
+                Some(DirectExpression::Return(root)),
+                NodeKind::Call,
+                Some(data::DataExpression::Construction(value)),
+            ) if root == node && self.is_iteration_bool_option(&value.ty) => constructor = true,
+            _ => {
+                self.iteration_body = IterationBody::Unsupported;
+                return;
+            }
+        }
+        self.iteration_body = IterationBody::TextOption {
+            direct,
+            constructor,
+            postfix,
+        };
+    }
+
+    fn named_iteration_gate(&self, inference: &Inference<'g>, operand: NodeId) -> bool {
+        if inference.module.syntax.nodes[operand].kind != NodeKind::ValueReference {
+            return false;
+        }
+        let slot = &inference.slots[&operand];
+        slot.access == data::Access::Owned
+            && slot.path.as_ref().is_some_and(|p| p.projections.is_empty())
+            && slot
+                .ty
+                .as_ref()
+                .is_some_and(|ty| self.is_iteration_bool_option(ty))
     }
 
     fn iteration_handoff(
@@ -189,7 +369,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             some: &option.some.id,
             none: &option.none.id,
             traversal,
-            simple_body: false,
+            body: None,
             text_input: None,
         }))
     }

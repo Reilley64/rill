@@ -4,6 +4,9 @@ use compiler::analysis::ownership::TextElementDisposal;
 use compiler::analysis::typed::{Primitive, PrimitiveCoverage, PrimitiveOperation, PrimitiveRole};
 use rill_collection::List;
 
+#[path = "iteration_postfix.rs"]
+mod postfix;
+
 const SOURCE: &str = r#"
 import std::collection::{List as Words};
 function onBreak(xs: List<string>, outer: string): void {
@@ -57,10 +60,6 @@ function bypass(xs: List<string>, skip: bool): void {
 function literal(a: string, b: string, c: string): void {
     for (let item of [a, b, c]) { break; }
 }
-function postfix(xs: List<string>, gate: Option<bool>): Option<bool> {
-    for (let item of xs) { let success = gate?; return Option.Some(success); }
-    return Option.Some(false);
-}
 "#;
 
 #[test]
@@ -86,21 +85,20 @@ fn unadmitted_text_parameters_keep_their_old_caps() {
                     .unwrap();
                 lower_body(receipt, module, &d.id, cap).unwrap()
             };
-            // Before the string cursor, all four stopped at the first text List.
-            for (name, max_work, max_entries) in [
-                ("postfix", 1966, 74),
+            // Unused/discarded/incomplete formal coverage must still block
+            // at the first text List under its pre-cursor cap.
+            for (name, work, entries) in [
                 ("unused", 1963, 73),
                 ("wildcard", 1963, 73),
                 ("sibling", 1966, 74),
             ] {
-                let report = run(
-                    name,
-                    AnalysisLimits {
-                        max_work,
-                        max_entries,
-                        max_depth: 0,
-                    },
-                );
+                let stats = Statistics {
+                    work,
+                    entries,
+                    max_depth: 0,
+                };
+                let report = run(name, limits(stats).0);
+                assert_eq!(report.statistics(), stats);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(report.mir().is_none());
                 assert_eq!(
@@ -108,7 +106,12 @@ fn unadmitted_text_parameters_keep_their_old_caps() {
                     b"xs: List<string>"
                 );
             }
-            assert!(run("works", AnalysisLimits::default()).mir().is_some());
+            for name in ["works", "postfix"] {
+                assert!(
+                    run(name, AnalysisLimits::default()).mir().is_some(),
+                    "{name}"
+                );
+            }
         },
     );
 }
@@ -300,7 +303,6 @@ fn installed_consuming_string_iteration() {
                 ("reusedPrior", Completion::SourceRejected),
                 ("reusedBacking", Completion::SourceRejected),
                 ("literal", Completion::Incomplete),
-                ("postfix", Completion::Incomplete),
             ] {
                 let function = module
                     .declarations
@@ -569,6 +571,17 @@ fn check_paths<'g>(
             .count(),
         1
     );
+    if matches!(name, "onPostfix" | "knownSome" | "knownNone" | "afterMove") {
+        postfix::check_edges(
+            name,
+            mir,
+            head,
+            (item, cursor),
+            (some, none),
+            (release, element),
+        );
+        return;
+    }
     let clean = |path: &[&Block<'g>]| -> Vec<_> {
         assert!(
             !path

@@ -1,4 +1,4 @@
-//! Ordinary consuming `for` over the installed List<i32> and List<string> backings.
+//! Consuming `for` over the installed List<i32> and List<string> backings.
 use super::*;
 use crate::analysis::generics::GoalId;
 use crate::analysis::typed::{CollectionProtection, ListTraversal};
@@ -17,7 +17,13 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending());
         };
         let text = owns_text(&iteration.yielded);
-        if !iteration.simple_body
+        use crate::analysis::scalars::IterationBodyKind::{NamedBoolPostfix, Ordinary};
+        let supported = match iteration.body {
+            Some(Ordinary) => true,
+            Some(NamedBoolPostfix) => text && exits.returning.is_some(),
+            None => false,
+        };
+        if !supported
             || iteration.traversal != Some(ListTraversal::Owned)
             || (!text && scalar::scalar(&iteration.yielded) != Some(Primitive::I32))
         {
@@ -183,6 +189,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             breaks: end_item(self, retire)?,
             continues: end_item(self, head)?,
         };
+        // Both explicit return and checked postfix failure export before taking
+        // this edge: body scope, initialized item, unyielded suffix, parent.
         let returning = return_retire.map(|pc| end_item(self, pc)).transpose()?;
         let yes = self.statement(
             body,
