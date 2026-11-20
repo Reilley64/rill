@@ -33,6 +33,11 @@ pub enum DependencyContract<'g> {
         body: NodeId,
         arrow_bodies: [NodeId; 2],
     },
+    /// Closed at the operation's reached commit, wait and terminal successors.
+    ScopedJoin {
+        bridge: &'g DeclarationId,
+        arrow_bodies: [NodeId; 2],
+    },
     ActiveDisposer,
     BuiltinDispose,
     ProtectedRelease {
@@ -546,6 +551,7 @@ fn analyze<'g>(
                         edge.contract,
                         DependencyContract::CallableTransfer(_)
                             | DependencyContract::SynchronousListArrows { .. }
+                            | DependencyContract::ScopedJoin { .. }
                             | DependencyContract::ListI32Disposal { .. }
                     ) {
                         // Specialized evidence closes this ordinary edge,
@@ -985,6 +991,27 @@ pub(super) fn visit_dependencies<'g>(
                     },
                     budget,
                 )?;
+            }
+            Operation::ScopedJoin(ref join) => {
+                emit(
+                    join.implementation,
+                    ScopedJoin {
+                        bridge: join.bridge,
+                        arrow_bodies: join.frames.each_ref().map(|frame| frame.body_site.node),
+                    },
+                    budget,
+                )?;
+                for cleanup in &join.parent_exit.cleanup {
+                    budget.step(1)?;
+                    if let Cleanup::DisposeListI32 {
+                        implementation,
+                        bridge,
+                        ..
+                    } = cleanup
+                    {
+                        emit(implementation, ListI32Disposal { bridge }, budget)?;
+                    }
+                }
             }
             Operation::CopyClosure { ref captures, .. } => {
                 budget.step(captures.len())?;

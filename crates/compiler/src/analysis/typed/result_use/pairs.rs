@@ -1,7 +1,9 @@
 //! Result-use transfer for one closed source pattern, not a scoped-work operation.
 use super::*;
 use crate::analysis::InvocationMode;
-use crate::analysis::generics::{GoalFacts, GoalJudgment, GoalState, callables::CaptureForm};
+use crate::analysis::generics::{
+    GoalFacts, GoalId, GoalJudgment, GoalState, callables::CaptureForm,
+};
 use crate::analysis::ordinary::RequirementTarget;
 use crate::analysis::scalars::CallFacts;
 
@@ -30,6 +32,43 @@ pub(in crate::analysis) struct PairChild<'g> {
     pub body: Site<'g>,
     pub expression: NodeId,
     pub arrow: Arc<crate::analysis::generics::callables::ArrowFacts<'g>>,
+}
+
+/// Concrete checked input and output route for the selected compiler operation.
+/// This is not an ownership or cancellation judgment.
+#[derive(Debug)]
+pub struct ScopedJoinCall<'g> {
+    pub role: super::super::RoutineRole<'g>,
+    pub alternative: usize,
+    pub slots: [ScopedJoinSlot<'g>; 2],
+    pub(in crate::analysis) argument: NodeId,
+}
+
+#[derive(Debug)]
+pub struct ScopedJoinSlot<'g> {
+    pub path: [usize; 1],
+    pub callable_once: GoalId,
+    pub send_job: GoalId,
+    pub send_result: GoalId,
+    pub(in crate::analysis) child: PairChild<'g>,
+}
+
+impl<'g> ScopedJoinSlot<'g> {
+    pub fn arrow(&self) -> &crate::analysis::generics::callables::ArrowFacts<'g> {
+        &self.child.arrow
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum CheckedTransfer<'g> {
+    Serial(Box<PairCall<'g>>),
+    Scoped(Box<ScopedJoinCall<'g>>),
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum PairBoundary<'g> {
+    Serial(PairBody<'g>),
+    Scoped(super::super::RoutineRole<'g>, PairBody<'g>),
 }
 
 #[derive(Clone, Copy)]
@@ -248,6 +287,118 @@ fn requirement<'a, 'g>(
     (id.name() == name && goal.state == state && goal.premise.is_none()).then_some(arguments)
 }
 
+/// Check the designated wrapper's real source route. There is no ordinary
+/// invocation body to interpret for either job: the bridge owns both slots.
+pub(super) fn scoped_summary<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    role: super::super::RoutineRole<'g>,
+    signature: &DeclarationFacts<'g>,
+    nodes: &Nodes<'_, 'g>,
+    budget: &mut Budget,
+) -> Work<Option<PairBody<'g>>> {
+    let Some(module) = inventory.graph().installed_routine_source() else {
+        return Ok(None);
+    };
+    let Some(metadata) = inventory.headers().get(&role.implementation.id) else {
+        return Ok(None);
+    };
+    budget.step(8 + metadata.requirements.len())?;
+    let checked = || {
+        let body = *module.syntax.nodes[role.implementation.node]
+            .children
+            .get(1)?;
+        let (returned, operation) = single_return(module, body)?;
+        let fact = |n| nodes.get(&(&module.key, n)).map(|&(_, f)| f);
+        let expression = |n| match &fact(n)?.kind {
+            NodeFactKind::Expression(value) if value.ordinary_context.is_none() => Some(value),
+            _ => None,
+        };
+        if !matches!(fact(returned)?.kind, NodeFactKind::Return { target } if *target == role.implementation.id)
+        {
+            return None;
+        }
+        let returned = expression(operation)?;
+        let call = returned.call.as_ref()?;
+        let [argument] = call.arguments.as_slice() else {
+            return None;
+        };
+        let DeclarationShape::Function { parameters, result } = &signature.shape else {
+            return None;
+        };
+        let [parameter] = parameters.as_slice() else {
+            return None;
+        };
+        let (TypeTerm::Tuple(jobs), TypeTerm::Tuple(results)) =
+            (parameter.ty.as_ref(), result.as_ref())
+        else {
+            return None;
+        };
+        let input = expression(*argument)?;
+        if call.callee != &role.bridge.id
+            || call.selection.is_some()
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || returned.ty != *result
+            || input.ty != parameter.ty
+            || input.access != Access::Owned
+            || !input.path.as_ref().is_some_and(|path| {
+                path.root == &parameter.declaration.id && path.projections.is_empty()
+            })
+            || jobs.len() != 2
+            || results.len() != 2
+            || signature.binders.len() != 4
+            || metadata.requirements.len() != 6
+        {
+            return None;
+        }
+        let mut positions = [false; 4];
+        for ty in jobs.iter().chain(results) {
+            let (binder, position) = binder(ty)?;
+            if signature.binders.get(position)?.declaration.id != *binder
+                || std::mem::replace(&mut positions[position], true)
+            {
+                return None;
+            }
+        }
+        let operation = fact(operation)?.site;
+        let slot = |i: usize| {
+            let requirement = |name: &str, arguments: &[&Type<'g>]| {
+                let mut requirements = metadata.requirements.iter().filter(|req| {
+                    matches!(req.target, Some(RequirementTarget::Predicate(id)) if id.name() == name)
+                        && req.arguments.len() == arguments.len()
+                        && req.arguments.iter().zip(arguments).all(|(actual, expected)| actual.as_ref() == Some(*expected))
+                });
+                let node = requirements.next()?.node;
+                requirements.next().is_none().then_some(node)
+            };
+            let mut invokes = metadata.requirements.iter().filter(|req| {
+                matches!(req.target, Some(RequirementTarget::Predicate(id)) if id.name() == "callableOnce")
+                    && matches!(req.arguments.as_slice(), [Some(job), Some(input), Some(output)]
+                        if *job == jobs[i] && empty_tuple(input) && *output == results[i])
+            });
+            let invoke = invokes.next()?.node;
+            if invokes.next().is_some() {
+                return None;
+            }
+            Some(Slot {
+                job: binder(&jobs[i])?,
+                result: binder(&results[i])?,
+                requirements: [
+                    invoke,
+                    requirement("sendable", &[&jobs[i]])?,
+                    requirement("sendable", &[&results[i]])?,
+                ],
+                invocation: operation,
+            })
+        };
+        Some(PairBody {
+            body: operation,
+            slots: [slot(0)?, slot(1)?],
+        })
+    };
+    Ok(checked())
+}
+
 impl<'a, 'g> Check<'a, 'g> {
     pub(super) fn transfer_pair(
         &mut self,
@@ -255,10 +406,14 @@ impl<'a, 'g> Check<'a, 'g> {
         value: &ExpressionFacts<'g>,
         call: &CallFacts<'g>,
         state: &mut Residence<'g>,
-        pair: PairBody<'g>,
+        boundary: PairBoundary<'g>,
         depth: usize,
     ) -> Work<bool> {
         self.depth(depth)?;
+        let (pair, scoped) = match boundary {
+            PairBoundary::Serial(pair) => (pair, None),
+            PairBoundary::Scoped(role, pair) => (pair, Some(role)),
+        };
         let Some(selected) = &call.selection else {
             return Ok(false);
         };
@@ -299,6 +454,19 @@ impl<'a, 'g> Check<'a, 'g> {
         {
             return Ok(false);
         }
+        if let Some(role) = scoped
+            && (call.callee != &role.family.id
+                || selected.implementation != &role.implementation.id
+                // The ordinary comparison first enumerated and projected
+                // every captured candidate. An intersecting contender cannot
+                // be erased by the operation binding.
+                || !matches!(ordinary.candidates.as_slice(), [only]
+                    if only.implementation == selected.implementation
+                        && only.alternative == selected.alternative
+                        && only.covers_observed_inputs))
+        {
+            return Ok(false);
+        }
         let tuple = self.ungroup_value(*argument)?;
         let Some(input) = self.expression_facts(tuple)? else {
             return Ok(false);
@@ -335,6 +503,7 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         let mut outputs = [Vec::new(), Vec::new()];
         let mut children = [None, None];
+        let mut scoped_slots = [None, None];
         for (i, ((origin, job, output), slot)) in [(first, job0, out0), (second, job1, out1)]
             .into_iter()
             .zip(pair.slots)
@@ -370,7 +539,7 @@ impl<'a, 'g> Check<'a, 'g> {
             // The selected goal and CallFacts share the winner's substitution.
             // Link the instantiated premises by written occurrence, not by
             // searching the goal list for another job/result of the same type.
-            let mut proved = [false; 3];
+            let mut proved = [None, None, None];
             for id in &goal.dependencies {
                 self.budget.step(1)?;
                 let Ok(evidence) = self.bodies.goal(id) else {
@@ -382,7 +551,7 @@ impl<'a, 'g> Check<'a, 'g> {
                         .iter()
                         .position(|&n| n == evidence.source.node)
                 {
-                    if proved[index]
+                    if proved[index].is_some()
                         || evidence.state != GoalState::Proved
                         || evidence.premise.is_some()
                         || index == 1
@@ -393,12 +562,12 @@ impl<'a, 'g> Check<'a, 'g> {
                     {
                         return Ok(false);
                     }
-                    proved[index] = true;
+                    proved[index] = Some(id);
                 }
             }
-            if proved != [true; 3] {
+            let [Some(callable_once), Some(send_job), Some(send_result)] = proved else {
                 return Ok(false);
-            }
+            };
             let slot_path = ResultComponent::TupleElement(i);
             let Some((expression, result)) =
                 self.pair_child(origin, arrow, &stored, slot_path, state, depth + 1)?
@@ -406,13 +575,28 @@ impl<'a, 'g> Check<'a, 'g> {
                 return Ok(false);
             };
             outputs[i] = result;
-            children[i] = expression.map(|expression| PairChild {
+            let child = expression.map(|expression| PairChild {
                 element: elements[i],
                 invocation: slot.invocation,
                 body: self.site(self.module.syntax.nodes[origin].children[1]),
                 expression,
                 arrow: Arc::clone(arrow),
             });
+            if scoped.is_some() {
+                let Some(child) = child else {
+                    return Ok(false);
+                };
+                self.budget.reserve(3)?;
+                scoped_slots[i] = Some(ScopedJoinSlot {
+                    path: [i],
+                    child,
+                    callable_once: callable_once.clone(),
+                    send_job: send_job.clone(),
+                    send_result: send_result.clone(),
+                });
+            } else {
+                children[i] = child;
+            }
         }
         // Commit only after both exact environments and both outgoing residences
         // checked. Sibling residences in the caller are not changed or observed.
@@ -427,19 +611,36 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         // Every reached alternative derives the same two source occurrences;
         // the receipt separately requires all residence checks to close.
-        if let [Some(first), Some(second)] = children {
+        if let Some(role) = scoped {
+            let [Some(first), Some(second)] = scoped_slots else {
+                unreachable!("proved both scoped slots")
+            };
             self.budget.step(self.module.key.path.len() + 2)?;
             let index = self.nodes[&(&self.module.key, node)].0;
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 self.report.pair_calls.entry(index)
             {
                 self.budget.reserve(3)?;
-                entry.insert(Box::new(PairCall {
+                entry.insert(CheckedTransfer::Scoped(Box::new(ScopedJoinCall {
+                    role,
+                    alternative: selected.alternative,
+                    slots: [first, second],
+                    argument: *argument,
+                })));
+            }
+        } else if let [Some(first), Some(second)] = children {
+            self.budget.step(self.module.key.path.len() + 2)?;
+            let index = self.nodes[&(&self.module.key, node)].0;
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                self.report.pair_calls.entry(index)
+            {
+                self.budget.reserve(3)?;
+                entry.insert(CheckedTransfer::Serial(Box::new(PairCall {
                     implementation: selected.implementation,
                     body: pair.body,
                     argument: *argument,
                     children: [first, second],
-                }));
+                })));
             }
         }
         Ok(true)

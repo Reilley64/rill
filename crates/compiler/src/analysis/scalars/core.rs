@@ -36,6 +36,14 @@ pub(super) struct GuardOperand<'g> {
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
+    pub(super) fn routine_bridge(&self, id: &DeclarationId) -> Option<&'g Declaration> {
+        self.ordinary_scope
+            .as_ref()?
+            .routine()
+            .filter(|role| &role.bridge.id == id)
+            .map(|role| role.implementation)
+    }
+
     pub(super) fn installed_bridge(&mut self, id: &DeclarationId) -> Work<bool> {
         let error = self
             .result
@@ -47,6 +55,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 + error.map_or(0, |p| p.renderers.len() + p.observers.len()),
         )?;
         Ok(self.is_linked_bridge(id)
+            || self.routine_bridge(id).is_some()
             || self.primitive_bridge(id).is_some()
             || error.is_some_and(|providers| {
                 providers

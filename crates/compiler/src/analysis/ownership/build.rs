@@ -6613,12 +6613,19 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             return self.written_scalar_copy(node, facts, call, into, next, depth);
         }
-        if checked_carrier.is_none()
-            && call.selection.is_some()
-            && list_arrows::scalar_pair(&facts.ty)
-            && let Some(pair) = call.list_arrows.as_deref()
-        {
-            return self.call_list_arrows(node, pair, into, next, depth);
+        if checked_carrier.is_none() && list_arrows::scalar_pair(&facts.ty) {
+            let route = if let Some(join) = call.scoped_join.as_deref() {
+                Some(list_arrows::ListArrowUse::Scoped(join))
+            } else if call.selection.is_some() {
+                call.list_arrows
+                    .as_deref()
+                    .map(list_arrows::ListArrowUse::Serial)
+            } else {
+                None
+            };
+            if let Some(route) = route {
+                return self.call_two_list_arrows(node, route, into, next, depth);
+            }
         }
         if !Self::direct_application_call(call)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())

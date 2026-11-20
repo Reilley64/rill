@@ -44,7 +44,7 @@ pub use primitive::{Primitive, PrimitiveOperation, PrimitiveValue};
 pub(in crate::analysis) use result_use::{PairCall, PairChild};
 pub use result_use::{
     PendingResultUse, ResultComponent, ResultDiscard, ResultDiscardKind, ResultUseBlocker,
-    ResultUseReport,
+    ResultUseReport, ScopedJoinCall, ScopedJoinSlot,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,7 +79,7 @@ pub struct TypedReceipt<'a, 'g> {
     pub(super) report: &'a TypedReport<'g>,
 }
 
-impl TypedReceipt<'_, '_> {
+impl<'g> TypedReceipt<'_, 'g> {
     pub fn context(&self) -> crate::loader::GraphId {
         self.report.inventory.context()
     }
@@ -90,6 +90,20 @@ impl TypedReceipt<'_, '_> {
 
     pub fn statistics(&self) -> Statistics {
         self.report.statistics()
+    }
+
+    /// Concrete call and Result-use facts, not the ownership judgment.
+    pub fn scoped_join(
+        &self,
+        module: &crate::loader::Module,
+        node: crate::parser::NodeId,
+    ) -> Result<Option<&ScopedJoinCall<'g>>, super::QueryError> {
+        Ok(self.report.bodies().node(module, node)?.and_then(|fact| {
+            let super::scalars::NodeFactKind::Expression(expression) = &fact.kind else {
+                return None;
+            };
+            expression.call.as_ref()?.scoped_join.as_deref()
+        }))
     }
 }
 
@@ -428,6 +442,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
                 collections,
                 native: &ownership,
                 outcome_observer: core.result_inspection.map(|d| &d.id),
+                routine,
             },
             &mut budget,
             &mut report,
@@ -443,6 +458,19 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     } else {
         None
     };
+    let routine_bound = result_use
+        .as_ref()
+        .is_some_and(ResultUseReport::routine_bound);
+    let routine_protection = match routine {
+        Some(role) if completion != ScalarFailureKind::ResourceLimit => {
+            super::ordinary::source::admitted_family(&inventory, &role.family.id, &mut budget)
+                .map(|family| family.is_ok())
+        }
+        _ => Ok(routine_source.is_none()),
+    };
+    if routine_protection.is_err() {
+        completion = ScalarFailureKind::ResourceLimit;
+    }
     let mut core_inventories = core::InventoryCompleteness::default();
     if completion != ScalarFailureKind::ResourceLimit
         && core::check_inventories(
@@ -467,15 +495,12 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             !matches!(roles_complete, Ok(true)) || routine_source.is_some() && routine.is_none(),
             CoreBlocker::Roles,
         ),
-        // The conditional group has source identity and ordinary dispatch only.
-        // It cannot close the installed checkpoint without a checked operation
-        // binding and protection over the captured contenders.
         (
-            !core_inventories.providers || routine_source.is_some(),
+            !core_inventories.providers || routine_source.is_some() && !routine_bound,
             CoreBlocker::Providers,
         ),
         (
-            !core_inventories.protection || routine_source.is_some(),
+            !core_inventories.protection || !matches!(routine_protection, Ok(true)),
             CoreBlocker::Protection,
         ),
         (!representation_complete, CoreBlocker::Representation),

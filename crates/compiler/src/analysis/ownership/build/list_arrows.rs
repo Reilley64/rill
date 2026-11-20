@@ -1,6 +1,11 @@
-//! Ordinary specialization of a checked two-invocation application body.
+//! Construct the checked List-reading arrow frames before their distinct call actions.
 use super::*;
-use crate::analysis::typed::{PairCall, PairChild};
+use crate::analysis::typed::{PairCall, PairChild, ScopedJoinCall};
+
+pub(super) enum ListArrowUse<'a, 'g> {
+    Serial(&'a PairCall<'g>),
+    Scoped(&'a ScopedJoinCall<'g>),
+}
 
 struct ListArrowPlan<'a, 'g> {
     read: NodeId,
@@ -32,10 +37,10 @@ pub(super) fn scalar_pair(ty: &Type<'_>) -> bool {
 }
 
 impl<'a, 'g> Build<'a, 'g, '_> {
-    pub(super) fn call_list_arrows(
+    pub(super) fn call_two_list_arrows(
         &mut self,
         node: NodeId,
-        pair: &PairCall<'g>,
+        call: ListArrowUse<'_, 'g>,
         into: Option<Slot>,
         next: Pc,
         depth: usize,
@@ -43,8 +48,28 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         self.depth(depth)?;
         let pending = Stop::Pending(node);
         let into = into.ok_or(Stop::Pending(node))?;
+        let (implementation, body, argument, [first, second], scoped) = match call {
+            ListArrowUse::Serial(pair)
+                if pair.implementation.module.origin == Origin::Application =>
+            {
+                (
+                    pair.implementation,
+                    pair.body,
+                    pair.argument,
+                    pair.children.each_ref(),
+                    None,
+                )
+            }
+            ListArrowUse::Scoped(join) => (
+                &join.role.implementation.id,
+                join.slots[0].child.invocation,
+                join.argument,
+                join.slots.each_ref().map(|slot| &slot.child),
+                Some(join.role),
+            ),
+            _ => return Err(pending),
+        };
         if self.module.key.origin != Origin::Application
-            || pair.implementation.module.origin != Origin::Application
             || self.slots[into].members != 2
             || self.slots[into].custom_disposer.is_some()
         {
@@ -53,8 +78,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         for i in 0..2 {
             self.element(node, into, i)?;
         }
-        let [first, second] = &pair.children;
-        let (tuple, tuple_depth) = self.ungroup_expression_at(pair.argument, depth + 1)?;
+        let (tuple, tuple_depth) = self.ungroup_expression_at(argument, depth + 1)?;
         if self.module.syntax.nodes[tuple].children.as_slice() != [first.element, second.element] {
             return Err(pending);
         }
@@ -66,21 +90,27 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let index = self.list_arrow_pairs.len();
         let sources = [a_body.source, b_body.source];
         self.list_arrow_pairs.push(ListArrowPair {
-            implementation: pair.implementation,
-            body: pair.body,
+            implementation,
+            body,
             children: [a_body, b_body],
         });
-        let mut next = self.emit(
-            node,
+        let action = if let Some(role) = scoped {
+            Action::ScopedJoin {
+                pair: index,
+                receivers: [a, b],
+                into,
+                role,
+            }
+        } else {
             Action::CallListArrows {
                 pair: index,
                 receivers: [a, b],
                 into,
-            },
-            Edges::Next(next),
-        )?;
+            }
+        };
+        let mut next = self.emit(node, action, Edges::Next(next))?;
         // Lower backwards: both closures form in written argument order before
-        // the selected body starts either arrow. Neither capture copies the List.
+        // dispatch or commit. Neither capture copies the List.
         for (receiver, capture, source) in [(a, a_capture, sources[0]), (b, b_capture, sources[1])]
             .into_iter()
             .rev()

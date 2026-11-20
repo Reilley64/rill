@@ -16,11 +16,15 @@ use std::sync::Arc;
 mod build;
 mod flow;
 mod graph;
+mod join;
 mod scalar;
 
 pub use graph::{
     Delivery, Dependency, DependencyContract, GraphCompletion, GraphObligation, GraphReport,
     GraphRetainingCall, RetainingCallSite, RootReport, analyze_ownership,
+};
+pub use join::{
+    JoinChildState, JoinDelivery, JoinEntry, JoinEvent, JoinNext, JoinWait, ScopedJoinProof,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -482,6 +486,8 @@ pub enum Operation<'g> {
         body: Site<'g>,
         slots: Box<[ListArrowFrame<'g>; 2]>,
     },
+    /// Checked commit, wait, and cleanup successors, not an ordinary call.
+    ScopedJoin(Box<ScopedJoinProof<'g>>),
     /// Call the selected scalar copy body, ending only the argument stage.
     CallScalarCopy {
         implementation: &'g DeclarationId,
@@ -1975,6 +1981,12 @@ enum Action<'g> {
         pair: usize,
         receivers: [Slot; 2],
         into: Slot,
+    },
+    ScopedJoin {
+        pair: usize,
+        receivers: [Slot; 2],
+        into: Slot,
+        role: super::typed::RoutineRole<'g>,
     },
     FormClosure {
         capture: Slot,

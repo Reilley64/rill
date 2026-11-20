@@ -1,8 +1,10 @@
-//! Ownership transitions for the unregistered two-List-arrow scoped operation.
+//! Ownership transitions for the two-List-arrow scoped compiler operation.
 //!
 //! These are static edges, not scheduling events. In particular, ordinary
 //! `CallListArrows` supplies no wait or delivery proof.
 use super::*;
+
+pub(super) mod installed;
 
 #[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
 pub(in crate::analysis::ownership) mod tests;
@@ -20,6 +22,7 @@ struct ScalarExport<'g> {
     into: Place<'g>,
 }
 
+#[derive(Clone, Copy)]
 struct Child<'g> {
     environment: Place<'g>,
     backing: Place<'g>,
@@ -362,6 +365,7 @@ enum Admission<'g> {
     Committed(Box<Waiting<'g>>),
 }
 
+#[derive(Clone)]
 enum ChildState<'g> {
     Entry(Held),
     Running(Held),
@@ -405,6 +409,7 @@ enum Event {
     Child(usize, ChildEvent),
     RequestStop,
     WaitYield,
+    #[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
     HandleDrop,
 }
 
@@ -450,7 +455,9 @@ impl<'g> Waiting<'g> {
                     .each_ref()
                     .map(|child| !matches!(child, ChildState::Complete));
             }
-            Event::WaitYield | Event::HandleDrop => {}
+            Event::WaitYield => {}
+            #[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
+            Event::HandleDrop => {}
             Event::Child(i, event) => {
                 let child = self.children.get_mut(i).ok_or(pending.clone())?;
                 let proof = &self.proof.children[i];

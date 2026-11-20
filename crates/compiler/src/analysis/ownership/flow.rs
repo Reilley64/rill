@@ -204,6 +204,9 @@ fn liveness(
             Action::FormListArrow { capture, into } => use_one(Some(capture), Some(into)),
             Action::CallListArrows {
                 receivers, into, ..
+            }
+            | Action::ScopedJoin {
+                receivers, into, ..
             } => (receivers.map(Some), Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
             Action::CopyClosure { from, into } => use_one(Some(from), Some(into)),
@@ -2236,7 +2239,10 @@ pub(super) fn run<'a, 'g>(
                 && (!matches!(action, Action::BudgetBackedge) || node == loop_node)
                 && (!matches!(edges, Edges::Branch { .. }) || node == test);
         }
-        if matches!(action, Action::CallListArrows { .. }) {
+        if matches!(
+            action,
+            Action::CallListArrows { .. } | Action::ScopedJoin { .. }
+        ) {
             candidate = false;
             replacement_candidate = false;
             single_active_call = false;
@@ -2260,6 +2266,7 @@ pub(super) fn run<'a, 'g>(
                 }
             }
         }
+        let mut join_resume = None;
         let operation = (|| -> ResultOf<_> {
             if callable_frame.is_some() {
                 // A bound transfer has no proof for other calls or protected
@@ -2274,6 +2281,7 @@ pub(super) fn run<'a, 'g>(
                         | Action::DropResultFailure { .. }
                         | Action::CopyClosure { .. }
                         | Action::CallListArrows { .. }
+                        | Action::ScopedJoin { .. }
                         | Action::InvokeClosurePair { .. }
                         | Action::InvokeMutableI32Cell { .. }
                 ) || unsupported_cleanup
@@ -2960,6 +2968,72 @@ pub(super) fn run<'a, 'g>(
                         mode: InvocationMode::ReadOnly,
                     }
                 }
+                Action::ScopedJoin {
+                    pair,
+                    receivers,
+                    into,
+                    role,
+                } => {
+                    let Edges::Next(resume) = edges else {
+                        return Err(Stop::Pending(node));
+                    };
+                    if active.is_some() {
+                        return Err(Stop::Pending(node));
+                    }
+                    let frames = &list_arrow_pairs[pair];
+                    budget.reserve(2)?;
+                    for (receiver, child) in receivers.into_iter().zip(&frames.children) {
+                        for (slot, access) in [
+                            (receiver, Access::Exclusive),
+                            (child.source, Access::Observe),
+                        ] {
+                            conflict(
+                                &slots,
+                                &state,
+                                &live[pc],
+                                slot,
+                                (node, Conflict::Access),
+                                access,
+                                budget,
+                            )?;
+                        }
+                    }
+                    let frames = std::array::from_fn(|i| {
+                        let child = &frames.children[i];
+                        let environment = local(receivers[i]);
+                        ListArrowFrame {
+                            origin: environment.root,
+                            invocation: child.invocation,
+                            body_site: child.body_site,
+                            environment,
+                            capture: child.capture,
+                            backing: local(child.source),
+                            incoming_backing: child.incoming_backing,
+                            result: local(into + 1 + i),
+                            body: Arc::clone(&child.body),
+                        }
+                    });
+                    let parent = CancellationFrame {
+                        module,
+                        slots: &slots,
+                        locals: body_scope.map_or(&[], |scope| &cleanups[scope]),
+                        params: &params,
+                        retained: &retained,
+                        indexed: facts.is_indexed(),
+                    };
+                    let (proof, resume, parent_state) = scoped_join::installed::check(
+                        &parent,
+                        &state,
+                        (receivers, into),
+                        frames,
+                        (site, resume),
+                        role,
+                        budget,
+                    )?;
+                    state = parent_state;
+                    join_resume = Some(resume);
+                    Operation::ScopedJoin(proof)
+                }
                 Action::CallListArrows {
                     pair,
                     receivers,
@@ -3638,7 +3712,9 @@ pub(super) fn run<'a, 'g>(
         }
         let mut successor = |pc, state| known.add(pc, state, budget);
         let terminator = match edges {
-            Edges::Next(next) => Terminator::Goto(successor(next, state)?),
+            // Publication returns a lowering PC and a checked caller state.
+            // Intern the pair; the PC alone is not a MIR block index.
+            Edges::Next(next) => Terminator::Goto(successor(join_resume.unwrap_or(next), state)?),
             Edges::Branch { yes, no } => Terminator::Branch {
                 yes: successor(yes, state.clone())?,
                 no: successor(no, state)?,

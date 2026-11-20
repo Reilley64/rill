@@ -16,7 +16,7 @@ pub(in crate::analysis::typed) struct InventoryCompleteness {
 #[derive(Clone)]
 pub(in crate::analysis) struct InstalledOrdinaryScope<'g> {
     context: GraphId,
-    routine: Option<&'g DeclarationId>,
+    routine: Option<super::routine::RoutineRole<'g>>,
 }
 
 impl<'g> InstalledOrdinaryScope<'g> {
@@ -26,14 +26,19 @@ impl<'g> InstalledOrdinaryScope<'g> {
     ) -> Self {
         Self {
             context: graph.id(),
-            routine: routine.map(|r| &r.family.id),
+            routine,
         }
     }
 
     pub(in crate::analysis) fn contains(&self, family: &DeclarationId) -> bool {
         family.context == self.context
             && family.kind == DeclarationKind::Family
-            && (family.module.origin == Origin::Application || self.routine == Some(family))
+            && (family.module.origin == Origin::Application
+                || self.routine.is_some_and(|role| &role.family.id == family))
+    }
+
+    pub(in crate::analysis) fn routine(&self) -> Option<super::routine::RoutineRole<'g>> {
+        self.routine
     }
 }
 

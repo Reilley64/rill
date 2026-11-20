@@ -129,6 +129,7 @@ pub use iteration::Iteration;
 pub struct CallFacts<'g> {
     /// Closed per-slot evidence from Result-use on this exact call, not a join contract.
     pub(in crate::analysis) list_arrows: Option<Box<super::typed::PairCall<'g>>>,
+    pub(in crate::analysis) scoped_join: Option<Box<super::typed::ScopedJoinCall<'g>>>,
     pub callee: &'g DeclarationId,
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
@@ -1617,6 +1618,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
             return Ok(None);
         };
+        if let Some(wrapper) = self.routine_bridge(&declaration.id)
+            && !context
+                .signature
+                .is_some_and(|signature| signature.declaration.id == wrapper.id)
+        {
+            self.deferred_declaration(
+                module,
+                node,
+                ScalarUnsupported::FamilySelection,
+                declaration,
+                bindings,
+            )?;
+            return Ok(None);
+        }
         let closed_error = self.closed_err(&declaration.id);
         let bridge = self.installed_bridge(&declaration.id)?;
         let family = declaration.id.kind == DeclarationKind::Family
@@ -1771,6 +1786,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             callee_node: callee,
             fact: CallFacts {
                 list_arrows: None,
+                scoped_join: None,
                 callee: &declaration.id,
                 bindings,
                 substitution,

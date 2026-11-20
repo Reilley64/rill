@@ -74,6 +74,7 @@ pub struct PendingResultUse<'g> {
 }
 
 pub(in crate::analysis) use pairs::{PairCall, PairChild};
+pub use pairs::{ScopedJoinCall, ScopedJoinSlot};
 
 #[derive(Debug, Default)]
 pub struct ResultUseReport<'g> {
@@ -81,7 +82,8 @@ pub struct ResultUseReport<'g> {
     pending: Vec<PendingResultUse<'g>>,
     // Temporary until the integrated analysis attaches each proof directly to
     // its originating call. The key indexes this report's typed node array.
-    pair_calls: BTreeMap<usize, Box<PairCall<'g>>>,
+    pair_calls: BTreeMap<usize, pairs::CheckedTransfer<'g>>,
+    routine_bound: bool,
 }
 impl<'g> ResultUseReport<'g> {
     pub(super) fn attach_pair_calls(
@@ -94,9 +96,17 @@ impl<'g> ResultUseReport<'g> {
             let NodeFactKind::Expression(facts) = &mut bodies.typed_node_mut(index).kind else {
                 unreachable!("proved call expression")
             };
-            facts.call.as_mut().expect("proved call").list_arrows = Some(proof);
+            let call = facts.call.as_mut().expect("proved call");
+            match proof {
+                pairs::CheckedTransfer::Serial(proof) => call.list_arrows = Some(proof),
+                pairs::CheckedTransfer::Scoped(proof) => call.scoped_join = Some(proof),
+            }
         }
         Ok(())
+    }
+
+    pub(super) fn routine_bound(&self) -> bool {
+        self.routine_bound
     }
 
     pub fn discards(&self) -> &[ResultDiscard<'g>] {
@@ -119,6 +129,7 @@ pub(super) struct Inputs<'a, 'g> {
     pub collections: super::CollectionCore<'g>,
     pub native: &'a super::ownership::Report<'g>,
     pub outcome_observer: Option<&'g DeclarationId>,
+    pub routine: Option<super::RoutineRole<'g>>,
 }
 
 #[derive(Clone, Copy)]
@@ -196,6 +207,15 @@ pub(super) fn check<'g>(
             }
         }
     }
+    let mut scoped = None;
+    if let Some(role) = core.routine
+        && checked.contains(&role.implementation.id)
+        && let Some(header) = implementation_headers.get(&role.implementation.id)
+        && let Some(summary) = pairs::scoped_summary(inventory, role, header, &nodes, budget)?
+    {
+        scoped = Some((role, summary));
+        report.routine_bound = true;
+    }
     let release_parameters = releases::check(
         inventory,
         core,
@@ -208,6 +228,7 @@ pub(super) fn check<'g>(
         inventory,
         bodies,
         pairs: &pairs,
+        scoped,
         nodes: &nodes,
         checked: &checked,
         variants: &variants,
@@ -262,6 +283,7 @@ struct Sources<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
     bodies: &'a GenericReport<'g>,
     pairs: &'a pairs::PairBodies<'g>,
+    scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
@@ -274,6 +296,7 @@ struct Check<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
     bodies: &'a GenericReport<'g>,
     pairs: &'a pairs::PairBodies<'g>,
+    scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
@@ -317,6 +340,7 @@ impl<'a, 'g> Check<'a, 'g> {
             inventory: sources.inventory,
             bodies: sources.bodies,
             pairs: sources.pairs,
+            scoped: sources.scoped,
             nodes: sources.nodes,
             checked: sources.checked,
             variants: sources.variants,
@@ -484,6 +508,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 DeclarationKind::Function | DeclarationKind::Implementation => {
                     if syntax.children.get(1).is_none()
                         || self.pairs.contains_key(&declaration.id)
+                        || self
+                            .scoped
+                            .is_some_and(|(role, _)| role.implementation.id == declaration.id)
                         || self
                             .contracts
                             .get(&declaration.id)

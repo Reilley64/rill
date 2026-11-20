@@ -174,7 +174,10 @@ fn installed_ownership_requires_the_built_archive() {
     let executable = root.join("bin/m48-ownership-probe");
     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
-    for module in include_str!("../../../tests/installed/typed/stdlib-sources.txt").lines() {
+    for module in include_str!("../../../tests/installed/typed/stdlib-sources.txt")
+        .lines()
+        .chain(include_str!("../../../tests/installed/typed/routine-sources.txt").lines())
+    {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();
     }
     fs::copy(env!("RILL_OWNERSHIP_ARCHIVE"), root.join(ARCHIVE)).unwrap();

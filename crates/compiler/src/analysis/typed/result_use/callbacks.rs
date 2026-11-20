@@ -322,6 +322,7 @@ impl<'a, 'g> Check<'a, 'g> {
             inventory: self.inventory,
             bodies: self.bodies,
             pairs: self.pairs,
+            scoped: self.scoped,
             nodes: self.nodes,
             checked: self.checked,
             variants: self.variants,

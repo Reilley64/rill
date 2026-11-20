@@ -63,18 +63,26 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             return Ok(states);
         }
-        if settled
-            && let Some(slots) = call
-                .selection
+        let scoped = self
+            .core
+            .routine
+            .is_some_and(|role| &role.family.id == call.callee);
+        let boundary = if scoped {
+            self.scoped
+                .map(|(role, slots)| pairs::PairBoundary::Scoped(role, slots))
+        } else {
+            call.selection
                 .as_ref()
                 .and_then(|selection| self.pairs.get(selection.implementation))
                 .copied()
-        {
+                .map(pairs::PairBoundary::Serial)
+        };
+        if settled && let Some(boundary) = boundary {
             let mut forwarded = Vec::new();
             let mut pending = Vec::new();
             for mut state in states {
                 self.budget.reserve(1)?;
-                if self.transfer_pair(node, value, call, &mut state, slots, depth + 1)? {
+                if self.transfer_pair(node, value, call, &mut state, boundary, depth + 1)? {
                     forwarded.push(state);
                 } else {
                     self.pending(node, ResultUseBlocker::CallBoundary)?;
@@ -91,8 +99,11 @@ impl<'a, 'g> Check<'a, 'g> {
             forwarded.extend(self.call_output(node, value, pending)?);
             return Ok(forwarded);
         }
+        if scoped {
+            self.pending(node, ResultUseBlocker::CallBoundary)?;
+        }
         for state in &mut states {
-            let checked = settled && self.ordinary_boundary(call, state, depth + 1)?;
+            let checked = settled && !scoped && self.ordinary_boundary(call, state, depth + 1)?;
             if settled && !checked && self.contracts.contains_key(call.callee) {
                 self.pending(node, ResultUseBlocker::CallBoundary)?;
             }

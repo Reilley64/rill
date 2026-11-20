@@ -1319,7 +1319,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                 required,
                 None,
             )?;
+            // The scoped operation requires actual argument occurrences at
+            // its direct call. A selected family value cannot carry that proof.
+            let routine = self
+                .ordinary_scope
+                .as_ref()
+                .and_then(|scope| scope.routine());
             let formed = self.has_installed_ordinary_scope(written.declaration)
+                && !routine.is_some_and(|role| &role.family.id == written.declaration)
                 && self.form_ordinary_value(inference, node, written, &goal, &output)?;
             self.elab.reserve(1)?;
             self.ordinary_values.insert(
