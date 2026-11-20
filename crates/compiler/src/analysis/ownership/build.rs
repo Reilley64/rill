@@ -4650,6 +4650,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         facts: &ExpressionFacts<'g>,
         depth: usize,
+        exclusive: bool,
     ) -> ResultOf<ListI32Read<'a, 'g>> {
         let pending = || Stop::Pending(node);
         let Some(DataExpression::ListIndex {
@@ -4661,9 +4662,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         };
         let list = self.typed.list_role().ok_or_else(pending)?;
+        let (access, place) = if exclusive {
+            (Access::Writable, TypedPlace::Writable)
+        } else {
+            (Access::ReadOnly, TypedPlace::ReadOnly)
+        };
         if !std::ptr::eq(*declaration, &list.declaration.id)
-            || facts.access != Access::ReadOnly
-            || facts.place != TypedPlace::ReadOnly
+            || facts.access != access
+            || facts.place != place
             || scalar::scalar(&facts.ty) != Some(Primitive::I32)
         {
             return Err(pending());
@@ -4700,8 +4706,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let index = u64::try_from(magnitude).map_err(|_| pending())?;
         let (base, base_depth) = self.ungroup_expression_at(*base, depth + 1)?;
         let view = self.normal_value(base)?;
-        if !matches!(view.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
-            if self.is_list_i32(referent))
+        if !matches!(view.ty.as_ref(), TypeTerm::Reference { mutable, referent }
+            if *mutable == exclusive && self.is_list_i32(referent))
         {
             return Err(pending());
         }
@@ -4740,7 +4746,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         depth: usize,
     ) -> ResultOf<Pc> {
         let pending = || Stop::Pending(node);
-        let read = self.check_list_i32_read(node, facts, depth)?;
+        let read = self.check_list_i32_read(node, facts, depth, false)?;
         let ListI32Read {
             base,
             base_depth,

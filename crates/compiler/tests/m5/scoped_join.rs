@@ -1062,16 +1062,256 @@ fn installed_join_publication_interns_the_actual_caller_state() {
 }
 
 #[test]
+fn installed_join_rejects_the_second_overlapping_capture() {
+    use compiler::analysis::generics::callables::CaptureForm;
+    use compiler::analysis::ownership::{GraphCompletion, analyze_ownership};
+    use compiler::analysis::scalars::{
+        Place,
+        data::{Access, DataExpression},
+    };
+    use compiler::analysis::{InvocationMode, TypeTerm};
+
+    installed(
+        "scoped_join::installed_join_rejects_the_second_overlapping_capture",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            let source = SHARED
+                .replace("let numbers = input;", "let mut numbers = input;")
+                .replace("(&numbers)[1u64]", "(&mut numbers)[1u64]");
+            fs::write(&request.entry, format!("{BASE}\n{source}")).unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let module = app(&graph);
+                let caller = &module.declarations[named(module, "joined")];
+                let node = call_node(module, "join([");
+                let limits = AnalysisLimits::default();
+                let typed = analyze_typed(&graph, limits);
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                assert!(typed.result_use().unwrap().pending().is_empty());
+                let receipt = typed.receipt().unwrap();
+                let transfer = receipt.scoped_join(module, node).unwrap().unwrap();
+                let [first, second] = &transfer.slots;
+                for (i, slot) in transfer.slots.iter().enumerate() {
+                    let mutable = i == 1;
+                    assert_eq!(slot.path, [i]);
+                    let arrow = slot.arrow();
+                    assert_eq!(
+                        arrow.mode,
+                        Some(if mutable {
+                            InvocationMode::Mutable
+                        } else {
+                            InvocationMode::ReadOnly
+                        })
+                    );
+                    let [capture] = arrow.captures.as_slice() else {
+                        panic!("one capture")
+                    };
+                    assert_eq!(capture.form, CaptureForm::ExplicitBorrow { mutable });
+                    assert!(
+                        matches!(capture.storage.as_deref(), Some(TypeTerm::Reference { mutable: m, referent }) if *m == mutable
+                        && matches!(referent.as_ref(), TypeTerm::Nominal { declaration, .. }
+                            if *declaration == &typed.list_role().unwrap().declaration.id))
+                    );
+                    let job = typed.bodies().goal(&slot.send_job).unwrap();
+                    assert_eq!(job.state, GoalState::Proved);
+                    assert!(job.premise.is_none());
+                    assert!(std::ptr::eq(job.arrow_origin.as_deref().unwrap(), arrow));
+                    let body = module.syntax.nodes[arrow.site.node].children[1];
+                    let read = typed.bodies().node(module, body).unwrap().unwrap();
+                    let NodeFactKind::Expression(value) = &read.kind else {
+                        panic!("no read")
+                    };
+                    assert!(
+                        matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+                    );
+                    let Some(DataExpression::ListIndex {
+                        declaration,
+                        base,
+                        selector,
+                    }) = value.data
+                    else {
+                        panic!("missing canonical List index")
+                    };
+                    assert_eq!(declaration, &typed.list_role().unwrap().declaration.id);
+                    assert_eq!(
+                        module.syntax.nodes[base].children.as_slice(),
+                        [capture.site.node]
+                    );
+                    assert_eq!(
+                        module.syntax.nodes[selector].span.bytes(),
+                        if mutable { b"1u64" } else { b"0u64" }
+                    );
+                    assert_eq!(
+                        (value.access, value.place),
+                        if mutable {
+                            (Access::Writable, Place::Writable)
+                        } else {
+                            (Access::ReadOnly, Place::ReadOnly)
+                        }
+                    );
+                }
+                let [previous, attempted] = [first, second].map(|slot| &slot.arrow().captures[0]);
+                assert_eq!(attempted.path.root, previous.path.root);
+                assert_eq!(attempted.site.span.bytes(), b"&mut numbers");
+                assert_eq!(previous.site.span.bytes(), b"&numbers");
+
+                let local = lower_body(&receipt, module, &caller.id, limits).unwrap();
+                assert_eq!(local.completion(), Completion::SourceRejected);
+                assert!(local.mir().is_none());
+                let [finding] = local.findings() else {
+                    panic!("one acquisition conflict")
+                };
+                assert_eq!(finding.code(), "R0201");
+                assert_eq!(finding.site.span, attempted.site.span);
+                assert_eq!(finding.related.span, previous.site.span);
+
+                let owned = analyze_ownership(&receipt, limits);
+                assert_eq!(owned.completion(), GraphCompletion::SourceRejected);
+                let root = owned
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == caller.node)
+                    .unwrap();
+                assert_eq!(root.completion(), Completion::SourceRejected);
+                assert_eq!(root.ordinary_completion(), Completion::SourceRejected);
+                assert!(root.mir().is_none() && root.ordinary_mir().is_none());
+                let [recorded] = owned.findings() else {
+                    panic!("one graph acquisition conflict")
+                };
+                assert_eq!(recorded.code(), "R0201");
+                assert_eq!(recorded.site.span, finding.site.span);
+                assert_eq!(recorded.related.span, finding.related.span);
+                check_typed_budget(&graph, &typed);
+                let stats = local.statistics();
+                let exact = AnalysisLimits {
+                    max_work: stats.work,
+                    max_entries: stats.entries,
+                    max_depth: stats.max_depth,
+                };
+                let replay = lower_body(&receipt, module, &caller.id, exact).unwrap();
+                assert_eq!(replay.completion(), Completion::SourceRejected);
+                assert_eq!(replay.findings()[0].site.span, attempted.site.span);
+                assert!(replay.mir().is_none());
+                let short = lower_body(
+                    &receipt,
+                    module,
+                    &caller.id,
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                )
+                .unwrap();
+                assert_eq!(short.completion(), Completion::ResourceLimit);
+                assert!(short.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn installed_join_checks_live_loans_before_deferring_exclusive_lifecycle() {
+    use compiler::analysis::ownership::{GraphObligation, analyze_ownership};
+
+    installed(
+        "scoped_join::installed_join_checks_live_loans_before_deferring_exclusive_lifecycle",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            for live in [false, true] {
+                let (before, after) = if live {
+                    ("", "let last = held[0u64];")
+                } else {
+                    ("let last = held[0u64];", "")
+                };
+                let source = format!(
+                    r#"{BASE}
+import std::routine::join;
+function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
+    let mut other = otherInput;
+    let held = &other;
+    {before}
+    let [first, second] = join([() => (&numbers)[0u64], () => (&mut other)[1u64]]);
+    {after}
+    dispose(numbers);
+    dispose(other);
+    return [first, second];
+}}
+"#
+                );
+                fs::write(&request.entry, source).unwrap();
+                for test_mode in [false, true] {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let module = app(&graph);
+                    let caller = &module.declarations[named(module, "joined")];
+                    let limits = AnalysisLimits::default();
+                    let typed = analyze_typed(&graph, limits);
+                    let receipt = typed.receipt().expect("typed disjoint environments");
+                    let node = call_node(module, "join([");
+                    let transfer = receipt.scoped_join(module, node).unwrap().unwrap();
+                    let [first, second] = transfer.slots.each_ref().map(|s| &s.arrow().captures[0]);
+                    assert_ne!(first.path.root, second.path.root);
+                    let local = lower_body(&receipt, module, &caller.id, limits).unwrap();
+                    let owned = analyze_ownership(&receipt, limits);
+                    let root = owned
+                        .roots()
+                        .iter()
+                        .find(|r| r.site().module == &module.key && r.site().node == caller.node)
+                        .unwrap();
+                    let expected = if live {
+                        Completion::SourceRejected
+                    } else {
+                        Completion::Incomplete
+                    };
+                    assert_eq!(local.completion(), expected);
+                    assert_eq!(root.completion(), expected);
+                    assert_eq!(root.ordinary_completion(), expected);
+                    assert!(
+                        local.mir().is_none()
+                            && root.mir().is_none()
+                            && root.ordinary_mir().is_none()
+                    );
+                    if live {
+                        for findings in [local.findings(), owned.findings()] {
+                            let [finding] = findings else {
+                                panic!("one acquisition conflict: {findings:?}")
+                            };
+                            assert_eq!(finding.code(), "R0201");
+                            assert_eq!(finding.site.span, second.site.span);
+                            assert_eq!(finding.related.span.bytes(), b"&other");
+                        }
+                    } else {
+                        assert!(local.findings().is_empty() && owned.findings().is_empty());
+                        assert_eq!(
+                            local.blocked_at().unwrap().span,
+                            &module.syntax.nodes[node].span
+                        );
+                        assert!(
+                            owned
+                                .open_obligations()
+                                .contains(&GraphObligation::MaskingAndJoin)
+                        );
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_join_keeps_unproved_capture_and_result_shapes_incomplete() {
     installed(
         "scoped_join::installed_join_keeps_unproved_capture_and_result_shapes_incomplete",
         |request| {
             fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
-            let competing = SHARED
-                .replace("let numbers = input;", "let mut numbers = input;")
-                .replace("(&numbers)[1u64]", "(&mut numbers)[1u64]");
             for source in [
-                competing.as_str(),
                 "import std::routine::join; function escaping(input: &i32): [&i32, &i32] { return join([() => input, () => { let local = 2i32; return &local; }]); }",
                 "import std::routine::join; function erased(numbers: List<i32>, work: () => i32): [i32, i32] { return join([() => (&numbers)[0u64], work]); }",
                 "import std::routine::join; function resultJobs(): void { let _ = join([() => Result.Ok(true), () => false]); }",

@@ -1976,6 +1976,7 @@ enum Action<'g> {
     FormListArrow {
         capture: Slot,
         into: Slot,
+        mode: InvocationMode,
     },
     CallListArrows {
         pair: usize,
@@ -1987,6 +1988,10 @@ enum Action<'g> {
         receivers: [Slot; 2],
         into: Slot,
         role: super::typed::RoutineRole<'g>,
+    },
+    UnprovedScopedJoin {
+        receivers: [Slot; 2],
+        into: Slot,
     },
     FormClosure {
         capture: Slot,

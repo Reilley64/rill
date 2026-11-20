@@ -585,8 +585,14 @@ impl<'a, 'g> Check<'a, 'g> {
                 return Ok(false);
             };
             let slot_path = ResultComponent::TupleElement(i);
-            let Some((expression, result)) =
-                self.pair_child(origin, arrow, &stored, slot_path, state, depth + 1)?
+            let Some((expression, result)) = self.pair_child(
+                origin,
+                arrow,
+                (&stored, slot_path),
+                state,
+                scoped.is_some(),
+                depth + 1,
+            )?
             else {
                 return Ok(false);
             };
@@ -614,8 +620,8 @@ impl<'a, 'g> Check<'a, 'g> {
                 children[i] = child;
             }
         }
-        // Commit only after both exact environments and both outgoing residences
-        // checked. Sibling residences in the caller are not changed or observed.
+        // Transfer Result residence only after checking both environments and
+        // both outputs. Sibling residences in the caller are unchanged.
         state.take(root, &[], self.budget)?;
         for (i, result) in outputs.into_iter().enumerate() {
             state.install(
@@ -708,9 +714,9 @@ impl<'a, 'g> Check<'a, 'g> {
         &mut self,
         origin: NodeId,
         arrow: &crate::analysis::generics::callables::ArrowFacts<'g>,
-        stored: &[Located<'g>],
-        slot: ResultComponent<'g>,
+        (stored, slot): (&[Located<'g>], ResultComponent<'g>),
         caller: &Residence<'g>,
+        scoped: bool,
         depth: usize,
     ) -> Work<Option<(Option<NodeId>, Vec<Located<'g>>)>> {
         let nodes = &self.module.syntax.nodes;
@@ -731,13 +737,21 @@ impl<'a, 'g> Check<'a, 'g> {
         let capture = match arrow.captures.as_slice() {
             [] if arrow.mode.is_some() => None,
             [capture]
-                if arrow.mode == Some(InvocationMode::ReadOnly)
-                    && capture.reachable
+                if capture.reachable
                     && capture.through.is_none()
-                    && capture.form == (CaptureForm::ExplicitBorrow { mutable: false })
                     && capture.path.projections.is_empty() =>
             {
-                Some(capture)
+                match (capture.form, arrow.mode) {
+                    (
+                        CaptureForm::ExplicitBorrow { mutable: false },
+                        Some(InvocationMode::ReadOnly),
+                    ) => Some((capture, false)),
+                    (
+                        CaptureForm::ExplicitBorrow { mutable: true },
+                        Some(InvocationMode::Mutable),
+                    ) if scoped => Some((capture, true)),
+                    _ => return Ok(None),
+                }
             }
             _ => return Ok(None),
         };
@@ -759,7 +773,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 Content::PossibleAlias((Root::Local(root), path))
                     if !alias
                         && path.is_empty()
-                        && capture.is_some_and(|c| c.path.root == *root) =>
+                        && capture.is_some_and(|(c, _)| c.path.root == *root) =>
                 {
                     alias = true
                 }
@@ -769,14 +783,13 @@ impl<'a, 'g> Check<'a, 'g> {
         if !callable || marker != capture.is_some() || alias != capture.is_some() {
             return Ok(None);
         }
-        let list = if let Some(capture) = capture {
-            let Some(TypeTerm::Reference {
-                mutable: false,
-                referent,
-            }) = capture.storage.as_deref()
-            else {
+        let list = if let Some((capture, exclusive)) = capture {
+            let Some(TypeTerm::Reference { mutable, referent }) = capture.storage.as_deref() else {
                 return Ok(None);
             };
+            if *mutable != exclusive || capture.storage.as_ref() != Some(&capture.ty) {
+                return Ok(None);
+            }
             let TypeTerm::Nominal {
                 declaration,
                 arguments,
@@ -812,6 +825,11 @@ impl<'a, 'g> Check<'a, 'g> {
             && nodes[root].kind == NodeKind::Index
             && matches!(arrow.result.as_ref(), TypeTerm::Primitive(p) if p.name()=="i32"))
         .then_some(body);
+        // Prove the scalar read's Result residence, not permission to use
+        // the captured access. M5 checks the loan when the environment forms.
+        if capture.is_some_and(|(_, exclusive)| exclusive) && list_read.is_none() {
+            return Ok(None);
+        }
         let Some(value) = self.expression_facts(body)? else {
             return Ok(None);
         };

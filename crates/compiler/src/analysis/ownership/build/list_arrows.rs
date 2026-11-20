@@ -11,6 +11,7 @@ struct ListArrowPlan<'a, 'g> {
     read: NodeId,
     operand: NodeId,
     source: Slot,
+    exclusive: bool,
     op: ListI32Read<'a, 'g>,
     output: &'a Type<'g>,
     closure: &'a Type<'g>,
@@ -82,28 +83,41 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         if self.module.syntax.nodes[tuple].children.as_slice() != [first.element, second.element] {
             return Err(pending);
         }
-        let left = self.list_arrow_plan(first, tuple_depth + 1)?;
-        let right = self.list_arrow_plan(second, tuple_depth + 1)?;
-        let (a, a_capture, a_body) = self.list_arrow(first, left)?;
-        let (b, b_capture, b_body) = self.list_arrow(second, right)?;
-        self.budget.reserve(3)?;
-        let index = self.list_arrow_pairs.len();
-        let sources = [a_body.source, b_body.source];
-        self.list_arrow_pairs.push(ListArrowPair {
-            implementation,
-            body,
-            children: [a_body, b_body],
-        });
-        let action = if let Some(role) = scoped {
-            Action::ScopedJoin {
-                pair: index,
-                receivers: [a, b],
-                into,
-                role,
+        let left = self.list_arrow_plan(first, tuple_depth + 1, scoped.is_some())?;
+        let right = self.list_arrow_plan(second, tuple_depth + 1, scoped.is_some())?;
+        let needs_lifecycle = left.exclusive || right.exclusive;
+        let sources = [
+            (left.source, left.exclusive),
+            (right.source, right.exclusive),
+        ];
+        let (a, a_capture, a_body) = self.list_arrow(first, left, needs_lifecycle)?;
+        let (b, b_capture, b_body) = self.list_arrow(second, right, needs_lifecycle)?;
+        let action = if let (Some(a_body), Some(b_body)) = (a_body, b_body) {
+            self.budget.reserve(3)?;
+            let index = self.list_arrow_pairs.len();
+            self.list_arrow_pairs.push(ListArrowPair {
+                implementation,
+                body,
+                children: [a_body, b_body],
+            });
+            if let Some(role) = scoped {
+                Action::ScopedJoin {
+                    pair: index,
+                    receivers: [a, b],
+                    into,
+                    role,
+                }
+            } else {
+                Action::CallListArrows {
+                    pair: index,
+                    receivers: [a, b],
+                    into,
+                }
             }
         } else {
-            Action::CallListArrows {
-                pair: index,
+            // Check both real acquisitions, but do not build or commit an
+            // exclusive child frame without a checked lifecycle for it.
+            Action::UnprovedScopedJoin {
                 receivers: [a, b],
                 into,
             }
@@ -111,8 +125,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let mut next = self.emit(node, action, Edges::Next(next))?;
         // Lower backwards: both closures form in written argument order before
         // dispatch or commit. Neither capture copies the List.
-        for (receiver, capture, source) in [(a, a_capture, sources[0]), (b, b_capture, sources[1])]
+        for ((receiver, capture), (source, exclusive)) in [(a, a_capture), (b, b_capture)]
             .into_iter()
+            .zip(sources)
             .rev()
         {
             let form = self.emit(
@@ -120,6 +135,11 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 Action::FormListArrow {
                     capture,
                     into: receiver,
+                    mode: if exclusive {
+                        InvocationMode::Mutable
+                    } else {
+                        InvocationMode::ReadOnly
+                    },
                 },
                 Edges::Next(next),
             )?;
@@ -128,7 +148,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 Action::Borrow {
                     from: source,
                     into: capture,
-                    exclusive: false,
+                    exclusive,
                     retained_target: false,
                 },
                 Edges::Next(form),
@@ -141,6 +161,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         &mut self,
         child: &PairChild<'g>,
         depth: usize,
+        scoped: bool,
     ) -> ResultOf<ListArrowPlan<'a, 'g>> {
         let arrow = &child.arrow;
         let (origin, depth) = self.ungroup_expression_at(child.element, depth)?;
@@ -151,11 +172,20 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let [capture] = arrow.captures.as_slice() else {
             return Err(pending);
         };
+        let exclusive = match (capture.form, arrow.mode) {
+            (CaptureForm::ExplicitBorrow { mutable: false }, Some(InvocationMode::ReadOnly)) => {
+                false
+            }
+            (CaptureForm::ExplicitBorrow { mutable: true }, Some(InvocationMode::Mutable))
+                if scoped =>
+            {
+                true
+            }
+            _ => return Err(pending),
+        };
         if !std::ptr::eq(arrow.site.module, &self.module.key)
             || !std::ptr::eq(capture.site.module, &self.module.key)
-            || arrow.mode != Some(InvocationMode::ReadOnly)
             || scalar::scalar(&arrow.result) != Some(Primitive::I32)
-            || capture.form != (CaptureForm::ExplicitBorrow { mutable: false })
             || capture.storage.as_ref() != Some(&capture.ty)
         {
             return Err(pending);
@@ -168,15 +198,18 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         }
         let (read, depth) = self.ungroup_expression_at(child.expression, expression_depth)?;
         let value = self.normal_value(read)?;
-        let read_op = self.check_list_i32_read(read, value, depth)?;
+        let read_op = self.check_list_i32_read(read, value, depth, exclusive)?;
         let base = read_op.base;
         let nodes = &self.module.syntax.nodes;
-        let (NodeKind::Prefix("&"), [operand]) =
+        let (NodeKind::Prefix(operator), [operand]) =
             (nodes[base].kind, nodes[base].children.as_slice())
         else {
             return Err(pending);
         };
-        if base != capture.site.node || read_op.view.ty != capture.ty {
+        if operator != if exclusive { "&mut" } else { "&" }
+            || base != capture.site.node
+            || read_op.view.ty != capture.ty
+        {
             return Err(pending);
         }
         let (operand, _) = self.ungroup_expression_at(*operand, read_op.base_depth + 1)?;
@@ -202,6 +235,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             read,
             operand,
             source,
+            exclusive,
             op: read_op,
             output: &value.ty,
             closure,
@@ -212,7 +246,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         &mut self,
         child: &PairChild<'g>,
         plan: ListArrowPlan<'a, 'g>,
-    ) -> ResultOf<(Slot, Slot, ListArrow<'g>)> {
+        needs_lifecycle: bool,
+    ) -> ResultOf<(Slot, Slot, Option<ListArrow<'g>>)> {
         let ListArrowPlan {
             read,
             operand,
@@ -220,12 +255,16 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             op: read_op,
             output,
             closure,
+            ..
         } = plan;
         let base = read_op.base;
         let view_ty = &read_op.view.ty;
         let backing = self.slots[source];
         let receiver = self.slot(child.arrow.site.node, closure)?;
         let staged = self.slot(base, view_ty)?;
+        if needs_lifecycle {
+            return Ok((receiver, staged, None));
+        }
 
         // Check the actual read in a separate frame using a transferred view.
         // The backing proxy is initialized but is not owned by this frame and
@@ -263,14 +302,14 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         Ok((
             receiver,
             staged,
-            ListArrow {
+            Some(ListArrow {
                 invocation: child.invocation,
                 body_site: child.body,
                 source,
                 capture,
                 incoming_backing,
                 body: Arc::new(body),
-            },
+            }),
         ))
     }
 }

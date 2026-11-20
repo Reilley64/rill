@@ -196,13 +196,14 @@ fn liveness(
                 into,
                 ..
             } => ([Some(capture), second], Some(into)),
-            Action::FormListArrow { capture, into } => use_one(Some(capture), Some(into)),
+            Action::FormListArrow { capture, into, .. } => use_one(Some(capture), Some(into)),
             Action::CallListArrows {
                 receivers, into, ..
             }
             | Action::ScopedJoin {
                 receivers, into, ..
-            } => (receivers.map(Some), Some(into)),
+            }
+            | Action::UnprovedScopedJoin { receivers, into } => (receivers.map(Some), Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
             Action::CopyClosure { from, into } => use_one(Some(from), Some(into)),
             Action::InvokeClosurePair { receiver, into, .. }
@@ -2949,7 +2950,11 @@ pub(super) fn run<'a, 'g>(
                         Operation::Call(call.callee)
                     }
                 }
-                Action::FormListArrow { capture, into } => {
+                Action::FormListArrow {
+                    capture,
+                    into,
+                    mode,
+                } => {
                     let staged = initialized(&state[capture], node)?;
                     state[into] = State::Initialized(Held {
                         loans: staged.loans.clone(),
@@ -2960,9 +2965,10 @@ pub(super) fn run<'a, 'g>(
                     Operation::FormClosure {
                         closure: local(into).root,
                         capture: local(capture).root,
-                        mode: InvocationMode::ReadOnly,
+                        mode,
                     }
                 }
+                Action::UnprovedScopedJoin { .. } => return Err(Stop::Pending(node)),
                 Action::ScopedJoin {
                     pair,
                     receivers,
