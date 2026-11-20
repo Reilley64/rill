@@ -32,6 +32,7 @@ enum ExpressionProof<'t, 'g> {
     CallCarrier(&'t Type<'g>),
     NestedTupleParent(&'t PlacePath<'g>),
     NestedTupleSource(Slot),
+    NamedNestedTupleLeaf,
     NestedRecordConstruction,
     NestedRecordFieldTemporary(ProjectedTemporary),
 }
@@ -964,6 +965,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 return Ok((target, None, Some(from)));
             }
         }
+        if facts.place == TypedPlace::Writable
+            && path.root.kind != DeclarationKind::Parameter
+            && let Some(target) = self.named_nested_tuple_leaf(left, facts)?
+        {
+            self.budget.step(1)?;
+            if self.value(value)?.ty != facts.ty {
+                return Err(Stop::Pending(value));
+            }
+            return Ok((target, Some(&facts.ty), None));
+        }
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
             && let [PathProjection::Field(field)] = path.projections.as_slice()
@@ -1010,6 +1021,47 @@ impl<'a, 'g> Build<'a, 'g> {
         self.clone_region(from, dest).map(Some)
     }
 
+    fn named_nested_tuple_leaf(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+    ) -> ResultOf<Option<Slot>> {
+        if facts.access != Access::Owned
+            || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(_))
+            || !matches!(&facts.data, Some(DataExpression::TupleIndex { .. }))
+            || self.nested_tuple_parameters.is_empty() && self.nested_tuple_bindings.is_empty()
+        {
+            return Ok(None);
+        }
+        let Some(path) = &facts.path else {
+            return Ok(None);
+        };
+        let (outer, inner) = match path.projections.as_slice() {
+            [PathProjection::TupleElement(outer)] => (*outer, None),
+            [
+                PathProjection::TupleElement(outer),
+                PathProjection::TupleElement(inner),
+            ] => (*outer, Some(*inner)),
+            _ => return Ok(None),
+        };
+        let Some(root) = self.named_nested_tuple_root(path)? else {
+            return Ok(None);
+        };
+        self.nested_tuple_pattern_member(node, root, outer, inner)
+            .map(Some)
+    }
+
+    fn named_nested_tuple_root(&mut self, path: &PlacePath<'g>) -> ResultOf<Option<Slot>> {
+        self.budget.step(1)?;
+        Ok(match path.root.kind {
+            DeclarationKind::Parameter => self.nested_tuple_parameters.get(path.root).copied(),
+            _ => self
+                .nested_tuple_bindings
+                .get(path.root)
+                .map(|&(slot, _)| slot),
+        })
+    }
+
     fn nested_tuple_transfer_source(
         &mut self,
         value: NodeId,
@@ -1023,15 +1075,7 @@ impl<'a, 'g> Build<'a, 'g> {
         let Some((facts, path)) = self.whole_named_owned_place(value)? else {
             return Ok(None);
         };
-        self.budget.step(1)?;
-        let from = match path.root.kind {
-            DeclarationKind::Parameter => self.nested_tuple_parameters.get(path.root).copied(),
-            _ => self
-                .nested_tuple_bindings
-                .get(path.root)
-                .map(|&(slot, _)| slot),
-        };
-        let Some(from) = from else {
+        let Some(from) = self.named_nested_tuple_root(path)? else {
             return Ok(None);
         };
         self.budget.step(self.slots[from].storage(from).len())?;
@@ -1341,7 +1385,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         } else {
                             next
                         };
-                        self.stage_value(value, into, tail, temporary, depth + 1)
+                        self.stage_named_transfer(value, into, tail, temporary, depth + 1)
                     }
                     Binding::IrrefutableProduct {
                         facts,
@@ -1429,7 +1473,7 @@ impl<'a, 'g> Build<'a, 'g> {
                         Some(ExpressionProof::NestedTupleSource(from)),
                     );
                 }
-                self.stage_value(value, incoming, displace, temporary, depth + 1)
+                self.stage_named_transfer(value, incoming, displace, temporary, depth + 1)
             }
             NodeKind::Return => {
                 let returning = self.check_retained(node, exits.returning)?;
@@ -1466,7 +1510,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     } else {
                         export
                     };
-                    self.stage_value(value, output, finish, temporary, depth + 1)
+                    self.stage_named_transfer(value, output, finish, temporary, depth + 1)
                 } else {
                     Ok(returning)
                 }
@@ -1541,6 +1585,28 @@ impl<'a, 'g> Build<'a, 'g> {
             scratch,
             member,
         }))
+    }
+
+    fn stage_named_transfer(
+        &mut self,
+        value: NodeId,
+        into: Slot,
+        next: Pc,
+        temporary: Option<ProjectedTemporary>,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        if temporary.is_some() {
+            self.stage_value(value, into, next, temporary, depth)
+        } else {
+            // Do not admit these layouts into generic expressions or places.
+            self.expression_with_proof(
+                value,
+                Some(into),
+                next,
+                depth,
+                Some(ExpressionProof::NamedNestedTupleLeaf),
+            )
+        }
     }
 
     fn stage_value(
@@ -3127,8 +3193,16 @@ impl<'a, 'g> Build<'a, 'g> {
                 let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
                 Action::ForbiddenBorrowedMove(root)
             } else {
+                let leaf = if matches!(proof, Some(ExpressionProof::NamedNestedTupleLeaf)) {
+                    self.named_nested_tuple_leaf(node, facts)?
+                } else {
+                    None
+                };
                 Action::Read {
-                    from: self.read_value_place(node, facts)?,
+                    from: match leaf {
+                        Some(slot) => slot,
+                        None => self.read_value_place(node, facts)?,
+                    },
                     into,
                 }
             };

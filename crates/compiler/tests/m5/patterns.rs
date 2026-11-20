@@ -2198,10 +2198,28 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
                     && again.root.span.bytes() == b"again" && again.root.node == returned.root.node)
             );
             assert!(path_drops(mir, mir.entry).is_empty());
+            let indexed = lower("indexed", default);
+            let mir = indexed
+                .mir()
+                .expect("the exact outer scalar leaf can be copied");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. } | Operation::Move { .. } | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::Copy { from, into: Some(staged) }, Operation::Export(output)]
+                if from.root.span.bytes() == b"value: [[bool, bool], bool]" && from.tuple_element() == Some(1)
+                    && staged.root.node == output.root.node && staged.projection.is_none() && output.projection.is_none())
+            );
+            assert!(path_drops(mir, mir.entry).is_empty());
             for (name, at) in [
                 ("child", b"whole".as_slice()),
                 ("temporary", b"forward(value)"),
-                ("indexed", b"value[1]"),
                 ("deeper", b"value: [[[bool, string], bool], bool]"),
                 ("reference", b"value: [[&bool, bool], bool]"),
             ] {

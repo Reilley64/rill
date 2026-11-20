@@ -2,6 +2,348 @@ use super::*;
 use compiler::analysis::ownership::Projection;
 
 #[test]
+fn named_nested_tuple_leaf_transfers_keep_the_sibling_live_at_the_join() {
+    probe(
+        "tuples::named_nested_tuple_leaf_transfers_keep_the_sibling_live_at_the_join",
+        r#"
+            function split(flag: bool, input: [[string, bool], string, bool, [string, bool]]): bool {
+                let saved = input;
+                if (flag) { let direct = saved[1]; }
+                else { let nested = saved[0][0]; }
+                let sibling = saved[3][0];
+                let bit = saved[2];
+                return (saved[0][1]);
+            }
+            function directAfterMove(input: [[string, bool], string]): string {
+                let taken = input[1];
+                return input[0x1];
+            }
+            function leafAfterJoin(flag: bool, input: [[string, bool], string]): string {
+                if (flag) { let taken = input[0][0]; }
+                return input[0][0];
+            }
+            function wholeAfterJoin(flag: bool, input: [[string, bool], string]): [[string, bool], string] {
+                let saved = input;
+                if (flag) { let taken = saved[0][0]; }
+                return saved;
+            }
+        "#,
+        |_, module, receipt| {
+            let check = |name, limits| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, limits).unwrap()
+            };
+            let report = check("split", AnalysisLimits::default());
+            let mir = report.mir().unwrap_or_else(|| {
+                panic!(
+                    "split: {:?} at {:?}",
+                    report.completion(),
+                    report
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string())
+                )
+            });
+            let (yes, no) = branch_targets(mir);
+            let positions = |projection| match projection {
+                Some(Projection::TupleElement(outer)) => Some((outer, None)),
+                Some(Projection::NestedTupleElement { outer, inner }) => Some((outer, Some(inner))),
+                _ => None,
+            };
+            let first = Some((0, Some(0)));
+            let middle = Some((1, None));
+            for (start, taken, kept, name) in [
+                (yes, middle, first, b"direct"),
+                (no, first, middle, b"nested"),
+            ] {
+                let route: Vec<_> = linear(mir, start)
+                    .into_iter()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Move { .. } | Operation::Copy { .. } | Operation::Export(_)
+                        )
+                    })
+                    .collect();
+                let [
+                    Operation::Move {
+                        from,
+                        into: Some(picked),
+                    },
+                    Operation::Move {
+                        from: other,
+                        into: Some(sibling),
+                    },
+                    Operation::Copy {
+                        from: direct_bit,
+                        into: Some(bit),
+                    },
+                    Operation::Copy {
+                        from: nested_bit,
+                        into: Some(staged),
+                    },
+                    Operation::Export(exported),
+                ] = route.as_slice()
+                else {
+                    panic!("unexpected transfer route: {route:?}");
+                };
+                assert_eq!(from.root.span.bytes(), b"saved");
+                assert!(
+                    [other, direct_bit, nested_bit]
+                        .iter()
+                        .all(|p| p.root.node == from.root.node)
+                );
+                assert_eq!(positions(from.projection), taken);
+                assert_eq!(positions(other.projection), Some((3, Some(0))));
+                assert_eq!(positions(direct_bit.projection), Some((2, None)));
+                assert_eq!(positions(nested_bit.projection), Some((0, Some(1))));
+                assert_eq!(picked.root.span.bytes(), name);
+                assert_eq!(sibling.root.span.bytes(), b"sibling");
+                assert_eq!(bit.root.span.bytes(), b"bit");
+                assert_eq!(staged.root.node, exported.root.node);
+                assert_eq!(exported.root.span.bytes(), b"(saved[0][1])");
+                assert!(
+                    [picked, sibling, bit, staged, exported]
+                        .iter()
+                        .all(|p| p.projection.is_none())
+                );
+                let drops = path_drops(mir, start);
+                assert!(
+                    matches!(drops.as_slice(), [Obligation::Drop(p), Obligation::Drop(s), Obligation::Drop(left)]
+                    if p.root.node == picked.root.node && s.root.node == sibling.root.node
+                        && p.projection.is_none() && s.projection.is_none()
+                        && left.root.node == from.root.node && positions(left.projection) == kept),
+                    "{drops:?}"
+                );
+            }
+            let stats = report.statistics();
+            let exact = AnalysisLimits {
+                max_work: stats.work,
+                max_entries: stats.entries,
+                max_depth: stats.max_depth,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("split", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = check("split", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+
+            for (name, read, moved) in [
+                ("directAfterMove", "input[0x1]", "input[1]"),
+                ("leafAfterJoin", "input[0][0]", "input[0][0]"),
+                ("wholeAfterJoin", "saved", "saved[0][0]"),
+            ] {
+                let rejected = check(name, AnalysisLimits::default());
+                assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                assert!(rejected.mir().is_none(), "{name}");
+                let [finding] = rejected.findings() else {
+                    panic!("{name}: expected one finding");
+                };
+                assert_eq!(finding.code(), "R0200", "{name}");
+                assert_eq!(finding.site.span.bytes(), read.as_bytes(), "{name}");
+                assert_eq!(finding.related.span.bytes(), moved.as_bytes(), "{name}");
+                assert!(
+                    finding.related.span.start() < finding.site.span.start(),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn nested_tuple_leaf_replacement_repairs_joins_and_backedges() {
+    probe(
+        "tuples::nested_tuple_leaf_replacement_repairs_joins_and_backedges",
+        r#"
+            function replace(flag: bool, seed: [[string, bool], string], fresh: string, tail: string): [[string, bool], string] {
+                let mut current = seed;
+                if (flag) {
+                    { let taken = current[0][0]; }
+                    current[0][0] = fresh;
+                } else {
+                    current[0][0] = fresh;
+                }
+                current[1] = (tail);
+                return current;
+            }
+            function repaired(again: bool, seed: [[string, bool], string]): [[string, bool], string] {
+                let mut current = seed;
+                while (again) {
+                    let taken = current[0][0];
+                    current[0][0] = taken;
+                    continue;
+                }
+                return current;
+            }
+            function skipped(again: bool, skip: bool, seed: [[string, bool], string]): void {
+                let mut current = seed;
+                while (again) {
+                    let taken = current[0][0];
+                    if (skip) { continue; }
+                    current[0][0] = taken;
+                }
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, AnalysisLimits::default()).unwrap()
+            };
+            let checked = |name| {
+                let report = lower(name);
+                assert!(
+                    report.mir().is_some(),
+                    "{name}: {:?} at {:?}",
+                    report.completion(),
+                    report
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string())
+                );
+                report
+            };
+            let nested = |p| {
+                matches!(
+                    p,
+                    Some(Projection::NestedTupleElement { outer: 0, inner: 0 })
+                )
+            };
+            let replace = checked("replace");
+            let mir = replace.mir().unwrap();
+            let (yes, no) = branch_targets(mir);
+            for (start, moved) in [(yes, true), (no, false)] {
+                let ops = linear(mir, start);
+                let first = ops
+                    .iter()
+                    .position(|op| matches!(op, Operation::Install { .. }))
+                    .unwrap();
+                let [
+                    Operation::Move {
+                        from: fresh,
+                        into: Some(nested_stage),
+                    },
+                    displaced,
+                    Operation::Install {
+                        target: member,
+                        incoming: nested_input,
+                    },
+                    Operation::Move {
+                        from: tail,
+                        into: Some(direct_stage),
+                    },
+                    Operation::Drop(old_tail),
+                    Operation::Install {
+                        target: direct,
+                        incoming: direct_input,
+                    },
+                    Operation::Move {
+                        from: current,
+                        into: Some(staged),
+                    },
+                    Operation::Export(output),
+                    ..,
+                ] = &ops[first - 2..]
+                else {
+                    panic!("unexpected replacement route: {ops:?}");
+                };
+                assert_eq!(fresh.root.span.bytes(), b"fresh: string");
+                assert_eq!(tail.root.span.bytes(), b"tail: string");
+                assert_eq!(current.root.span.bytes(), b"current");
+                assert_eq!(member.root.node, current.root.node);
+                assert_eq!(direct.root.node, current.root.node);
+                assert!(nested(member.projection));
+                assert_eq!(direct.tuple_element(), Some(1));
+                assert_eq!(old_tail.root.node, direct.root.node);
+                assert_eq!(old_tail.tuple_element(), Some(1));
+                assert_eq!(nested_stage.root.node, nested_input.root.node);
+                assert_eq!(direct_stage.root.node, direct_input.root.node);
+                assert_eq!(staged.root.node, output.root.node);
+                assert!(
+                    [
+                        fresh,
+                        tail,
+                        nested_stage,
+                        nested_input,
+                        direct_stage,
+                        direct_input,
+                        current,
+                        staged,
+                        output
+                    ]
+                    .iter()
+                    .all(|p| p.projection.is_none())
+                );
+                if moved {
+                    assert!(matches!(displaced, Operation::None));
+                    assert!(matches!(&ops[..first - 2], [
+                        Operation::Move { from, into: Some(taken) }, Operation::Cleanup(actions), ..
+                    ] if from.root.node == member.root.node && nested(from.projection)
+                        && matches!(actions.as_slice(), [Obligation::Drop(p)] if p.root.node == taken.root.node)));
+                } else {
+                    assert!(matches!(displaced, Operation::Drop(old)
+                        if old.root.node == member.root.node && nested(old.projection)));
+                }
+                let drops = path_drops(mir, start);
+                assert_eq!(drops.len(), 2, "only the old owners drop: {drops:?}");
+            }
+
+            let repaired = checked("repaired");
+            let mir = repaired.mir().unwrap();
+            let (body, exit) = branch_targets(mir);
+            let backedge = straight_blocks(mir, body);
+            let route: Vec<_> = backedge.iter().map(|block| &block.operation).collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Move { from, into: Some(taken) },
+                Operation::Move { from: read, into: Some(staged) },
+                Operation::None,
+                Operation::Install { target, incoming }, ..
+            ] if from.root.node == target.root.node && nested(from.projection) && nested(target.projection)
+                && taken.root.node == read.root.node && staged.root.node == incoming.root.node),
+                "{route:?}"
+            );
+            assert!(std::ptr::eq(
+                *backedge.last().unwrap(),
+                *straight_blocks(mir, mir.entry).last().unwrap()
+            ));
+            assert!(path_drops(mir, exit).is_empty());
+
+            let skipped = lower("skipped");
+            assert_eq!(skipped.completion(), Completion::SourceRejected);
+            assert!(skipped.mir().is_none());
+            let [finding] = skipped.findings() else {
+                panic!("expected one backedge initialization finding");
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"current[0][0]");
+            assert_eq!(finding.related.node, finding.site.node);
+        },
+    );
+}
+
+#[test]
 fn whole_nested_tuple_moves_preserve_initialization_at_scope_exit() {
     probe(
         "tuples::whole_nested_tuple_moves_preserve_initialization_at_scope_exit",
@@ -349,17 +691,31 @@ fn whole_nested_tuple_transfers_do_not_open_general_places_or_values() {
     probe(
         "tuples::whole_nested_tuple_transfers_do_not_open_general_places_or_values",
         r#"
-            function index(input: [[string, bool], string]): string {
+            function readChild(input: [[string, bool], string]): [string, bool] {
                 let saved = input;
-                return saved[0][0];
+                return saved[0];
             }
             function borrow(input: [[string, bool], string]): void {
                 let saved = input;
                 let view = &saved;
             }
-            function writeMember(input: [[string, bool], string], fresh: string): void {
+            function borrowLeaf(input: [[string, bool], string]): void {
+                let saved = input;
+                let view = &saved[0][0];
+            }
+            function writeChild(input: [[string, bool], string], fresh: [string, bool]): void {
                 let mut saved = input;
-                saved[1] = fresh;
+                saved[0] = fresh;
+            }
+            type Wrapper = { text: string; }
+            function leafInConstruction(input: [[string, bool], string]): void {
+                let saved = input;
+                let wrapper = Wrapper { text: saved[0][0] };
+            }
+            function takeLeaf(text: string): void {}
+            function leafArgument(input: [[string, bool], string]): void {
+                let saved = input;
+                takeLeaf(saved[0][0]);
             }
             function construct(fresh: string): void {
                 let saved: [[string, bool], string] = [[fresh, true], "tail"];
@@ -380,19 +736,24 @@ fn whole_nested_tuple_transfers_do_not_open_general_places_or_values() {
             function produce(): [[string, bool], string] { return [["head", true], "tail"]; }
             function result(): [[string, bool], string] { return produce(); }
             function reference(input: [[&string, bool], string]): void { let saved = input; }
+            function protected(input: [[LockGuard<i32>, bool], string]): void { let saved = input; }
             function deeper(input: [[[string, bool]], string]): void { let saved = input; }
         "#,
         |_, module, receipt| {
             for (name, site) in [
-                ("index", "saved[0][0]"),
+                ("readChild", "saved[0]"),
                 ("borrow", "saved"),
-                ("writeMember", "saved[1]"),
+                ("borrowLeaf", "saved[0][0]"),
+                ("writeChild", "saved[0]"),
+                ("leafInConstruction", "saved[0][0]"),
+                ("leafArgument", "saved[0][0]"),
                 ("construct", "saved"),
                 ("replaceWithConstructed", "[[fresh, true], \"tail\"]"),
                 ("localPattern", "saved"),
                 ("argument", "saved"),
                 ("result", "produce()"),
                 ("reference", "input: [[&string, bool], string]"),
+                ("protected", "input: [[LockGuard<i32>, bool], string]"),
                 ("deeper", "input: [[[string, bool]], string]"),
             ] {
                 let declaration = module
