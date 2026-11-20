@@ -209,6 +209,111 @@ fn shared_job_source_moves_and_releases_through_the_installed_list_backing() {
     }
 }
 
+#[test]
+fn list_backing_cleanup_follows_the_owner_not_the_parameter_slot() {
+    probe_report_with_modules(
+        "scoped_jobs::list_backing_cleanup_follows_the_owner_not_the_parameter_slot",
+        r#"
+        import std::core::dispose as release;
+        import helper::{relay as importedRelay, consume};
+        function discard(input: List<i32>): void { let _ = input; }
+        function transfer(input: List<i32>): List<i32> { return input; }
+        function localResult(input: List<i32>): void { let result = transfer(input); release(result); }
+        function importedResult(input: List<i32>): void { let result = importedRelay(input); release(result); }
+        function handoff(input: List<i32>): void { consume(input); }
+        function grouped(input: List<i32>): void { (release)(((input))); }
+        function escape(input: List<i32>): &List<i32> { return &input; }
+        function other(input: List<bool>): void { release(input); }
+    "#,
+        &[(
+            "helper.rill",
+            "import std::{List};\nexport function relay(xs: List<i32>): List<i32> { return xs; }\nexport function consume(xs: List<i32>): void { dispose(xs); }",
+        )],
+        |_, module, typed| {
+            let receipt = typed.receipt().expect("a typed ordinary cross-module call");
+            let lower = |name: &str| {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(&receipt, module, &d.id, AnalysisLimits::default()).unwrap()
+            };
+            for name in ["discard", "handoff"] {
+                let body = lower(name);
+                let mir = body.mir().unwrap();
+                let blocks = straight_blocks(mir, mir.entry);
+                let Operation::Move {
+                    from,
+                    into: Some(owned),
+                } = blocks[0].operation
+                else {
+                    panic!("one transfer from the input")
+                };
+                assert_eq!(from.root.span.bytes(), b"input: List<i32>");
+                assert_ne!(from.root.node, owned.root.node);
+                let drops = path_drops(mir, mir.entry);
+                if name == "discard" {
+                    assert!(
+                        matches!(drops.as_slice(),[Obligation::DisposeListI32 { operand,.. }] if operand.root.node==owned.root.node)
+                    );
+                } else {
+                    assert!(drops.is_empty());
+                    assert!(
+                        matches!(blocks[1].operation, Operation::Call(id) if id.module.path=="helper.rill")
+                    );
+                }
+            }
+            let graph = analyze_ownership(&receipt, AnalysisLimits::default());
+            let root = |path: &str, name: &str| {
+                let prefix = format!("function {name}(");
+                graph
+                    .roots()
+                    .iter()
+                    .find(|r| {
+                        r.site().module.path == path
+                            && r.site().span.bytes().starts_with(prefix.as_bytes())
+                    })
+                    .unwrap()
+            };
+            let consume = root("helper.rill", "consume").mir().unwrap();
+            assert!(
+                matches!(path_drops(consume, consume.entry).as_slice(),[Obligation::DisposeListI32{operand,..}] if operand.root.span.bytes()==b"xs: List<i32>")
+            );
+            assert!(root("main.rill", "handoff").mir().is_some());
+            for name in ["transfer", "localResult", "importedResult"] {
+                let body = lower(name);
+                assert_eq!(body.completion(), Completion::Incomplete, "{name}");
+                assert!(body.mir().is_none() && body.findings().is_empty());
+                assert!(root("main.rill", name).mir().is_none());
+            }
+            assert!(root("helper.rill", "relay").mir().is_none());
+            let grouped = lower("grouped");
+            let mir = grouped.mir().unwrap();
+            assert!(
+                matches!(path_drops(mir,mir.entry).as_slice(),[Obligation::DisposeListI32{operand,..}] if operand.root.span.bytes()==b"input: List<i32>")
+            );
+            let escape = lower("escape");
+            assert_eq!(escape.completion(), Completion::SourceRejected);
+            assert!(escape.mir().is_none());
+            let [f] = escape.findings() else {
+                panic!("one escape")
+            };
+            assert_eq!(
+                (f.code(), f.site.span.bytes(), f.related.span.bytes()),
+                (
+                    "R0202",
+                    b"return &input;".as_slice(),
+                    b"input: List<i32>".as_slice()
+                )
+            );
+            let other = lower("other");
+            assert_eq!(other.completion(), Completion::Incomplete);
+            assert!(other.mir().is_none() && other.findings().is_empty());
+        },
+    );
+}
+
 fn check_exact(
     receipt: &TypedReceipt<'_, '_>,
     module: &loader::Module,

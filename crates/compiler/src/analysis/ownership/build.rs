@@ -2303,6 +2303,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         return self.stage_named_transfer(value, output, checked, None, depth + 1);
                     }
                     let facts = self.value(value)?;
+                    if self.is_list_i32(result) {
+                        // Local List disposal does not prove a returned backing transfer.
+                        return Err(Stop::Pending(value));
+                    }
                     if facts.call.is_some() && self.shared_option(&facts.ty) {
                         // The producer has no checked caller-backing contract.
                         // Do not allocate or prove return storage for its value.
@@ -6411,8 +6415,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(Stop::Pending(node));
         }
         let result = checked_carrier.unwrap_or(&facts.ty);
-        // The local payload transfer does not prove a caller retention contract.
-        if self.shared_option(result) {
+        // A local cleanup or payload transfer does not establish the callee's
+        // ownership of a returned backing or its caller retention contract.
+        if self.is_list_i32(result) || self.shared_option(result) {
             return Err(Stop::Pending(node));
         }
         if checked_carrier.is_none() && matches!(result.as_ref(), TypeTerm::Callable { .. }) {
