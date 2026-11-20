@@ -169,27 +169,50 @@ impl<'g> OrdinaryAnalysis<'g> {
         self.statistics
     }
 
-    pub(super) fn mark_text_iteration_source(
+    pub(super) fn mark_text_iteration_sources(
         &mut self,
-        owner: &DeclarationId,
-        position: usize,
+        mut marks: Vec<(&'g DeclarationId, usize)>,
         budget: &mut Budget,
     ) -> Work<()> {
-        let width = owner.module.path.len().checked_add(4).ok_or(())?;
-        budget.step(
-            width
-                .checked_mul(self.types.declarations.len() + 1)
-                .ok_or(())?,
-        )?;
-        let header = self
-            .types
-            .declarations
-            .get_mut(owner)
-            .expect("checked named function");
-        let DeclarationShape::Function { parameters, .. } = &mut header.shape else {
-            unreachable!("checked function parameter")
-        };
-        parameters[position].text_iteration_source = true;
+        let n = marks.len();
+        if n == 0 {
+            return Ok(());
+        }
+        budget.step(n.checked_mul(n.ilog2() as usize + 3).ok_or(())?)?;
+        marks.sort_unstable_by_key(|&(owner, i)| (std::ptr::from_ref(owner), i));
+        marks.dedup_by(|a, b| std::ptr::eq(a.0, b.0) && a.1 == b.1);
+        for group in marks.chunk_by(|a, b| std::ptr::eq(a.0, b.0)) {
+            let (owner, first) = group[0];
+            let width = owner.module.path.len().checked_add(4).ok_or(())?;
+            budget.step(
+                width
+                    .checked_mul(self.types.declarations.len() + 1)
+                    .ok_or(())?,
+            )?;
+            let header = self
+                .types
+                .declarations
+                .get_mut(owner)
+                .expect("checked named function");
+            let DeclarationShape::Function { parameters, .. } = &mut header.shape else {
+                unreachable!("checked formal")
+            };
+            // A partially marked signature would make the first parameter pay
+            // for storage that an unrelated sibling cannot finish checking.
+            let TypeTerm::Nominal {
+                declaration: list, ..
+            } = parameters[first].ty.as_ref()
+            else {
+                unreachable!("typed List source")
+            };
+            budget.step(parameters.len() + group.len())?;
+            let required=parameters.iter().filter(|p| matches!(p.ty.as_ref(),TypeTerm::Nominal{declaration,arguments} if std::ptr::eq(*declaration,*list) && matches!(arguments.as_slice(),[t] if matches!(t.as_ref(),TypeTerm::Primitive(p) if p.name()=="string")))).count();
+            if required == group.len() {
+                for &(_, i) in group {
+                    parameters[i].text_iteration_source = true;
+                }
+            }
+        }
         Ok(())
     }
 

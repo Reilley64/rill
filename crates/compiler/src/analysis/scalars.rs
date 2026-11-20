@@ -2946,6 +2946,34 @@ impl<'r, 'g> Checker<'r, 'g> {
                 for &child in &n.children {
                     let obligations = self.facts.obligations.len();
                     let next = self.statement(module, child, depth + 1, context)?;
+                    if flow.normal
+                        && !flow.pending
+                        && module.syntax.nodes[child].kind == NodeKind::For
+                        && context.arrow_return.is_none()
+                        && let Some(header) = context.signature
+                        && header.declaration.id.kind == DeclarationKind::Function
+                        && module.syntax.nodes[header.declaration.node].children.get(1)
+                            == Some(&node)
+                        && let Some(NodeFacts {
+                            site,
+                            kind: NodeFactKind::Iteration(iteration),
+                            ..
+                        }) = self.facts.nodes.last()
+                        && site.node == child
+                        && let Some(source) = iteration.text_input
+                        && let DeclarationShape::Function { parameters, .. } = &header.shape
+                    {
+                        self.elab.step(parameters.len())?;
+                        if let Some(i) = parameters
+                            .iter()
+                            .position(|p| std::ptr::eq(&p.declaration.id, source))
+                        {
+                            self.elab.reserve(1)?;
+                            self.facts
+                                .text_iteration_sources
+                                .push((&header.declaration.id, i));
+                        }
+                    }
                     if flow.normal {
                         flow.normal = false;
                         flow = self.union(flow, &next)?;

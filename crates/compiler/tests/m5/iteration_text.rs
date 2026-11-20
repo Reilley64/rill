@@ -86,11 +86,12 @@ fn unadmitted_text_parameters_keep_their_old_caps() {
                     .unwrap();
                 lower_body(receipt, module, &d.id, cap).unwrap()
             };
-            // Before the string cursor, all three stopped at the parameter.
+            // Before the string cursor, all four stopped at the first text List.
             for (name, max_work, max_entries) in [
                 ("postfix", 1966, 74),
                 ("unused", 1963, 73),
                 ("wildcard", 1963, 73),
+                ("sibling", 1966, 74),
             ] {
                 let report = run(
                     name,
@@ -107,13 +108,49 @@ fn unadmitted_text_parameters_keep_their_old_caps() {
                     b"xs: List<string>"
                 );
             }
-            let other = run("sibling", AnalysisLimits::default());
-            assert!(other.mir().is_none());
-            assert_eq!(
-                other.blocked_at().unwrap().span.bytes(),
-                b"other: List<string>"
-            );
             assert!(run("works", AnalysisLimits::default()).mir().is_some());
+        },
+    );
+}
+
+#[test]
+fn a_dead_loop_does_not_admit_a_text_parameter() {
+    probe(
+        "iteration::text::a_dead_loop_does_not_admit_a_text_parameter",
+        r#"
+        function dead(xs: List<string>): void { return; for (let item of xs) { break; } }
+        function pruned(xs: List<string>): void { if (false) { for (let item of xs) { break; } } }
+        function both(xs: List<string>, ys: List<string>): void { for (let x of xs) { break; } for (let y of ys) { break; } }
+    "#,
+        |_, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            for (name, expected) in [
+                ("dead", Completion::Incomplete),
+                ("pruned", Completion::Incomplete),
+                ("both", Completion::Checked),
+            ] {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let local = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                    .unwrap();
+                assert_eq!(local.completion(), expected);
+                assert_eq!(root.ordinary_completion(), expected);
+                assert_eq!(local.mir().is_some(), expected == Completion::Checked);
+                assert_eq!(root.mir().is_some(), expected == Completion::Checked);
+                if expected == Completion::Incomplete {
+                    assert_eq!(
+                        local.blocked_at().unwrap().span.bytes(),
+                        b"xs: List<string>"
+                    );
+                }
+            }
         },
     );
 }

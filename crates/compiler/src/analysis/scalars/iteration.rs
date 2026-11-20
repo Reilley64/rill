@@ -20,6 +20,7 @@ pub struct Iteration<'g> {
     /// excludes nested iteration, propagation and computed scalar expressions.
     /// This describes the written body, not ownership of its operands.
     pub(in crate::analysis) simple_body: bool,
+    pub(super) text_input: Option<&'g DeclarationId>,
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
@@ -63,30 +64,17 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut body = body?;
         if simple
             && context.scopes.last().is_some_and(|scope| scope.len() == 1)
-            && let (Some(iteration), Some(value), Some(header)) =
-                (&handoff, &source, context.signature)
+            && let (Some(iteration), Some(value)) = (&mut handoff, &source)
             && iteration.traversal == Some(ListTraversal::Owned)
             && primitive_name(&iteration.yielded) == Some("string")
-            && header.declaration.id.kind == DeclarationKind::Function
-            && context.arrow_return.is_none()
             && value.access == data::Access::Owned
             && let Some(path) = value.path.as_ref()
             && path.root.kind == DeclarationKind::Parameter
             && path.projections.is_empty()
-            && let DeclarationShape::Function { parameters, .. } = &header.shape
         {
-            // The pattern scope contains just the named yield (or is empty
-            // for `_`). This source hint does not select any M5 effects.
-            self.elab.step(parameters.len())?;
-            if let Some(i) = parameters
-                .iter()
-                .position(|formal| std::ptr::eq(&formal.declaration.id, path.root))
-            {
-                self.elab.reserve(1)?;
-                self.facts
-                    .text_iteration_sources
-                    .push((&header.declaration.id, i));
-            }
+            // Written source only. The enclosing block separately knows whether
+            // its prefix can actually reach this loop.
+            iteration.text_input = Some(path.root);
         }
         context.loops.pop();
         context.scopes.pop();
@@ -202,6 +190,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             none: &option.none.id,
             traversal,
             simple_body: false,
+            text_input: None,
         }))
     }
 }
