@@ -2966,6 +2966,284 @@ fn moved_incoming_write_checks_the_original_caller_contents() {
 }
 
 #[test]
+fn terminal_nested_retained_writes_receive_typed_receipts() {
+    use compiler::analysis::scalars::data::{Access, PathProjection};
+    use compiler::analysis::scalars::{NodeFactKind, Place};
+    use compiler::analysis::typed::TypedCompletion;
+    use compiler::analysis::{Stage, TypeTerm};
+
+    probe_with_typed(
+        "retained::terminal_nested_retained_writes_receive_typed_receipts",
+        r#"
+            function keep(slot: &mut &mut &bool, input: &bool): void { **slot = input; }
+            function leak(slot: &mut &mut &bool, input: &bool): void {
+                let flag = true;
+                **slot = &flag;
+            }
+            function relay(slot: &mut &mut &bool, input: &bool): void { keep(slot, input); }
+        "#,
+        |request, module, receipt, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let nodes = &module.syntax.nodes;
+            let value = |node| {
+                let facts = typed.bodies().node(module, node).unwrap().unwrap();
+                let NodeFactKind::Expression(expression) = &facts.kind else {
+                    panic!("expected expression facts")
+                };
+                expression
+            };
+            for (name, rhs) in [("keep", b"input".as_slice()), ("leak", b"&flag")] {
+                let function = declaration(name);
+                let body = nodes[function.node].children[1];
+                let store = *nodes[body].children.last().unwrap();
+                let left = nodes[store].children[0];
+                let right = nodes[store].children[1];
+                let inner = nodes[left].children[0];
+                let slot = nodes[inner].children[0];
+                let original = value(slot).binding.unwrap();
+                assert_eq!(original.kind, loader::DeclarationKind::Parameter);
+                let slot_decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.id == *original)
+                    .unwrap();
+                assert_eq!(slot_decl.span.bytes(), b"slot: &mut &mut &bool");
+                assert!(
+                    function.span.start() <= slot_decl.span.start()
+                        && slot_decl.span.end() <= function.span.end()
+                );
+                assert_eq!(value(slot).path.as_ref().unwrap().root, original);
+                assert!(value(slot).path.as_ref().unwrap().projections.is_empty());
+                for (hop, count) in [(inner, 1), (left, 2)] {
+                    let hop = value(hop);
+                    assert_eq!((hop.place, hop.access), (Place::Writable, Access::Writable));
+                    let path = hop.path.as_ref().unwrap();
+                    assert_eq!(path.root, original);
+                    assert_eq!(path.projections, vec![PathProjection::Dereference; count]);
+                }
+                for (descriptor, referent) in [(slot, inner), (inner, left)] {
+                    assert!(
+                        matches!(value(descriptor).ty.as_ref(), TypeTerm::Reference { mutable: true, referent: ty }
+                        if ty == &value(referent).ty)
+                    );
+                }
+                assert!(
+                    matches!(value(left).ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                    if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+                );
+                assert_eq!(value(left).ty, value(right).ty);
+                assert_eq!(nodes[right].span.bytes(), rhs);
+                let backing = if name == "leak" {
+                    nodes[right].children[0]
+                } else {
+                    right
+                };
+                let path = value(backing).path.as_ref().unwrap();
+                assert!(path.projections.is_empty());
+                let backing = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.id == *path.root)
+                    .unwrap();
+                assert_eq!(
+                    backing.span.bytes(),
+                    if name == "leak" {
+                        &b"flag"[..]
+                    } else {
+                        b"input: &bool"
+                    }
+                );
+                assert!(
+                    function.span.start() <= backing.span.start()
+                        && backing.span.end() <= function.span.end()
+                );
+            }
+            let relay = nodes
+                .iter()
+                .position(|node| node.span.bytes() == b"keep(slot, input)")
+                .unwrap();
+            assert_eq!(
+                value(relay).call.as_ref().unwrap().callee,
+                &declaration("keep").id
+            );
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty() && uses.discards().is_empty());
+            assert_eq!(
+                receipt.not_performed(),
+                &[Stage::Ownership, Stage::Execution]
+            );
+
+            let graph = loader::load_installed(request.clone()).unwrap();
+            let stats = receipt.statistics();
+            let exact = AnalysisLimits {
+                max_work: stats.work,
+                max_entries: stats.entries,
+                max_depth: stats.max_depth,
+            };
+            assert!(analyze_typed(&graph, exact).receipt().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = analyze_typed(&graph, short);
+                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
+                assert!(limited.receipt().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn nested_retained_write_handoff_preserves_unrelated_result_discard() {
+    use compiler::analysis::typed::{ResultDiscardKind, TypedCompletion};
+
+    probe_report(
+        "retained::nested_retained_write_handoff_preserves_unrelated_result_discard",
+        r#"
+            function unused(slot: &mut &mut &bool, input: &bool, owed: Result<bool>.Ok): void {
+                **slot = input;
+            }
+        "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::SourceRejected);
+            assert!(typed.core_blockers().is_empty() && typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty());
+            let [discard] = uses.discards() else {
+                panic!("expected the original Result discard")
+            };
+            assert_eq!(discard.code(), "R0103");
+            assert_eq!(discard.kind, ResultDiscardKind::ScopeExit);
+            assert_eq!(discard.origin.span.bytes(), b"owed: Result<bool>.Ok");
+            assert_eq!(discard.storage.unwrap().start, discard.origin.span.start());
+        },
+    );
+}
+
+#[test]
+fn nested_retained_write_handoff_requires_unchanged_original_bool_route() {
+    use compiler::analysis::scalars::{NodeFactKind, Place};
+    use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
+
+    probe_report(
+        "retained::nested_retained_write_handoff_requires_unchanged_original_bool_route",
+        r#"
+            function moved(slot: &mut &mut &bool, input: &bool): void {
+                let alias = slot;
+                **alias = input;
+            }
+            function redirected(slot: &mut &mut &bool, inner: &mut &bool, input: &bool): void {
+                *slot = inner;
+                **slot = input;
+            }
+            function joined(slot: &mut &mut &bool, other: &mut &mut &bool, input: &bool, choose: bool): void {
+                let mut alias = slot;
+                if (choose) { alias = other; }
+                **alias = input;
+            }
+            function touch(slot: &mut &mut &bool): void {}
+            function afterCall(slot: &mut &mut &bool, input: &bool): void {
+                touch(slot);
+                **slot = input;
+            }
+            function forward(slot: &mut &mut &bool): &mut &mut &bool { return slot; }
+            function computed(slot: &mut &mut &bool, input: &bool): void {
+                **forward(slot) = input;
+            }
+            type Box = { access: &mut &mut &bool; }
+            function projected(b: &mut Box, input: &bool): void { **b.access = input; }
+            function captured(slot: &mut &mut &bool, input: &bool): mut () => void {
+                return () => { **slot = input; };
+            }
+            function namedAlias(slot: &mut &mut &bool, aliased: &bool): void {
+                let alias = aliased;
+                **slot = alias;
+            }
+            function borrowedParameter(slot: &mut &mut &bool, flag: bool): void {
+                **slot = &flag;
+            }
+            function displacedResult(slot: &mut &mut Result<bool, i32>, input: Result<bool, i32>): void {
+                **slot = input;
+            }
+            function pointeeResult(slot: &mut &mut &Result<bool, i32>, input: &Result<bool, i32>): void {
+                **slot = input;
+            }
+            function unknown<T>(slot: &mut &mut T, input: T): void {
+                **slot = input;
+            }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.core_blockers().is_empty() && typed.receipt().is_none());
+            assert!(
+                typed.bodies().findings().is_empty(),
+                "{:?}",
+                typed
+                    .bodies()
+                    .findings()
+                    .iter()
+                    .map(|f| (f.kind, String::from_utf8_lossy(f.site.span.bytes())))
+                    .collect::<Vec<_>>()
+            );
+            let pending = typed.result_use().unwrap().pending();
+            for (name, store) in [
+                ("moved", "**alias = input;"),
+                ("redirected", "**slot = input;"),
+                ("joined", "**alias = input;"),
+                ("afterCall", "**slot = input;"),
+                ("computed", "**forward(slot) = input;"),
+                ("projected", "**b.access = input;"),
+                ("captured", "**slot = input;"),
+                ("namedAlias", "**slot = alias;"),
+                ("borrowedParameter", "**slot = &flag;"),
+                ("displacedResult", "**slot = input;"),
+                ("pointeeResult", "**slot = input;"),
+                ("unknown", "**slot = input;"),
+            ] {
+                let function = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let blocked = pending
+                    .iter()
+                    .find(|p| {
+                        p.blocker == ResultUseBlocker::Storage
+                            && p.site.module == &module.key
+                            && function.span.start() <= p.site.span.start()
+                            && p.site.span.end() <= function.span.end()
+                            && p.site.span.bytes() == store.as_bytes()
+                    })
+                    .unwrap_or_else(|| panic!("missing Storage blocker for {name}"));
+                let facts = typed.bodies();
+                assert!(matches!(
+                    facts.node(module, blocked.site.node).unwrap().unwrap().kind,
+                    NodeFactKind::Statement
+                ));
+                let destination = module.syntax.nodes[blocked.site.node].children[0];
+                assert!(
+                    matches!(&facts.node(module, destination).unwrap().unwrap().kind,
+                    NodeFactKind::Expression(v) if v.place == Place::Writable),
+                    "{name}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
 fn retained_write_handoff_does_not_grant_captured_or_result_storage() {
     use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 

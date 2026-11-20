@@ -22,6 +22,7 @@ mod control;
 mod loops;
 mod patterns;
 mod releases;
+mod retained;
 mod shape;
 mod storage;
 mod values;
@@ -252,6 +253,7 @@ struct Check<'a, 'g> {
     proving_callable: bool,
     has_pending: bool,
     current_parameters: &'a [MemberType<'g>],
+    nested_write_body: Option<NodeId>,
 }
 
 impl<'a, 'g> Check<'a, 'g> {
@@ -292,6 +294,7 @@ impl<'a, 'g> Check<'a, 'g> {
             proving_callable: false,
             has_pending: false,
             current_parameters: &[],
+            nested_write_body: None,
         })
     }
 
@@ -648,6 +651,13 @@ impl<'a, 'g> Check<'a, 'g> {
                         }) {
                             self.pending(node, ResultUseBlocker::Storage)?;
                         }
+                    } else if checked
+                        && syntax.kind == NodeKind::Assignment("=")
+                        && matches!(&storage, PlaceStorage::Indirect(addresses) if addresses.is_empty())
+                        && let Some(target) = target
+                        && self.terminal_nested_bool_write(node, target, state, &incoming, depth)?
+                    {
+                        // No displaced Result-use state to update; ownership still checks the store.
                     } else {
                         self.pending(node, ResultUseBlocker::Storage)?;
                         for address in storage.addresses() {

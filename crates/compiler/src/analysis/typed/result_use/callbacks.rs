@@ -85,6 +85,12 @@ impl<'a, 'g> Check<'a, 'g> {
             return self.pending(node, ResultUseBlocker::TypedInput);
         };
         let previous = std::mem::replace(&mut self.current_parameters, parameters);
+        self.budget.step(1)?;
+        let nested_write_body = (signature.declaration.id.kind == DeclarationKind::Function
+            && signature.binders.is_empty()
+            && self.checked.contains(&signature.declaration.id))
+        .then_some(body);
+        let previous_body = std::mem::replace(&mut self.nested_write_body, nested_write_body);
         let mut states = self.singleton(Residence::default())?;
         for parameter in parameters {
             let id = &parameter.declaration.id;
@@ -113,6 +119,7 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         self.current_parameters = previous;
+        self.nested_write_body = previous_body;
         Ok(())
     }
 
