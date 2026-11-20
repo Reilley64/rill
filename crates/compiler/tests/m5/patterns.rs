@@ -1,6 +1,417 @@
 use super::*;
 
 #[test]
+fn owned_narrow_variant_exports_the_lexical_payload() {
+    use compiler::analysis::{
+        ownership::{GraphCompletion, Place, Projection, analyze_ownership},
+        scalars::BodyOwner,
+    };
+    use loader::DeclarationKind;
+
+    let mut normal_context = None;
+    probe(
+        "patterns::owned_narrow_variant_exports_the_lexical_payload",
+        r#"
+        enum Parcel { Text(string), Empty }
+        function keep(input: Parcel.Text): string { let Parcel.Text(text) = input; return text; }
+        function discard(input: Parcel.Text, after: string): string { let Parcel.Text(_) = input; return after; }
+        function reuse(input: Parcel.Text): string { let Parcel.Text(first) = input; let Parcel.Text(second) = input; return second; }
+        function untouched(input: Parcel.Text): void {}
+        function bound(input: Parcel.Text, after: bool): bool { let Parcel.Text(text) = input; return after; }
+        enum ScalarParcel { Text(i32), Owned(string), Empty }
+        function copyTwice(input: ScalarParcel.Text): i32 { let ScalarParcel.Text(first) = input; let ScalarParcel.Text(second) = input; return second; }
+        function groupedSource(input: Parcel.Text): string { let Parcel.Text(text) = (((((((input))))))); return text; }
+        function groupedPattern(input: Parcel.Text): string { let (((Parcel.Text((((text))))))) = input; return text; }
+    "#,
+        |request, module, receipt| {
+            let default = AnalysisLimits::default();
+            let function = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower =
+                |name, limits| lower_body(receipt, module, &function(name).id, limits).unwrap();
+            let [text, scalar] = module
+                .declarations
+                .iter()
+                .filter(|d| {
+                    d.id.kind == DeclarationKind::Variant && d.name.as_deref() == Some("Text")
+                })
+                .collect::<Vec<_>>()[..]
+            else {
+                panic!("expected two distinct Text variant declarations")
+            };
+            assert_ne!(text.id, scalar.id);
+            let payload = |place: &Place<'_>, variant| matches!(place.projection, Some(Projection::VariantPayload { variant: id, index: 0 }) if id == variant);
+            let verify = |name, mir: &Mir<'_>| {
+                let ops = linear(mir, mir.entry);
+                assert!(
+                    !ops.iter()
+                        .any(|op| matches!(op, Operation::TestVariant { .. }))
+                );
+                let transfers: Vec<_> = ops
+                    .iter()
+                    .copied()
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Operation::Copy { .. } | Operation::Move { .. } | Operation::Export(_)
+                        )
+                    })
+                    .collect();
+                let drops = path_drops(mir, mir.entry);
+                match name {
+                    "keep" | "groupedSource" | "groupedPattern" => {
+                        assert!(matches!(transfers.as_slice(), [
+                            Operation::Move { from: input, into: Some(stage) },
+                            Operation::Move { from: leaf, into: Some(local) },
+                            Operation::Move { from: giving, into: Some(result) },
+                            Operation::Export(export),
+                        ] if input.root.span.bytes() == b"input: Parcel.Text" && input.projection.is_none()
+                            && stage.projection.is_none() && stage.root.node != input.root.node
+                            && leaf.root.node == stage.root.node && payload(leaf, &text.id)
+                            && local.root.span.bytes() == b"text" && local.projection.is_none()
+                            && local.root.node == giving.root.node && giving.projection.is_none()
+                            && result.root.node == export.root.node && export.projection.is_none()));
+                        assert!(drops.is_empty());
+                    }
+                    "discard" => {
+                        let [
+                            Operation::Move {
+                                from: input,
+                                into: Some(stage),
+                            },
+                            Operation::Move {
+                                from: after,
+                                into: Some(result),
+                            },
+                            Operation::Export(export),
+                        ] = transfers.as_slice()
+                        else {
+                            panic!("{transfers:?}")
+                        };
+                        assert_eq!(input.root.span.bytes(), b"input: Parcel.Text");
+                        assert_eq!(after.root.span.bytes(), b"after: string");
+                        assert_eq!(result.root.node, export.root.node);
+                        assert!(
+                            matches!(drops.as_slice(), [Obligation::Drop(leaf)] if leaf.root.node == stage.root.node && payload(leaf, &text.id))
+                        );
+                        let drop = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::Drop(leaf) if payload(leaf, &text.id))))).unwrap();
+                        let stage_move = ops
+                            .iter()
+                            .position(|op| std::ptr::eq(*op, transfers[0]))
+                            .unwrap();
+                        let suffix = ops
+                            .iter()
+                            .position(|op| std::ptr::eq(*op, transfers[1]))
+                            .unwrap();
+                        assert!(stage_move < drop && drop < suffix);
+                    }
+                    "untouched" => {
+                        assert!(transfers.is_empty());
+                        assert!(
+                            matches!(drops.as_slice(), [Obligation::Drop(leaf)] if leaf.root.span.bytes() == b"input: Parcel.Text" && payload(leaf, &text.id))
+                        );
+                    }
+                    "bound" => {
+                        let [
+                            Operation::Move {
+                                into: Some(stage), ..
+                            },
+                            Operation::Move {
+                                from: leaf,
+                                into: Some(local),
+                            },
+                            Operation::Copy { from: after, .. },
+                            Operation::Export(_),
+                        ] = transfers.as_slice()
+                        else {
+                            panic!("{transfers:?}")
+                        };
+                        assert!(leaf.root.node == stage.root.node && payload(leaf, &text.id));
+                        assert_eq!(local.root.span.bytes(), b"text");
+                        assert_eq!(after.root.span.bytes(), b"after: bool");
+                        assert!(
+                            matches!(drops.as_slice(), [Obligation::Drop(drop)] if drop.root.node == local.root.node && drop.projection.is_none())
+                        );
+                        let suffix = ops
+                            .iter()
+                            .position(|op| std::ptr::eq(*op, transfers[2]))
+                            .unwrap();
+                        let drop = ops.iter().position(|op| matches!(op, Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action, Obligation::Drop(place) if place.root.node == local.root.node)))).unwrap();
+                        assert!(suffix < drop);
+                    }
+                    "copyTwice" => {
+                        assert!(matches!(transfers.as_slice(), [
+                            Operation::Copy { from: input, into: Some(stage1) },
+                            Operation::Copy { from: leaf1, into: Some(first) },
+                            Operation::Copy { from: reuse, into: Some(stage2) },
+                            Operation::Copy { from: leaf2, into: Some(second) },
+                            Operation::Copy { from: giving, into: Some(result) },
+                            Operation::Export(export),
+                        ] if input.root.span.bytes() == b"input: ScalarParcel.Text" && input.projection.is_none()
+                            && input.root.node == reuse.root.node && reuse.projection.is_none()
+                            && stage1.root.node != stage2.root.node && stage1.projection.is_none() && stage2.projection.is_none()
+                            && leaf1.root.node == stage1.root.node && payload(leaf1, &scalar.id)
+                            && leaf2.root.node == stage2.root.node && payload(leaf2, &scalar.id)
+                            && first.root.span.bytes() == b"first" && second.root.span.bytes() == b"second"
+                            && second.root.node == giving.root.node && result.root.node == export.root.node));
+                        assert!(drops.is_empty());
+                    }
+                    _ => unreachable!(),
+                }
+            };
+            let rejected = |findings: &[compiler::analysis::ownership::Finding<'_>]| {
+                let [finding] = findings else {
+                    panic!("expected exactly one R0200")
+                };
+                let source = function("reuse").span.bytes();
+                let read = |needle: &[u8]| {
+                    function("reuse").span.start()
+                        + source
+                            .windows(needle.len())
+                            .position(|bytes| bytes == needle)
+                            .unwrap()
+                        + needle.len()
+                        - b"input;".len()
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.site.span.bytes(), b"input");
+                assert_eq!(finding.site.span.start(), read(b"(second) = input;"));
+                assert_eq!(finding.related.span.bytes(), b"input");
+                assert_eq!(finding.related.span.start(), read(b"(first) = input;"));
+            };
+            let graph = analyze_ownership(receipt, default);
+            assert_eq!(graph.context(), receipt.context());
+            assert_eq!(graph.test_mode(), request.test_mode);
+            if let Some(normal) = &normal_context {
+                assert_ne!(normal, &graph.context());
+            } else {
+                normal_context = Some(graph.context());
+            }
+            assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
+            assert!(graph.inventory_complete());
+            rejected(graph.findings());
+            let root = |name| {
+                graph
+                    .roots()
+                    .iter()
+                    .find(|root| root.owner() == BodyOwner::Declaration(&function(name).id))
+                    .unwrap()
+            };
+            let report = lower("reuse", default);
+            assert_eq!(report.completion(), Completion::SourceRejected);
+            rejected(report.findings());
+            assert!(report.mir().is_none());
+            assert_eq!(
+                root("reuse").ordinary_completion(),
+                Completion::SourceRejected
+            );
+            assert!(root("reuse").ordinary_mir().is_none());
+            for name in [
+                "keep",
+                "discard",
+                "untouched",
+                "bound",
+                "copyTwice",
+                "groupedSource",
+                "groupedPattern",
+            ] {
+                let local = lower(name, default);
+                assert_eq!(
+                    local.completion(),
+                    Completion::Checked,
+                    "{name}: {:?}",
+                    local
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string())
+                );
+                assert_eq!(
+                    root(name).ordinary_completion(),
+                    Completion::Checked,
+                    "{name}"
+                );
+                verify(name, local.mir().unwrap());
+                verify(name, root(name).ordinary_mir().unwrap());
+            }
+            let bare_depth = lower("keep", default).statistics().max_depth;
+            for name in ["groupedSource", "groupedPattern"] {
+                let stats = lower(name, default).statistics();
+                assert!(stats.max_depth > bare_depth);
+                let exact = AnalysisLimits {
+                    max_depth: stats.max_depth,
+                    max_work: stats.work,
+                    max_entries: stats.entries,
+                };
+                assert_eq!(lower(name, exact).completion(), Completion::Checked);
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = lower(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+            let stats = graph.statistics();
+            let exact = AnalysisLimits {
+                max_depth: stats.max_depth,
+                max_work: stats.work,
+                max_entries: stats.entries,
+            };
+            assert_eq!(
+                analyze_ownership(receipt, exact).completion(),
+                GraphCompletion::SourceRejected
+            );
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                assert_eq!(
+                    analyze_ownership(receipt, short).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+            let shallow = analyze_ownership(
+                receipt,
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..default
+                },
+            );
+            assert_eq!(shallow.completion(), GraphCompletion::ResourceLimit);
+            for name in ["groupedSource", "groupedPattern"] {
+                let root = shallow
+                    .roots()
+                    .iter()
+                    .find(|root| root.owner() == BodyOwner::Declaration(&function(name).id))
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::ResourceLimit);
+                assert!(root.ordinary_mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn owned_narrow_variant_keeps_other_storage_routes_incomplete() {
+    use compiler::analysis::{ownership::analyze_ownership, scalars::BodyOwner};
+
+    probe(
+        "patterns::owned_narrow_variant_keeps_other_storage_routes_incomplete",
+        r#"
+        enum Parcel { Text(string), Guard(LockGuard<i32>), Nested([string, bool]), Empty }
+        enum Singleton { Text(string) }
+        enum Generic<T> { Text(T), Empty }
+        function borrowed(input: &Parcel.Text): &string { let Parcel.Text(text) = input; return text; }
+        function protected(input: Parcel.Guard): void { let Parcel.Guard(_) = input; }
+        function nested(input: Parcel.Nested): void { let Parcel.Nested([_, _]) = input; }
+        function parent(input: Singleton): string { let Singleton.Text(text) = input; return text; }
+        function generic(input: Generic<string>.Text): void { let Generic<string>.Text(_) = input; }
+        function whole(input: Parcel.Text): void { let saved = input; }
+    "#,
+        |_, module, receipt| {
+            let limits = AnalysisLimits::default();
+            let graph = analyze_ownership(receipt, limits);
+            for name in [
+                "borrowed",
+                "protected",
+                "nested",
+                "parent",
+                "generic",
+                "whole",
+            ] {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let report = lower_body(receipt, module, &decl.id, limits).unwrap();
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none() && report.findings().is_empty());
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|root| root.owner() == BodyOwner::Declaration(&decl.id))
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::Incomplete, "{name}");
+                assert!(root.ordinary_mir().is_none());
+            }
+            assert!(graph.findings().is_empty());
+        },
+    );
+}
+
+#[test]
+fn owned_narrow_variant_refutable_bindings_have_no_typed_receipt() {
+    use compiler::analysis::{scalars::ScalarFindingKind, typed::TypedCompletion};
+
+    probe_report(
+        "patterns::owned_narrow_variant_refutable_bindings_have_no_typed_receipt",
+        r#"
+        enum Parcel { Text(string), Empty }
+        function parent(input: Parcel): string { let Parcel.Text(text) = input; return text; }
+        function refutablePayload(input: Parcel.Text): void { let Parcel.Text("test") = input; }
+    "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            let refutable: Vec<_> = typed
+                .bodies()
+                .findings()
+                .iter()
+                .filter(|f| f.kind == ScalarFindingKind::RefutableBinding)
+                .map(|f| f.site.span.bytes())
+                .collect();
+            assert_eq!(
+                refutable,
+                [
+                    b"Parcel.Text(text)".as_slice(),
+                    b"Parcel.Text(\"test\")".as_slice()
+                ]
+            );
+        },
+    );
+}
+
+#[test]
+fn owned_narrow_variant_custom_disposer_has_no_typed_receipt() {
+    use compiler::analysis::typed::TypedCompletion;
+
+    probe_report(
+        "patterns::owned_narrow_variant_custom_disposer_has_no_typed_receipt",
+        r#"
+        enum Parcel { Text(string), Empty }
+        implement dispose(value: Parcel.Text): void {}
+        function untouched(input: Parcel.Text): void {}
+    "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+        },
+    );
+}
+
+#[test]
 fn constructed_nested_record_pattern_cleans_named_binding_on_option_exits() {
     use compiler::analysis::ownership::{Place, Projection};
 

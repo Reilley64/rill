@@ -1,6 +1,5 @@
 //! Construct ownership operations from the M4 type and control facts.
 use super::*;
-use crate::analysis::MemberType;
 use crate::analysis::ordinary::{self, HypotheticalOutcome};
 use crate::analysis::scalars::data::{
     Access, Construction, Constructor, DataExpression, PathProjection, Pattern, PatternBinder,
@@ -16,8 +15,10 @@ use crate::analysis::scalars::{
 };
 use crate::analysis::typed::{
     ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
-    OptionRole, OwnershipCoverage, OwnershipRule, PrimitiveCoverage, PrimitiveRole, ResultRole,
+    OptionRole, OwnershipCoverage, OwnershipRule, Primitive, PrimitiveCoverage, PrimitiveOperation,
+    PrimitiveRole, ResultRole,
 };
+use crate::analysis::{MemberType, Payload};
 use crate::loader::Origin;
 use crate::parser::NodeKind;
 use std::sync::Arc;
@@ -34,6 +35,7 @@ enum ExpressionProof<'t, 'g> {
     CallCarrier(&'t Type<'g>),
     NestedTupleParent(&'t PlacePath<'g>),
     NestedTupleSource(Slot),
+    NarrowVariantSource(Slot),
     NamedNestedTupleLeaf,
     NestedRecordConstruction,
     UnloweredRebuildRead(Slot),
@@ -266,6 +268,18 @@ enum Binding<'a, 'g> {
         access: Access,
         nested_reborrow: Option<&'a PlacePath<'g>>,
     },
+    IrrefutableVariant {
+        source: NodeId,
+        from: Slot,
+        binder: Option<(NodeId, &'a PatternBinder<'g>)>,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct NarrowVariantParameter<'a, 'g> {
+    slot: Slot,
+    ty: &'a Type<'g>,
+    payload: &'a Type<'g>,
 }
 
 #[derive(Clone, Copy)]
@@ -321,6 +335,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             nested_record_values: BTreeMap::new(),
             nested_tuple_parameters: BTreeMap::new(),
             nested_tuple_bindings: BTreeMap::new(),
+            narrow_variant_parameters: BTreeMap::new(),
             whole_child_patterns: BTreeSet::new(),
             retained: BTreeMap::new(),
             retains_exclusive_bool: false,
@@ -410,9 +425,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(())
     }
 
-    pub(super) fn parameter(&mut self, parameter: &MemberType<'g>) -> ResultOf<Slot> {
+    pub(super) fn parameter(&mut self, parameter: &'a MemberType<'g>) -> ResultOf<Slot> {
         let node = parameter.declaration.node;
         let ty = &parameter.ty;
+        if matches!(ty.as_ref(), TypeTerm::Variant { declaration, .. } if declaration.module.origin == Origin::Application)
+            && self.return_contract.is_some_and(|(owner, _)| {
+                owner.kind == DeclarationKind::Function
+                    && owner.module.origin == Origin::Application
+            })
+        {
+            return self.narrow_variant_parameter(parameter);
+        }
         if let Some(slot) = self.nested_record_region(node, ty)? {
             self.budget.reserve(1)?;
             self.nested_record_values
@@ -426,6 +449,104 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Ok(slot);
         }
         self.local(&parameter.declaration.id, node, ty)
+    }
+
+    fn narrow_variant_parameter(&mut self, parameter: &'a MemberType<'g>) -> ResultOf<Slot> {
+        let node = parameter.declaration.node;
+        let pending = || Stop::Pending(node);
+        let ty = &parameter.ty;
+        let TypeTerm::Variant {
+            parent,
+            declaration,
+        } = ty.as_ref()
+        else {
+            return Err(pending());
+        };
+        let TypeTerm::Nominal {
+            declaration: parent_id,
+            arguments,
+        } = parent.as_ref()
+        else {
+            return Err(pending());
+        };
+        self.budget.step(2)?;
+        if !arguments.is_empty()
+            || parent_id.kind != DeclarationKind::Enum
+            || parent_id.module.origin != Origin::Application
+            || declaration.kind != DeclarationKind::Variant
+            || declaration.module != parent_id.module
+        {
+            return Err(pending());
+        }
+        let facts = self
+            .typed
+            .inventory()
+            .type_facts()
+            .declarations
+            .get(parent_id)
+            .ok_or_else(pending)?;
+        let DeclarationShape::Enum { variants } = &facts.shape else {
+            return Err(pending());
+        };
+        if !facts.binders.is_empty() {
+            return Err(pending());
+        }
+        self.budget.step(variants.len())?;
+        let variant = variants
+            .iter()
+            .find(|variant| &variant.declaration.id == *declaration)
+            .ok_or_else(pending)?;
+        let Payload::Tuple(types) = &variant.payload else {
+            return Err(pending());
+        };
+        let [payload] = types.as_slice() else {
+            return Err(pending());
+        };
+        let TypeTerm::Primitive(intrinsic) = payload.as_ref() else {
+            return Err(pending());
+        };
+        let primitive = Primitive::named(intrinsic.name()).ok_or_else(pending)?;
+        if self.outer_disposer(node, parent)?.is_some() || self.outer_disposer(node, ty)?.is_some()
+        {
+            return Err(pending());
+        }
+        // The required pinned primitive winner must still cover this exact payload.
+        // Native nominal protection cannot apply to an application enum or this leaf.
+        let protection = self.typed.primitive_protection();
+        self.budget.step(protection.len())?;
+        let winner = protection
+            .iter()
+            .find(|scope| {
+                Some(scope.family) == self.dispose
+                    && scope.role == PrimitiveRole::Dispose
+                    && scope.primitive == primitive
+                    && scope.coverage == PrimitiveCoverage::Clear
+            })
+            .and_then(|scope| scope.required_winner)
+            .ok_or_else(pending)?;
+        let providers = self.typed.primitive_providers();
+        self.budget.step(providers.len())?;
+        if !providers.iter().any(|provider| {
+            Some(provider.family) == self.dispose
+                && provider.role == PrimitiveRole::Dispose
+                && provider.primitive == primitive
+                && &provider.implementation.id == winner
+                && provider.binding.map(|binding| binding.operation)
+                    == (primitive == Primitive::String).then_some(PrimitiveOperation::DisposeText)
+        }) {
+            return Err(pending());
+        }
+        let projection = Projection::VariantPayload {
+            variant: &variant.declaration.id,
+            index: 0,
+        };
+        let slot = self.aggregate(node, None, std::iter::once((projection, payload)))?;
+        self.budget.reserve(1)?;
+        self.narrow_variant_parameters.insert(
+            &parameter.declaration.id,
+            NarrowVariantParameter { slot, ty, payload },
+        );
+        Ok(slot)
     }
 
     fn nested_tuple_region(&mut self, node: NodeId, ty: &Type<'g>) -> ResultOf<Option<Slot>> {
@@ -1477,9 +1598,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         match projection {
             Projection::Field(field) => self.field(node, root, &field.id),
             Projection::TupleElement(position) => self.element(node, root, position),
-            Projection::NestedField { .. } | Projection::NestedTupleElement { .. } => {
-                Err(Stop::Pending(node))
-            }
+            Projection::NestedField { .. }
+            | Projection::NestedTupleElement { .. }
+            | Projection::VariantPayload { .. } => Err(Stop::Pending(node)),
         }
     }
 
@@ -1665,7 +1786,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 || nodes[*name].kind != NodeKind::NamePattern
                 || nodes[*literal].kind != NodeKind::Literal
                 || self.normal_value(*literal)?.ty != *bool_ty
-                || !matches!(self.binding(binding)?, Binding::Name { declaration, .. }
+                || !matches!(self.binding(binding, depth + 1)?, Binding::Name { declaration, .. }
                     if declaration == backing)
             {
                 return Err(Stop::Pending(rhs));
@@ -1769,7 +1890,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let statement = &self.module.syntax.nodes[child];
             let control = if matches!(statement.kind, NodeKind::Binding { .. }) {
                 let initializer = *statement.children.last().unwrap();
-                self.declare_binding(child, initializer, &mut locals)?;
+                self.declare_binding(child, initializer, &mut locals, depth + 2)?;
                 initializer
             } else {
                 child
@@ -1835,7 +1956,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             NodeKind::Function => Ok(next),
             NodeKind::Binding { .. } => {
                 let value = *children.last().unwrap();
-                let binding = self.binding(node)?;
+                let binding = self.binding(node, depth + 1)?;
                 let (initializer, initializer_depth) =
                     self.ungroup_expression_at(value, depth + 1)?;
                 if self.propagates_directly(initializer)? {
@@ -1951,6 +2072,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         nested_reborrow,
                         ..
                     } => self.bind_product(node, facts, access, nested_reborrow, next, depth + 1),
+                    Binding::IrrefutableVariant {
+                        source,
+                        from,
+                        binder,
+                    } => self.bind_narrow_variant(node, source, from, binder, next, depth + 1),
                 }
             }
             NodeKind::ExpressionStatement => {
@@ -2329,7 +2455,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
     }
 
-    fn binding(&mut self, node: NodeId) -> ResultOf<Binding<'a, 'g>> {
+    fn binding(&mut self, node: NodeId, depth: usize) -> ResultOf<Binding<'a, 'g>> {
         let pattern = self.module.syntax.nodes[node].children[0];
         let shape = self.ungroup(pattern)?;
         match self.module.syntax.nodes[shape].kind {
@@ -2354,6 +2480,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     site: shape,
                 })
             }
+            NodeKind::PayloadPattern => self.irrefutable_variant(node, pattern, depth),
             kind @ (NodeKind::BracketPattern | NodeKind::RecordPattern) => {
                 self.budget.step(1)?;
                 let Some(NodeFactKind::Pattern(facts)) = self.fact(&pattern).map(|f| &f.kind)
@@ -2434,6 +2561,157 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 })
             }
         }
+    }
+
+    fn variant_pattern_at(
+        &mut self,
+        mut node: NodeId,
+        mut depth: usize,
+    ) -> ResultOf<(NodeId, usize)> {
+        loop {
+            self.depth(depth)?;
+            let syntax = &self.module.syntax.nodes[node];
+            if syntax.kind != NodeKind::GroupPattern {
+                return Ok((node, depth));
+            }
+            node = syntax.children[0];
+            depth += 1;
+        }
+    }
+
+    fn irrefutable_variant(
+        &mut self,
+        node: NodeId,
+        pattern: NodeId,
+        depth: usize,
+    ) -> ResultOf<Binding<'a, 'g>> {
+        let pending = Stop::Pending(pattern);
+        let (shape, pattern_depth) = self.variant_pattern_at(pattern, depth)?;
+        let statement = &self.module.syntax.nodes[node];
+        let [_, source] = statement.children.as_slice() else {
+            return Err(pending);
+        };
+        let [_, child] = self.module.syntax.nodes[shape].children.as_slice() else {
+            return Err(pending);
+        };
+        let Some(NodeFactKind::Pattern(facts)) = self.fact(&pattern).map(|fact| &fact.kind) else {
+            return Err(pending);
+        };
+        if statement.kind != (NodeKind::Binding { mutable: false })
+            || facts.access != Access::Owned
+            || !facts.coverage.exhaustive()
+            || !std::ptr::eq(facts.source.module, &self.module.key)
+            || facts.source.node != *source
+        {
+            return Err(pending);
+        }
+        let (read, _) = self.ungroup_expression_at(*source, depth)?;
+        let (input, path) = self.named_owned_place(read)?.ok_or(Stop::Pending(read))?;
+        self.budget.step(1)?;
+        let parameter = self
+            .narrow_variant_parameters
+            .get(path.root)
+            .copied()
+            .ok_or(Stop::Pending(read))?;
+        let initializer = self.normal_value(*source)?;
+        // Match the declared parameter type, not a flow-refined or admitted type.
+        if input.binding != Some(path.root)
+            || &input.ty != parameter.ty
+            || &facts.ty != parameter.ty
+            || &initializer.ty != parameter.ty
+            || input.refinement.is_some()
+            || initializer.refinement.is_some()
+            || input.admission.is_some()
+            || initializer.admission.is_some()
+            || input.data.is_some()
+            || input.call.is_some()
+            || input.place == TypedPlace::Value
+            || initializer.access != Access::Owned
+            || initializer.path.as_ref() != Some(path)
+        {
+            return Err(Stop::Pending(read));
+        }
+        let from = parameter.slot;
+        let Some(Projection::VariantPayload { variant, index }) = self.slots[from + 1].projection
+        else {
+            return Err(pending);
+        };
+        let Pattern::Constructor(Constructor::Variant(tag), children, Some(site)) =
+            facts.pattern.as_ref()
+        else {
+            return Err(pending);
+        };
+        let [typed_child] = children.as_slice() else {
+            return Err(pending);
+        };
+        if *tag != variant || *site != shape {
+            return Err(pending);
+        }
+        let (child, _) = self.variant_pattern_at(*child, pattern_depth + 1)?;
+        let syntax = &self.module.syntax.nodes;
+        let binder = match (
+            syntax[child].kind,
+            typed_child.as_ref(),
+            facts.binders.as_slice(),
+        ) {
+            (NodeKind::Wildcard, Pattern::Wildcard, []) => None,
+            (NodeKind::NamePattern, Pattern::Any, [binder]) => {
+                self.budget.step(1)?;
+                if binder.declaration.kind != DeclarationKind::Binding
+                    || binder.declaration.module != self.module.key
+                    || binder.declaration.start != syntax[child].span.start()
+                    || binder.mutable
+                    || &binder.ty != parameter.payload
+                    || &binder.source_type != parameter.payload
+                    || !matches!(binder.projections.as_slice(), [PatternProjection::Payload { variant: projected, index: position }] if *projected == variant && *position == index)
+                {
+                    return Err(pending);
+                }
+                Some((child, binder))
+            }
+            _ => return Err(Stop::Pending(child)),
+        };
+        Ok(Binding::IrrefutableVariant {
+            source: *source,
+            from,
+            binder,
+        })
+    }
+
+    fn bind_narrow_variant(
+        &mut self,
+        node: NodeId,
+        source: NodeId,
+        from: Slot,
+        binder: Option<(NodeId, &PatternBinder<'g>)>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let scratch = self.clone_region(from, source)?;
+        let mut tail = self.cleanup(node, &[scratch], next)?;
+        if let Some((site, binder)) = binder {
+            self.budget.step(1)?;
+            let into = *self
+                .locals
+                .get(binder.declaration)
+                .ok_or(Stop::Pending(site))?;
+            // Exact cloned region: the sole payload follows the envelope.
+            tail = self.emit(
+                site,
+                Action::Read {
+                    from: scratch + 1,
+                    into: Some(into),
+                },
+                Edges::Next(tail),
+            )?;
+        }
+        self.expression_with_proof(
+            source,
+            Some(scratch),
+            tail,
+            depth,
+            Some(ExpressionProof::NarrowVariantSource(from)),
+        )
     }
 
     fn exclusive_tuple_reborrow_path(
@@ -2566,10 +2844,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         initializer: NodeId,
         locals: &mut Vec<Slot>,
+        depth: usize,
     ) -> ResultOf<()> {
         let pattern = self.module.syntax.nodes[node].children[0];
-        match self.binding(node)? {
+        match self.binding(node, depth)? {
             Binding::Discard => Ok(()),
+            Binding::IrrefutableVariant { binder, .. } => {
+                if let Some((site, binder)) = binder {
+                    self.budget.reserve(1)?;
+                    locals.push(self.local(binder.declaration, site, &binder.ty)?);
+                }
+                Ok(())
+            }
             Binding::Name {
                 declaration,
                 ty,
@@ -4130,7 +4416,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             NodeKind::ValueReference => Action::Read {
                 // Only exact named transfers and owned pattern staging supply this slot.
                 from: match proof {
-                    Some(ExpressionProof::NestedTupleSource(slot)) => slot,
+                    Some(
+                        ExpressionProof::NestedTupleSource(slot)
+                        | ExpressionProof::NarrowVariantSource(slot),
+                    ) => slot,
                     _ => self.read_value_place(node, facts)?,
                 },
                 into,
