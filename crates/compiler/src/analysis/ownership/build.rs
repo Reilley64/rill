@@ -149,8 +149,15 @@ fn projection<'g>(facts: &ExpressionFacts<'g>) -> Option<(NodeId, Projection<'g>
 
 enum ProductMember<'g> {
     Field(&'g DeclarationId),
+    NestedField {
+        outer: &'g DeclarationId,
+        inner: &'g DeclarationId,
+    },
     TupleElement(usize),
-    NestedTupleElement { outer: usize, inner: usize },
+    NestedTupleElement {
+        outer: usize,
+        inner: usize,
+    },
 }
 
 fn product_member<'g>(
@@ -164,6 +171,10 @@ fn product_member<'g>(
     };
     match members {
         [PatternProjection::Field(field)] => Some(ProductMember::Field(field)),
+        [
+            PatternProjection::Field(outer),
+            PatternProjection::Field(inner),
+        ] if access == Access::Owned => Some(ProductMember::NestedField { outer, inner }),
         [PatternProjection::TupleElement(position)] => Some(ProductMember::TupleElement(*position)),
         [
             PatternProjection::TupleElement(outer),
@@ -972,6 +983,25 @@ impl<'a, 'g> Build<'a, 'g> {
         Err(Stop::Pending(node))
     }
 
+    fn nested_field(
+        &mut self,
+        node: NodeId,
+        root: Slot,
+        outer: &DeclarationId,
+        inner: &DeclarationId,
+    ) -> ResultOf<Slot> {
+        let child = self.field(node, root, outer)?;
+        for field in self.slots[child].storage(child).skip(1) {
+            self.budget.step(1)?;
+            if matches!(self.slots[field].projection, Some(Projection::NestedField { outer: parent, inner: leaf })
+                if parent.id == *outer && leaf.id == *inner)
+            {
+                return Ok(field);
+            }
+        }
+        Err(Stop::Pending(node))
+    }
+
     fn element(&mut self, node: NodeId, root: Slot, position: usize) -> ResultOf<Slot> {
         self.budget.step(1)?;
         if position >= self.slots[root].members {
@@ -1586,31 +1616,23 @@ impl<'a, 'g> Build<'a, 'g> {
                 access,
                 ..
             } => {
+                self.budget.step(1)?;
                 let syntax = &self.module.syntax.nodes[shape];
-                let record = syntax.kind == NodeKind::RecordPattern;
-                let first = usize::from(
-                    record
-                        && syntax.children.first().is_some_and(|&child| {
-                            self.module.syntax.nodes[child].kind == NodeKind::PatternPath
-                        }),
-                );
                 let mut binders = facts.binders.iter();
                 self.budget.reserve(binders.len())?;
-                for (position, &child) in syntax.children[first..].iter().enumerate() {
-                    self.budget.step(1)?;
-                    let (component, shorthand) = if record {
-                        let field = &self.module.syntax.nodes[child];
-                        let NodeKind::PatternField { shorthand } = field.kind else {
-                            return Err(Stop::Pending(child));
-                        };
-                        (field.children[usize::from(!shorthand)], shorthand)
+                if syntax.kind == NodeKind::RecordPattern {
+                    self.declare_record_pattern(shape, access, false, &mut binders, locals)?;
+                    return if binders.next().is_none() {
+                        Ok(())
                     } else {
-                        (child, false)
+                        Err(Stop::Pending(pattern))
                     };
-                    let name = self.ungroup(component)?;
+                }
+                for (position, &child) in syntax.children.iter().enumerate() {
+                    self.budget.step(1)?;
+                    let name = self.ungroup(child)?;
                     let syntax = &self.module.syntax.nodes[name];
-                    if !record && access != Access::Owned && syntax.kind == NodeKind::BracketPattern
-                    {
+                    if access != Access::Owned && syntax.kind == NodeKind::BracketPattern {
                         for (inner, &child) in syntax.children.iter().enumerate() {
                             self.budget.step(1)?;
                             let leaf = self.ungroup(child)?;
@@ -1633,16 +1655,12 @@ impl<'a, 'g> Build<'a, 'g> {
                     if syntax.kind == NodeKind::Wildcard {
                         continue;
                     }
-                    if !shorthand && syntax.kind != NodeKind::NamePattern {
+                    if syntax.kind != NodeKind::NamePattern {
                         return Err(Stop::Pending(name));
                     }
                     let binder = binders.next().ok_or(Stop::Pending(name))?;
-                    let flat = match product_member(access, &binder.projections) {
-                        Some(ProductMember::TupleElement(index)) => !record && index == position,
-                        Some(ProductMember::Field(_)) => record,
-                        _ => false,
-                    };
-                    if !flat {
+                    if !matches!(product_member(access, &binder.projections), Some(ProductMember::TupleElement(index)) if index == position)
+                    {
                         return Err(Stop::Pending(name));
                     }
                     self.declare_product_local(name, binder, locals)?;
@@ -1655,12 +1673,57 @@ impl<'a, 'g> Build<'a, 'g> {
         }
     }
 
+    fn declare_record_pattern(
+        &mut self,
+        shape: NodeId,
+        access: Access,
+        nested: bool,
+        binders: &mut std::slice::Iter<'_, PatternBinder<'g>>,
+        locals: &mut Vec<Slot>,
+    ) -> ResultOf<()> {
+        self.budget.step(2)?;
+        let syntax = &self.module.syntax.nodes[shape];
+        let first =
+            usize::from(syntax.children.first().is_some_and(|&child| {
+                self.module.syntax.nodes[child].kind == NodeKind::PatternPath
+            }));
+        for &child in &syntax.children[first..] {
+            self.budget.step(1)?;
+            let field = &self.module.syntax.nodes[child];
+            let NodeKind::PatternField { shorthand } = field.kind else {
+                return Err(Stop::Pending(child));
+            };
+            let name = self.ungroup(field.children[usize::from(!shorthand)])?;
+            self.budget.step(1)?;
+            let kind = self.module.syntax.nodes[name].kind;
+            // Only one nested record level: deeper constructors stay incomplete.
+            if kind == NodeKind::RecordPattern && access == Access::Owned && !nested {
+                self.declare_record_pattern(name, access, true, binders, locals)?;
+            } else if kind != NodeKind::Wildcard {
+                if !shorthand && kind != NodeKind::NamePattern {
+                    return Err(Stop::Pending(name));
+                }
+                let binder = binders.next().ok_or(Stop::Pending(name))?;
+                if !matches!(
+                    (nested, product_member(access, &binder.projections)),
+                    (false, Some(ProductMember::Field(_)))
+                        | (true, Some(ProductMember::NestedField { .. }))
+                ) {
+                    return Err(Stop::Pending(name));
+                }
+                self.declare_product_local(name, binder, locals)?;
+            }
+        }
+        Ok(())
+    }
+
     fn declare_product_local(
         &mut self,
         name: NodeId,
         binder: &PatternBinder<'g>,
         locals: &mut Vec<Slot>,
     ) -> ResultOf<()> {
+        self.budget.step(1)?;
         if binder.declaration.start != self.module.syntax.nodes[name].span.start() {
             return Err(Stop::Pending(name));
         }
@@ -1700,7 +1763,14 @@ impl<'a, 'g> Build<'a, 'g> {
         // Stage the initializer once. For borrowed patterns this is only
         // the descriptor; the aggregate storage stays with its owner.
         let source = facts.source.node;
-        let scratch = self.slot(source, &facts.ty)?;
+        let scratch = if access == Access::Owned
+            && matches!(facts.ty.as_ref(), TypeTerm::Nominal { .. })
+            && let Some(slot) = self.nested_transfer_slot(source, source, &facts.ty)?
+        {
+            slot
+        } else {
+            self.slot(source, &facts.ty)?
+        };
         if self.slots[scratch].custom_disposer.is_some() || self.slots[scratch].contains_guard() {
             return Err(Stop::Pending(node));
         }
@@ -1732,6 +1802,7 @@ impl<'a, 'g> Build<'a, 'g> {
                             .ok_or(Stop::Pending(site))?;
                         Projection::Field(field.declaration)
                     }
+                    ProductMember::NestedField { .. } => return Err(Stop::Pending(site)),
                 };
                 let binding = borrowed_binding_mode(access, binder).ok_or(Stop::Pending(site))?;
                 Action::BindBorrowedMember {
@@ -1746,6 +1817,9 @@ impl<'a, 'g> Build<'a, 'g> {
                         self.element(site, scratch, position)?
                     }
                     ProductMember::Field(field) => self.field(site, scratch, field)?,
+                    ProductMember::NestedField { outer, inner } => {
+                        self.nested_field(site, scratch, outer, inner)?
+                    }
                     ProductMember::NestedTupleElement { .. } => return Err(Stop::Pending(site)),
                 };
                 Action::Read {
