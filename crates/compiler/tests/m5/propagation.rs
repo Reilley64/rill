@@ -730,6 +730,430 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
 }
 
 #[test]
+fn returning_wrap_rhs_forwards_instead_of_wrapping() {
+    use compiler::analysis::ownership::{Block, Place};
+    use compiler::analysis::scalars::{NodeFactKind, data::DataExpression};
+    probe_with_typed(
+        "propagation::returning_wrap_rhs_forwards_instead_of_wrapping",
+        r#"
+            import std::result::Err as fail;
+            function marker(): Result<i32, i32> {
+                let seed = fail<i32, i32>(7i32);
+                let value = seed ? 9i32;
+                return Result.Ok(value);
+            }
+            function after(flag: bool): bool { return flag; }
+            function wrapsAfterRhs(input: Result<bool, i32>, tail: string): Result<bool, i32> {
+                let flag = input ? (marker()?);
+                return Result.Ok(after(flag));
+            }
+            function pending(input: Result<bool, i32>.Err, tail: string): Result<bool, i32> {
+                let _ = input ? (marker()?);
+                return Result.Ok(after(true));
+            }
+            function carryFailure(source: Result<i32, i32>.Err): Result<i32, i32>.Err {
+                return source;
+            }
+            function terminalRhs(input: Result<bool, i32>.Err, source: Result<i32, i32>.Err, tail: string): Result<bool, i32> {
+                let _ = input ? (carryFailure(source)?);
+                return Result.Ok(after(true));
+            }
+            function carrySuccess(): Result<i32, i32>.Ok { return Result.Ok(5i32); }
+            function successfulRhs(input: Result<bool, i32>.Err, tail: string): Result<bool, i32> {
+                let _ = input ? (carrySuccess()?);
+                return Result.Ok(after(true));
+            }
+            function scalarWrap(input: Result<bool, i32>, tail: string): Result<bool, i32> {
+                let flag = input ? 3i32;
+                return Result.Ok(flag);
+            }
+            function mover(text: string): Result<i32, i32> { return fail(8i32); }
+            function badMarker(text: string): Result<i32, i32> {
+                dispose(text);
+                dispose(text);
+                return fail(9i32);
+            }
+            function reachesBadRhs(input: Result<bool, i32>.Err, text: string): Result<bool, i32> {
+                let _ = input ? (badMarker(text)?);
+                return Result.Ok(true);
+            }
+            function skipsBadRhs(input: Result<bool, i32>.Ok, text: string): Result<bool, i32> {
+                let _ = input ? (badMarker(text)?);
+                return Result.Ok(true);
+            }
+            function reachesMoved(input: Result<bool, i32>.Err, text: string): Result<bool, i32> {
+                dispose(text);
+                let _ = input ? (mover(text)?);
+                return Result.Ok(true);
+            }
+            function skipsMoved(input: Result<bool, i32>.Ok, text: string): Result<bool, i32> {
+                dispose(text);
+                let _ = input ? (mover(text)?);
+                return Result.Ok(true);
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let id = |name| {
+                &module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let check = |name, limits| lower_body(receipt, module, id(name), limits).unwrap();
+            let lower = |name| check(name, AnalysisLimits::default());
+            let role = typed.result_role().unwrap();
+            let pin = role.representation.unwrap().storage_source;
+            let facts = |node| typed.bodies().node(module, node).unwrap().unwrap();
+            let assert_wrap = |block: &Block<'_>,
+                               left: Place<'_>,
+                               right: Place<'_>,
+                               export: &Block<'_>| {
+                let Operation::WrapResultFailure {
+                    operand,
+                    payload,
+                    into,
+                    variant,
+                    wrapper,
+                    origin,
+                    cause_display,
+                } = block.operation
+                else {
+                    panic!("expected a new outer wrapper");
+                };
+                assert_eq!(operand.root.node, left.root.node);
+                assert_eq!(payload.root.node, right.root.node);
+                assert_eq!((variant, wrapper), (&role.err.id, &role.wrapper.id));
+                assert!(
+                    matches!(export.operation, Operation::Export(out) if out.root.node == into.root.node)
+                );
+                let NodeFactKind::Expression(value) = &facts(block.site.node).kind else {
+                    panic!("expected typed infix expression");
+                };
+                let Some(DataExpression::Wrapping(data)) = &value.data else {
+                    panic!("expected typed wrapping evidence");
+                };
+                assert_eq!(origin, &data.construction.origin);
+                assert_eq!(origin.snapshot(), &module.snapshot);
+                assert_eq!(origin.bytes(), b"?");
+                assert_eq!(
+                    origin.start(),
+                    block.site.span.start() + operand.root.span.bytes().len() + 1
+                );
+                let retained = data.construction.retained.as_ref().unwrap();
+                assert_eq!(retained.operand, operand.root.node);
+                assert_eq!(data.construction.value, payload.root.node);
+                let goal = typed.bodies().goal(&retained.display).unwrap();
+                assert_eq!(
+                    cause_display,
+                    goal.selection.as_ref().unwrap().implementation
+                );
+            };
+
+            // The operative marker return has its own origin and a real cause.
+            let marker = lower("marker");
+            let mir = marker.mir().expect("checked marker");
+            let prefix = straight_blocks(mir, mir.entry);
+            let [_, construct, stage, test] = prefix.as_slice() else {
+                panic!("marker prefix");
+            };
+            let Operation::ConstructResultError {
+                constructor,
+                variant,
+                wrapper,
+                into: seed,
+                ..
+            } = construct.operation
+            else {
+                panic!("construct the marker's cause");
+            };
+            assert_eq!(constructor, &role.providers.unwrap().constructor.id);
+            assert_eq!((variant, wrapper), (&role.err.id, &role.wrapper.id));
+            let NodeFactKind::Expression(value) = &facts(construct.site.node).kind else {
+                panic!();
+            };
+            let Some(DataExpression::ErrorConstruction(data)) = &value.data else {
+                panic!();
+            };
+            assert!(data.retained.is_none());
+            assert_eq!(construct.site.span.bytes(), b"fail<i32, i32>(7i32)");
+            assert_eq!(data.origin.snapshot(), construct.site.span.snapshot());
+            assert_eq!(data.origin.start(), construct.site.span.start());
+            let Operation::Move {
+                from,
+                into: Some(held),
+            } = stage.operation
+            else {
+                panic!();
+            };
+            assert_eq!(from.root.node, seed.root.node);
+            let Terminator::Branch { no, .. } = test.terminator else {
+                panic!();
+            };
+            assert!(
+                matches!(test.operation, Operation::TestVariant { operand, success }
+                if operand.root.node == held.root.node && success == &role.ok.id)
+            );
+            let failure = straight_blocks(mir, no);
+            let [init, wrap, export, ..] = failure.as_slice() else {
+                panic!();
+            };
+            let Operation::Initialize(payload) = init.operation else {
+                panic!();
+            };
+            assert_wrap(wrap, held, payload, export);
+            assert!(matches!(
+                failure.last().unwrap().terminator,
+                Terminator::Return
+            ));
+
+            for name in ["wrapsAfterRhs", "pending", "terminalRhs", "successfulRhs"] {
+                let report = lower(name);
+                let mir = report
+                    .mir()
+                    .unwrap_or_else(|| panic!("{name}: {:?}", report.completion()));
+                let prefix = straight_blocks(mir, mir.entry);
+                let Operation::Move {
+                    from,
+                    into: Some(left),
+                } = prefix[0].operation
+                else {
+                    panic!("stage the left input once");
+                };
+                assert!(
+                    from.root
+                        .span
+                        .bytes()
+                        .starts_with(b"input: Result<bool, i32>")
+                );
+                assert_eq!(left.root.span.bytes(), b"input");
+                let rhs = if name == "wrapsAfterRhs" {
+                    assert_eq!(prefix.len(), 2);
+                    let (ok, err) = variant_edges(mir, mir.entry, &role.ok.id, b"input");
+                    assert_eq!(calls_on_path(mir, [true]), [id("after")]);
+                    let skipped = linear(mir, ok);
+                    assert!(
+                        matches!(skipped[0], Operation::TakeResultSuccess { operand, into: Some(flag) }
+                        if operand.root.node == left.root.node && flag.root.span.bytes() == b"flag")
+                    );
+                    assert_return(&skipped, &role.ok.id, true, &[b"tail: string"]);
+                    assert!(!skipped.iter().any(|op| matches!(
+                        op,
+                        Operation::DropResultFailure { .. } | Operation::WrapResultFailure { .. }
+                    )));
+                    straight_blocks(mir, err)
+                } else {
+                    prefix[1..].to_vec()
+                };
+                let call = match name {
+                    "terminalRhs" => {
+                        assert!(
+                            matches!(rhs[0].operation, Operation::Move { from, into: Some(stage) }
+                            if from.root.span.bytes().starts_with(b"source:") && stage.root.span.bytes() == b"source")
+                        );
+                        assert!(
+                            matches!(rhs[1].operation, Operation::Call(callee) if callee == id("carryFailure"))
+                        );
+                        rhs[1]
+                    }
+                    "successfulRhs" => {
+                        assert!(
+                            matches!(rhs[0].operation, Operation::Call(callee) if callee == id("carrySuccess"))
+                        );
+                        rhs[0]
+                    }
+                    _ => {
+                        let [call, test] = rhs.as_slice() else {
+                            panic!("one RHS call and test");
+                        };
+                        assert_eq!(call.site.span.bytes(), b"marker()");
+                        assert!(
+                            matches!(call.operation, Operation::Call(callee) if callee == id("marker"))
+                        );
+                        assert!(
+                            matches!(test.operation, Operation::TestVariant { operand, success }
+                            if operand.root.node == call.site.node && success == &role.ok.id)
+                        );
+                        call
+                    }
+                };
+                let (ok, err) = match rhs.last().unwrap().terminator {
+                    Terminator::Branch { yes, no }
+                        if matches!(name, "wrapsAfterRhs" | "pending") =>
+                    {
+                        (
+                            Some(straight_blocks(mir, yes)),
+                            Some(straight_blocks(mir, no)),
+                        )
+                    }
+                    Terminator::Return if name == "terminalRhs" => (None, Some(rhs[2..].to_vec())),
+                    Terminator::Return if name == "successfulRhs" => {
+                        (Some(rhs[1..].to_vec()), None)
+                    }
+                    _ => panic!("wrong RHS feasibility for {name}"),
+                };
+                if let Some(ok) = ok {
+                    let [take, wrap, export, cleanup @ ..] = ok.as_slice() else {
+                        panic!("wrap after RHS success");
+                    };
+                    let Operation::TakeResultSuccess {
+                        operand,
+                        into: Some(payload),
+                    } = take.operation
+                    else {
+                        panic!();
+                    };
+                    assert_eq!(operand.root.node, call.site.node);
+                    assert_wrap(wrap, left, payload, export);
+                    assert_wrap_tail_cleanup(cleanup);
+                }
+                if let Some(err) = err {
+                    let [forward, export, drop, cleanup @ ..] = err.as_slice() else {
+                        panic!("forward, export and retire the left failure");
+                    };
+                    let Operation::ForwardResultFailure {
+                        operand,
+                        into,
+                        variant,
+                        wrapper,
+                    } = forward.operation
+                    else {
+                        panic!();
+                    };
+                    assert_eq!(operand.root.node, call.site.node);
+                    assert_eq!(into.root.node, forward.site.node);
+                    assert_eq!((variant, wrapper), (&role.err.id, &role.wrapper.id));
+                    assert_ne!(into.root.node, left.root.node);
+                    assert!(
+                        matches!(export.operation, Operation::Export(out) if out.root.node == into.root.node)
+                    );
+                    assert!(
+                        matches!(drop.operation, Operation::DropResultFailure { operand, variant, wrapper, storage_source }
+                        if operand.root.node == left.root.node && variant == &role.err.id
+                            && wrapper == &role.wrapper.id && storage_source == pin)
+                    );
+                    assert_wrap_tail_cleanup(cleanup);
+                }
+
+                let stats = report.statistics();
+                let limits = AnalysisLimits {
+                    max_work: stats.work,
+                    max_entries: stats.entries,
+                    max_depth: stats.max_depth,
+                };
+                assert!(
+                    check(name, limits).mir().is_some(),
+                    "exact limits for {name}"
+                );
+                for short in [
+                    AnalysisLimits {
+                        max_work: limits.max_work - 1,
+                        ..limits
+                    },
+                    AnalysisLimits {
+                        max_entries: limits.max_entries - 1,
+                        ..limits
+                    },
+                    AnalysisLimits {
+                        max_depth: limits.max_depth - 1,
+                        ..limits
+                    },
+                ] {
+                    let limited = check(name, short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none());
+                }
+            }
+
+            // Measured in both modes on 66d553e, with this source installed.
+            let ordinary = check(
+                "scalarWrap",
+                AnalysisLimits {
+                    max_work: 4080,
+                    max_entries: 801,
+                    max_depth: 4,
+                },
+            );
+            let mir = ordinary
+                .mir()
+                .expect("normal wrapping still fits its original budget");
+            let (_, err) = variant_edges(mir, mir.entry, &role.ok.id, b"input");
+            let path = straight_blocks(mir, err);
+            let [init, wrap, export, cleanup @ ..] = path.as_slice() else {
+                panic!("ordinary wrap path");
+            };
+            let Operation::Initialize(payload) = init.operation else {
+                panic!();
+            };
+            let Operation::WrapResultFailure { operand, .. } = wrap.operation else {
+                panic!();
+            };
+            assert_wrap(wrap, operand, payload, export);
+            assert_wrap_tail_cleanup(cleanup);
+
+            for (name, drops) in [
+                ("skipsBadRhs", &[b"text: string".as_slice()][..]),
+                ("skipsMoved", &[][..]),
+            ] {
+                let skipped = lower(name);
+                let mir = skipped.mir().expect("left Ok must skip RHS entirely");
+                assert!(calls_on_path(mir, []).is_empty());
+                let path = linear(mir, mir.entry);
+                assert_return(&path, &role.ok.id, true, drops);
+                assert!(!path.iter().any(|op| matches!(
+                    op,
+                    Operation::DropResultFailure { .. }
+                        | Operation::WrapResultFailure { .. }
+                        | Operation::ForwardResultFailure { .. }
+                )));
+            }
+            assert!(lower("mover").mir().is_some());
+            let rejection = |name| {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("one finding for {name}");
+                };
+                assert_eq!(finding.code(), "R0200");
+                assert_eq!(finding.related.span.bytes(), b"dispose(text)");
+                assert!(finding.related.span.start() < finding.site.span.start());
+                (finding.site, finding.related)
+            };
+            let (bad_use, bad_move) = rejection("badMarker");
+            assert_eq!(bad_use.span.bytes(), b"dispose(text)");
+            let (callee_use, callee_move) = rejection("reachesBadRhs");
+            assert_eq!(
+                (callee_use.node, callee_move.node),
+                (bad_use.node, bad_move.node)
+            );
+            let (use_site, moved_site) = rejection("reachesMoved");
+            assert_eq!(use_site.span.bytes(), b"text");
+            assert_ne!(moved_site.node, bad_move.node);
+            assert!(use_site.span.start() > id("reachesMoved").start);
+            assert!(moved_site.span.start() > id("reachesMoved").start);
+        },
+    );
+}
+
+fn assert_wrap_tail_cleanup(path: &[&compiler::analysis::ownership::Block<'_>]) {
+    let mut obligations = path.iter().flat_map(|block| match &block.operation {
+        Operation::Cleanup(actions) => actions.as_slice(),
+        Operation::None => &[],
+        other => panic!("unexpected wrapping exit operation: {other:?}"),
+    });
+    assert!(
+        matches!(obligations.next(), Some(Obligation::Drop(place)) if place.root.span.bytes() == b"tail: string")
+    );
+    assert!(obligations.next().is_none());
+    assert!(matches!(
+        path.last().unwrap().terminator,
+        Terminator::Return
+    ));
+}
+
+#[test]
 fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
     probe_with_typed(
         "propagation::fresh_scalar_error_keeps_constructor_origin_through_postfix",

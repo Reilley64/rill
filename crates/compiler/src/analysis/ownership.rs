@@ -588,6 +588,15 @@ pub enum Operation<'g> {
         variant: &'g DeclarationId,
         wrapper: &'g DeclarationId,
     },
+    /// Retire a proved failed stage on an interrupted wrapping RHS. Consume
+    /// its installed `OwnedErr<i32>` (including origin and retained chain)
+    /// using the pinned storage's drop, with no wrapper-level dispatch or rendering.
+    DropResultFailure {
+        operand: Place<'g>,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        storage_source: &'g std::path::Path,
+    },
     /// Consume the staged failed Result and outer payload into a new
     /// `Result.Err` in `into`. The cause keeps the inner origin and chain;
     /// only the outer wrapper gets `origin`. `cause_display` names the
@@ -1861,6 +1870,12 @@ enum Action<'g> {
         into: Slot,
         variant: &'g DeclarationId,
         wrapper: &'g DeclarationId,
+    },
+    DropResultFailure {
+        operand: Slot,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        storage_source: &'g std::path::Path,
     },
     WrapResultFailure {
         operand: Slot,

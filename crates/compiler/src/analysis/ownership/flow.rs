@@ -174,7 +174,8 @@ fn liveness(
             Action::CheckCallableReturn(slot) => use_one(Some(slot), None),
             Action::Dispose { operand: slot, .. }
             | Action::Export(slot)
-            | Action::EndEmptyOption(slot) => use_one(Some(slot), Some(slot)),
+            | Action::EndEmptyOption(slot)
+            | Action::DropResultFailure { operand: slot, .. } => use_one(Some(slot), Some(slot)),
             Action::Displace { target, incoming } | Action::Install { target, incoming } => {
                 use_one(Some(incoming), Some(target))
             }
@@ -2182,6 +2183,7 @@ pub(super) fn run<'a, 'g>(
                         | Action::Dispose { .. }
                         | Action::ConstructResultError { .. }
                         | Action::WrapResultFailure { .. }
+                        | Action::DropResultFailure { .. }
                         | Action::CopyClosure { .. }
                         | Action::InvokeClosurePair { .. }
                         | Action::InvokeMutableI32Cell { .. }
@@ -2396,6 +2398,21 @@ pub(super) fn run<'a, 'g>(
                         into: local(into),
                         variant,
                         wrapper,
+                    }
+                }
+                Action::DropResultFailure {
+                    operand,
+                    variant,
+                    wrapper,
+                    storage_source,
+                } => {
+                    initialized(&state[operand], node)?;
+                    state[operand] = State::Vacant;
+                    Operation::DropResultFailure {
+                        operand: local(operand),
+                        variant,
+                        wrapper,
+                        storage_source,
                     }
                 }
                 Action::WrapResultFailure {

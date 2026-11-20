@@ -10,8 +10,8 @@ use crate::analysis::scalars::generics::{
     callables::{ArrowFacts, CaptureFact, CaptureForm, InvocationFacts},
 };
 use crate::analysis::scalars::{
-    CallFacts, ErrorConstruction, ExpressionFacts, LiteralValue, Place as TypedPlace, Propagation,
-    PropagationTarget,
+    CallFacts, ErrorConstruction, ExpressionFacts, Flow, LiteralValue, Place as TypedPlace,
+    Propagation, PropagationTarget,
 };
 use crate::analysis::typed::{
     ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
@@ -2425,7 +2425,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         allow_field: bool,
     ) -> ResultOf<Option<ProjectedTemporary>> {
         self.budget.step(1)?;
-        let facts = self.value(node)?;
+        self.temporary_projection_with_facts(node, self.value(node)?, allow_field)
+    }
+
+    fn temporary_projection_with_facts(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        allow_field: bool,
+    ) -> ResultOf<Option<ProjectedTemporary>> {
         if facts.path.is_some() || facts.access != Access::Owned {
             return Ok(None);
         }
@@ -3526,7 +3534,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let failure = return_slot
                 .map(|(output, export)| {
                     if let Some(data) = wrap {
-                        self.wrap_result_failure(node, scratch, data, output, export, depth)
+                        self.wrap_result_failure(
+                            node,
+                            scratch,
+                            data,
+                            (output, export),
+                            return_cleanup,
+                            depth,
+                        )
                     } else {
                         self.emit(
                             node,
@@ -4056,7 +4071,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         &mut self,
         node: NodeId,
         data: &ErrorConstruction<'g>,
-    ) -> ResultOf<(NodeId, &'g Span, &'g DeclarationId)> {
+    ) -> ResultOf<(&'a Flow, &'g Span, &'g DeclarationId)> {
         let role = self.typed.result_role().ok_or(Stop::Pending(node))?;
         let [left, right] = self.module.syntax.nodes[node].children[..] else {
             return Err(Stop::Pending(node));
@@ -4064,6 +4079,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let retained = data.retained.as_ref().ok_or(Stop::Pending(node))?;
         let (_, result) = self.return_contract.ok_or(Stop::Pending(node))?;
         self.budget.step(1)?;
+        let rhs = self.fact(&right).ok_or(Stop::Pending(right))?;
+        let NodeFactKind::Expression(value) = &rhs.kind else {
+            return Err(Stop::Pending(right));
+        };
         if data.operation != ErrorOperation::Wrap
             || data.result != *result
             || data.failure != &role.err.id
@@ -4074,7 +4093,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if *declaration == data.wrapper && matches!(arguments.as_slice(), [payload] if *payload == retained.payload))
             || !matches!(retained.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
             || !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
-            || self.value(right)?.ty != data.payload
+            || value.ty != data.payload
         {
             return Err(Stop::Pending(node));
         }
@@ -4106,7 +4125,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .filter(|token| token.span == data.origin && token.span.bytes() == b"?")
             .ok_or(Stop::Pending(node))?
             .span;
-        Ok((right, origin, selected.implementation))
+        Ok((&rhs.flow, origin, selected.implementation))
     }
 
     fn wrap_result_failure(
@@ -4114,33 +4133,117 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         operand: Slot,
         data: &ErrorConstruction<'g>,
-        into: Slot,
-        next: Pc,
+        output: (Slot, Pc),
+        return_cleanup: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        let (right, origin, cause_display) = self.checked_wrap_failure(node, data)?;
-        let payload = self.slot(right, &data.payload)?;
-        let source = self.ungroup(right)?;
-        let temporary = self.temporary_projection(source, false)?;
-        let next = if let Some(temp) = temporary {
-            self.cleanup(node, &[temp.scratch], next)?
+        let (flow, origin, cause_display) = self.checked_wrap_failure(node, data)?;
+        let right = data.value;
+        let payload = flow
+            .normal
+            .then(|| self.slot(right, &data.payload))
+            .transpose()?;
+        let root = self.ungroup(right)?;
+        self.budget.step(1)?;
+        let facts = self.value(root)?;
+        let (rhs, temporary) = if matches!(facts.data, Some(DataExpression::Propagation(_))) {
+            let (_, depth) = self.ungroup_expression_at(right, depth)?;
+            let checked = self.checked_propagation(root, facts)?;
+            if checked.piped
+                || checked.wrapper != Some(data.wrapper)
+                || flow.normal != checked.exit.can_continue
+                || flow.returns != checked.exit.can_return
+                || flow.pending
+                || flow.diverges
+                || !flow.breaks.is_empty()
+                || !flow.continues.is_empty()
+            {
+                return Err(Stop::Pending(right));
+            }
+            (Some((depth, checked)), None)
         } else {
-            next
+            if !flow.normal || flow.returns {
+                return Err(Stop::Pending(right));
+            }
+            (
+                None,
+                self.temporary_projection_with_facts(root, facts, false)?,
+            )
         };
-        let wrap = self.emit(
-            node,
-            Action::WrapResultFailure {
+        let (into, export) = output;
+        let next = if let Some(payload) = payload {
+            let next = if let Some(temp) = temporary {
+                self.cleanup(node, &[temp.scratch], export)?
+            } else {
+                export
+            };
+            self.emit(
+                node,
+                Action::WrapResultFailure {
+                    operand,
+                    payload,
+                    into,
+                    variant: data.failure,
+                    wrapper: data.wrapper,
+                    origin,
+                    cause_display,
+                },
+                Edges::Next(next),
+            )?
+        } else {
+            export
+        };
+        if let Some((depth, checked)) = rhs {
+            // The postfix exports its own failure before reaching this cleanup.
+            // A continuing postfix instead transfers the held operand into Wrap.
+            let returning = if flow.returns {
+                self.retire_wrap_operand(node, root, operand, data, return_cleanup)?
+            } else {
+                return_cleanup
+            };
+            self.lower_checked_propagation(root, payload, next, returning, depth, checked)
+        } else {
+            self.stage_value(
+                right,
+                payload.ok_or(Stop::Pending(right))?,
+                next,
+                temporary,
+                depth,
+            )
+        }
+    }
+
+    fn retire_wrap_operand(
+        &mut self,
+        node: NodeId,
+        rhs: NodeId,
+        operand: Slot,
+        data: &ErrorConstruction<'g>,
+        next: Pc,
+    ) -> ResultOf<Pc> {
+        let representation = self
+            .typed
+            .result_role()
+            .and_then(|role| role.representation)
+            .ok_or(Stop::Pending(node))?;
+        let retained = data.retained.as_ref().ok_or(Stop::Pending(node))?;
+        if self.outer_disposer(node, &retained.wrapper)?.is_some() {
+            return Err(Stop::Pending(node));
+        }
+        // The installed source is byte-pinned. Dropping the sealed wrapper
+        // drops its origin and iteratively releases its retained nodes,
+        // invoking their stored disposers, not their display witnesses.
+        let _: fn(rill_error_storage::OwnedErr<i32>) = std::mem::drop;
+        self.emit(
+            rhs,
+            Action::DropResultFailure {
                 operand,
-                payload,
-                into,
                 variant: data.failure,
                 wrapper: data.wrapper,
-                origin,
-                cause_display,
+                storage_source: representation.storage_source,
             },
             Edges::Next(next),
-        )?;
-        self.stage_value(right, payload, wrap, temporary, depth)
+        )
     }
 
     fn construct_variant(
