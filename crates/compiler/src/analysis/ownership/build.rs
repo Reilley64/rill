@@ -3,8 +3,8 @@ use super::*;
 use crate::analysis::MemberType;
 use crate::analysis::ordinary::{self, HypotheticalOutcome};
 use crate::analysis::scalars::data::{
-    Access, Construction, DataExpression, PathProjection, PatternBinder, PatternFacts,
-    PatternProjection, PlacePath,
+    Access, Construction, Constructor, DataExpression, PathProjection, Pattern, PatternBinder,
+    PatternFacts, PatternProjection, PlacePath,
 };
 use crate::analysis::scalars::generics::{
     GoalState,
@@ -1763,11 +1763,23 @@ impl<'a, 'g> Build<'a, 'g> {
         // Stage the initializer once. For borrowed patterns this is only
         // the descriptor; the aggregate storage stays with its owner.
         let source = facts.source.node;
-        let scratch = if access == Access::Owned
-            && matches!(facts.ty.as_ref(), TypeTerm::Nominal { .. })
-            && let Some(slot) = self.nested_transfer_slot(source, source, &facts.ty)?
+        // Inspect the typed shape even when a nested pattern has no binders.
+        let nested_record = if access == Access::Owned
+            && let Pattern::Constructor(Constructor::Record(_), fields, _) = facts.pattern.as_ref()
         {
-            slot
+            self.budget.step(fields.len())?;
+            fields.iter().any(|field| {
+                matches!(
+                    field.as_ref(),
+                    Pattern::Constructor(Constructor::Record(_), ..)
+                )
+            })
+        } else {
+            false
+        };
+        let scratch = if nested_record {
+            self.nested_transfer_slot(source, source, &facts.ty)?
+                .ok_or(Stop::Pending(source))?
         } else {
             self.slot(source, &facts.ty)?
         };
@@ -1786,6 +1798,9 @@ impl<'a, 'g> Build<'a, 'g> {
                 .get(binder.declaration)
                 .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
+            if nested_record && !matches!(binder.source_type.as_ref(), TypeTerm::Primitive(_)) {
+                return Err(Stop::Pending(site));
+            }
             let member = product_member(access, &binder.projections).ok_or(Stop::Pending(site))?;
             let action = if access != Access::Owned {
                 let projection = match member {

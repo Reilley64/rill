@@ -963,8 +963,19 @@ fn owned_nested_record_pattern_transfers_exact_leaves_and_cleans_the_remainder()
                 let Outer { child: Inner { last: selected } } = value;
                 return value.rest;
             }
+            function ignore(value: Outer): void {
+                let Outer { child: Inner { last: _ } } = value;
+            }
+            function wholeChild(value: Outer): string {
+                let Outer { earlier: whole, child: Inner { last: selected } } = value;
+                return selected;
+            }
             type Bits = { marked: bool; }
             type Flags = { child: Bits; ready: bool; }
+            function constructed(value: Flags): bool {
+                let Flags { child: Bits { marked } } = Flags { child: Bits { marked: true }, ready: false };
+                return marked;
+            }
             function copyable(value: Flags): bool {
                 let Flags { child: Bits { marked } } = value;
                 if (marked) { return value.ready; }
@@ -1033,7 +1044,8 @@ fn owned_nested_record_pattern_transfers_exact_leaves_and_cleans_the_remainder()
                     into: Some(staged),
                 },
                 Operation::Export(output),
-                ..,
+                Operation::Cleanup(lexical),
+                Operation::Cleanup(parameters),
             ] = route.as_slice()
             else {
                 panic!(
@@ -1065,38 +1077,74 @@ fn owned_nested_record_pattern_transfers_exact_leaves_and_cleans_the_remainder()
             assert_eq!(flag.root.span.bytes(), b"flag");
             assert_eq!(result.root.node, selected.root.node);
             assert_eq!(output.root.node, staged.root.node);
-            let drops = path_drops(mir, mir.entry);
-            assert_eq!(drops.len(), 7);
+            let direct = |place: &compiler::analysis::ownership::Place<'_>, name| {
+                place.root.node == scratch.root.node
+                    && place
+                        .field()
+                        .is_some_and(|member| &member.id == field("Outer", name))
+            };
+            assert!(matches!(remaining.as_slice(), [
+                Obligation::Drop(rest),
+                Obligation::EndStorage(marker), Obligation::Drop(keep), Obligation::Drop(first), Obligation::EndStorage(child),
+                Obligation::Drop(last), Obligation::EndStorage(earlier_marker), Obligation::Drop(earlier_keep), Obligation::Drop(earlier_first), Obligation::EndStorage(earlier),
+                Obligation::EndStorage(root),
+            ] if direct(rest, "rest") && nested(marker, "child", "flag") && nested(keep, "child", "keep")
+                && nested(first, "child", "first") && direct(child, "child") && nested(last, "earlier", "last")
+                && nested(earlier_marker, "earlier", "flag") && nested(earlier_keep, "earlier", "keep")
+                && nested(earlier_first, "earlier", "first") && direct(earlier, "earlier")
+                && root.root.node == scratch.root.node && root.projection.is_none()));
             assert!(
-                matches!(drops[0], Obligation::Drop(rest) if rest.root.node == scratch.root.node
-                && rest.field().is_some_and(|member| &member.id == field("Outer", "rest")))
+                matches!(lexical.as_slice(), [Obligation::EndStorage(marker), Obligation::Drop(name)]
+                if marker.root.node == flag.root.node && name.root.node == tail.root.node
+                    && marker.projection.is_none() && name.projection.is_none())
             );
-            assert!(
-                matches!(drops[6], Obligation::Drop(name) if name.root.node == tail.root.node && name.projection.is_none())
-            );
-            for (drop, (outer, inner)) in drops[1..6].iter().zip([
-                ("child", "keep"),
-                ("child", "first"),
-                ("earlier", "last"),
-                ("earlier", "keep"),
-                ("earlier", "first"),
-            ]) {
-                assert!(matches!(drop, Obligation::Drop(place) if nested(place, outer, inner)));
-            }
-            assert_eq!(
-                remaining
-                    .iter()
-                    .filter(|action| matches!(action, Obligation::Drop(_)))
-                    .count(),
-                6
-            );
+            assert!(parameters.is_empty());
+
+            let ignored = lower("ignore", default);
+            let mir = ignored
+                .mir()
+                .expect("wildcards still consume the noncopyable source");
+            let stages: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Copy { .. }))
+                .collect();
+            let [
+                Operation::Move {
+                    from,
+                    into: Some(discarded),
+                },
+            ] = stages.as_slice()
+            else {
+                panic!("expected one move into the wildcard temporary");
+            };
+            assert_eq!(from.root.span.bytes(), b"value: Outer");
+            assert!(from.projection.is_none() && discarded.projection.is_none());
+            let dropped = path_drops(mir, mir.entry);
+            assert_eq!(dropped.len(), 8);
+            assert!(dropped.iter().all(|drop| matches!(drop, Obligation::Drop(place) if place.root.node == discarded.root.node && place.projection.is_some())));
             let copied = lower("copyable", default);
             let mir = copied
                 .mir()
                 .expect("copyable patterns preserve their original source");
             let prefix = straight_blocks(mir, mir.entry);
-            assert!(prefix.iter().any(|block| matches!(block.operation, Operation::Copy { from, into: Some(dest) }
-                if from.root.span.bytes() == b"value: Flags" && from.projection.is_none() && dest.root.span.bytes() == b"value")));
+            let copies: Vec<_> = prefix
+                .iter()
+                .filter_map(|block| match &block.operation {
+                    Operation::Copy {
+                        from,
+                        into: Some(dest),
+                    } => Some((from, dest)),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                matches!(copies.as_slice(), [(value, scratch), (leaf, marked)]
+                if value.root.span.bytes() == b"value: Flags" && value.projection.is_none()
+                    && scratch.root.span.bytes() == b"value" && scratch.projection.is_none()
+                    && leaf.root.node == scratch.root.node && marked.root.span.bytes() == b"marked"
+                    && matches!(leaf.projection, Some(Projection::NestedField { outer, inner })
+                        if &outer.id == field("Flags", "child") && &inner.id == field("Bits", "marked")))
+            );
             let (yes, _) = branch_targets(mir);
             assert!(linear(mir, yes).iter().any(|op| matches!(op, Operation::Copy { from, .. }
                 if from.root.span.bytes() == b"value: Flags" && from.field().is_some_and(|member| &member.id == field("Flags", "ready")))));
@@ -1115,13 +1163,19 @@ fn owned_nested_record_pattern_transfers_exact_leaves_and_cleans_the_remainder()
                 assert_eq!(finding.related.span.bytes(), related);
                 assert!(finding.related.span.start() < finding.site.span.start());
             }
-            let borrowed = lower("borrowed", default);
-            assert_eq!(borrowed.completion(), Completion::Incomplete);
-            assert!(borrowed.mir().is_none());
-            assert_eq!(
-                borrowed.blocked_at().unwrap().span.bytes(),
-                b"Bits { marked }"
-            );
+            for (name, site) in [
+                ("borrowed", b"Bits { marked }".as_slice()),
+                ("wholeChild", b"whole"),
+                (
+                    "constructed",
+                    b"Flags { child: Bits { marked: true }, ready: false }",
+                ),
+            ] {
+                let report = lower(name, default);
+                assert_eq!(report.completion(), Completion::Incomplete);
+                assert!(report.mir().is_none());
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
+            }
             let exact = AnalysisLimits {
                 max_work: unpack.statistics().work,
                 max_entries: unpack.statistics().entries,
