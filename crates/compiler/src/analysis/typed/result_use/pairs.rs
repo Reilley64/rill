@@ -15,30 +15,54 @@ pub(super) struct Slot<'g> {
     requirements: [NodeId; 3],
 }
 
-pub(super) fn summaries<'g>(
+pub(super) fn summary<'g>(
     inventory: &OrdinaryAnalysis<'g>,
+    signature: &DeclarationFacts<'g>,
+    metadata: &crate::analysis::ordinary::HeaderMetadata<'g>,
     bodies: &GenericReport<'g>,
     nodes: &Nodes<'_, 'g>,
-    checked: &BTreeSet<&'g DeclarationId>,
-    headers: &BTreeMap<&'g DeclarationId, &DeclarationFacts<'g>>,
     budget: &mut Budget,
-) -> Work<PairBodies<'g>> {
-    let mut summaries = BTreeMap::new();
-    for module in inventory.graph().modules() {
-        for declaration in &module.declarations {
-            budget.step(1)?;
-            let id = &declaration.id;
-            if checked.contains(id)
-                && let Some(signature) = headers.get(id)
-                && let Some(metadata) = inventory.headers().get(id)
-                && let Some(slots) = summarize(module, signature, metadata, bodies, nodes)
-            {
-                budget.reserve(2)?;
-                summaries.insert(id, slots);
-            }
-        }
-    }
-    Ok(summaries)
+) -> Work<Option<[Slot<'g>; 2]>> {
+    let modules = inventory.graph().modules();
+    budget.step(modules.len())?;
+    let Some(module) = modules
+        .iter()
+        .find(|m| m.key == signature.declaration.id.module)
+    else {
+        return Ok(None);
+    };
+    let Some((returned, tuple)) = module.syntax.nodes[signature.declaration.node]
+        .children
+        .get(1)
+        .and_then(|body| single_return(module, *body))
+    else {
+        return Ok(None);
+    };
+    let tuple = values::ungroup(module, tuple, budget)?;
+    let Some(facts) = nodes.get(&(&module.key, tuple)) else {
+        return Ok(None);
+    };
+    let NodeFactKind::Expression(value) = &facts.kind else {
+        return Ok(None);
+    };
+    let Some(DataExpression::Tuple { elements }) = &value.data else {
+        return Ok(None);
+    };
+    let [first, second] = elements.as_slice() else {
+        return Ok(None);
+    };
+    let calls = [
+        values::ungroup(module, *first, budget)?,
+        values::ungroup(module, *second, budget)?,
+    ];
+    Ok(summarize(
+        module,
+        signature,
+        metadata,
+        bodies,
+        nodes,
+        (returned, tuple, calls),
+    ))
 }
 
 // The entire body must consume jobs[i]() exactly once into return slot i. This
@@ -50,6 +74,7 @@ fn summarize<'g>(
     metadata: &crate::analysis::ordinary::HeaderMetadata<'g>,
     bodies: &GenericReport<'g>,
     nodes: &Nodes<'_, 'g>,
+    (returned, tuple, calls): (NodeId, NodeId, [NodeId; 2]),
 ) -> Option<[Slot<'g>; 2]> {
     let DeclarationShape::Function { parameters, result } = &signature.shape else {
         return None;
@@ -80,8 +105,6 @@ fn summarize<'g>(
         }
     }
     let syntax = &module.syntax.nodes;
-    let body = *syntax[signature.declaration.node].children.get(1)?;
-    let (returned, tuple) = single_return(module, body)?;
     let fact = |node| nodes.get(&(&module.key, node)).copied();
     let expression = |node| match &fact(node)?.kind {
         NodeFactKind::Expression(value) if value.ordinary_context.is_none() => Some(value),
@@ -92,12 +115,6 @@ fn summarize<'g>(
         return None;
     }
     let value = expression(tuple)?;
-    let Some(DataExpression::Tuple { elements }) = &value.data else {
-        return None;
-    };
-    let [first, second] = elements.as_slice() else {
-        return None;
-    };
     if value.ty != *result {
         return None;
     }
@@ -147,7 +164,7 @@ fn summarize<'g>(
             requirements: [assumption.source.node, send(job)?, send(output)?],
         })
     };
-    Some([slot(0, *first)?, slot(1, *second)?])
+    Some([slot(0, calls[0])?, slot(1, calls[1])?])
 }
 
 fn single_return(module: &Module, body: NodeId) -> Option<(NodeId, NodeId)> {
@@ -565,7 +582,8 @@ impl<'a, 'g> Check<'a, 'g> {
                 base,
                 selector,
             }) => Ok(list == Some((*declaration, self.ungroup_value(*base)?))
-                && self.module.syntax.nodes[*selector].kind == NodeKind::Literal
+                && self.module.syntax.nodes[self.ungroup_value(*selector)?].kind
+                    == NodeKind::Literal
                 && matches!(value.ty.as_ref(), TypeTerm::Primitive(_))),
             None => Ok(self.module.syntax.nodes[node].kind == NodeKind::Literal
                 && matches!(value.ty.as_ref(), TypeTerm::Primitive(_))),

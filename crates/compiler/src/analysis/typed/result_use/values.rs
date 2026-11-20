@@ -1,5 +1,16 @@
 //! Expression evaluation retains original residences until transfer commits.
 use super::*;
+
+pub(super) fn ungroup(module: &Module, mut node: NodeId, budget: &mut Budget) -> Work<NodeId> {
+    loop {
+        budget.step(1)?;
+        let syntax = &module.syntax.nodes[node];
+        if syntax.kind != NodeKind::Group {
+            return Ok(node);
+        }
+        node = syntax.children[0];
+    }
+}
 use crate::analysis::scalars::data::Construction;
 
 pub(super) enum PlaceStorage<'g> {
@@ -256,15 +267,8 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
-    pub(super) fn ungroup_value(&mut self, mut node: NodeId) -> Work<NodeId> {
-        loop {
-            self.budget.step(1)?;
-            let syntax = &self.module.syntax.nodes[node];
-            if syntax.kind != NodeKind::Group {
-                return Ok(node);
-            }
-            node = syntax.children[0];
-        }
+    pub(super) fn ungroup_value(&mut self, node: NodeId) -> Work<NodeId> {
+        ungroup(self.module, node, self.budget)
     }
 
     pub(super) fn expression_facts(

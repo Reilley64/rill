@@ -140,6 +140,7 @@ pub(super) fn check<'g>(
             }
         }
     }
+    let mut pairs = BTreeMap::new();
     let mut implementation_headers = BTreeMap::new();
     let mut families = BTreeSet::new();
     for source in inventory.graph().implementations() {
@@ -153,8 +154,24 @@ pub(super) fn check<'g>(
                     == crate::analysis::ordinary::Compatibility::Compatible
                 {
                     budget.reserve(1)?;
-                    implementation_headers
-                        .insert(&implementation.source.declaration, &implementation.header);
+                    let id = &implementation.source.declaration;
+                    implementation_headers.insert(id, &implementation.header);
+                    if implementation.header.binders.len() == 4
+                        && checked.contains(id)
+                        && let Some(metadata) = inventory.headers().get(id)
+                        && metadata.requirements.len() == 6
+                        && let Some(slots) = pairs::summary(
+                            inventory,
+                            &implementation.header,
+                            metadata,
+                            bodies,
+                            &nodes,
+                            budget,
+                        )?
+                    {
+                        budget.reserve(2)?;
+                        pairs.insert(id, slots);
+                    }
                 }
             }
         }
@@ -162,14 +179,6 @@ pub(super) fn check<'g>(
     let release_parameters = releases::check(
         inventory,
         core,
-        &nodes,
-        &checked,
-        &implementation_headers,
-        budget,
-    )?;
-    let pairs = pairs::summaries(
-        inventory,
-        bodies,
         &nodes,
         &checked,
         &implementation_headers,

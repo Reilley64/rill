@@ -1722,12 +1722,37 @@ fn installed_pair_invocation(request: &InstalledRequest) {
     use compiler::analysis::typed::ResultUseBlocker;
 
     let baseline = include_str!("../../../tests/installed/typed/main.rill");
+    let checks = include_str!("../../../tests/installed/typed/checks.rill");
+    fs::write(&request.entry, baseline).unwrap();
+    fs::write(request.entry.with_file_name("checks.rill"), checks).unwrap();
+    for test_mode in [false, true] {
+        let graph = loader::load_installed(InstalledRequest {
+            test_mode,
+            ..request.clone()
+        })
+        .unwrap();
+        // Baseline before two-child Result-use: no pair candidate to discover.
+        assert!(
+            analyze_typed(
+                &graph,
+                AnalysisLimits {
+                    max_work: 372246,
+                    max_entries: 54059,
+                    max_depth: 12
+                }
+            )
+            .receipt()
+            .is_some()
+        );
+    }
     fs::write(
         request.entry.with_file_name("checks.rill"),
         format!(
             "{}\n{}",
-            include_str!("../../../tests/installed/typed/checks.rill"),
-            INVOKE_PAIR.replace("function runTwo", "export function runTwo")
+            checks,
+            INVOKE_PAIR
+                .replace("function runTwo", "export function runTwo")
+                .replace("[jobs[0](), jobs[1]()]", "([(jobs[0]()), jobs[1]()])")
         ),
     )
     .unwrap();
@@ -1736,13 +1761,16 @@ fn installed_pair_invocation(request: &InstalledRequest) {
         r#"
         import checks::runTwo as join;
         function mixed(left: List<bool>, right: List<i32>): [[bool, i32], i32] {
-            return join([(): [bool, i32] => [(&left)[0u64], 17i32], () => { return (&right)[0u64]; }]);
+            return join([(): [bool, i32] => [(&left)[(0u64)], 17i32], () => { return (&right)[0u64]; }]);
         }
         function shared(input: List<i32>): [i32, i32] {
             let numbers = input;
             let [first, second] = join([() => (&numbers)[0u64], () => (&numbers)[1u64]]);
             dispose(numbers);
             return [first, second];
+        }
+        function nestedParts(): [[[bool, i32], bool], bool] {
+            return join([(): [[bool, i32], bool] => [[true, 1i32], false], () => true]);
         }
         function residences(): void {
             let owed: Result<bool> = Result.Ok(true);
@@ -1830,15 +1858,24 @@ fn installed_pair_invocation(request: &InstalledRequest) {
             max_depth: s.max_depth,
         };
         assert!(analyze_typed(&graph, exact).receipt().is_some());
-        let short = analyze_typed(
-            &graph,
+        for limit in [
             AnalysisLimits {
                 max_work: s.work - 1,
                 ..exact
             },
-        );
-        assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
-        assert!(short.receipt().is_none());
+            AnalysisLimits {
+                max_entries: s.entries - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_depth: s.max_depth - 1,
+                ..exact
+            },
+        ] {
+            let short = analyze_typed(&graph, limit);
+            assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
+            assert!(short.receipt().is_none());
+        }
     }
 
     for (source, completion, boundary, discard) in [
