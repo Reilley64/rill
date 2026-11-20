@@ -3,6 +3,7 @@ use super::{
     *,
 };
 use compiler::analysis::{
+    Statistics,
     ownership::{
         CallableField, CallableLayout, Delivery, DependencyContract, GraphCompletion,
         GraphObligation, GraphReport, RootReport, analyze_ownership,
@@ -93,6 +94,153 @@ fn callable_transfer_specialization_is_not_an_open_source_root_proof() {
 }
 
 #[test]
+fn callable_transfers_share_only_the_same_canonical_body_in_a_graph() {
+    let source = r#"
+        function forward(job: once () => [&bool, bool]): once () => [&bool, bool] { return job; }
+        export function twice(seed: bool): void {
+            let other = true;
+            let _ = forward(() => [&seed, other]);
+            let _ = forward(() => [&seed, other]);
+        }
+        function onceCaller(seed: bool): void {
+            let other = false;
+            let _ = forward(() => [&seed, other]);
+        }
+    "#;
+    probe_report_with_modules(
+        "graph::callable_transfers_share_only_the_same_canonical_body_in_a_graph",
+        "import left::twice as leftTwice; import right::twice as rightTwice;",
+        &[("left.rill", source), ("right.rill", source)],
+        |_, _, typed| {
+            fn transfers<'m, 'g>(
+                mir: &'m Mir<'g>,
+            ) -> Vec<(&'g loader::DeclarationId, &'m std::sync::Arc<Mir<'g>>)> {
+                mir.blocks
+                    .iter()
+                    .filter_map(|block| match &block.operation {
+                        Operation::CallCallableTransfer { callee, body, .. } => {
+                            Some((*callee, body))
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            }
+
+            let report = analyze_ownership(
+                &typed.receipt().expect("typed receipt"),
+                AnalysisLimits::default(),
+            );
+            let checked = |path: &str, prefix: &[u8]| {
+                let root = report
+                    .roots()
+                    .iter()
+                    .find(|root| {
+                        root.site().module.path == path
+                            && root.site().span.bytes().starts_with(prefix)
+                    })
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::Checked);
+                transfers(root.ordinary_mir().unwrap())
+            };
+            let twice = checked("left.rill", b"function twice");
+            let once = checked("left.rill", b"function onceCaller");
+            let other = checked("right.rill", b"function twice");
+            let ([(id, first), (_, second)], [(_, third)], [(other_id, other), ..]) =
+                (twice.as_slice(), once.as_slice(), other.as_slice())
+            else {
+                panic!("expected the written transfers");
+            };
+            assert!(std::sync::Arc::ptr_eq(first, second));
+            assert!(std::sync::Arc::ptr_eq(first, third));
+            assert_eq!(id.start, other_id.start);
+            assert_ne!(id.module, other_id.module);
+            assert!(!std::sync::Arc::ptr_eq(first, other));
+            assert_eq!(other.blocks[other.entry].site.module, &other_id.module);
+        },
+    );
+}
+
+#[test]
+fn targeted_callable_transfer_dependencies_share_the_module_scan() {
+    let main = format!(
+        "{MAIN}\nimport helper::{{first, second}};\n\
+         function one(seed: bool): void {{ first(seed); }}\n\
+         function two(seed: bool): void {{ first(seed); second(seed); }}"
+    );
+    let helper = format!(
+        r#"{HELPER}
+        function forward(job: once () => [&bool, bool]): once () => [&bool, bool] {{ return job; }}
+        export function first(seed: bool): void {{
+            let other = true; let _ = forward(() => [&seed, other]);
+        }}
+        export function second(seed: bool): void {{
+            let other = false; let _ = forward(() => [&seed, other]);
+        }}"#
+    );
+    let noise = "let _ = true;\n".repeat(64);
+    let quiet = format!("{helper}\nfunction unrelated(): void {{}}");
+    let noisy = format!("{helper}\nfunction unrelated(): void {{ {noise} }}");
+    let mut quiet_stats = [[Statistics::default(); 2]; 2];
+    fixture_with_main(
+        "graph::targeted_callable_transfer_dependencies_share_the_module_scan",
+        &main,
+        &[&quiet, &noisy],
+        |variant, request, graph, receipt, _| {
+            let module = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                .unwrap();
+            let stats = ["one", "two"].map(|name| {
+                let caller = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let run = |limits| lower_body(receipt, module, &caller.id, limits).unwrap();
+                let checked = run(AnalysisLimits::default());
+                assert_eq!(checked.completion(), Completion::Checked, "{name}");
+                let used = checked.statistics();
+                let exact = AnalysisLimits {
+                    max_work: used.work,
+                    max_entries: used.entries,
+                    max_depth: used.max_depth,
+                };
+                assert!(run(exact).mir().is_some());
+                for short in [
+                    AnalysisLimits {
+                        max_work: used.work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: used.entries - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = run(short);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none());
+                }
+                used
+            });
+            let baseline = &mut quiet_stats[usize::from(request.test_mode)];
+            if variant == 0 {
+                *baseline = stats;
+            } else {
+                let [(one_work, one_entries), two] = [0, 1].map(|i| {
+                    (
+                        stats[i].work - baseline[i].work,
+                        stats[i].entries - baseline[i].entries,
+                    )
+                });
+                assert!(one_work > 0 && one_entries > 0);
+                assert_eq!(two, (one_work, one_entries));
+            }
+        },
+    );
+}
+
+#[test]
 fn closed_callable_transfer_preserves_the_callees_ordinary_finding() {
     probe(
         "graph::closed_callable_transfer_preserves_the_callees_ordinary_finding",
@@ -103,14 +251,44 @@ fn closed_callable_transfer_preserves_the_callees_ordinary_finding() {
         function caller(seed: bool): void {
             let other = true; let held = forward(() => [&seed, other]); let _ = held;
         }
+        function again(seed: bool): void {
+            let other = false; let _ = forward(() => [&seed, other]);
+        }
+        function nested(job: once () => [&bool, bool]): once () => [&bool, bool] {
+            let bit = true; let other = false;
+            let _ = forward(() => [&bit, other]); return job;
+        }
+        function unknownFirst(seed: bool): void {
+            let other = true; let _ = nested(() => [&seed, other]);
+        }
+        function unknownSecond(seed: bool): void {
+            let other = false; let _ = nested(() => [&other, seed]);
+        }
     "#,
         |_, module, receipt| {
             let report = analyze_ownership(receipt, AnalysisLimits::default());
             let caller = root(&report, b"function caller");
             let producer = root(&report, b"function forward");
             assert_eq!(producer.completion(), Completion::Incomplete);
-            assert_eq!(caller.ordinary_completion(), Completion::SourceRejected);
-            assert!(caller.mir().is_none());
+            for caller in [caller, root(&report, b"function again")] {
+                assert_eq!(caller.ordinary_completion(), Completion::SourceRejected);
+                assert!(caller.ordinary_mir().is_none());
+            }
+            for (prefix, call) in [
+                (
+                    b"function unknownFirst".as_slice(),
+                    b"nested(() => [&seed, other])".as_slice(),
+                ),
+                (
+                    b"function unknownSecond".as_slice(),
+                    b"nested(() => [&other, seed])".as_slice(),
+                ),
+            ] {
+                let unknown = root(&report, prefix);
+                assert_eq!(unknown.ordinary_completion(), Completion::Incomplete);
+                assert!(unknown.ordinary_mir().is_none());
+                assert_eq!(unknown.blocked_at().unwrap().span.bytes(), call);
+            }
             let BodyOwner::Declaration(id) = caller.owner() else {
                 panic!("named caller")
             };

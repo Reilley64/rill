@@ -92,7 +92,10 @@ impl<'a, 'g> TargetIndex<'a, 'g> {
             frame,
             false,
             Some(&self.nodes),
-            budget,
+            Lowering {
+                budget,
+                cache: None,
+            },
         )?
         .mir)
     }

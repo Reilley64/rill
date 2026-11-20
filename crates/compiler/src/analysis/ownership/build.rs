@@ -292,24 +292,31 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         body: NodeId,
         return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
         indexed_facts: Option<&'a NodeIndex<'a, 'g>>,
+        cache: Option<&QueryCache<'a, 'g>>,
         budget: &'b mut Budget,
     ) -> ResultOf<Self> {
-        let mut facts = BTreeMap::new();
-        if indexed_facts.is_none() {
+        let facts = if let Some(nodes) = indexed_facts {
+            BuildFacts::Indexed(nodes)
+        } else if let Some(cache) = cache
+            && let Some(nodes) = cache.target_nodes(module, budget)?
+        {
+            BuildFacts::Shared(nodes)
+        } else {
+            let mut facts = BTreeMap::new();
             for fact in typed.bodies().typed_nodes() {
                 budget.step(1)?;
-                if fact.site.module == &module.key {
+                if std::ptr::eq(fact.site.module, &module.key) {
                     budget.reserve(1)?;
                     facts.insert(fact.site.node, fact);
                 }
             }
-        }
+            BuildFacts::Local(facts)
+        };
         Ok(Self {
             typed,
             module,
             body,
             facts,
-            indexed_facts,
             locals: BTreeMap::new(),
             nested_record_values: BTreeMap::new(),
             nested_tuple_parameters: BTreeMap::new(),
@@ -333,7 +340,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     }
 
     fn fact(&self, node: &NodeId) -> Option<&'a NodeFacts<'g>> {
-        self.indexed_facts.unwrap_or(&self.facts).get(node).copied()
+        self.facts.nodes().get(node).copied()
     }
 
     pub(super) fn check_scalar_copy_body(
@@ -5457,12 +5464,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(pending());
         }
-        let header = self
-            .typed
-            .inventory()
-            .type_facts()
-            .declarations
+        let headers = &self.typed.inventory().type_facts().declarations;
+        // A comparison may read the whole path. Bound every candidate
+        // comparison without depending on the ordered map's fanout.
+        graph::charge_key(&call.callee.module, headers.len(), self.budget)?;
+        let header = headers
             .get(call.callee)
+            .filter(|header| std::ptr::eq(call.callee, &header.declaration.id))
             .ok_or_else(pending)?;
         let DeclarationShape::Function {
             parameters,
@@ -5494,7 +5502,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             callee: &header.declaration.id,
             args: vec![stage],
             into: Some(into),
-            result: CallResult::TransfersCallable,
+            result: CallResult::TransfersCallable(header),
             destination: None,
         });
         let transfer = self.emit(node, Action::Call(index), Edges::Next(next))?;

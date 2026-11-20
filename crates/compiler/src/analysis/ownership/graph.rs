@@ -303,7 +303,7 @@ fn module_index(
     Ok(modules.binary_search_by(|module| module.key.cmp(key)).ok())
 }
 
-fn charge_key(key: &ModuleKey, probes: usize, budget: &mut Budget) -> Result<(), ()> {
+pub(super) fn charge_key(key: &ModuleKey, probes: usize, budget: &mut Budget) -> Result<(), ()> {
     let width = key.path.len().checked_add(1).ok_or(())?;
     budget.step(width.checked_mul(probes).ok_or(())?)
 }
@@ -484,6 +484,7 @@ fn analyze<'g>(
     let dispose = typed.dispose_role().map(|role| &role.id);
     let mut reverse_edges = 0usize;
     let mut findings = FindingIndex::new();
+    let mut cache = QueryCache::default();
     let mut index = 0;
     while index < work.len() {
         budget.step(1)?;
@@ -494,7 +495,7 @@ fn analyze<'g>(
             item,
             &facts[item.module_index].nodes,
             index >= report.source_roots,
-            budget,
+            Lowering::new(budget, &mut cache),
         );
         match lowered {
             Err(Stop::Limit) => return Err(()),
@@ -785,7 +786,7 @@ fn lower_indexed<'a, 'g>(
     item: &WorkItem<'a, 'g>,
     nodes: &'a NodeIndex<'a, 'g>,
     active: bool,
-    budget: &mut Budget,
+    lowering: Lowering<'_, 'a, 'g>,
 ) -> ResultOf<Lowered<'a, 'g>> {
     let WorkItem {
         module,
@@ -804,7 +805,7 @@ fn lower_indexed<'a, 'g>(
         if body.site.node != site {
             return Err(pending());
         }
-        return lower_startup_body(typed, module, nodes, budget);
+        return lower_startup_body(typed, module, nodes, lowering);
     };
     if !matches!(body.owner, BodyOwner::Declaration(owner) if std::ptr::eq(owner, &declaration.id))
     {
@@ -816,7 +817,7 @@ fn lower_indexed<'a, 'g>(
                 return Err(pending());
             }
             let result = body.result.as_ref().ok_or_else(pending)?;
-            return lower_expectation_body(typed, module, site, result, nodes, budget);
+            return lower_expectation_body(typed, module, site, result, nodes, lowering);
         }
         DeclarationKind::Function => {
             let header = facts.header.ok_or_else(pending)?;
@@ -864,48 +865,13 @@ fn lower_indexed<'a, 'g>(
                 declaration,
                 implementation,
                 body,
-                budget,
+                lowering.budget,
             )?;
             (&implementation.header, frame, false)
         }
         _ => return Err(pending()),
     };
-    lower(typed, module, header, frame, collect_trace, nodes, budget)
-}
-
-pub(super) fn lower_callable_transfer<'g>(
-    typed: &TypedReport<'g>,
-    module: &'g Module,
-    callee: &'g DeclarationId,
-    layout: CallableLayout,
-    nodes: &NodeIndex<'_, 'g>,
-    site: NodeId,
-    budget: &mut Budget,
-) -> ResultOf<Mir<'g>> {
-    budget.step(1 + module.key.path.len())?;
-    let header = typed
-        .inventory()
-        .type_facts()
-        .declarations
-        .get(callee)
-        .ok_or(Stop::Pending(site))?;
-    let lowered = lower(
-        typed,
-        module,
-        header,
-        Frame::CallableTransfer(layout),
-        false,
-        Some(nodes),
-        budget,
-    )
-    .map_err(|stop| match stop {
-        Stop::Limit | Stop::Rejected { .. } => stop,
-        Stop::Pending(_) => Stop::Pending(site),
-    })?;
-    // The preflight rules out unresolved dependencies before source findings;
-    // also require the actual ordinary MIR to have no external edge.
-    visit_dependencies(&lowered.mir, budget, |_, _, _| Err(Stop::Pending(site)))?;
-    Ok(lowered.mir)
+    lower(typed, module, header, frame, collect_trace, nodes, lowering)
 }
 
 pub(super) fn visit_dependencies<'g>(

@@ -126,7 +126,7 @@ impl Edges {
 fn liveness(
     slots: &[Local<'_>],
     code: &[Instruction<'_>],
-    calls: &[Call<'_>],
+    calls: &[Call<'_, '_>],
     cleanups: &[Vec<Slot>],
     retained: &BTreeMap<Slot, RetainedContents>,
     budget: &mut Budget,
@@ -1101,11 +1101,10 @@ pub(super) struct CancellationTrace<'a, 'g> {
     locals: Vec<Slot>,
     params: Vec<Slot>,
     retained: BTreeMap<Slot, RetainedContents>,
-    facts: NodeIndex<'a, 'g>,
-    indexed_facts: Option<&'a NodeIndex<'a, 'g>>,
+    facts: BuildFacts<'a, 'g>,
     bindings: BTreeMap<&'g DeclarationId, Slot>,
     code: Vec<Instruction<'g>>,
-    calls: Vec<Call<'g>>,
+    calls: Vec<Call<'a, 'g>>,
     known: KnownStates,
     live: Vec<BTreeSet<Slot>>,
     flat: bool,
@@ -1207,10 +1206,7 @@ impl<'g> EnabledRetainingCall<'_, 'g> {
 
 impl<'g> CancellationTrace<'_, 'g> {
     fn fact_kind(&self, node: NodeId) -> Option<&NodeFactKind<'g>> {
-        self.indexed_facts
-            .unwrap_or(&self.facts)
-            .get(&node)
-            .map(|fact| &fact.kind)
+        self.facts.nodes().get(&node).map(|fact| &fact.kind)
     }
 
     fn frame(&self) -> CancellationFrame<'_, 'g> {
@@ -1220,7 +1216,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             locals: &self.locals,
             params: &self.params,
             retained: &self.retained,
-            indexed: self.indexed_facts.is_some(),
+            indexed: self.facts.is_indexed(),
         }
     }
 
@@ -1294,7 +1290,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             return Ok(None);
         };
         if !std::ptr::eq(facts.callee, call.callee) {
-            if self.indexed_facts.is_some() {
+            if self.facts.is_indexed() {
                 budget.step(
                     facts
                         .callee
@@ -1340,7 +1336,7 @@ impl<'g> CancellationTrace<'_, 'g> {
         // Bound the slot by its old and sole compatible input loans, never by
         // the transient access loan. Entry itself still has the old contents.
         let loans = loan_set(backing, budget)?;
-        if self.indexed_facts.is_some() {
+        if self.facts.is_indexed() {
             budget.step(state.len())?;
         }
         budget.reserve(state.len())?;
@@ -1402,7 +1398,7 @@ impl<'g> CancellationTrace<'_, 'g> {
         {
             return Ok(None);
         }
-        if self.indexed_facts.is_some() {
+        if self.facts.is_indexed() {
             // Include the binding equality test and all possible map probes.
             let width = path
                 .root
@@ -1697,6 +1693,7 @@ pub(super) fn run<'a, 'g>(
     params: Vec<Slot>,
     active: Option<DisposerFrame>,
     collect_trace: bool,
+    mut cache: Option<&mut QueryCache<'a, 'g>>,
 ) -> ResultOf<(Mir<'g>, Option<CancellationTrace<'a, 'g>>)> {
     let mut candidate = collect_trace
         && build.module.key.origin == crate::loader::Origin::Application
@@ -1715,8 +1712,7 @@ pub(super) fn run<'a, 'g>(
         typed,
         module,
         body,
-        facts,
-        indexed_facts,
+        mut facts,
         callable_frame,
         locals: bindings,
         return_contract,
@@ -1753,7 +1749,6 @@ pub(super) fn run<'a, 'g>(
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
     }
-    let mut callable_proofs = BTreeMap::new();
     let mut callable_exported = false;
     let mut unsupported_cleanup = Vec::new();
     if let Some((layout, _)) = callable_frame {
@@ -1845,7 +1840,7 @@ pub(super) fn run<'a, 'g>(
                 if let Some((id, _)) = return_contract {
                     let callee = calls[index].callee;
                     if callee.start == id.start && callee.kind == id.kind {
-                        if indexed_facts.is_some() {
+                        if facts.is_indexed() {
                             budget.step(id.module.path.len().checked_add(1).ok_or(Stop::Limit)?)?;
                         }
                         flat &= callee != id;
@@ -2290,7 +2285,9 @@ pub(super) fn run<'a, 'g>(
                         binding,
                     }
                 }
-                Action::Call(index) if calls[index].result == CallResult::TransfersCallable => {
+                Action::Call(index)
+                    if let CallResult::TransfersCallable(header) = calls[index].result =>
+                {
                     let call = &calls[index];
                     let ([argument], Some(into)) = (call.args.as_slice(), call.into) else {
                         return Err(Stop::Pending(node));
@@ -2308,28 +2305,14 @@ pub(super) fn run<'a, 'g>(
                     {
                         return Err(Stop::Pending(node));
                     }
-                    // The cache is local to this typed capture/module and keying
-                    // uses the selected canonical declaration, not the arrow.
-                    let key = (call.callee.start, layout);
-                    budget.step(1)?;
-                    let body = match callable_proofs.entry(key) {
-                        std::collections::btree_map::Entry::Occupied(proof) => {
-                            Arc::clone(proof.get())
-                        }
-                        std::collections::btree_map::Entry::Vacant(proof) => {
-                            let checked = graph::lower_callable_transfer(
-                                typed,
-                                module,
-                                call.callee,
-                                layout,
-                                indexed_facts.unwrap_or(&facts),
-                                node,
-                                budget,
-                            )?;
-                            budget.reserve(2)?;
-                            Arc::clone(proof.insert(Arc::new(checked)))
-                        }
-                    };
+                    let cache = cache.as_deref_mut().ok_or(Stop::Pending(node))?;
+                    cache.share_target_nodes(module, &mut facts, budget)?;
+                    let body = cache
+                        .callable_transfer(typed, module, header, layout, facts.nodes(), budget)
+                        .map_err(|stop| match stop {
+                            Stop::Pending(_) => Stop::Pending(node),
+                            _ => stop,
+                        })?;
                     // Declared conservative may-carry behavior: retain all
                     // actual input loans without the origin or exact targets.
                     let loans = actual.loans.clone();
@@ -2488,7 +2471,7 @@ pub(super) fn run<'a, 'g>(
                                 input: local(retention.input),
                             }
                         }
-                    } else if call.result == CallResult::ScalarCopy {
+                    } else if matches!(call.result, CallResult::ScalarCopy) {
                         let [argument] = call.args.as_slice() else {
                             return Err(Stop::Pending(node));
                         };
@@ -2497,7 +2480,7 @@ pub(super) fn run<'a, 'g>(
                             argument: local(*argument),
                             into: call.into.map(local),
                         }
-                    } else if call.result == CallResult::RetainsRecordInput {
+                    } else if matches!(call.result, CallResult::RetainsRecordInput) {
                         let [argument] = call.args.as_slice() else {
                             return Err(Stop::Pending(node));
                         };
@@ -2964,7 +2947,6 @@ pub(super) fn run<'a, 'g>(
         params,
         retained,
         facts,
-        indexed_facts,
         bindings,
         code,
         calls,

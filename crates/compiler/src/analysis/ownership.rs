@@ -792,9 +792,14 @@ fn checked_graph<'g>(
 
     let mut seen = BTreeMap::new();
     let mut pending = VecDeque::new();
+    let mut cache = QueryCache::default();
+    let lowering = Lowering::new(budget, &mut cache);
     let (root_site, lowered) = match plan {
         RootPlan::Function(header) => {
-            budget.reserve(1).map_err(|()| (module, Stop::Limit))?;
+            lowering
+                .budget
+                .reserve(1)
+                .map_err(|()| (module, Stop::Limit))?;
             seen.insert(&header.declaration.id, None);
             (
                 header.declaration.node,
@@ -805,19 +810,19 @@ fn checked_graph<'g>(
                     Frame::OrdinaryFunction,
                     true,
                     None,
-                    budget,
+                    lowering,
                 ),
             )
         }
         RootPlan::Implementation(declaration) => (
             declaration.node,
-            lower_implementation(typed, module, declaration, budget),
+            lower_implementation(typed, module, declaration, lowering),
         ),
         RootPlan::Expectation(declaration) => (
             declaration.node,
-            lower_expectation(typed, module, declaration, budget),
+            lower_expectation(typed, module, declaration, lowering),
         ),
-        RootPlan::Startup => (module.syntax.root, lower_startup(typed, module, budget)),
+        RootPlan::Startup => (module.syntax.root, lower_startup(typed, module, lowering)),
     };
     let Lowered {
         mir: mut root,
@@ -885,7 +890,7 @@ fn checked_graph<'g>(
                 frame,
                 enabled,
                 None,
-                budget,
+                Lowering::new(budget, &mut cache),
             )
         };
         let Lowered {
@@ -931,6 +936,105 @@ struct Lowered<'a, 'g> {
     empty_entry: Option<Site<'g>>,
 }
 
+#[derive(Default)]
+struct QueryCache<'a, 'g> {
+    target_nodes: BTreeMap<*const Module, Arc<NodeIndex<'a, 'g>>>,
+    // Canonical references belong to this receipt. Address keys avoid path
+    // comparisons, and identical source offsets in other modules cannot alias.
+    callable_proofs: BTreeMap<(*const DeclarationId, CallableLayout), ResultOf<Arc<Mir<'g>>>>,
+}
+
+struct Lowering<'q, 'a, 'g> {
+    budget: &'q mut Budget,
+    cache: Option<&'q mut QueryCache<'a, 'g>>,
+}
+
+impl<'q, 'a, 'g> Lowering<'q, 'a, 'g> {
+    fn new(budget: &'q mut Budget, cache: &'q mut QueryCache<'a, 'g>) -> Self {
+        Self {
+            budget,
+            cache: Some(cache),
+        }
+    }
+}
+
+impl<'a, 'g> QueryCache<'a, 'g> {
+    fn target_nodes(
+        &self,
+        module: &Module,
+        budget: &mut Budget,
+    ) -> ResultOf<Option<Arc<NodeIndex<'a, 'g>>>> {
+        if self.target_nodes.is_empty() {
+            return Ok(None);
+        }
+        budget.step(1)?;
+        Ok(self.target_nodes.get(&std::ptr::from_ref(module)).cloned())
+    }
+
+    fn share_target_nodes(
+        &mut self,
+        module: &Module,
+        facts: &mut BuildFacts<'a, 'g>,
+        budget: &mut Budget,
+    ) -> ResultOf<()> {
+        if let BuildFacts::Local(nodes) = facts {
+            // Keep the already-metered scan only once a transfer is reached.
+            // Indexed graph/scalar builds and ordinary-only requests do no extra indexing.
+            budget.step(1)?;
+            budget.reserve(2)?;
+            let nodes = Arc::new(std::mem::take(nodes));
+            self.target_nodes
+                .insert(std::ptr::from_ref(module), Arc::clone(&nodes));
+            *facts = BuildFacts::Shared(nodes);
+        }
+        Ok(())
+    }
+
+    fn callable_transfer(
+        &mut self,
+        typed: &TypedReport<'g>,
+        module: &'g Module,
+        header: &DeclarationFacts<'g>,
+        layout: CallableLayout,
+        nodes: &NodeIndex<'_, 'g>,
+        budget: &mut Budget,
+    ) -> ResultOf<Arc<Mir<'g>>> {
+        let key = (std::ptr::from_ref(&header.declaration.id), layout);
+        budget.step(1)?;
+        if let Some(proof) = self.callable_proofs.get(&key) {
+            return proof.clone();
+        }
+        // Transfer frames cannot lower another callable transfer. Only a
+        // finished check (including closure of external edges) is reusable.
+        let proof = lower(
+            typed,
+            module,
+            header,
+            Frame::CallableTransfer(layout),
+            false,
+            Some(nodes),
+            Lowering {
+                budget,
+                cache: None,
+            },
+        )
+        .and_then(|lowered| {
+            graph::visit_dependencies(&lowered.mir, budget, |_, edge, _| {
+                Err(Stop::Pending(edge.site.node))
+            })?;
+            Ok(lowered.mir)
+        });
+        if matches!(proof, Err(Stop::Limit)) {
+            return Err(Stop::Limit);
+        }
+        budget.step(1)?;
+        budget.reserve(1 + usize::from(proof.is_ok()))?;
+        let proof = proof.map(Arc::new);
+        self.callable_proofs.insert(key, proof.clone());
+        proof
+    }
+}
+
 enum Frame {
     OrdinaryFunction,
     CallableTransfer(CallableLayout),
@@ -946,7 +1050,7 @@ fn lower<'a, 'g>(
     frame: Frame,
     collect_trace: bool,
     facts: Option<&'a NodeIndex<'a, 'g>>,
-    budget: &mut Budget,
+    Lowering { budget, cache }: Lowering<'_, 'a, 'g>,
 ) -> ResultOf<Lowered<'a, 'g>> {
     let entry_site = header.declaration.node;
     let DeclarationShape::Function { parameters, result } = &header.shape else {
@@ -978,6 +1082,7 @@ fn lower<'a, 'g>(
         body,
         Some((&header.declaration.id, result)),
         facts,
+        cache.as_deref(),
         budget,
     )?;
     if matches!(frame, Frame::ScalarCopy { .. }) {
@@ -1081,7 +1186,7 @@ fn lower<'a, 'g>(
     .then(|| site_at(module, body));
     // Capturing pre-states is separate from the ordinary lowering frame and
     // does not assume delivery is enabled on any ordinary edge.
-    let (mir, trace) = flow::run(build, entry, params, active, collect_trace)?;
+    let (mir, trace) = flow::run(build, entry, params, active, collect_trace, cache)?;
     Ok(Lowered {
         mir,
         trace,
@@ -1093,7 +1198,7 @@ fn lower_implementation<'a, 'g>(
     typed: &'a TypedReport<'g>,
     module: &'g Module,
     declaration: &'g Declaration,
-    budget: &mut Budget,
+    Lowering { budget, cache }: Lowering<'_, 'a, 'g>,
 ) -> ResultOf<Lowered<'a, 'g>> {
     use crate::loader::Origin;
 
@@ -1152,7 +1257,7 @@ fn lower_implementation<'a, 'g>(
         frame,
         false,
         None,
-        budget,
+        Lowering { budget, cache },
     )
 }
 
@@ -1171,15 +1276,19 @@ fn lower_expectation<'a, 'g>(
     typed: &'a TypedReport<'g>,
     module: &'g Module,
     declaration: &'g Declaration,
-    budget: &mut Budget,
+    lowering: Lowering<'_, 'a, 'g>,
 ) -> ResultOf<Lowered<'a, 'g>> {
     let root = declaration.node;
     let result = typed
         .bodies()
-        .checked_body(module, BodyOwner::Declaration(&declaration.id), budget)?
+        .checked_body(
+            module,
+            BodyOwner::Declaration(&declaration.id),
+            lowering.budget,
+        )?
         .and_then(|body| body.result.as_ref())
         .ok_or(Stop::Pending(root))?;
-    lower_expectation_body(typed, module, root, result, None, budget)
+    lower_expectation_body(typed, module, root, result, None, lowering)
 }
 
 fn lower_expectation_body<'a, 'g>(
@@ -1188,11 +1297,11 @@ fn lower_expectation_body<'a, 'g>(
     root: NodeId,
     result: &'a Type<'g>,
     facts: Option<&'a NodeIndex<'a, 'g>>,
-    budget: &mut Budget,
+    Lowering { budget, cache }: Lowering<'_, 'a, 'g>,
 ) -> ResultOf<Lowered<'a, 'g>> {
-    let mut build = Build::new(typed, module, root, None, facts, budget)?;
+    let mut build = Build::new(typed, module, root, None, facts, cache.as_deref(), budget)?;
     let entry = build.expectation(result)?;
-    let (mir, trace) = flow::run(build, entry, Vec::new(), None, false)?;
+    let (mir, trace) = flow::run(build, entry, Vec::new(), None, false, cache)?;
     Ok(Lowered {
         mir,
         trace,
@@ -1203,25 +1312,33 @@ fn lower_expectation_body<'a, 'g>(
 fn lower_startup<'a, 'g>(
     typed: &'a TypedReport<'g>,
     module: &'g Module,
-    budget: &mut Budget,
+    lowering: Lowering<'_, 'a, 'g>,
 ) -> ResultOf<Lowered<'a, 'g>> {
     let root = module.syntax.root;
     typed
         .bodies()
-        .checked_body(module, BodyOwner::Startup, budget)?
+        .checked_body(module, BodyOwner::Startup, lowering.budget)?
         .ok_or(Stop::Pending(root))?;
-    lower_startup_body(typed, module, None, budget)
+    lower_startup_body(typed, module, None, lowering)
 }
 
 fn lower_startup_body<'a, 'g>(
     typed: &'a TypedReport<'g>,
     module: &'g Module,
     facts: Option<&'a NodeIndex<'a, 'g>>,
-    budget: &mut Budget,
+    Lowering { budget, cache }: Lowering<'_, 'a, 'g>,
 ) -> ResultOf<Lowered<'a, 'g>> {
-    let mut build = Build::new(typed, module, module.syntax.root, None, facts, budget)?;
+    let mut build = Build::new(
+        typed,
+        module,
+        module.syntax.root,
+        None,
+        facts,
+        cache.as_deref(),
+        budget,
+    )?;
     let entry = build.startup()?;
-    let (mir, trace) = flow::run(build, entry, Vec::new(), None, false)?;
+    let (mir, trace) = flow::run(build, entry, Vec::new(), None, false, cache)?;
     Ok(Lowered {
         mir,
         trace,
@@ -1330,6 +1447,7 @@ fn site_at(module: &Module, node: NodeId) -> Site<'_> {
     }
 }
 
+#[derive(Clone)]
 enum Stop {
     Rejected {
         site: NodeId,
@@ -1603,13 +1721,32 @@ struct Loop {
 
 type NodeIndex<'a, 'g> = BTreeMap<NodeId, &'a NodeFacts<'g>>;
 
+enum BuildFacts<'a, 'g> {
+    Local(NodeIndex<'a, 'g>),
+    Shared(Arc<NodeIndex<'a, 'g>>),
+    Indexed(&'a NodeIndex<'a, 'g>),
+}
+
+impl<'a, 'g> BuildFacts<'a, 'g> {
+    fn nodes(&self) -> &NodeIndex<'a, 'g> {
+        match self {
+            Self::Local(nodes) => nodes,
+            Self::Shared(nodes) => nodes,
+            Self::Indexed(nodes) => nodes,
+        }
+    }
+
+    // Graph-indexed delivery metering is separate from targeted index reuse.
+    fn is_indexed(&self) -> bool {
+        matches!(self, Self::Indexed(_))
+    }
+}
+
 struct Build<'a, 'g, 'b> {
     typed: &'a TypedReport<'g>,
     module: &'g Module,
     body: NodeId,
-    // The targeted query hands this owned index to its cancellation trace.
-    facts: NodeIndex<'a, 'g>,
-    indexed_facts: Option<&'a NodeIndex<'a, 'g>>,
+    facts: BuildFacts<'a, 'g>,
     locals: BTreeMap<&'g DeclarationId, Slot>,
     /// Checked nested regions expose value transfers, not general places.
     nested_record_values: BTreeMap<&'g DeclarationId, Slot>,
@@ -1624,7 +1761,7 @@ struct Build<'a, 'g, 'b> {
     incoming_exclusive_bools: Vec<Slot>,
     slots: Vec<Local<'g>>,
     code: Vec<Instruction<'g>>,
-    calls: Vec<Call<'g>>,
+    calls: Vec<Call<'a, 'g>>,
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
     scalar_copy_read: Option<NodeId>,
@@ -1657,21 +1794,21 @@ struct OriginalTwoHopBool {
     contents: Slot,
 }
 
-struct Call<'g> {
+struct Call<'a, 'g> {
     callee: &'g DeclarationId,
     args: Vec<Slot>,
     into: Option<Slot>,
-    result: CallResult,
+    result: CallResult<'a, 'g>,
     destination: Option<CallDestination>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CallResult {
+#[derive(Clone, Copy)]
+enum CallResult<'a, 'g> {
     Plain,
     ScalarCopy,
     RetainsInputs,
     RetainsRecordInput,
-    TransfersCallable,
+    TransfersCallable(&'a DeclarationFacts<'g>),
 }
 
 #[derive(Clone, Copy)]
