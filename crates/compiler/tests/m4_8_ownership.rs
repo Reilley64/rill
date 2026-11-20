@@ -1731,6 +1731,18 @@ fn installed_pair_invocation(request: &InstalledRequest) {
             ..request.clone()
         })
         .unwrap();
+        let mut captured: Vec<_> = graph
+            .modules()
+            .iter()
+            .filter(|module| module.key.origin == Origin::Standard)
+            .map(|module| module.key.path.as_str())
+            .collect();
+        let mut pins: Vec<_> = include_str!("../../../tests/installed/typed/stdlib-sources.txt")
+            .lines()
+            .collect();
+        captured.sort_unstable();
+        pins.sort_unstable();
+        assert_eq!(captured, pins);
         // Baseline before two-child Result-use: no pair candidate to discover.
         assert!(
             analyze_typed(
@@ -1843,14 +1855,22 @@ fn installed_pair_invocation(request: &InstalledRequest) {
             receipt.not_performed(),
             &[Stage::Ownership, Stage::Execution]
         );
-        let user = app
-            .declarations
-            .iter()
-            .find(|d| d.name.as_deref() == Some("mixed"))
-            .unwrap();
-        let local = lower_body(&receipt, app, &user.id, AnalysisLimits::default()).unwrap();
-        assert_eq!(local.completion(), Completion::Incomplete);
-        assert!(local.mir().is_none());
+        for name in ["mixed", "shared"] {
+            let user = app
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some(name))
+                .unwrap();
+            let local = lower_body(&receipt, app, &user.id, AnalysisLimits::default()).unwrap();
+            assert_eq!(local.completion(), Completion::Incomplete);
+            assert!(local.mir().is_none());
+            if name == "shared" {
+                assert_eq!(
+                    local.blocked_at().unwrap().span.bytes(),
+                    b"join([() => (&numbers)[0u64], () => (&numbers)[1u64]])",
+                );
+            }
+        }
         let s = receipt.statistics();
         let exact = AnalysisLimits {
             max_work: s.work,

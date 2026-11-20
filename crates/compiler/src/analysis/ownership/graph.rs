@@ -32,6 +32,10 @@ pub enum DependencyContract<'g> {
     ProtectedRelease {
         entry: &'g DeclarationId,
     },
+    /// Closed ordinary effect of the installed List<i32> disposal bridge.
+    ListI32Disposal {
+        bridge: &'g DeclarationId,
+    },
     ResultConstructor,
     RetainedErrorDisplay,
 }
@@ -532,9 +536,13 @@ fn analyze<'g>(
                 let mut post_install_leaf = None;
                 visit_dependencies(&mir, budget, |block, edge, budget| {
                     budget.reserve(1)?;
-                    if matches!(edge.contract, DependencyContract::CallableTransfer(_)) {
-                        // This edge carries the checked specialized MIR, not a
-                        // claim about the callee's unbound source root.
+                    if matches!(
+                        edge.contract,
+                        DependencyContract::CallableTransfer(_)
+                            | DependencyContract::ListI32Disposal { .. }
+                    ) {
+                        // Specialized evidence closes this ordinary edge,
+                        // not the callee's unbound source root.
                         report.bodies[index].dependencies.push(edge);
                         return Ok(());
                     }
@@ -988,6 +996,11 @@ pub(super) fn visit_dependencies<'g>(
                             entry,
                             ..
                         } => emit(implementation, ProtectedRelease { entry }, budget)?,
+                        Cleanup::DisposeListI32 {
+                            implementation,
+                            bridge,
+                            ..
+                        } => emit(implementation, ListI32Disposal { bridge }, budget)?,
                         _ => {}
                     }
                 }

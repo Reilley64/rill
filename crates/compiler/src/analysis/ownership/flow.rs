@@ -545,6 +545,7 @@ fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultO
             some,
         }),
         StorageCleanup::ReleaseGuard(release) => Ok(release.cleanup(place)),
+        StorageCleanup::DisposeListI32(disposal) => Ok(disposal.cleanup(place)),
         StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
 }
@@ -594,7 +595,7 @@ fn cleanup_operation<'g>(
     Ok(match cleanup_of(module, local, node)? {
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
-        cleanup @ Cleanup::DropOptionPayload { .. } => {
+        cleanup @ (Cleanup::DropOptionPayload { .. } | Cleanup::DisposeListI32 { .. }) => {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
         }
@@ -3147,6 +3148,9 @@ pub(super) fn run<'a, 'g>(
                     } else if let Some(release) = slots[slot].guard_release() {
                         budget.reserve(1)?;
                         Operation::Cleanup(vec![release.cleanup(local(slot))])
+                    } else if let StorageCleanup::DisposeListI32(disposal) = slots[slot].cleanup {
+                        budget.reserve(1)?;
+                        Operation::Cleanup(vec![disposal.cleanup(local(slot))])
                     } else if let Some(implementation) = scalar_implementation {
                         Operation::CallScalarDispose {
                             implementation,

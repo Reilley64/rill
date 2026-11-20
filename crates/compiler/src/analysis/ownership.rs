@@ -740,6 +740,12 @@ pub enum Cleanup<'g> {
         implementation: &'g DeclarationId,
         entry: &'g DeclarationId,
     },
+    /// Consume the canonical List<i32> backing. Its scalar elements have no drop action.
+    DisposeListI32 {
+        operand: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+    },
     /// Transfer the initialized remainder to the active disposer's epilogue.
     DeferDisposerFields {
         from: Place<'g>,
@@ -1741,6 +1747,23 @@ enum StorageCleanup<'g> {
     DropOptionPayload(&'g DeclarationId),
     Unlowered,
     ReleaseGuard(GuardRelease<'g>),
+    DisposeListI32(ListDisposal<'g>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ListDisposal<'g> {
+    implementation: &'g DeclarationId,
+    bridge: &'g DeclarationId,
+}
+
+impl<'g> ListDisposal<'g> {
+    fn cleanup(self, operand: Place<'g>) -> Cleanup<'g> {
+        Cleanup::DisposeListI32 {
+            operand,
+            implementation: self.implementation,
+            bridge: self.bridge,
+        }
+    }
 }
 
 impl<'g> Local<'g> {
@@ -1749,7 +1772,12 @@ impl<'g> Local<'g> {
     }
 
     fn needs_boundary_cleanup(self) -> bool {
-        self.members > 0 || self.custom_disposer.is_some() || self.guard_release().is_some()
+        self.members > 0
+            || self.custom_disposer.is_some()
+            || matches!(
+                self.cleanup,
+                StorageCleanup::ReleaseGuard(_) | StorageCleanup::DisposeListI32(_)
+            )
     }
 
     fn guard_release(self) -> Option<GuardRelease<'g>> {

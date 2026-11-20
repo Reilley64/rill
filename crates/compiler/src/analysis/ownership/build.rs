@@ -6,7 +6,7 @@ use crate::analysis::scalars::data::{
     PatternFacts, PatternProjection, PlacePath,
 };
 use crate::analysis::scalars::generics::{
-    GoalState,
+    GoalJudgment, GoalState,
     callables::{ArrowFacts, CaptureFact, CaptureForm, InvocationFacts},
 };
 use crate::analysis::scalars::{
@@ -14,9 +14,9 @@ use crate::analysis::scalars::{
     Propagation, PropagationTarget,
 };
 use crate::analysis::typed::{
-    ErrorOperation, NativeOwnershipAction, NativeOwnershipProvider, NativeRepresentationKind,
-    OptionRole, OwnershipCoverage, OwnershipRule, Primitive, PrimitiveCoverage, PrimitiveOperation,
-    PrimitiveRole, ResultRole,
+    CollectionOperation, CollectionStorage, ErrorOperation, NativeOwnershipAction,
+    NativeOwnershipProvider, NativeRepresentationKind, OptionRole, OwnershipCoverage,
+    OwnershipRule, Primitive, PrimitiveCoverage, PrimitiveOperation, PrimitiveRole, ResultRole,
 };
 use crate::analysis::{MemberType, Payload};
 use crate::loader::Origin;
@@ -694,6 +694,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             TypeTerm::Nominal { .. } if let Some(release) = self.guard_release(ty)? => {
                 (true, StorageCleanup::ReleaseGuard(release))
             }
+            TypeTerm::Nominal { .. } if self.is_list_i32(ty) => (
+                true,
+                StorageCleanup::DisposeListI32(self.list_disposal(node)?),
+            ),
             TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
                 if let Some((role, payload)) = self.admitted_option(ty) =>
             {
@@ -773,6 +777,43 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             cleanup,
         });
         Ok(slot)
+    }
+
+    fn is_list_i32(&self, ty: &Type<'g>) -> bool {
+        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if self.typed.list_role().is_some_and(|list| std::ptr::eq(*declaration, &list.declaration.id))
+                && matches!(arguments.as_slice(), [element] if scalar::scalar(element) == Some(Primitive::I32)))
+    }
+
+    fn list_disposal(&mut self, node: NodeId) -> ResultOf<ListDisposal<'g>> {
+        let pending = || Stop::Pending(node);
+        let list = self.typed.list_role().ok_or_else(pending)?;
+        for scope in self.typed.collection_protection() {
+            self.budget.step(1)?;
+            if scope.operation != CollectionOperation::DisposeList
+                || !std::ptr::eq(scope.owner, list.declaration)
+                || !self
+                    .dispose
+                    .is_some_and(|id| std::ptr::eq(id, &scope.family.id))
+                || scope.coverage != OwnershipCoverage::Clear
+            {
+                continue;
+            }
+            let provider = scope.provider.ok_or_else(pending)?;
+            for repr in self.typed.collection_representations() {
+                self.budget.step(1)?;
+                if repr.storage == CollectionStorage::Elements
+                    && std::ptr::eq(repr.declaration, list.declaration)
+                    && std::ptr::eq(repr.artifact.context(), provider.artifact.context())
+                {
+                    return Ok(ListDisposal {
+                        implementation: &provider.implementation.id,
+                        bridge: &provider.bridge.id,
+                    });
+                }
+            }
+        }
+        Err(pending())
     }
 
     fn guard_release(&mut self, ty: &TypeTerm<'g>) -> ResultOf<Option<GuardRelease<'g>>> {
@@ -2187,6 +2228,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 }
                 let (target, source) = self.assignment_target(left, facts, value, depth + 1)?;
                 if self.slots[target].shared_option.is_some()
+                    || matches!(
+                        self.slots[target].cleanup,
+                        StorageCleanup::DisposeListI32(_)
+                    )
                     || self.slots[target].projection.is_some()
                         && self.slots[target].guard_release().is_some()
                 {
@@ -6114,6 +6159,46 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         )
     }
 
+    fn check_list_dispose_call(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        argument: NodeId,
+        disposal: ListDisposal<'g>,
+        depth: usize,
+    ) -> ResultOf<()> {
+        let pending = || Stop::Pending(node);
+        let (name, _) = self.ungroup_expression_at(argument, depth + 1)?;
+        let (named, path) = self.named_owned_place(name)?.ok_or_else(pending)?;
+        let actual = self.normal_value(argument)?;
+        let Some(DataExpression::CanonicalCall(goal)) = &facts.data else {
+            return Err(pending());
+        };
+        self.budget
+            .step(1 + disposal.implementation.module.path.len())?;
+        let goal = self.typed.bodies().goal(goal).map_err(|_| pending())?;
+        if facts.ordinary_context.is_some()
+            || !call.defaults.is_empty()
+            || !self.is_list_i32(&named.ty)
+            || actual.ty != named.ty
+            || actual.access != Access::Owned
+            || !matches!(&actual.path, Some(actual) if std::ptr::eq(actual.root, path.root) && actual.projections.is_empty())
+            || goal.state != GoalState::Proved
+            || goal.premise.is_some()
+            || !matches!(&goal.judgment, GoalJudgment::Determine { family, inputs, .. }
+                if std::ptr::eq(*family, call.callee) && matches!(inputs.as_slice(), [input] if *input == actual.ty))
+            || !goal.selection.as_ref().is_some_and(|s| {
+                s.implementation == disposal.implementation
+                    && matches!(s.substitution.as_slice(), [element]
+                        if scalar::scalar(&element.argument) == Some(Primitive::I32))
+            })
+        {
+            return Err(pending());
+        }
+        Ok(())
+    }
+
     fn invoke_mutable_cell(
         &mut self,
         node: NodeId,
@@ -6273,6 +6358,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 {
                     return Err(Stop::Pending(node));
                 }
+            } else if let StorageCleanup::DisposeListI32(disposal) = self.slots[operand].cleanup {
+                self.check_list_dispose_call(node, facts, call, *arg, disposal, depth)?;
             } else {
                 let actual = self.value(*arg)?;
                 if scalar::scalar(&actual.ty).is_some()

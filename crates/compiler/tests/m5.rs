@@ -34,6 +34,8 @@ mod records;
 mod retained;
 #[path = "m5/roots.rs"]
 mod roots;
+#[path = "m5/scoped_jobs.rs"]
+mod scoped_jobs;
 mod support;
 #[path = "m5/tuples.rs"]
 mod tuples;
