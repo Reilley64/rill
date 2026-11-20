@@ -1383,6 +1383,12 @@ impl<'g> Local<'g> {
 }
 
 #[derive(Clone, Copy)]
+enum PairCall {
+    Once,
+    ReadOnly { typed_origin: Option<NodeId> },
+}
+
+#[derive(Clone, Copy)]
 enum Action<'g> {
     None,
     BudgetBackedge,
@@ -1430,9 +1436,7 @@ enum Action<'g> {
     InvokeClosurePair {
         receiver: Slot,
         into: Slot,
-        // None denotes the existing consuming invocation. A read-only
-        // invocation must reach the environment identified by its typed origin.
-        read_only_origin: Option<NodeId>,
+        call: PairCall,
     },
     TestVariant {
         operand: Slot,

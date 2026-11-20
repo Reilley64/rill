@@ -885,11 +885,27 @@ fn read_only_pair_results<'g>(
                     Operation::Copy {
                         from,
                         into: Some(stage),
-                    } if stage.root.node == capture.node => Some(from.root.span.start()),
+                    } if stage.root.node == capture.node
+                        && !matches!(form, CaptureForm::ExplicitBorrow { .. }) =>
+                    {
+                        Some(from.root.span.start())
+                    }
+                    Operation::Borrow {
+                        source,
+                        holder,
+                        exclusive: false,
+                    } if holder.root.node == capture.node
+                        && form == (CaptureForm::ExplicitBorrow { mutable: false }) =>
+                    {
+                        Some(source.root.span.start())
+                    }
                     _ => None,
                 })
                 .expect("each written tuple position has its own capture stage");
-            assert_eq!(fact.path.root, &declaration_at(source, name).id);
+            assert_eq!(
+                fact.path.root,
+                &declaration_at(source, name.trim_start_matches('&')).id
+            );
         }
         into
     });
@@ -1147,6 +1163,207 @@ fn repeated_descriptor_pairs_keep_backing_through_last_use() {
                 assert_eq!(report.completion(), Completion::ResourceLimit);
                 assert!(report.mir().is_none());
             }
+        },
+    );
+}
+
+#[test]
+fn repeatable_calls_use_the_reaching_environment_after_a_join() {
+    probe_with_typed(
+        "captures::repeatable_calls_use_the_reaching_environment_after_a_join",
+        r#"
+function joined(choose: bool, a: bool, b: bool): [bool, bool] {
+    let mut job: () => [bool, bool] = () => [a, b];
+    if (choose) { job = () => [b, a]; }
+    let first = job(); return job();
+}
+function retainsAfterJoin(choose: bool, seed: &bool, bit: bool): bool {
+    let mut flag = true;
+    let mut job: () => [&bool, bool] = () => [seed, bit];
+    if (choose) { job = () => [&flag, bit]; }
+    let first = job(); flag = false; let second = job(); return *second[0];
+}
+"#,
+        |_, module, receipt, _| {
+            let find = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower = |name| {
+                lower_body(receipt, module, &find(name).id, AnalysisLimits::default()).unwrap()
+            };
+            let joined = lower("joined");
+            let mir = joined
+                .mir()
+                .expect("both incoming environments have checked formations");
+            let prefix = straight_blocks(mir, mir.entry);
+            let (original, slot) = prefix
+                .iter()
+                .find_map(|block| match block.operation {
+                    Operation::FormClosurePair {
+                        closure, captures, ..
+                    } => {
+                        assert_eq!(captures.map(|s| s.span.bytes()), [b"a", b"b"]);
+                        Some((block.site.node, closure.node))
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let (yes, no) = branch_targets(mir);
+            for (arm, replaced) in [(yes, true), (no, false)] {
+                let path = straight_blocks(mir, arm);
+                let replacement = path.iter().find_map(|block| match block.operation {
+                    Operation::FormClosurePair { captures, .. } => {
+                        assert_eq!(captures.map(|s| s.span.bytes()), [b"b", b"a"]);
+                        Some(block.site.node)
+                    }
+                    _ => None,
+                });
+                assert_eq!(replacement.is_some(), replaced);
+                let origin = replacement.unwrap_or(original);
+                let calls: Vec<_> = path
+                    .iter()
+                    .filter_map(|block| match block.operation {
+                        Operation::InvokeReadOnlyClosurePair {
+                            receiver,
+                            origin: actual,
+                            into,
+                        } => {
+                            assert_eq!((receiver.root.node, actual.node), (slot, origin));
+                            Some(into.root.node)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(calls.len(), 2);
+                assert_ne!(calls[0], calls[1]);
+                assert!(path.iter().any(|block| matches!(block.operation, Operation::Export(place) if place.root.node == calls[1])));
+            }
+            let bad = lower("retainsAfterJoin");
+            assert_eq!(bad.completion(), Completion::SourceRejected);
+            assert!(bad.mir().is_none());
+            let [finding] = bad.findings() else {
+                panic!("expected the replacement's loan")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"flag = false;");
+            assert_eq!(finding.related.span.bytes(), b"&flag");
+            let graph = compiler::analysis::ownership::analyze_ownership(
+                receipt,
+                AnalysisLimits::default(),
+            );
+            for (name, expected) in [
+                ("joined", Completion::Checked),
+                ("retainsAfterJoin", Completion::SourceRejected),
+            ] {
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == find(name).node)
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), expected);
+                assert_eq!(
+                    root.ordinary_mir().is_some(),
+                    expected == Completion::Checked
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn read_only_pair_receiver_groups_consume_depth() {
+    probe(
+        "captures::read_only_pair_receiver_groups_consume_depth",
+        r#"
+function bare(left: bool, right: bool): [bool, bool] { let job: () => [bool, bool] = () => [left, right]; return job(); }
+function grouped(left: bool, right: bool): [bool, bool] { let job: () => [bool, bool] = () => [left, right]; return ((((((((((((job))))))))))))(); }
+"#,
+        |_, module, receipt| {
+            let check = |name: &str, limits| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, limits).unwrap()
+            };
+            let bare = check("bare", AnalysisLimits::default());
+            assert!(bare.mir().is_some());
+            assert!(check("grouped", AnalysisLimits::default()).mir().is_some());
+            let limits = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..Default::default()
+            };
+            assert!(check("bare", limits).mir().is_some());
+            let short = check("grouped", limits);
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none());
+        },
+    );
+}
+
+#[test]
+fn explicit_borrow_in_repeatable_pair_ends_at_its_last_descriptor_use() {
+    probe_with_typed(
+        "captures::explicit_borrow_in_repeatable_pair_ends_at_its_last_descriptor_use",
+        r#"
+function before(bit: bool): bool {
+    let mut flag = true;
+    let job: () => [&bool, bool] = () => [&flag, bit];
+    let [_, saved] = job(); let [view, _] = job();
+    flag = false; let seen = *view; return saved;
+}
+function after(bit: bool): bool {
+    let mut flag = true;
+    let job: () => [&bool, bool] = () => [&flag, bit];
+    let [_, saved] = job(); let [view, _] = job();
+    let seen = *view; flag = false; return saved;
+}
+"#,
+        |_, module, receipt, typed| {
+            let check = |name: &str| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            let early = check("before");
+            assert_eq!(early.completion(), Completion::SourceRejected);
+            assert!(early.mir().is_none());
+            let [finding] = early.findings() else {
+                panic!("expected one conflict")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"flag = false;");
+            assert_eq!(finding.related.span.bytes(), b"&flag");
+            let late = check("after");
+            let mir = late
+                .mir()
+                .expect("only the independent scalar is still live at the write");
+            let [scalar, descriptor] = read_only_pair_results(
+                module,
+                typed,
+                mir,
+                mir.entry,
+                ["&flag", "bit"],
+                [
+                    CaptureForm::ExplicitBorrow { mutable: false },
+                    CaptureForm::Value,
+                ],
+            );
+            let ops = linear(mir, mir.entry);
+            assert!(ops.iter().any(|op| matches!(op, Operation::Copy { from, into: Some(binding) } if from.root.node == scalar.root.node && from.tuple_element() == Some(1) && binding.root.span.bytes() == b"saved")));
+            assert!(ops.iter().any(|op| matches!(op, Operation::Copy { from, into: Some(binding) } if from.root.node == descriptor.root.node && from.tuple_element() == Some(0) && binding.root.span.bytes() == b"view")));
+            let read = ops.iter().position(|op| matches!(op, Operation::Dereference(from) if from.root.span.bytes() == b"view")).unwrap();
+            let write = ops.iter().position(|op| matches!(op, Operation::Install { target, .. } if target.root.span.bytes() == b"flag")).unwrap();
+            let returned = ops.iter().position(|op| matches!(op, Operation::Copy { from, into: Some(_) } if from.root.span.bytes() == b"saved")).unwrap();
+            assert!(read < write && write < returned);
         },
     );
 }

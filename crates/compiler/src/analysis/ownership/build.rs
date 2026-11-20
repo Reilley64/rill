@@ -4757,7 +4757,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(destination(CallStorage::Local(place)))
     }
 
-    fn invoke_closure_pair(&mut self, node: NodeId, into: Slot, next: Pc) -> ResultOf<Pc> {
+    fn invoke_closure_pair(
+        &mut self,
+        node: NodeId,
+        into: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
         self.budget.step(2)?;
         let invocation = self
             .fact(&node)
@@ -4778,7 +4784,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(Stop::Pending(node));
         }
-        let receiver = self.ungroup(invocation.receiver)?;
+        let receiver = if invocation.mode == InvocationMode::ReadOnly {
+            self.ungroup_expression_at(invocation.receiver, depth + 1)?
+                .0
+        } else {
+            self.ungroup(invocation.receiver)?
+        };
         if self.module.syntax.nodes[receiver].kind != NodeKind::ValueReference {
             return Err(Stop::Pending(node));
         }
@@ -4800,28 +4811,33 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(Stop::Pending(node));
         }
-        let read_only_origin = if *mode == InvocationMode::ReadOnly {
-            // The callable interface alone proves neither the environment nor
-            // the dependencies of a result. Pair formation checks the original
-            // captures against the two written expressions, in lexical order.
+        let call = if *mode == InvocationMode::ReadOnly {
             self.budget.step(3)?;
-            let arrow = self
-                .fact(&invocation.receiver)
-                .and_then(|fact| fact.callable.as_ref()?.arrow.as_deref())
-                .ok_or(Stop::Pending(node))?;
-            if !elements.iter().all(|ty| {
-                matches!(ty.as_ref(), TypeTerm::Primitive(_)) && !owns_text(ty)
-                    || shared_primitive_reference(ty)
-            }) || arrow.site.module != &self.module.key
-                || arrow.mode != Some(InvocationMode::ReadOnly)
-                || arrow.result != *result
-                || self.slots[into].moves
+            if self.slots[into].moves
+                || !elements.iter().all(|ty| {
+                    matches!(ty.as_ref(), TypeTerm::Primitive(_)) && !owns_text(ty)
+                        || shared_primitive_reference(ty)
+                })
             {
                 return Err(Stop::Pending(node));
             }
-            Some(arrow.site.node)
+            // A replaceable binding need not have a single typed origin. Flow
+            // must still identify a checked read-only formation on each path.
+            let arrow = self
+                .fact(&invocation.receiver)
+                .and_then(|fact| fact.callable.as_ref()?.arrow.as_deref());
+            if arrow.is_some_and(|arrow| {
+                !std::ptr::eq(arrow.site.module, &self.module.key)
+                    || arrow.mode != Some(InvocationMode::ReadOnly)
+                    || arrow.result != *result
+            }) {
+                return Err(Stop::Pending(node));
+            }
+            PairCall::ReadOnly {
+                typed_origin: arrow.map(|arrow| arrow.site.node),
+            }
         } else {
-            None
+            PairCall::Once
         };
         let receiver = self.resolve_place(receiver, path)?;
         self.emit(
@@ -4829,7 +4845,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             Action::InvokeClosurePair {
                 receiver,
                 into,
-                read_only_origin,
+                call,
             },
             Edges::Next(next),
         )
@@ -5161,7 +5177,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         checked_carrier: Option<&Type<'g>>,
     ) -> ResultOf<Pc> {
         let Some(call) = facts.call.as_deref() else {
-            return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next);
+            return self.invoke_closure_pair(node, into.ok_or(Stop::Pending(node))?, next, depth);
         };
         if Some(call.callee) == self.dispose {
             if call.pipe_input.is_some() {

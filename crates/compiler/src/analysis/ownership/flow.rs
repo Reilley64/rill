@@ -18,7 +18,7 @@ struct Held {
     loans: Arc<[Loan]>,
     capture_drops: [Option<NodeId>; 2],
     /// A checked pair body acquired at this local arrow, not just a callable type.
-    pair_origin: Option<NodeId>,
+    pair_origin: Option<(NodeId, InvocationMode)>,
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
     stored_at: Option<NodeId>,
@@ -2381,7 +2381,7 @@ pub(super) fn run<'a, 'g>(
                     state[into] = State::Initialized(Held {
                         loans,
                         capture_drops: [drop_of(capture), second.and_then(drop_of)],
-                        pair_origin: second.map(|_| node),
+                        pair_origin: second.map(|_| (node, mode)),
                         ..Held::default()
                     });
                     state[capture] = State::Vacant;
@@ -2404,12 +2404,15 @@ pub(super) fn run<'a, 'g>(
                 Action::InvokeClosurePair {
                     receiver,
                     into,
-                    read_only_origin,
+                    call,
                 } => {
                     let held = initialized(&state[receiver], node)?;
-                    let origin = held.pair_origin.ok_or(Stop::Pending(node))?;
-                    let (kind, access) = if let Some(expected) = read_only_origin {
-                        if origin != expected || held.capture_drops != [None, None] {
+                    let (origin, mode) = held.pair_origin.ok_or(Stop::Pending(node))?;
+                    let (kind, access) = if let PairCall::ReadOnly { typed_origin } = call {
+                        if mode != InvocationMode::ReadOnly
+                            || typed_origin.is_some_and(|expected| origin != expected)
+                            || held.capture_drops != [None, None]
+                        {
                             return Err(Stop::Pending(node));
                         }
                         (Conflict::Access, Access::Observe)
@@ -2435,7 +2438,7 @@ pub(super) fn run<'a, 'g>(
                         loans,
                         ..Held::default()
                     });
-                    if read_only_origin.is_some() {
+                    if matches!(call, PairCall::ReadOnly { .. }) {
                         Operation::InvokeReadOnlyClosurePair {
                             receiver: local(receiver),
                             origin: site_at(module, origin),
