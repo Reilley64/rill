@@ -1811,9 +1811,30 @@ fn owned_nested_record_pattern_transfers_exact_leaves_and_cleans_the_remainder()
                 assert_eq!(finding.related.span.bytes(), related);
                 assert!(finding.related.span.start() < finding.site.span.start());
             }
+            let whole_child = lower("wholeChild", default);
+            let mir = whole_child
+                .mir()
+                .expect("the whole child has default cleanup");
+            let drops = path_drops(mir, mir.entry);
+            let whole: Vec<_> = drops
+                .iter()
+                .filter_map(|action| match action {
+                    Obligation::Drop(place) if place.root.span.bytes() == b"whole" => {
+                        Some(&place.field().expect("standalone child field").id)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                whole,
+                [
+                    field("Inner", "last"),
+                    field("Inner", "keep"),
+                    field("Inner", "first")
+                ]
+            );
             for (name, site) in [
                 ("borrowed", b"Bits { marked }".as_slice()),
-                ("wholeChild", b"whole"),
                 (
                     "constructed",
                     b"Flags { child: Bits { marked: true }, ready: false }",

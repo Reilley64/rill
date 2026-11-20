@@ -197,6 +197,14 @@ fn product_member<'g>(
     }
 }
 
+fn whole_product_child(binder: &PatternBinder<'_>) -> bool {
+    matches!(
+        (binder.projections.as_slice(), binder.source_type.as_ref()),
+        ([PatternProjection::Field(_)], TypeTerm::Nominal { .. })
+            | ([PatternProjection::TupleElement(_)], TypeTerm::Tuple(_))
+    )
+}
+
 enum Binding<'a, 'g> {
     Discard,
     Name {
@@ -2683,11 +2691,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // Stage the initializer once. For borrowed patterns this is only
         // the descriptor; the aggregate storage stays with its owner.
         let source = facts.source.node;
-        // Inspect the typed shape even when a nested pattern has no binders.
+        // A nested constructor can have no binders, and a whole-child
+        // binder can hide nesting from the pattern tree. Check both facts.
         let (mut nested_record, mut nested_tuple) = (false, false);
+        let mut whole_child = false;
         if access == Access::Owned
             && let Pattern::Constructor(kind, children, _) = facts.pattern.as_ref()
         {
+            self.budget.step(facts.binders.len())?;
+            whole_child = facts.binders.iter().any(whole_product_child);
+            nested_record = whole_child && matches!(kind, Constructor::Record(_));
+            nested_tuple = whole_child && matches!(kind, Constructor::Tuple(_));
             self.budget.step(children.len())?;
             for child in children {
                 match (kind, child.as_ref()) {
@@ -2705,7 +2719,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let tuple_source = if nested_tuple {
             let (root, source_depth) = self.ungroup_expression_at(source, depth)?;
             self.budget.step(1)?;
-            if self.module.syntax.nodes[root].kind == NodeKind::Bracket {
+            if self.module.syntax.nodes[root].kind == NodeKind::Bracket && !whole_child {
                 tuple_literal = Some((root, source_depth));
                 None
             } else {
@@ -2743,8 +2757,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 .get(binder.declaration)
                 .ok_or(Stop::Pending(node))?;
             let site = self.slots[into].node;
+            // A direct owned binder has the same checked type and member order as
+            // its child region in the proved named source. Its local is standalone.
             if (nested_record || nested_tuple)
                 && !matches!(binder.source_type.as_ref(), TypeTerm::Primitive(_))
+                && !whole_product_child(binder)
             {
                 return Err(Stop::Pending(site));
             }
