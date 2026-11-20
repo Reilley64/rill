@@ -2,6 +2,401 @@ use super::*;
 use compiler::analysis::ownership::Projection;
 
 #[test]
+fn whole_nested_tuple_moves_preserve_initialization_at_scope_exit() {
+    probe(
+        "tuples::whole_nested_tuple_moves_preserve_initialization_at_scope_exit",
+        r#"
+            function split(flag: bool, input: [[string, bool], string, [string, i32]]): void {
+                if (flag) { let saved = (input); }
+            }
+            function give(input: [[string, bool], string, [string, i32]]): [[string, bool], string, [string, i32]] {
+                let saved = input;
+                return (saved);
+            }
+            function copyWhole(input: [[bool, i32], bool]): [[bool, i32], bool] {
+                let first = input;
+                let second = input;
+                return second;
+            }
+            function movedOnOneEdge(flag: bool, input: [[string, bool], string, [string, i32]]): [[string, bool], string, [string, i32]] {
+                if (flag) { let saved = input; }
+                return (input);
+            }
+        "#,
+        |_, module, receipt| {
+            let check = |name, limits| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, limits).unwrap()
+            };
+            let lower = |name| check(name, AnalysisLimits::default());
+            let split = lower("split");
+            let mir = split.mir().unwrap_or_else(|| {
+                panic!(
+                    "split: {:?} at {:?}",
+                    split.completion(),
+                    split
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string())
+                )
+            });
+            let (yes, no) = branch_targets(mir);
+            let moves: Vec<_> = linear(mir, yes)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. }))
+                .collect();
+            let [
+                Operation::Move {
+                    from: input,
+                    into: Some(saved),
+                },
+            ] = moves.as_slice()
+            else {
+                panic!("expected one whole move: {moves:?}")
+            };
+            assert_eq!(
+                input.root.span.bytes(),
+                b"input: [[string, bool], string, [string, i32]]"
+            );
+            assert_eq!(saved.root.span.bytes(), b"saved");
+            assert!(input.projection.is_none() && saved.projection.is_none());
+            assert!(
+                !linear(mir, no)
+                    .iter()
+                    .any(|op| matches!(op, Operation::Move { .. }))
+            );
+            for (start, owner) in [(yes, saved), (no, input)] {
+                let drops = path_drops(mir, start);
+                assert!(
+                    matches!(drops.as_slice(), [Obligation::Drop(last), Obligation::Drop(middle), Obligation::Drop(first)]
+                    if [last, middle, first].iter().all(|place| place.root.node == owner.root.node)
+                        && matches!(last.projection, Some(Projection::NestedTupleElement { outer: 2, inner: 0 }))
+                        && middle.tuple_element() == Some(1)
+                        && matches!(first.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 0 }))),
+                    "{}: {drops:?}",
+                    owner.root.span.bytes().escape_ascii()
+                );
+            }
+
+            let give = lower("give");
+            let mir = give.mir().expect("return the whole moved-to tuple");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Export(_)))
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Move { from: input, into: Some(saved) },
+                Operation::Move { from: read, into: Some(staged) }, Operation::Export(output),
+            ] if input.root.span.bytes() == b"input: [[string, bool], string, [string, i32]]"
+                && saved.root.span.bytes() == b"saved" && saved.root.node == read.root.node
+                && staged.root.node == output.root.node && output.root.span.bytes() == b"(saved)"
+                && [input, saved, read, staged, output].iter().all(|place| place.projection.is_none())),
+                "{route:?}"
+            );
+            assert!(path_drops(mir, mir.entry).is_empty());
+
+            let exact = AnalysisLimits {
+                max_work: give.statistics().work,
+                max_entries: give.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("give", exact).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+            ] {
+                let limited = check("give", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+
+            let copied = lower("copyWhole");
+            let mir = copied
+                .mir()
+                .expect("an all-scalar tuple copies without moving the source");
+            let route: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::Copy { .. } | Operation::Move { .. } | Operation::Export(_)
+                    )
+                })
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [
+                Operation::Copy { from: input, into: Some(first) },
+                Operation::Copy { from: original, into: Some(second) },
+                Operation::Copy { from: read, into: Some(staged) }, Operation::Export(output),
+            ] if input.root.node == original.root.node && first.root.span.bytes() == b"first"
+                && second.root.span.bytes() == b"second" && second.root.node == read.root.node
+                && staged.root.node == output.root.node
+                && [input, first, original, second, read, staged, output].iter().all(|place| place.projection.is_none())),
+                "{route:?}"
+            );
+
+            let rejected = lower("movedOnOneEdge");
+            assert_eq!(rejected.completion(), Completion::SourceRejected);
+            assert!(rejected.mir().is_none());
+            let [finding] = rejected.findings() else {
+                panic!("expected one moved-value finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"input");
+            assert_eq!(finding.related.span.bytes(), b"input");
+            assert!(finding.related.span.start() < finding.site.span.start());
+        },
+    );
+}
+
+#[test]
+fn whole_nested_tuple_replacement_cleans_only_live_storage() {
+    probe(
+        "tuples::whole_nested_tuple_replacement_cleans_only_live_storage",
+        r#"
+            function replace(flag: bool, seed: [[string, bool], string], fresh: [[string, bool], string]): [[string, bool], string] {
+                let mut current = seed;
+                if (flag) { let taken = current; }
+                current = (fresh);
+                return current;
+            }
+            function repaired(again: bool, seed: [[string, bool], string]): [[string, bool], string] {
+                let mut current = seed;
+                while (again) {
+                    let saved = current;
+                    current = (saved);
+                    continue;
+                }
+                return current;
+            }
+            function skipped(again: bool, skip: bool, seed: [[string, bool], string]): void {
+                let mut current = seed;
+                while (again) {
+                    let saved = current;
+                    if (skip) { continue; }
+                    current = (saved);
+                }
+            }
+        "#,
+        |_, module, receipt| {
+            let lower = |name| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, AnalysisLimits::default()).unwrap()
+            };
+            let replace = lower("replace");
+            let mir = replace.mir().unwrap_or_else(|| {
+                panic!(
+                    "replace: {:?} at {:?}",
+                    replace.completion(),
+                    replace
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string())
+                )
+            });
+            let (taken, kept) = branch_targets(mir);
+            for (branch, moved) in [(taken, true), (kept, false)] {
+                let ops = linear(mir, branch);
+                let install = ops
+                    .iter()
+                    .position(|op| matches!(op, Operation::Install { .. }))
+                    .unwrap();
+                let [
+                    Operation::Move {
+                        from: fresh,
+                        into: Some(staged),
+                    },
+                    Operation::Cleanup(displaced),
+                    Operation::Install { target, incoming },
+                    Operation::Move {
+                        from: current,
+                        into: Some(output),
+                    },
+                    Operation::Export(exported),
+                    ..,
+                ] = &ops[install - 2..]
+                else {
+                    panic!("expected stage, displacement, install and export")
+                };
+                assert_eq!(fresh.root.span.bytes(), b"fresh: [[string, bool], string]");
+                assert_eq!(target.root.span.bytes(), b"current");
+                assert_eq!(target.root.node, current.root.node);
+                assert_eq!(staged.root.node, incoming.root.node);
+                assert_eq!(output.root.node, exported.root.node);
+                assert!(
+                    [fresh, staged, target, incoming, current, output, exported]
+                        .iter()
+                        .all(|place| place.projection.is_none())
+                );
+                let owner = if moved {
+                    assert!(
+                        displaced.is_empty(),
+                        "nothing to displace after a whole move"
+                    );
+                    let Operation::Move {
+                        from,
+                        into: Some(taken),
+                    } = ops
+                        .iter()
+                        .copied()
+                        .find(|op| matches!(op, Operation::Move { .. }))
+                        .unwrap()
+                    else {
+                        unreachable!()
+                    };
+                    assert_eq!(from.root.node, target.root.node);
+                    assert_eq!(taken.root.span.bytes(), b"taken");
+                    taken
+                } else {
+                    assert!(matches!(displaced.as_slice(), [
+                        Obligation::Drop(last), Obligation::EndStorage(bit), Obligation::Drop(first),
+                        Obligation::EndStorage(child), Obligation::EndStorage(root),
+                    ] if [last, bit, first, child, root].iter().all(|place| place.root.node == target.root.node)
+                        && last.tuple_element() == Some(1)
+                        && matches!(bit.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 1 }))
+                        && matches!(first.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 0 }))
+                        && child.tuple_element() == Some(0) && root.projection.is_none()));
+                    target
+                };
+                assert!(
+                    matches!(path_drops(mir, branch).as_slice(), [Obligation::Drop(last), Obligation::Drop(first)]
+                    if last.root.node == owner.root.node && first.root.node == owner.root.node
+                        && last.tuple_element() == Some(1)
+                        && matches!(first.projection, Some(Projection::NestedTupleElement { outer: 0, inner: 0 })))
+                );
+            }
+
+            let repaired = lower("repaired");
+            let mir = repaired
+                .mir()
+                .expect("whole replacement repairs the backedge");
+            let (body, exit) = branch_targets(mir);
+            let path = straight_blocks(mir, body);
+            let install = path
+                .iter()
+                .position(|block| matches!(block.operation, Operation::Install { .. }))
+                .unwrap();
+            assert!(
+                matches!(path[install - 3..=install].iter().map(|block| &block.operation).collect::<Vec<_>>().as_slice(), [
+                Operation::Move { from: current, into: Some(saved) },
+                Operation::Move { from: source, into: Some(staged) },
+                Operation::Cleanup(displaced),
+                Operation::Install { target, incoming },
+            ] if saved.root.span.bytes() == b"saved" && saved.root.node == source.root.node
+                && current.root.span.bytes() == b"current" && current.root.node == target.root.node
+                && staged.root.node == incoming.root.node && displaced.is_empty())
+            );
+            assert!(path.iter().all(|block| match &block.operation {
+                Operation::Drop(_) => false,
+                Operation::Cleanup(actions) => actions.is_empty(),
+                _ => true,
+            }));
+            let head = straight_blocks(mir, mir.entry);
+            assert!(std::ptr::eq(*path.last().unwrap(), *head.last().unwrap()));
+            let route: Vec<_> = linear(mir, exit)
+                .into_iter()
+                .filter(|op| matches!(op, Operation::Move { .. } | Operation::Export(_)))
+                .collect();
+            assert!(
+                matches!(route.as_slice(), [Operation::Move { from, into: Some(staged) }, Operation::Export(output)]
+                if from.root.span.bytes() == b"current" && staged.root.node == output.root.node
+                    && [from, staged, output].iter().all(|place| place.projection.is_none()))
+            );
+            assert!(path_drops(mir, exit).is_empty());
+
+            let skipped = lower("skipped");
+            assert_eq!(skipped.completion(), Completion::SourceRejected);
+            assert!(skipped.mir().is_none());
+            let [finding] = skipped.findings() else {
+                panic!("expected one backedge initialization finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"current");
+            assert_eq!(finding.related.node, finding.site.node);
+        },
+    );
+}
+
+#[test]
+fn whole_nested_tuple_transfers_do_not_open_general_places_or_values() {
+    probe(
+        "tuples::whole_nested_tuple_transfers_do_not_open_general_places_or_values",
+        r#"
+            function index(input: [[string, bool], string]): string {
+                let saved = input;
+                return saved[0][0];
+            }
+            function borrow(input: [[string, bool], string]): void {
+                let saved = input;
+                let view = &saved;
+            }
+            function writeMember(input: [[string, bool], string], fresh: string): void {
+                let mut saved = input;
+                saved[1] = fresh;
+            }
+            function construct(fresh: string): void {
+                let saved: [[string, bool], string] = [[fresh, true], "tail"];
+            }
+            function replaceWithConstructed(input: [[string, bool], string], fresh: string): void {
+                let mut saved = input;
+                saved = [[fresh, true], "tail"];
+            }
+            function localPattern(input: [[string, bool], string]): void {
+                let saved = input;
+                let [[text, _], _] = saved;
+            }
+            function consume(input: [[string, bool], string]): bool { return true; }
+            function argument(input: [[string, bool], string]): bool {
+                let saved = input;
+                return consume(saved);
+            }
+            function produce(): [[string, bool], string] { return [["head", true], "tail"]; }
+            function result(): [[string, bool], string] { return produce(); }
+            function reference(input: [[&string, bool], string]): void { let saved = input; }
+            function deeper(input: [[[string, bool]], string]): void { let saved = input; }
+        "#,
+        |_, module, receipt| {
+            for name in [
+                "index",
+                "borrow",
+                "writeMember",
+                "construct",
+                "replaceWithConstructed",
+                "localPattern",
+                "argument",
+                "result",
+                "reference",
+                "deeper",
+            ] {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let report =
+                    lower_body(receipt, module, &declaration.id, AnalysisLimits::default())
+                        .unwrap();
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+            }
+        },
+    );
+}
+
+#[test]
 fn fixed_tuple_places_preserve_initialization_and_order() {
     probe(
         "tuples::fixed_tuple_places_preserve_initialization_and_order",

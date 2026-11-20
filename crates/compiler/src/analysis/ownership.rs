@@ -554,6 +554,7 @@ fn lower<'g>(
         locals: BTreeMap::new(),
         nested_record_values: BTreeMap::new(),
         nested_tuple_parameters: BTreeMap::new(),
+        nested_tuple_bindings: BTreeMap::new(),
         retained: BTreeMap::new(),
         retains_exclusive_bool,
         incoming_exclusive_bools: Vec::new(),
@@ -925,8 +926,10 @@ struct Build<'a, 'g> {
     locals: BTreeMap<&'g DeclarationId, Slot>,
     /// Checked nested regions expose value transfers, not general places.
     nested_record_values: BTreeMap<&'g DeclarationId, Slot>,
-    /// Two-level owned tuple inputs used only for pattern staging and cleanup.
+    /// Two-level owned tuple inputs kept out of general place resolution.
     nested_tuple_parameters: BTreeMap<&'g DeclarationId, Slot>,
+    /// Exact named tuple bindings with their proved initializer slot.
+    nested_tuple_bindings: BTreeMap<&'g DeclarationId, (Slot, Slot)>,
     /// Separate contents of checked caller destinations from the access descriptors.
     retained: BTreeMap<Slot, Slot>,
     retains_exclusive_bool: bool,
