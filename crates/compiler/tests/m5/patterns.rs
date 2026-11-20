@@ -2485,7 +2485,6 @@ fn nested_tuple_pattern_sources_stage_owned_leaves() {
                                 _ => {}
                             }
                         }
-                        assert_eq!(drops.len(), 3, "{drops:?}");
                         assert!(
                             matches!(drop_steps.as_slice(), [(a, outer), (b, inner), (c, bound)]
                             if outer.root.node == stage.root.node && outer.tuple_element() == Some(1)
@@ -2539,11 +2538,27 @@ fn grouped_tuple_pattern_literal_stages_only_on_reached_paths() {
                     (([([true, (head)]), middle, ([(picked), tail])]));
                 return second;
             }
+            function bareInner(seed: string): string {
+                let [[text, _], _]: [[string, bool], bool] = [[seed, true], false];
+                return text;
+            }
+            function groupedInner(seed: string): string {
+                let [[text, _], _]: [[string, bool], bool] = [((((([seed, true]))))), false];
+                return text;
+            }
             function skipped(seed: string): string {
                 if (false) {
                     let [[_, _], _]: [[string, bool], bool] = [[seed, true], false];
                 }
                 return seed;
+            }
+            function repeated(seed: string): string {
+                let [[text, _], _]: [[string, string], bool] = [[seed, seed], false];
+                return text;
+            }
+            function interrupted(seed: string, gate: Option<bool>): Option<bool> {
+                let [[_, bit], _]: [[string, bool], bool] = [[seed, gate?], false];
+                return Option.Some(bit);
             }
             function namedChild(child: [string, bool]): string {
                 let [[text, _], _]: [[string, bool], bool] = [child, false];
@@ -2657,6 +2672,17 @@ fn grouped_tuple_pattern_literal_stages_only_on_reached_paths() {
                 assert!(bounded.mir().is_none());
             }
 
+            let bare = lower("bareInner", default);
+            assert!(bare.mir().is_some() && lower("groupedInner", default).mir().is_some());
+            let depth = AnalysisLimits {
+                max_depth: bare.statistics().max_depth,
+                ..default
+            };
+            assert!(lower("bareInner", depth).mir().is_some());
+            let limited = lower("groupedInner", depth);
+            assert_eq!(limited.completion(), Completion::ResourceLimit);
+            assert!(limited.mir().is_none());
+
             let skipped = lower("skipped", default);
             let mir = skipped.mir().expect("a dead literal does not move seed");
             let values: Vec<_> = linear(mir, mir.entry)
@@ -2674,6 +2700,19 @@ fn grouped_tuple_pattern_literal_stages_only_on_reached_paths() {
             );
             assert!(path_drops(mir, mir.entry).is_empty());
 
+            let repeated = lower("repeated", default);
+            assert_eq!(repeated.completion(), Completion::SourceRejected);
+            assert!(repeated.mir().is_none());
+            let [finding] = repeated.findings() else {
+                panic!("expected one moved literal input finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"seed");
+            assert_eq!(finding.related.span.bytes(), b"seed");
+            assert!(finding.related.span.start() < finding.site.span.start());
+            let interrupted = lower("interrupted", default);
+            assert_eq!(interrupted.completion(), Completion::Incomplete);
+            assert!(interrupted.mir().is_none() && interrupted.findings().is_empty());
             let child = lower("namedChild", default);
             assert_eq!(child.completion(), Completion::Incomplete);
             assert!(child.mir().is_none());

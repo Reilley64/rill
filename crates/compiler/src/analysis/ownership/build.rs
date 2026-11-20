@@ -2336,18 +2336,25 @@ impl<'a, 'g> Build<'a, 'g> {
                 }
             }
         }
+        let mut tuple_literal = None;
         let tuple_source = if nested_tuple {
-            self.nested_tuple_transfer_source(source, &facts.ty)?
+            let (root, source_depth) = self.ungroup_expression_at(source, depth)?;
+            self.budget.step(1)?;
+            if self.module.syntax.nodes[root].kind == NodeKind::Bracket {
+                tuple_literal = Some((root, source_depth));
+                None
+            } else {
+                Some(
+                    self.nested_tuple_transfer_source(root, &facts.ty)?
+                        .ok_or(Stop::Pending(source))?,
+                )
+            }
         } else {
             None
         };
         let scratch = if let Some(from) = tuple_source {
             self.clone_region(from, source)?
-        } else if nested_tuple {
-            let literal = self.ungroup(source)?;
-            if self.module.syntax.nodes[literal].kind != NodeKind::Bracket {
-                return Err(Stop::Pending(source));
-            }
+        } else if tuple_literal.is_some() {
             self.nested_tuple_region(source, &facts.ty)?
                 .ok_or(Stop::Pending(source))?
         } else if nested_record {
@@ -2425,8 +2432,14 @@ impl<'a, 'g> Build<'a, 'g> {
             };
             tail = self.emit(site, action, Edges::Next(tail))?;
         }
-        if nested_tuple && tuple_source.is_none() {
-            return self.initialize_tuple_pattern_literal(source, scratch, &facts.ty, tail, depth);
+        if let Some((literal, source_depth)) = tuple_literal {
+            return self.initialize_tuple_pattern_literal(
+                literal,
+                scratch,
+                &facts.ty,
+                tail,
+                source_depth,
+            );
         }
         let proof = tuple_source
             .map(ExpressionProof::NestedTupleSource)
