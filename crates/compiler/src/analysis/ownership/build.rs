@@ -1439,13 +1439,22 @@ impl<'a, 'g> Build<'a, 'g> {
             }
             NodeKind::ExpressionStatement => {
                 let value = children[0];
-                let expression = self.ungroup(value)?;
+                let mut expression = value;
+                let mut expression_depth = depth + 1;
+                while self.module.syntax.nodes[expression].kind == NodeKind::Group {
+                    self.depth(expression_depth)?;
+                    expression = self.module.syntax.nodes[expression].children[0];
+                    expression_depth += 1;
+                }
                 if self.propagates_directly(expression)? {
-                    self.propagate(expression, None, next, exits.returning, depth + 1)
-                } else if let Some(call) =
-                    self.check_value_call_propagation(expression, true, exits.returning, depth + 1)?
-                {
-                    self.lower_propagating_value_call(node, call, None, next, depth + 1)
+                    self.propagate(expression, None, next, exits.returning, expression_depth)
+                } else if let Some(call) = self.check_value_call_propagation(
+                    expression,
+                    true,
+                    exits.returning,
+                    expression_depth,
+                )? {
+                    self.lower_propagating_value_call(node, call, None, next, expression_depth)
                 } else {
                     self.discard(node, value, next, depth + 1)
                 }
@@ -2861,9 +2870,13 @@ impl<'a, 'g> Build<'a, 'g> {
                 let ([arg], [postfix]) = (call.arguments.as_slice(), roots.as_slice()) else {
                     return Err(Stop::Pending(node));
                 };
-                self.budget.step(4)?;
+                self.budget.step(3)?;
                 let syntax = &self.module.syntax.nodes[postfix.root];
-                let flow = &self.facts.get(arg).ok_or(Stop::Pending(*arg))?.flow;
+                let argument = self.facts.get(arg).ok_or(Stop::Pending(*arg))?;
+                let NodeFactKind::Expression(value) = &argument.kind else {
+                    return Err(Stop::Pending(*arg));
+                };
+                let flow = &argument.flow;
                 if call.pipe_input.is_some()
                     || syntax.kind != NodeKind::Propagate
                     || flow.pending
@@ -2872,7 +2885,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     || !flow.continues.is_empty()
                     || flow.normal != terminal_root_index.is_none()
                     || flow.returns != postfix.can_return
-                    || !matches!(self.value(*arg)?.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+                    || !matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
                     || self
                         .bool_option_role(&self.value(syntax.children[0])?.ty)
                         .is_none()

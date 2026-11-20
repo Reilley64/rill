@@ -7183,6 +7183,11 @@ fn discarded_compound_call_cleans_only_the_materialized_success_result() {
                 let bit = after();
                 return Option.Some(bit);
             }
+            function groupedPair(input: Option<bool>, keep: string): Option<bool> {
+                ((compound(input?)));
+                let bit = after();
+                return Option.Some(bit);
+            }
         "#,
         |request, module, receipt, typed| {
             const CALL: &[u8] = b"compound(input?)";
@@ -7241,8 +7246,24 @@ fn discarded_compound_call_cleans_only_the_materialized_success_result() {
             });
             let option = typed.option_role().unwrap();
             let (yes, no) = variant_edges(mir, mir.entry, &option.some.id, b"input");
+            let prefix = straight_blocks(mir, mir.entry);
+            assert!(!prefix.iter().any(|block| matches!(
+                &block.operation,
+                Operation::Drop(_) | Operation::Cleanup(_) | Operation::CopyOptionPayload { .. }
+            )));
+            let Operation::TestVariant {
+                operand: carrier, ..
+            } = &prefix.last().unwrap().operation
+            else {
+                panic!("expected the input carrier test before either exit");
+            };
             assert_eq!(calls_on_path(mir, [true]), [id("compound"), id("after")]);
             assert!(calls_on_path(mir, [false]).is_empty());
+            assert!(
+                !linear(mir, no)
+                    .iter()
+                    .any(|op| matches!(op, Operation::CopyOptionPayload { .. }))
+            );
             assert_return(&linear(mir, no), &option.none.id, false, &[b"keep: string"]);
             assert!(!linear(mir, no).iter().any(|op| matches!(op,
                 Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
@@ -7251,6 +7272,19 @@ fn discarded_compound_call_cleans_only_the_materialized_success_result() {
             let success = straight_blocks(mir, yes);
             let called = success.iter().position(|b| matches!(&b.operation,
                 Operation::Call(callee) if *callee == id("compound") && b.site.node == call.site.node)).unwrap();
+            let extracted: Vec<_> = success
+                .iter()
+                .enumerate()
+                .filter_map(|(i, b)| match &b.operation {
+                    Operation::CopyOptionPayload { operand, into } => Some((i, operand, into)),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                matches!(extracted.as_slice(), [(i, operand, into)] if *i < called
+                && operand.root.node == carrier.root.node && operand.projection.is_none()
+                && into.root.span.bytes() == b"input?" && into.projection.is_none())
+            );
             let after = success
                 .iter()
                 .position(|b| {
@@ -7291,7 +7325,19 @@ fn discarded_compound_call_cleans_only_the_materialized_success_result() {
             };
             let bounded = |limits| lower_body(receipt, module, id("discardPair"), limits).unwrap();
             assert!(bounded(exact).mir().is_some());
+            assert!(lower("groupedPair").mir().is_some());
+            let depth = AnalysisLimits {
+                max_depth: exact.max_depth,
+                ..AnalysisLimits::default()
+            };
+            let grouped = lower_body(receipt, module, id("groupedPair"), depth).unwrap();
+            assert_eq!(grouped.completion(), Completion::ResourceLimit);
+            assert!(grouped.mir().is_none());
             for short in [
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
                 AnalysisLimits {
                     max_work: exact.max_work - 1,
                     ..exact
@@ -7325,6 +7371,10 @@ fn discarded_compound_call_checks_only_reached_ownership() {
             function after(): bool { return true; }
             function stopped(input: Option<bool>.None, keep: string): Option<bool> {
                 broken((input?));
+                return Option.Some(after());
+            }
+            function ready(input: Option<bool>.Some): Option<bool> {
+                compound(input?);
                 return Option.Some(after());
             }
             function reached(input: Option<bool>.Some): Option<bool> {
@@ -7371,6 +7421,26 @@ fn discarded_compound_call_checks_only_reached_ownership() {
             assert!(!linear(mir, mir.entry).iter().any(|op| matches!(op,
                 Operation::Cleanup(actions) if actions.iter().any(|action| matches!(action,
                     Obligation::EndStorage(place) if place.root.span.bytes() == b"broken((input?))")))));
+            let ready = lower("ready");
+            let mir = ready.mir().expect("known Some reaches the valid producer");
+            assert_eq!(calls_on_path(mir, []), [id("compound"), id("after")]);
+            let path = linear(mir, mir.entry);
+            assert!(
+                !path
+                    .iter()
+                    .any(|op| matches!(op, Operation::TestVariant { .. }))
+            );
+            let produced = path
+                .iter()
+                .position(|op| matches!(op, Operation::Call(callee) if *callee == id("compound")))
+                .unwrap();
+            assert!(
+                matches!(&path[produced + 1..], [Operation::Cleanup(actions), Operation::Call(after), ..]
+                if *after == id("after") && matches!(actions.as_slice(), [Obligation::Drop(right), Obligation::Drop(left), Obligation::EndStorage(root)]
+                    if root.root.span.bytes() == b"compound(input?)" && root.projection.is_none()
+                    && right.root.node == root.root.node && left.root.node == root.root.node
+                    && right.tuple_element() == Some(1) && left.tuple_element() == Some(0)))
+            );
             for (name, site) in [("reached", b"dispose(text)".as_slice()), ("moved", b"text")] {
                 let report = lower(name);
                 assert_eq!(
