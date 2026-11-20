@@ -14,6 +14,59 @@ const TWO_ARROW_BODY: &str = r#"
 "#;
 
 #[test]
+fn unsupported_list_arrow_shapes_keep_the_old_caps() {
+    let source = format!(
+        "{TWO_ARROW_BODY}{}",
+        r#"
+        function partial(xs: List<i32>): [i32, i32] {
+            return runTwo([() => (&xs)[0u64], () => 5i32]);
+        }
+        function mixed(xs: List<i32>): [[bool, i32], i32] {
+            return runTwo([(): [bool, i32] => [true, 2i32], () => (&xs)[1u64]]);
+        }
+    "#
+    );
+    probe(
+        "scoped_jobs::unsupported_list_arrow_shapes_keep_the_old_caps",
+        &source,
+        |request, module, receipt| {
+            // Measured on b887bdd: M4 still checks each actual Result residence,
+            // but there is no pair of List reads to retain or lower in M5.
+            let graph = loader::load_installed(request.clone()).unwrap();
+            let typed = compiler::analysis::typed::analyze_typed(
+                &graph,
+                AnalysisLimits {
+                    max_work: 335319,
+                    max_entries: 50011,
+                    max_depth: 12,
+                },
+            );
+            assert!(typed.receipt().is_some());
+            for (name, max_work, max_entries) in [("partial", 2367, 148), ("mixed", 2372, 152)] {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let report = lower_body(
+                    receipt,
+                    module,
+                    &d.id,
+                    AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth: 3,
+                    },
+                )
+                .unwrap();
+                assert_eq!(report.completion(), Completion::Incomplete);
+                assert!(report.mir().is_none() && report.findings().is_empty());
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_two_list_arrow_frames() {
     use compiler::analysis::generics::{GoalState, callables::CaptureForm};
     use compiler::analysis::ownership::{GraphCompletion, GraphReport};
@@ -41,6 +94,9 @@ fn installed_two_list_arrow_frames() {
         }
         function unknown(input: List<i32>): [i32, i32] {
             return runTwo([() => (&input)[0u64], () => 5i32]);
+        }
+        function deep(input: List<i32>): [i32, i32] {
+            return runTwo((((([((((() => (&input)[0u64])))), () => (&input)[1u64]])))));
         }
         "#,
     );
@@ -178,8 +234,8 @@ fn installed_two_list_arrow_frames() {
                         assert!(borrow < formation);
                         acquisition_pc.push((borrow, formation));
                         let child = straight_blocks(&slot.body, slot.body.entry);
-                        let [read, cleanup, export, end] = child.as_slice() else {
-                            panic!("read, cleanup, export, return")
+                        let [read, export, cleanup, end] = child.as_slice() else {
+                            panic!("read, transfer scalar, end child view, return")
                         };
                         let Operation::ReadListI32 {
                             view,
@@ -205,8 +261,7 @@ fn installed_two_list_arrow_frames() {
                         );
                         assert!(matches!(end.terminator, Terminator::Return));
                         assert!(slot.body.cancellation().is_none());
-                        assert!(!path_drops(mir, mir.entry).iter().any(|item| matches!(item,
-                            Obligation::EndStorage(place) if [slot.capture.root.node, slot.environment.root.node].contains(&place.root.node))));
+                        assert!(!path.iter().any(|b| matches!(&b.operation, Operation::Cleanup(items) if items.iter().any(|item| matches!(item, Obligation::EndStorage(place) if [slot.capture.root.node,slot.environment.root.node].contains(&place.root.node))))));
                     }
                     assert!(acquisition_pc[0].1 < acquisition_pc[1].0);
                     assert!(path[call_pc + 1..].iter().any(|block| matches!(&block.operation, Operation::Cleanup(items)
@@ -225,6 +280,22 @@ fn installed_two_list_arrow_frames() {
                     check_exact(&receipt, module, &decl(name).id, local.statistics());
                 }
             }
+            let deep = lower("deep");
+            assert!(deep.mir().is_some());
+            let max_depth = lower("sameRoot").statistics().max_depth;
+            assert!(deep.statistics().max_depth > max_depth);
+            let limited = lower_body(
+                &receipt,
+                module,
+                &decl("deep").id,
+                AnalysisLimits {
+                    max_depth,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(limited.completion(), Completion::ResourceLimit);
+            assert!(limited.mir().is_none());
             let conflict = lower("conflicting");
             let [finding] = conflict.findings() else {
                 panic!("{:?} at {:?}", conflict.completion(), conflict.blocked_at())
@@ -238,7 +309,20 @@ fn installed_two_list_arrow_frames() {
                 graph.roots()[root(&graph, "conflicting")].completion(),
                 Completion::SourceRejected
             );
-            assert_eq!(lower("unknown").completion(), Completion::Incomplete);
+            // An eligible neighbor must not make a missed specialization more expensive.
+            let unknown = lower_body(
+                &receipt,
+                module,
+                &decl("unknown").id,
+                AnalysisLimits {
+                    max_work: 2611,
+                    max_entries: 253,
+                    max_depth: 3,
+                },
+            )
+            .unwrap();
+            assert_eq!(unknown.completion(), Completion::Incomplete);
+            assert!(unknown.mir().is_none());
             assert!(graph.roots()[root(&graph, "unknown")].mir().is_none());
             assert!(
                 graph

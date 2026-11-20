@@ -79,20 +79,24 @@ pub(in crate::analysis) use pairs::{PairCall, PairChild};
 pub struct ResultUseReport<'g> {
     discards: Vec<ResultDiscard<'g>>,
     pending: Vec<PendingResultUse<'g>>,
-    pair_calls: BTreeMap<(&'g ModuleKey, NodeId), PairCall<'g>>,
+    // Temporary until the integrated analysis attaches each proof directly to
+    // its originating call. The key indexes this report's typed node array.
+    pair_calls: BTreeMap<usize, Box<PairCall<'g>>>,
 }
 impl<'g> ResultUseReport<'g> {
-    pub(in crate::analysis) fn pair_call(
-        &self,
-        module: &'g ModuleKey,
-        node: NodeId,
+    pub(super) fn attach_pair_calls(
+        &mut self,
+        bodies: &mut GenericReport<'g>,
         budget: &mut Budget,
-    ) -> Work<Option<&PairCall<'g>>> {
-        if self.pair_calls.is_empty() {
-            return Ok(None);
+    ) -> Work<()> {
+        budget.step(self.pair_calls.len())?;
+        for (index, proof) in std::mem::take(&mut self.pair_calls) {
+            let NodeFactKind::Expression(facts) = &mut bodies.typed_node_mut(index).kind else {
+                unreachable!("proved call expression")
+            };
+            facts.call.as_mut().expect("proved call").list_arrows = Some(proof);
         }
-        budget.step(module.path.len() + 1)?;
-        Ok(self.pair_calls.get(&(module, node)))
+        Ok(())
     }
 
     pub fn discards(&self) -> &[ResultDiscard<'g>] {
@@ -103,7 +107,7 @@ impl<'g> ResultUseReport<'g> {
     }
 }
 
-type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), &'a NodeFacts<'g>>;
+type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), (usize, &'a NodeFacts<'g>)>;
 type Alternatives<'g> = Vec<Residence<'g>>;
 
 #[derive(Clone, Copy)]
@@ -132,11 +136,11 @@ pub(super) fn check<'g>(
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
     let mut nodes = BTreeMap::new();
-    for facts in bodies.typed_nodes() {
+    for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
         nodes
             .entry((facts.site.module, facts.site.node))
-            .or_insert(facts);
+            .or_insert((index, facts));
     }
     let mut checked = BTreeSet::new();
     for body in bodies.checked_bodies() {
@@ -359,7 +363,10 @@ impl<'a, 'g> Check<'a, 'g> {
 
     fn facts(&mut self, node: NodeId) -> Work<Option<&'a NodeFacts<'g>>> {
         self.budget.step(1)?;
-        Ok(self.nodes.get(&(&self.module.key, node)).copied())
+        Ok(self
+            .nodes
+            .get(&(&self.module.key, node))
+            .map(|&(_, fact)| fact))
     }
 
     fn pending(&mut self, node: NodeId, blocker: ResultUseBlocker) -> Work<()> {

@@ -6592,8 +6592,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if checked_carrier.is_none()
             && call.selection.is_some()
             && list_arrows::scalar_pair(&facts.ty)
-            && let Some(uses) = self.typed.result_use()
-            && let Some(pair) = uses.pair_call(&self.module.key, node, self.budget)?
+            && let Some(pair) = call.list_arrows.as_deref()
         {
             return self.call_list_arrows(node, pair, into, next, depth);
         }

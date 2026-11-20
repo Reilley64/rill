@@ -19,11 +19,13 @@ pub(super) struct PairBody<'g> {
 pub(in crate::analysis) struct PairCall<'g> {
     pub implementation: &'g DeclarationId,
     pub body: Site<'g>,
+    pub argument: NodeId,
     pub children: [PairChild<'g>; 2],
 }
 
 #[derive(Debug)]
 pub(in crate::analysis) struct PairChild<'g> {
+    pub element: NodeId,
     pub invocation: Site<'g>,
     pub body: Site<'g>,
     pub expression: NodeId,
@@ -65,7 +67,7 @@ pub(super) fn summary<'g>(
         return Ok(None);
     };
     let tuple = values::ungroup(module, tuple, budget)?;
-    let Some(facts) = nodes.get(&(&module.key, tuple)) else {
+    let Some((_, facts)) = nodes.get(&(&module.key, tuple)) else {
         return Ok(None);
     };
     let NodeFactKind::Expression(value) = &facts.kind else {
@@ -139,7 +141,7 @@ fn summarize<'g>(
         }
     }
     let syntax = &module.syntax.nodes;
-    let fact = |node| nodes.get(&(&module.key, node)).copied();
+    let fact = |node| nodes.get(&(&module.key, node)).map(|&(_, f)| f);
     let expression = |node| match &fact(node)?.kind {
         NodeFactKind::Expression(value) if value.ordinary_context.is_none() => Some(value),
         _ => None,
@@ -325,6 +327,7 @@ impl<'a, 'g> Check<'a, 'g> {
         }) {
             return Ok(false);
         }
+        let elements = [*first, *second];
         let first = self.ungroup_value(*first)?;
         let second = self.ungroup_value(*second)?;
         if first == second {
@@ -403,7 +406,8 @@ impl<'a, 'g> Check<'a, 'g> {
                 return Ok(false);
             };
             outputs[i] = result;
-            children[i] = Some(PairChild {
+            children[i] = expression.map(|expression| PairChild {
+                element: elements[i],
                 invocation: slot.invocation,
                 body: self.site(self.module.syntax.nodes[origin].children[1]),
                 expression,
@@ -423,16 +427,20 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         // Every reached alternative derives the same two source occurrences;
         // the receipt separately requires all residence checks to close.
-        self.budget.step(self.module.key.path.len() + 1)?;
-        if let std::collections::btree_map::Entry::Vacant(entry) =
-            self.report.pair_calls.entry((&self.module.key, node))
-        {
-            self.budget.reserve(3)?;
-            entry.insert(PairCall {
-                implementation: selected.implementation,
-                body: pair.body,
-                children: children.map(Option::unwrap),
-            });
+        if let [Some(first), Some(second)] = children {
+            self.budget.step(self.module.key.path.len() + 2)?;
+            let index = self.nodes[&(&self.module.key, node)].0;
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                self.report.pair_calls.entry(index)
+            {
+                self.budget.reserve(3)?;
+                entry.insert(Box::new(PairCall {
+                    implementation: selected.implementation,
+                    body: pair.body,
+                    argument: *argument,
+                    children: [first, second],
+                }));
+            }
         }
         Ok(true)
     }
@@ -487,7 +495,7 @@ impl<'a, 'g> Check<'a, 'g> {
         slot: ResultComponent<'g>,
         caller: &Residence<'g>,
         depth: usize,
-    ) -> Work<Option<(NodeId, Vec<Located<'g>>)>> {
+    ) -> Work<Option<(Option<NodeId>, Vec<Located<'g>>)>> {
         let nodes = &self.module.syntax.nodes;
         let body = nodes[origin].children[1];
         let body = if nodes[body].kind == NodeKind::Block {
@@ -580,9 +588,13 @@ impl<'a, 'g> Check<'a, 'g> {
         } else {
             None
         };
-        if !self.closed_child_expression(body, list, depth + 1)? {
+        let Some(root) = self.closed_child_expression(body, list, depth + 1)? else {
             return Ok(None);
-        }
+        };
+        let list_read = (list.is_some()
+            && nodes[root].kind == NodeKind::Index
+            && matches!(arrow.result.as_ref(), TypeTerm::Primitive(p) if p.name()=="i32"))
+        .then_some(body);
         let Some(value) = self.expression_facts(body)? else {
             return Ok(None);
         };
@@ -604,7 +616,7 @@ impl<'a, 'g> Check<'a, 'g> {
             && result
                 .iter()
                 .all(|v| matches!(v.content, Content::Test(_, _))))
-        .then_some((body, result)))
+        .then_some((list_read, result)))
     }
 
     fn closed_child_expression(
@@ -612,38 +624,46 @@ impl<'a, 'g> Check<'a, 'g> {
         node: NodeId,
         list: Option<(&'g DeclarationId, NodeId)>,
         depth: usize,
-    ) -> Work<bool> {
+    ) -> Work<Option<NodeId>> {
         self.depth(depth)?;
         let node = self.ungroup_value(node)?;
         let Some(facts) = self.facts(node)? else {
-            return Ok(false);
+            return Ok(None);
         };
         let NodeFactKind::Expression(value) = &facts.kind else {
-            return Ok(false);
+            return Ok(None);
         };
         if value.ordinary_context.is_some() || value.call.is_some() || !facts.flow.normal {
-            return Ok(false);
+            return Ok(None);
         }
-        match &value.data {
+        let checked = match &value.data {
             Some(DataExpression::Tuple { elements }) => {
                 for &element in elements {
-                    if !self.closed_child_expression(element, list, depth + 1)? {
-                        return Ok(false);
+                    if self
+                        .closed_child_expression(element, list, depth + 1)?
+                        .is_none()
+                    {
+                        return Ok(None);
                     }
                 }
-                Ok(true)
+                true
             }
             Some(DataExpression::ListIndex {
                 declaration,
                 base,
                 selector,
-            }) => Ok(list == Some((*declaration, self.ungroup_value(*base)?))
-                && self.module.syntax.nodes[self.ungroup_value(*selector)?].kind
-                    == NodeKind::Literal
-                && matches!(value.ty.as_ref(), TypeTerm::Primitive(_))),
-            None => Ok(self.module.syntax.nodes[node].kind == NodeKind::Literal
-                && matches!(value.ty.as_ref(), TypeTerm::Primitive(_))),
-            _ => Ok(false),
-        }
+            }) => {
+                list == Some((*declaration, self.ungroup_value(*base)?))
+                    && self.module.syntax.nodes[self.ungroup_value(*selector)?].kind
+                        == NodeKind::Literal
+                    && matches!(value.ty.as_ref(), TypeTerm::Primitive(_))
+            }
+            None => {
+                self.module.syntax.nodes[node].kind == NodeKind::Literal
+                    && matches!(value.ty.as_ref(), TypeTerm::Primitive(_))
+            }
+            _ => false,
+        };
+        Ok(checked.then_some(node))
     }
 }

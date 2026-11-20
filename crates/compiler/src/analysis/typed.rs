@@ -356,7 +356,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     };
     let ordinary_scope = matches!(roles_complete, Ok(true))
         .then(|| core::ApplicationOrdinaryScope::from_closed_roles(graph));
-    let bodies = analyze_integrated_bodies(
+    let mut bodies = analyze_integrated_bodies(
         &inventory,
         budget,
         IntegratedInputs {
@@ -417,6 +417,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             &mut budget,
             &mut report,
         )
+        .and_then(|()| report.attach_pair_calls(&mut bodies, &mut budget))
         .is_err()
         {
             completion = ScalarFailureKind::ResourceLimit;

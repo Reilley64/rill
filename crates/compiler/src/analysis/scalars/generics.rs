@@ -233,6 +233,10 @@ impl<'g> GenericReport<'g> {
         &self.facts.nodes
     }
 
+    pub(in crate::analysis) fn typed_node_mut(&mut self, index: usize) -> &mut NodeFacts<'g> {
+        &mut self.facts.nodes[index]
+    }
+
     pub(in crate::analysis) fn checked_bodies(&self) -> &[BodyFacts<'g>] {
         &self.facts.bodies
     }

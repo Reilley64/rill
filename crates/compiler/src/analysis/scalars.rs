@@ -127,6 +127,8 @@ pub use iteration::Iteration;
 
 #[derive(Debug)]
 pub struct CallFacts<'g> {
+    /// Closed per-slot evidence from Result-use on this exact call, not a join contract.
+    pub(in crate::analysis) list_arrows: Option<Box<super::typed::PairCall<'g>>>,
     pub callee: &'g DeclarationId,
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
@@ -1768,6 +1770,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(Some(PreparedCall {
             callee_node: callee,
             fact: CallFacts {
+                list_arrows: None,
                 callee: &declaration.id,
                 bindings,
                 substitution,

@@ -1,6 +1,15 @@
 //! Ordinary specialization of a checked two-invocation application body.
 use super::*;
-use crate::analysis::typed::PairCall;
+use crate::analysis::typed::{PairCall, PairChild};
+
+struct ListArrowPlan<'a, 'g> {
+    read: NodeId,
+    operand: NodeId,
+    source: Slot,
+    op: ListI32Read<'a, 'g>,
+    output: &'a Type<'g>,
+    closure: &'a Type<'g>,
+}
 
 pub(in crate::analysis::ownership) struct ListArrowPair<'g> {
     pub implementation: &'g DeclarationId,
@@ -45,8 +54,14 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             self.element(node, into, i)?;
         }
         let [first, second] = &pair.children;
-        let (a, a_capture, a_body) = self.list_arrow(first, depth + 1)?;
-        let (b, b_capture, b_body) = self.list_arrow(second, depth + 1)?;
+        let (tuple, tuple_depth) = self.ungroup_expression_at(pair.argument, depth + 1)?;
+        if self.module.syntax.nodes[tuple].children.as_slice() != [first.element, second.element] {
+            return Err(pending);
+        }
+        let left = self.list_arrow_plan(first, tuple_depth + 1)?;
+        let right = self.list_arrow_plan(second, tuple_depth + 1)?;
+        let (a, a_capture, a_body) = self.list_arrow(first, left)?;
+        let (b, b_capture, b_body) = self.list_arrow(second, right)?;
         self.budget.reserve(3)?;
         let index = self.list_arrow_pairs.len();
         let sources = [a_body.source, b_body.source];
@@ -92,14 +107,16 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         Ok(next)
     }
 
-    fn list_arrow(
+    fn list_arrow_plan(
         &mut self,
-        child: &crate::analysis::typed::PairChild<'g>,
+        child: &PairChild<'g>,
         depth: usize,
-    ) -> ResultOf<(Slot, Slot, ListArrow<'g>)> {
-        self.depth(depth)?;
+    ) -> ResultOf<ListArrowPlan<'a, 'g>> {
         let arrow = &child.arrow;
-        let origin = arrow.site.node;
+        let (origin, depth) = self.ungroup_expression_at(child.element, depth)?;
+        if origin != arrow.site.node {
+            return Err(Stop::Pending(origin));
+        }
         let pending = Stop::Pending(origin);
         let [capture] = arrow.captures.as_slice() else {
             return Err(pending);
@@ -113,7 +130,13 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         {
             return Err(pending);
         }
-        let (read, depth) = self.ungroup_expression_at(child.expression, depth + 1)?;
+        let mut expression_depth = depth + 1;
+        if self.module.syntax.nodes[child.body.node].kind == NodeKind::Block {
+            self.depth(expression_depth)?;
+            self.depth(expression_depth + 1)?;
+            expression_depth += 2;
+        }
+        let (read, depth) = self.ungroup_expression_at(child.expression, expression_depth)?;
         let value = self.normal_value(read)?;
         let read_op = self.check_list_i32_read(read, value, depth)?;
         let base = read_op.base;
@@ -144,9 +167,35 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         {
             return Err(pending);
         }
-        let closure = self.normal_value(origin)?;
-        let receiver = self.slot(origin, &closure.ty)?;
-        let staged = self.slot(base, &capture.ty)?;
+        let closure = &self.normal_value(origin)?.ty;
+        Ok(ListArrowPlan {
+            read,
+            operand,
+            source,
+            op: read_op,
+            output: &value.ty,
+            closure,
+        })
+    }
+
+    fn list_arrow(
+        &mut self,
+        child: &PairChild<'g>,
+        plan: ListArrowPlan<'a, 'g>,
+    ) -> ResultOf<(Slot, Slot, ListArrow<'g>)> {
+        let ListArrowPlan {
+            read,
+            operand,
+            source,
+            op: read_op,
+            output,
+            closure,
+        } = plan;
+        let base = read_op.base;
+        let view_ty = &read_op.view.ty;
+        let backing = self.slots[source];
+        let receiver = self.slot(child.arrow.site.node, closure)?;
+        let staged = self.slot(base, view_ty)?;
 
         // Check the actual read in a separate frame using a transferred view.
         // The backing proxy is initialized but is not owned by this frame and
@@ -159,8 +208,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             BuildFacts::Local(BTreeMap::new()),
             self.budget,
         );
-        let view = frame.slot(base, &capture.ty)?;
-        let output = frame.slot(read, &value.ty)?;
+        let view = frame.slot(base, view_ty)?;
+        let output = frame.slot(read, output)?;
         frame.budget.reserve(4)?;
         let incoming = frame.slots.len();
         frame.slots.push(Local {
@@ -171,12 +220,12 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         });
         frame.incoming_list_arrow = Some((view, incoming));
         let end = frame.emit(read, Action::None, Edges::End)?;
-        let exported = frame.emit(read, Action::Export(output), Edges::Next(end))?;
-        let cleanup = frame.cleanup(read, &[view], exported)?;
+        let cleanup = frame.cleanup(read, &[view], end)?;
+        let exported = frame.emit(read, Action::Export(output), Edges::Next(cleanup))?;
         let entry = frame.emit(
             read,
             read_op.action(view, Some(output)),
-            Edges::Next(cleanup),
+            Edges::Next(exported),
         )?;
         let capture = frame.slots[view].place(self.module);
         let incoming_backing = frame.slots[incoming].place(self.module);

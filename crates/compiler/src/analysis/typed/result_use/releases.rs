@@ -70,7 +70,7 @@ pub(super) fn check<'g>(
         let [node] = module.syntax.nodes[*statement].children.as_slice() else {
             continue;
         };
-        let expression = |node| match &nodes.get(&(&module.key, node))?.kind {
+        let expression = |node| match &nodes.get(&(&module.key, node))?.1.kind {
             NodeFactKind::Expression(value) if value.ordinary_context.is_none() => Some(value),
             _ => None,
         };
