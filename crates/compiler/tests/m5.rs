@@ -30,6 +30,8 @@ mod propagation;
 mod records;
 #[path = "m5/retained.rs"]
 mod retained;
+#[path = "m5/roots.rs"]
+mod roots;
 mod support;
 #[path = "m5/tuples.rs"]
 mod tuples;

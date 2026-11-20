@@ -229,7 +229,46 @@ struct ProjectedTemporary {
     member: Slot,
 }
 
-impl<'a, 'g> Build<'a, 'g, '_> {
+impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
+    pub(super) fn new(
+        typed: &'a TypedReport<'g>,
+        module: &'g Module,
+        body: NodeId,
+        return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
+        budget: &'b mut Budget,
+    ) -> ResultOf<Self> {
+        let mut build = Self {
+            typed,
+            module,
+            body,
+            facts: BTreeMap::new(),
+            locals: BTreeMap::new(),
+            nested_record_values: BTreeMap::new(),
+            nested_tuple_parameters: BTreeMap::new(),
+            nested_tuple_bindings: BTreeMap::new(),
+            retained: BTreeMap::new(),
+            retains_exclusive_bool: false,
+            incoming_exclusive_bools: Vec::new(),
+            slots: Vec::new(),
+            code: Vec::new(),
+            calls: Vec::new(),
+            cleanups: Vec::new(),
+            body_scope: None,
+            dispose: typed.dispose_role().map(|d| &d.id),
+            return_contract,
+            proved_variant_cleanup: Vec::new(),
+            budget,
+        };
+        for fact in typed.bodies().typed_nodes() {
+            build.budget.step(1)?;
+            if fact.site.module == &module.key {
+                build.budget.reserve(1)?;
+                build.facts.insert(fact.site.node, fact);
+            }
+        }
+        Ok(build)
+    }
+
     fn depth(&mut self, depth: usize) -> ResultOf<()> {
         self.budget.step(1)?;
         if depth > self.budget.limits.max_depth.min(64) {
@@ -1523,6 +1562,125 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         }
     }
 
+    pub(super) fn expectation(&mut self, result: &Type<'g>) -> ResultOf<Pc> {
+        let root = self.body;
+        let [expression] = self.module.syntax.nodes[root].children[..] else {
+            return Err(Stop::Pending(root));
+        };
+        if !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+            || self.normal_value(expression)?.ty != *result
+        {
+            return Err(Stop::Pending(expression));
+        }
+        let output = self.slot(expression, result)?;
+        let finish = self.emit(expression, Action::Export(output), Edges::FinishExpectation)?;
+        let (projected, projection_depth) = self.ungroup_expression_at(expression, 1)?;
+        if let Some(temporary) = self.temporary_projection(projected, true)? {
+            let cleanup = self.cleanup(expression, &[temporary.scratch], finish)?;
+            return self.stage_value(
+                expression,
+                output,
+                cleanup,
+                Some(temporary),
+                projection_depth + 1,
+            );
+        }
+        self.expression(expression, Some(output), finish, 1)
+    }
+
+    pub(super) fn startup(&mut self) -> ResultOf<Pc> {
+        let root = self.body;
+        self.depth(1)?;
+        let mut children = Vec::new();
+        for &child in &self.module.syntax.nodes[root].children {
+            self.budget.step(1)?;
+            // Same child selection as the integrated typed startup pass.
+            if !matches!(
+                self.module.syntax.nodes[child].kind,
+                NodeKind::Export
+                    | NodeKind::Function
+                    | NodeKind::Import
+                    | NodeKind::Record
+                    | NodeKind::Enum
+                    | NodeKind::Expect
+                    | NodeKind::Implementation
+            ) {
+                self.budget.reserve(1)?;
+                children.push(child);
+            }
+        }
+        let end = self.emit(root, Action::None, Edges::FinishStartup)?;
+        self.sequence(
+            root,
+            &children,
+            end,
+            Exits {
+                returning: None,
+                looping: None,
+            },
+            1,
+        )
+    }
+
+    fn sequence(
+        &mut self,
+        node: NodeId,
+        children: &[NodeId],
+        next: Pc,
+        exits: Exits,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let mut locals = Vec::new();
+        let mut prefix = children.len();
+        for (index, &child) in children.iter().enumerate() {
+            self.budget.step(1)?;
+            let statement = &self.module.syntax.nodes[child];
+            let control = if matches!(statement.kind, NodeKind::Binding { .. }) {
+                let initializer = *statement.children.last().unwrap();
+                self.declare_binding(child, initializer, &mut locals)?;
+                initializer
+            } else {
+                child
+            };
+            // Typed statement flow already composes nested exits.
+            // An infeasible suffix introduces no slots or obligations.
+            if self
+                .facts
+                .get(&control)
+                .is_some_and(|facts| !facts.flow.normal && !facts.flow.pending)
+            {
+                prefix = index + 1;
+                break;
+            }
+        }
+        let exits = Exits {
+            returning: exits
+                .returning
+                .map(|target| self.cleanup_scope(node, &locals, target))
+                .transpose()?,
+            looping: match exits.looping {
+                Some(looping) => Some(Loop {
+                    breaks: self.cleanup_scope(node, &locals, looping.breaks)?,
+                    continues: self.cleanup_scope(node, &locals, looping.continues)?,
+                }),
+                None => None,
+            },
+        };
+        let mut tail = self.cleanup_scope(node, &locals, next)?;
+        if node == self.body {
+            if !locals.is_empty()
+                && let Action::EndScope(index) = self.code[tail].action
+            {
+                self.body_scope = Some(index);
+            }
+            tail = self.check_retained(node, tail)?;
+        }
+        for &child in children[..prefix].iter().rev() {
+            tail = self.statement(child, tail, exits, depth + 1)?;
+        }
+        Ok(tail)
+    }
+
     pub(super) fn statement(
         &mut self,
         node: NodeId,
@@ -1534,54 +1692,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let syntax = &self.module.syntax.nodes[node];
         let children = &syntax.children;
         match syntax.kind {
-            NodeKind::Block => {
-                let mut locals = Vec::new();
-                let mut prefix = children.len();
-                for (index, &child) in children.iter().enumerate() {
-                    self.budget.step(1)?;
-                    let statement = &self.module.syntax.nodes[child];
-                    let control = if matches!(statement.kind, NodeKind::Binding { .. }) {
-                        let initializer = *statement.children.last().unwrap();
-                        self.declare_binding(child, initializer, &mut locals)?;
-                        initializer
-                    } else {
-                        child
-                    };
-                    // Typed statement flow already composes nested exits.
-                    // An infeasible suffix introduces no slots or obligations.
-                    if self
-                        .facts
-                        .get(&control)
-                        .is_some_and(|facts| !facts.flow.normal && !facts.flow.pending)
-                    {
-                        prefix = index + 1;
-                        break;
-                    }
-                }
-                let exits = Exits {
-                    returning: self.cleanup_scope(node, &locals, exits.returning)?,
-                    looping: match exits.looping {
-                        Some(looping) => Some(Loop {
-                            breaks: self.cleanup_scope(node, &locals, looping.breaks)?,
-                            continues: self.cleanup_scope(node, &locals, looping.continues)?,
-                        }),
-                        None => None,
-                    },
-                };
-                let mut tail = self.cleanup_scope(node, &locals, next)?;
-                if node == self.body {
-                    if !locals.is_empty()
-                        && let Action::EndScope(index) = self.code[tail].action
-                    {
-                        self.body_scope = Some(index);
-                    }
-                    tail = self.check_retained(node, tail)?;
-                }
-                for &child in children[..prefix].iter().rev() {
-                    tail = self.statement(child, tail, exits, depth + 1)?;
-                }
-                Ok(tail)
-            }
+            NodeKind::Block => self.sequence(node, children, next, exits, depth),
             NodeKind::Binding { .. } => {
                 let value = *children.last().unwrap();
                 let binding = self.binding(node)?;
@@ -1599,7 +1710,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                         initializer,
                         into,
                         next,
-                        exits.returning,
+                        exits.returning.ok_or(Stop::Pending(initializer))?,
                         initializer_depth,
                     );
                 }
@@ -1707,7 +1818,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 let (expression, expression_depth) =
                     self.ungroup_expression_at(value, depth + 1)?;
                 if self.propagates_directly(expression)? {
-                    self.propagate(expression, None, next, exits.returning, expression_depth)
+                    let returning = exits.returning.ok_or(Stop::Pending(expression))?;
+                    self.propagate(expression, None, next, returning, expression_depth)
                 } else if let Some(call) = self.check_value_call_propagation(
                     expression,
                     true,
@@ -1805,16 +1917,15 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 Ok(stage)
             }
             NodeKind::Return => {
-                let returning = self.check_retained(node, exits.returning)?;
+                let (_, result) = self.return_contract.ok_or(Stop::Pending(node))?;
+                let returning =
+                    self.check_retained(node, exits.returning.ok_or(Stop::Pending(node))?)?;
                 if let Some(&value) = children.first() {
                     let ty = self.value(value)?.ty.clone();
-                    let tuple_source =
-                        self.nested_tuple_transfer_source(value, self.return_contract.1)?;
+                    let tuple_source = self.nested_tuple_transfer_source(value, result)?;
                     let output = if let Some(from) = tuple_source {
                         self.clone_region(from, value)?
-                    } else if let Some(slot) =
-                        self.nested_transfer_slot(value, value, self.return_contract.1)?
-                    {
+                    } else if let Some(slot) = self.nested_transfer_slot(value, value, result)? {
                         slot
                     } else {
                         self.slot(value, &ty)?
@@ -2695,7 +2806,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         facts: &'a ExpressionFacts<'g>,
     ) -> ResultOf<CheckedPropagation<'a, 'g>> {
         let syntax = &self.module.syntax.nodes[node];
-        let (id, result) = self.return_contract;
+        let (id, result) = self.return_contract.ok_or(Stop::Pending(node))?;
         let (exit, wrap, fresh) = match &facts.data {
             Some(DataExpression::Propagation(exit)) => (exit.as_ref(), None, None),
             Some(DataExpression::Wrapping(wrap)) => (&wrap.branch, Some(&wrap.construction), None),
@@ -2862,7 +2973,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                     ),
                 },
                 call,
-                return_cleanup,
+                Some(return_cleanup),
                 depth,
             )? {
             self.budget.step(1)?;
@@ -2883,7 +2994,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         } else {
             None
         };
-        let result = self.return_contract.1;
+        let (_, result) = self.return_contract.ok_or(Stop::Pending(node))?;
         let scratch = self.slot(source, operand)?;
         let return_slot = if exit.can_return {
             let output = self.slot(node, result)?;
@@ -3175,7 +3286,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         &mut self,
         node: NodeId,
         statement_discard: bool,
-        returning: Pc,
+        returning: Option<Pc>,
         depth: usize,
     ) -> ResultOf<Option<PropagatingValueCall<'a, 'g>>> {
         self.budget.step(1)?;
@@ -3232,7 +3343,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         node: NodeId,
         output: PropagatingCallOutput<'_, 'g>,
         call: &crate::analysis::scalars::CallFacts<'g>,
-        returning: Pc,
+        returning: Option<Pc>,
         depth: usize,
     ) -> ResultOf<Option<PropagatingArguments>> {
         let pipe_formal = if let Some(input) = call.pipe_input {
@@ -3315,9 +3426,10 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 });
             }
         }
-        if roots.is_empty() {
+        let Some(first) = roots.first() else {
             return Ok(None);
-        }
+        };
+        let returning = returning.ok_or(Stop::Pending(first.root))?;
         match output {
             PropagatingCallOutput::Value(expected) => {
                 if !(owns_text(expected)
@@ -3441,9 +3553,10 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(Stop::Pending(node));
         };
         let retained = data.retained.as_ref().ok_or(Stop::Pending(node))?;
+        let (_, result) = self.return_contract.ok_or(Stop::Pending(node))?;
         self.budget.step(1)?;
         if data.operation != ErrorOperation::Wrap
-            || data.result != *self.return_contract.1
+            || data.result != *result
             || data.failure != &role.err.id
             || data.wrapper != &role.wrapper.id
             || data.value != right
@@ -4194,7 +4307,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         node: NodeId,
         into: Slot,
         next: Pc,
-        returning: Pc,
+        returning: Option<Pc>,
         depth: usize,
     ) -> ResultOf<Option<Pc>> {
         self.budget.step(1)?;
@@ -4217,6 +4330,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let Some((position, postfix)) = postfix else {
             return Ok(None);
         };
+        let returning = returning.ok_or(Stop::Pending(postfix))?;
         let fields = self.record_fields(&data.ty)?.ok_or(Stop::Pending(node))?;
         self.budget.step(fields.len())?;
         if self.slots[into].members != fields.len()

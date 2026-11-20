@@ -1,7 +1,7 @@
-//! Ownership checking and cleanup MIR for a checked function body.
+//! Scoped ownership checking and cleanup MIR over a typed capture.
 use super::DeclarationFacts;
 use super::declarations::Budget;
-use super::scalars::{NodeFactKind, NodeFacts, Site};
+use super::scalars::{BodyOwner, NodeFactKind, NodeFacts, Site};
 use super::typed::{TypedReceipt, TypedReport};
 use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
@@ -457,8 +457,87 @@ pub enum Cleanup<'g> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Terminator {
     Goto(usize),
-    Branch { yes: usize, no: usize },
+    Branch {
+        yes: usize,
+        no: usize,
+    },
     Return,
+    /// End the module's lexical startup frame; there is no callable result.
+    FinishStartup,
+    /// Export the staged Bool after expression cleanup, without a callable return.
+    FinishExpectation,
+}
+
+/// Lower a single root and validate its reached dependencies in this capture.
+/// `Checked` certifies only this scoped judgment, not whole-capture ownership
+/// or execution. Non-function roots do not carry a cancellation proof.
+pub fn lower_root<'g>(
+    receipt: &TypedReceipt<'_, 'g>,
+    module: &'g Module,
+    owner: BodyOwner<'_>,
+    limits: AnalysisLimits,
+) -> Result<Report<'g>, QueryError> {
+    let typed = receipt.report;
+    validate_request(typed, module, owner)?;
+    let plan = match owner {
+        BodyOwner::Startup => RootPlan::Startup,
+        BodyOwner::Declaration(id) if id.kind == DeclarationKind::Function => {
+            let header = typed
+                .inventory()
+                .type_facts()
+                .declarations
+                .get(id)
+                .ok_or(QueryError::InvalidRequest)?;
+            RootPlan::Function(header)
+        }
+        BodyOwner::Declaration(id)
+            if matches!(
+                id.kind,
+                DeclarationKind::Implementation | DeclarationKind::Expectation
+            ) =>
+        {
+            let index = module
+                .declarations
+                .binary_search_by(|candidate| candidate.id.cmp(id))
+                .map_err(|_| QueryError::InvalidRequest)?;
+            let declaration = &module.declarations[index];
+            if id.kind == DeclarationKind::Implementation {
+                RootPlan::Implementation(declaration)
+            } else {
+                RootPlan::Expectation(declaration)
+            }
+        }
+        BodyOwner::Declaration(_) => return Err(QueryError::InvalidRequest),
+    };
+    let mut budget = Budget {
+        limits,
+        statistics: Statistics::default(),
+    };
+    let result = checked_graph(typed, module, plan, &mut budget);
+    Ok(report(result, budget.statistics))
+}
+
+// Identity validation precedes proof work so a foreign request is invalid even
+// with zero proof budget. Loaded modules are ordered by their canonical keys.
+fn validate_request(
+    typed: &TypedReport<'_>,
+    module: &Module,
+    owner: BodyOwner<'_>,
+) -> Result<(), QueryError> {
+    let graph = typed.inventory().graph();
+    if let BodyOwner::Declaration(id) = owner
+        && (id.context != graph.id() || id.module != module.key)
+    {
+        return Err(QueryError::InvalidRequest);
+    }
+    let modules = graph.modules();
+    let index = modules
+        .binary_search_by(|candidate| candidate.key.cmp(&module.key))
+        .map_err(|_| QueryError::InvalidRequest)?;
+    if !std::ptr::eq(&modules[index], module) {
+        return Err(QueryError::InvalidRequest);
+    }
+    Ok(())
 }
 
 /// Lower the selected body after validating reached direct calls and disposers.
@@ -470,30 +549,13 @@ pub fn lower_body<'g>(
     declaration: &DeclarationId,
     limits: AnalysisLimits,
 ) -> Result<Report<'g>, QueryError> {
-    let typed = receipt.report;
-    if declaration.kind != DeclarationKind::Function || declaration.module != module.key {
+    if declaration.kind != DeclarationKind::Function {
         return Err(QueryError::InvalidRequest);
     }
-    if !typed
-        .inventory()
-        .graph()
-        .modules()
-        .iter()
-        .any(|candidate| std::ptr::eq(candidate, module))
-    {
-        return Err(QueryError::InvalidRequest);
-    }
-    let header = typed
-        .inventory()
-        .type_facts()
-        .declarations
-        .get(declaration)
-        .ok_or(QueryError::InvalidRequest)?;
-    let mut budget = Budget {
-        limits,
-        statistics: Statistics::default(),
-    };
-    let result = checked_graph(typed, module, header, &mut budget);
+    lower_root(receipt, module, BodyOwner::Declaration(declaration), limits)
+}
+
+fn report<'g>(result: Result<Mir<'g>, (&'g Module, Stop)>, statistics: Statistics) -> Report<'g> {
     let (completion, findings, blocked_at, mir) = match result {
         Ok(mir) => (Completion::Checked, Vec::new(), None, Some(mir)),
         Err((
@@ -525,13 +587,20 @@ pub fn lower_body<'g>(
         ),
         Err((_, Stop::Limit)) => (Completion::ResourceLimit, Vec::new(), None, None),
     };
-    Ok(Report {
+    Report {
         completion,
         findings,
         blocked_at,
         mir,
-        statistics: budget.statistics,
-    })
+        statistics,
+    }
+}
+
+enum RootPlan<'a, 'g> {
+    Function(&'a DeclarationFacts<'g>),
+    Implementation(&'g Declaration),
+    Expectation(&'g Declaration),
+    Startup,
 }
 
 // Prove the declared dependency contracts of every direct callee reached by
@@ -540,7 +609,7 @@ pub fn lower_body<'g>(
 fn checked_graph<'g>(
     typed: &TypedReport<'g>,
     module: &'g Module,
-    header: &DeclarationFacts<'g>,
+    plan: RootPlan<'_, 'g>,
     budget: &mut Budget,
 ) -> Result<Mir<'g>, (&'g Module, Stop)> {
     let reached = |mir: &Mir<'g>,
@@ -594,14 +663,32 @@ fn checked_graph<'g>(
         Ok(())
     };
 
-    budget.reserve(1).map_err(|()| (module, Stop::Limit))?;
-    let mut seen = BTreeMap::from([(&header.declaration.id, None)]);
+    let mut seen = BTreeMap::new();
     let mut pending = VecDeque::new();
+    let (root_site, lowered) = match plan {
+        RootPlan::Function(header) => {
+            budget.reserve(1).map_err(|()| (module, Stop::Limit))?;
+            seen.insert(&header.declaration.id, None);
+            (
+                header.declaration.node,
+                lower(typed, module, header, Frame::Query, budget),
+            )
+        }
+        RootPlan::Implementation(declaration) => (
+            declaration.node,
+            lower_implementation(typed, module, declaration, budget),
+        ),
+        RootPlan::Expectation(declaration) => (
+            declaration.node,
+            lower_expectation(typed, module, declaration, budget),
+        ),
+        RootPlan::Startup => (module.syntax.root, lower_startup(typed, module, budget)),
+    };
     let Lowered {
         mir: mut root,
         trace,
         ..
-    } = lower(typed, module, header, Frame::Query, budget).map_err(|stop| (module, stop))?;
+    } = lowered.map_err(|stop| (module, stop))?;
     reached(&root, &mut pending, &mut seen, budget).map_err(|stop| (module, stop))?;
     // All direct dependencies of the root are queued before transitive ones.
     let mut direct = pending.len();
@@ -609,12 +696,12 @@ fn checked_graph<'g>(
     let mut unknown_entry = false;
     while let Some((target, id, is_disposer)) = pending.pop_front() {
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
-        let missing = (module, Stop::Pending(header.declaration.node));
+        let missing = (module, Stop::Pending(root_site));
         let selected = if is_disposer {
             let family = typed
                 .dispose_role()
                 .and_then(|role| typed.inventory().captured_family(&role.id))
-                .ok_or((module, Stop::Pending(header.declaration.node)))?;
+                .ok_or((module, Stop::Pending(root_site)))?;
             budget
                 .step(family.implementations.len())
                 .map_err(|()| (target, Stop::Limit))?;
@@ -666,6 +753,7 @@ struct Lowered<'a, 'g> {
 enum Frame {
     Query,
     ReachedCall,
+    PlainImplementation { body: NodeId },
     ActiveDisposer,
 }
 
@@ -680,8 +768,12 @@ fn lower<'a, 'g>(
     let DeclarationShape::Function { parameters, result } = &header.shape else {
         return Err(Stop::Pending(entry_site));
     };
-    let Some(&body) = module.syntax.nodes[entry_site].children.get(1) else {
-        return Err(Stop::Pending(entry_site));
+    let body = match frame {
+        Frame::PlainImplementation { body } => body,
+        _ => *module.syntax.nodes[entry_site]
+            .children
+            .get(1)
+            .ok_or(Stop::Pending(entry_site))?,
     };
     let mut retains_exclusive_bool = false;
     if matches!(parameters.len(), 2..=4) {
@@ -696,35 +788,14 @@ fn lower<'a, 'g>(
         }
     }
     let two_hop = retained_two_hop_bool_contract(header);
-    let mut build = Build {
+    let mut build = Build::new(
         typed,
         module,
         body,
-        facts: BTreeMap::new(),
-        locals: BTreeMap::new(),
-        nested_record_values: BTreeMap::new(),
-        nested_tuple_parameters: BTreeMap::new(),
-        nested_tuple_bindings: BTreeMap::new(),
-        retained: BTreeMap::new(),
-        retains_exclusive_bool,
-        incoming_exclusive_bools: Vec::new(),
-        slots: Vec::new(),
-        code: Vec::new(),
-        calls: Vec::new(),
-        cleanups: Vec::new(),
-        body_scope: None,
-        dispose: typed.dispose_role().map(|d| &d.id),
-        return_contract: (&header.declaration.id, result),
-        proved_variant_cleanup: Vec::new(),
+        Some((&header.declaration.id, result)),
         budget,
-    };
-    for fact in typed.bodies().typed_nodes() {
-        build.budget.step(1)?;
-        if fact.site.module == &module.key {
-            build.budget.reserve(1)?;
-            build.facts.insert(fact.site.node, fact);
-        }
-    }
+    )?;
+    build.retains_exclusive_bool = retains_exclusive_bool;
     build.budget.reserve(parameters.len())?;
     let mut params = Vec::with_capacity(parameters.len());
     let mut owns_guard = false;
@@ -794,7 +865,7 @@ fn lower<'a, 'g>(
         body,
         finish,
         Exits {
-            returning: finish,
+            returning: Some(finish),
             looping: None,
         },
         1,
@@ -815,6 +886,114 @@ fn lower<'a, 'g>(
         mir,
         trace,
         empty_entry,
+    })
+}
+
+fn lower_implementation<'a, 'g>(
+    typed: &'a TypedReport<'g>,
+    module: &'g Module,
+    declaration: &'g Declaration,
+    budget: &mut Budget,
+) -> ResultOf<Lowered<'a, 'g>> {
+    use super::ordinary::Compatibility;
+    use crate::loader::Origin;
+
+    let site = declaration.node;
+    budget.step(1)?;
+    if module.key.origin != Origin::Application {
+        return Err(Stop::Pending(site));
+    }
+    let inventory = typed.inventory();
+    let mut attachment = None;
+    for candidate in inventory.graph().implementations() {
+        budget.step(1)?;
+        if candidate.declaration == declaration.id {
+            attachment = Some(candidate);
+            break;
+        }
+    }
+    let source = attachment.ok_or(Stop::Pending(site))?;
+    // In the installed typed receipt the closed protection catalogue is keyed
+    // by canonical standard family, including its implementations on app types.
+    // Do not use an ordinary frame for any such family: active disposers and
+    // standard/protected providers need separate root contracts.
+    if source.family.module.origin != Origin::Application
+        || source.family.kind != DeclarationKind::Family
+    {
+        return Err(Stop::Pending(site));
+    }
+    budget.step(1)?;
+    let family = inventory
+        .captured_family(&source.family)
+        .ok_or(Stop::Pending(site))?;
+    if !family.header.binders.is_empty() {
+        return Err(Stop::Pending(site));
+    }
+    budget.step(family.implementations.len())?;
+    let implementation = family
+        .implementations
+        .iter()
+        .find(|body| std::ptr::eq(body.source, source))
+        .ok_or(Stop::Pending(site))?;
+    if implementation.compatibility != Compatibility::Compatible
+        || !implementation.header.binders.is_empty()
+    {
+        return Err(Stop::Pending(site));
+    }
+    typed
+        .bodies()
+        .checked_body(module, BodyOwner::Declaration(&declaration.id), budget)?
+        .ok_or(Stop::Pending(site))?;
+    lower(
+        typed,
+        module,
+        &implementation.header,
+        Frame::PlainImplementation {
+            body: source.body_node,
+        },
+        budget,
+    )
+}
+
+fn lower_expectation<'a, 'g>(
+    typed: &'a TypedReport<'g>,
+    module: &'g Module,
+    declaration: &'g Declaration,
+    budget: &mut Budget,
+) -> ResultOf<Lowered<'a, 'g>> {
+    let root = declaration.node;
+    let result = typed
+        .bodies()
+        .checked_body(module, BodyOwner::Declaration(&declaration.id), budget)?
+        .and_then(|body| body.result.as_ref())
+        .ok_or(Stop::Pending(root))?;
+    let mut build = Build::new(typed, module, root, None, budget)?;
+    let entry = build.expectation(result)?;
+    let (mir, trace) = flow::run(build, entry, Vec::new(), None, false)?;
+    Ok(Lowered {
+        mir,
+        trace,
+        empty_entry: None,
+    })
+}
+
+fn lower_startup<'a, 'g>(
+    typed: &'a TypedReport<'g>,
+    module: &'g Module,
+    budget: &mut Budget,
+) -> ResultOf<Lowered<'a, 'g>> {
+    let root = module.syntax.root;
+    typed
+        .bodies()
+        .checked_body(module, BodyOwner::Startup, budget)?
+        .ok_or(Stop::Pending(root))?;
+    let mut build = Build::new(typed, module, root, None, budget)?;
+    let entry = build.startup()?;
+    let (mir, trace) = flow::run(build, entry, Vec::new(), None, false)?;
+    Ok(Lowered {
+        mir,
+        trace,
+        empty_entry: None,
     })
 }
 
@@ -1152,6 +1331,8 @@ enum Edges {
     Next(Pc),
     Branch { yes: Pc, no: Pc },
     End,
+    FinishStartup,
+    FinishExpectation,
 }
 
 #[derive(Clone, Copy)]
@@ -1163,7 +1344,7 @@ struct Instruction<'g> {
 
 #[derive(Clone, Copy)]
 struct Exits {
-    returning: Pc,
+    returning: Option<Pc>,
     looping: Option<Loop>,
 }
 
@@ -1195,7 +1376,7 @@ struct Build<'a, 'g, 'b> {
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
     dispose: Option<&'g DeclarationId>,
-    return_contract: (&'g DeclarationId, &'a Type<'g>),
+    return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
     proved_variant_cleanup: Vec<Type<'g>>,
     budget: &'b mut Budget,
 }

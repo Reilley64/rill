@@ -7589,6 +7589,9 @@ fn calls_on_path<'g, const N: usize>(
                 assert!(choices.next().is_none(), "exit skipped a branch");
                 return calls;
             }
+            Terminator::FinishStartup | Terminator::FinishExpectation => {
+                panic!("expected a callable return")
+            }
         }
     }
     panic!("path did not reach a return");

@@ -82,7 +82,7 @@ impl Edges {
         let (first, second) = match self {
             Self::Next(pc) => (Some(pc), None),
             Self::Branch { yes, no } => (Some(yes), Some(no)),
-            Self::End => (None, None),
+            Self::End | Self::FinishStartup | Self::FinishExpectation => (None, None),
         };
         first.into_iter().chain(second)
     }
@@ -1163,6 +1163,7 @@ impl<'g> CancellationTrace<'_, 'g> {
                     }
                 }
                 Terminator::Return => {}
+                Terminator::FinishStartup | Terminator::FinishExpectation => return Ok(None),
             }
         }
         if !complete {
@@ -1440,7 +1441,7 @@ pub(super) fn run<'a, 'g>(
         // state visit. No graph walk or allocation on behalf of cancellation.
         if candidate {
             flat &= flat_action(action, &slots)
-                && !matches!(action, Action::Call(index) if calls[index].callee == return_contract.0);
+                && !matches!(action, Action::Call(index) if return_contract.is_some_and(|(id, _)| calls[index].callee == id));
             loop_delivery |= matches!(action, Action::BudgetBackedge);
         }
         let operation = (|| -> ResultOf<_> {
@@ -2364,6 +2365,8 @@ pub(super) fn run<'a, 'g>(
                 no: successor(no, state)?,
             },
             Edges::End => Terminator::Return,
+            Edges::FinishStartup => Terminator::FinishStartup,
+            Edges::FinishExpectation => Terminator::FinishExpectation,
         };
         blocks.push(Block {
             site,
