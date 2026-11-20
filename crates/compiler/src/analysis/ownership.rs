@@ -9,7 +9,7 @@ use super::{
 };
 use crate::loader::{Declaration, DeclarationId, DeclarationKind};
 use crate::source::Span;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::ops::Range;
 
 mod build;
@@ -545,7 +545,7 @@ fn checked_graph<'g>(
 ) -> Result<Mir<'g>, (&'g Module, Stop)> {
     let reached = |mir: &Mir<'g>,
                    pending: &mut VecDeque<(&'g Module, &'g DeclarationId, bool)>,
-                   seen: &mut BTreeSet<&'g DeclarationId>,
+                   seen: &mut BTreeMap<&'g DeclarationId, Option<Site<'g>>>,
                    budget: &mut Budget|
      -> ResultOf<()> {
         for block in &mir.blocks {
@@ -574,7 +574,7 @@ fn checked_graph<'g>(
                         _ => None,
                     }))
             {
-                if seen.contains(callee) {
+                if seen.contains_key(callee) {
                     continue;
                 }
                 let mut target = None;
@@ -587,7 +587,7 @@ fn checked_graph<'g>(
                 }
                 let target = target.ok_or(Stop::Pending(block.site.node))?;
                 budget.reserve(2)?;
-                seen.insert(callee);
+                seen.insert(callee, None);
                 pending.push_back((target, callee, is_disposer));
             }
         }
@@ -595,11 +595,18 @@ fn checked_graph<'g>(
     };
 
     budget.reserve(1).map_err(|()| (module, Stop::Limit))?;
-    let mut seen = BTreeSet::from([&header.declaration.id]);
+    let mut seen = BTreeMap::from([(&header.declaration.id, None)]);
     let mut pending = VecDeque::new();
-    let mut root =
-        lower(typed, module, header, Frame::Query, budget).map_err(|stop| (module, stop))?;
+    let Lowered {
+        mir: mut root,
+        trace,
+        ..
+    } = lower(typed, module, header, Frame::Query, budget).map_err(|stop| (module, stop))?;
     reached(&root, &mut pending, &mut seen, budget).map_err(|stop| (module, stop))?;
+    // All direct dependencies of the root are queued before transitive ones.
+    let mut direct = pending.len();
+    let mut known_entry = false;
+    let mut unknown_entry = false;
     while let Some((target, id, is_disposer)) = pending.pop_front() {
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
         let missing = (module, Stop::Pending(header.declaration.node));
@@ -625,14 +632,35 @@ fn checked_graph<'g>(
         } else {
             Frame::ReachedCall
         };
-        let mir = lower(typed, target, selected, frame, budget).map_err(|stop| (target, stop))?;
+        let Lowered {
+            mir, empty_entry, ..
+        } = lower(typed, target, selected, frame, budget).map_err(|stop| (target, stop))?;
+        if direct != 0 {
+            direct -= 1;
+            known_entry |= empty_entry.is_some();
+            unknown_entry |= empty_entry.is_none();
+            if let Some(entry) = empty_entry {
+                *seen.get_mut(id).unwrap() = Some(entry);
+            }
+        }
         reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
         if is_disposer {
             budget.reserve(1).map_err(|()| (target, Stop::Limit))?;
             root.disposer_bodies.insert(id, mir);
         }
     }
+    if let Some(trace) = trace {
+        root.cancellation = trace
+            .finish(&root, &seen, known_entry, unknown_entry, budget)
+            .map_err(|stop| (module, stop))?;
+    }
     Ok(root)
+}
+
+struct Lowered<'a, 'g> {
+    mir: Mir<'g>,
+    trace: Option<flow::CancellationTrace<'a, 'g>>,
+    empty_entry: Option<Site<'g>>,
 }
 
 enum Frame {
@@ -641,13 +669,13 @@ enum Frame {
     ActiveDisposer,
 }
 
-fn lower<'g>(
-    typed: &TypedReport<'g>,
+fn lower<'a, 'g>(
+    typed: &'a TypedReport<'g>,
     module: &'g Module,
-    header: &DeclarationFacts<'g>,
+    header: &'a DeclarationFacts<'g>,
     frame: Frame,
     budget: &mut Budget,
-) -> ResultOf<Mir<'g>> {
+) -> ResultOf<Lowered<'a, 'g>> {
     let entry_site = header.declaration.node;
     let DeclarationShape::Function { parameters, result } = &header.shape else {
         return Err(Stop::Pending(entry_site));
@@ -771,9 +799,23 @@ fn lower<'g>(
         },
         1,
     )?;
+    // Only an empty application frame can contribute its entry and no other
+    // delivery point. Ordinary lowering already has its body and signature.
+    let empty_entry = (matches!(frame, Frame::ReachedCall)
+        && module.key.origin == crate::loader::Origin::Application
+        && parameters.is_empty()
+        && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
+        && module.syntax.nodes[body].kind == crate::parser::NodeKind::Block
+        && module.syntax.nodes[body].children.is_empty())
+    .then(|| site_at(module, body));
     // Reached ordinary bodies may run under an enclosing mask. We have not
     // proved those contexts. The root proof links only admitted callee entries.
-    flow::run(build, entry, &params, active, matches!(frame, Frame::Query))
+    let (mir, trace) = flow::run(build, entry, params, active, matches!(frame, Frame::Query))?;
+    Ok(Lowered {
+        mir,
+        trace,
+        empty_entry,
+    })
 }
 
 fn retained_two_hop_bool_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
@@ -1131,7 +1173,7 @@ struct Loop {
     continues: Pc,
 }
 
-struct Build<'a, 'g> {
+struct Build<'a, 'g, 'b> {
     typed: &'a TypedReport<'g>,
     module: &'g Module,
     body: NodeId,
@@ -1155,7 +1197,7 @@ struct Build<'a, 'g> {
     dispose: Option<&'g DeclarationId>,
     return_contract: (&'g DeclarationId, &'a Type<'g>),
     proved_variant_cleanup: Vec<Type<'g>>,
-    budget: &'a mut Budget,
+    budget: &'b mut Budget,
 }
 
 #[derive(Clone, Copy)]

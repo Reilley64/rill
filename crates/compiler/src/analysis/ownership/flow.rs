@@ -943,122 +943,249 @@ struct CalleeEntry<'g> {
     site: Site<'g>,
 }
 
-// Admit only a closed frame. An unmodeled call could have started work before
-// a later check. An empty void body bounds this call's cancellation proof to
-// its entry, before it owns any storage. This is an admission check for the
-// cancellation proof only; the ordinary call contract is unchanged.
-fn empty_callee_entry<'g>(
-    build: &mut Build<'_, 'g>,
-    index: usize,
-) -> ResultOf<Option<CalleeEntry<'g>>> {
-    let call = &build.calls[index];
-    if !call.args.is_empty() || call.callee.module.origin != crate::loader::Origin::Application {
-        return Ok(None);
+fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
+    match action {
+        Action::Displace { target, .. } => slots[target].cleanup == StorageCleanup::End,
+        Action::None
+        | Action::BudgetBackedge
+        | Action::Init(_)
+        | Action::Read { .. }
+        | Action::Move { .. }
+        | Action::Borrow { .. }
+        | Action::Reborrow { .. }
+        | Action::Dereference { .. }
+        | Action::Install { .. }
+        | Action::CopyThrough { .. }
+        | Action::InstallThrough { .. }
+        | Action::CheckRetained
+        | Action::End(_)
+        | Action::Cleanup(_)
+        | Action::EndScope(_)
+        | Action::Export(_)
+        | Action::Call(_) => true,
+        _ => false,
     }
-    build.budget.step(1)?;
-    let Some(header) = build
-        .typed
-        .inventory()
-        .type_facts()
-        .declarations
-        .get(call.callee)
-    else {
-        return Ok(None);
-    };
-    if !matches!(&header.shape, DeclarationShape::Function { parameters, result }
-        if parameters.is_empty() && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void"))
-    {
-        return Ok(None);
-    }
-    for module in build.typed.inventory().graph().modules() {
-        build.budget.step(1)?;
-        if module.key == call.callee.module {
-            let Some(&body) = module.syntax.nodes[header.declaration.node].children.get(1) else {
-                return Ok(None);
-            };
-            let syntax = &module.syntax.nodes[body];
-            return Ok((syntax.kind == crate::parser::NodeKind::Block
-                && syntax.children.is_empty())
-            .then(|| CalleeEntry {
-                callee: call.callee,
-                site: site_at(module, body),
-            }));
-        }
-    }
-    Ok(None)
 }
 
-// The ordinary CFG already encodes feasible branches and abandoned suffixes.
-fn cancellation_calls<'g>(
-    build: &mut Build<'_, 'g>,
-    entry: Pc,
-) -> ResultOf<Option<BTreeMap<Pc, CalleeEntry<'g>>>> {
-    if build.module.key.origin != crate::loader::Origin::Application
-        || build.retains_exclusive_bool
-        || build.retained.len() > 1
-        || matches!(
-            build.retained.values().next(),
-            Some(RetainedContents::TwoHop(_))
-        )
-    {
-        return Ok(None);
-    }
-    build.budget.step(build.slots.len())?;
-    if !build.slots.iter().all(|slot| {
-        slot.projection.is_none()
-            && !slot.needs_boundary_cleanup()
-            && matches!(slot.cleanup, StorageCleanup::End | StorageCleanup::Drop)
-    }) {
-        return Ok(None);
-    }
-    build.budget.reserve(2 * build.code.len())?;
-    let mut calls = BTreeMap::new();
-    let mut seen = vec![false; build.code.len()];
-    let mut pending = vec![entry];
-    seen[entry] = true;
-    while let Some(pc) = pending.pop() {
-        build.budget.step(1)?;
-        let instruction = build.code[pc];
-        if let Action::Call(index) = instruction.action {
-            let Some(callee) = empty_callee_entry(build, index)? else {
-                return Ok(None);
-            };
-            build.budget.reserve(1)?;
-            calls.insert(pc, callee);
-        } else if let Action::Displace { target, .. } = instruction.action {
-            // Ending a plain descriptor is not an observable disposal interval.
-            if build.slots[target].cleanup != StorageCleanup::End {
-                return Ok(None);
+type KnownStates = BTreeMap<Pc, BTreeMap<Vec<State>, usize>>;
+
+// Reuse the ordinary pre-instruction states and the checked graph's callee
+// identities. Taking ownership of these already-accounted collections does
+// not run a speculative walk or charge ordinary-only callers for admission.
+pub(super) struct CancellationTrace<'a, 'g> {
+    module: &'g Module,
+    body: NodeId,
+    slots: Vec<Local<'g>>,
+    locals: Vec<Slot>,
+    params: Vec<Slot>,
+    retained: BTreeMap<Slot, RetainedContents>,
+    facts: BTreeMap<NodeId, &'a NodeFacts<'g>>,
+    bindings: BTreeMap<&'g DeclarationId, Slot>,
+    code: Vec<Instruction<'g>>,
+    calls: Vec<Call<'g>>,
+    pending: Vec<(Pc, Vec<State>)>,
+    known: KnownStates,
+    flat: bool,
+    loop_delivery: bool,
+}
+
+impl<'g> CancellationTrace<'_, 'g> {
+    // Dynamic branches only admit a direct read of an immutable Bool
+    // parameter. Values of locals, arbitrary expressions and call results
+    // are not independent choices. The ordinary CFG's one-way edges already
+    // exclude branches ruled out by the typed outcomes.
+    fn branch_bit(&self, mut node: NodeId, budget: &mut Budget) -> ResultOf<Option<u64>> {
+        use crate::parser::NodeKind;
+
+        loop {
+            budget.step(1)?;
+            let syntax = &self.module.syntax.nodes[node];
+            if syntax.kind != NodeKind::Group {
+                if syntax.kind != NodeKind::ValueReference {
+                    return Ok(None);
+                }
+                break;
             }
-        } else if !matches!(
-            instruction.action,
-            Action::None
-                | Action::BudgetBackedge
-                | Action::Init(_)
-                | Action::Read { .. }
-                | Action::Move { .. }
-                | Action::Borrow { .. }
-                | Action::Reborrow { .. }
-                | Action::Dereference { .. }
-                | Action::Install { .. }
-                | Action::CopyThrough { .. }
-                | Action::InstallThrough { .. }
-                | Action::CheckRetained
-                | Action::End(_)
-                | Action::Cleanup(_)
-                | Action::EndScope(_)
-                | Action::Export(_)
-        ) {
+            node = syntax.children[0];
+        }
+        let Some(NodeFactKind::Expression(facts)) = self.facts.get(&node).map(|fact| &fact.kind)
+        else {
+            return Ok(None);
+        };
+        let Some(path) = &facts.path else {
+            return Ok(None);
+        };
+        if path.root.kind != DeclarationKind::Parameter
+            || !path.projections.is_empty()
+            || facts.binding != Some(path.root)
+            || facts.refinement.is_some()
+            || facts.access != crate::analysis::scalars::data::Access::Owned
+            || facts.place != crate::analysis::scalars::Place::ReadOnly
+            || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+        {
             return Ok(None);
         }
-        for next in instruction.edges.successors() {
-            if !seen[next] {
-                seen[next] = true;
-                pending.push(next);
+        let slot = self.bindings[path.root];
+        Ok((slot < u64::BITS as usize).then(|| 1 << slot))
+    }
+
+    pub(super) fn finish(
+        self,
+        mir: &Mir<'g>,
+        entries: &BTreeMap<&DeclarationId, Option<Site<'g>>>,
+        known_entry: bool,
+        unknown_entry: bool,
+        budget: &mut Budget,
+    ) -> ResultOf<Option<Cancellation<'g>>> {
+        let mut complete = self.flat && !unknown_entry;
+        let checkpoints = self.loop_delivery || known_entry;
+        if !complete && (!checkpoints || self.retained.is_empty()) {
+            return Ok(None);
+        }
+        budget.step(self.slots.len())?;
+        if !self.slots.iter().all(|slot| {
+            slot.projection.is_none()
+                && !slot.needs_boundary_cleanup()
+                && matches!(slot.cleanup, StorageCleanup::End | StorageCleanup::Drop)
+        }) {
+            return Ok(None);
+        }
+        let frame = CancellationFrame {
+            module: self.module,
+            slots: &self.slots,
+            locals: &self.locals,
+            params: &self.params,
+            retained: &self.retained,
+        };
+        if !checkpoints {
+            let initial = self.known[&self.pending[mir.entry].0]
+                .keys()
+                .next()
+                .unwrap();
+            return frame.entry(initial, self.body, budget);
+        }
+
+        // Index the inputs to the MIR blocks without copying ownership state.
+        budget.reserve(mir.blocks.len())?;
+        budget.step(self.known.len() + mir.blocks.len())?;
+        let mut inputs = vec![&[][..]; mir.blocks.len()];
+        for by_state in self.known.values() {
+            for (state, &block) in by_state {
+                inputs[block] = state;
             }
         }
+
+        // A path condition is the pair of true and false parameter masks.
+        // Check before pushing, including a repeated loop path. Every key
+        // and worklist item is charged, so state splitting cannot grow past
+        // the caller's work and entry limits.
+        let mut visited = BTreeSet::new();
+        let mut pending = Vec::new();
+        let enqueue = |path,
+                       visited: &mut BTreeSet<_>,
+                       pending: &mut Vec<_>,
+                       budget: &mut Budget|
+         -> ResultOf<()> {
+            budget.step(1)?;
+            if !visited.contains(&path) {
+                budget.reserve(2)?;
+                visited.insert(path);
+                pending.push(path);
+            }
+            Ok(())
+        };
+        enqueue((mir.entry, 0u64, 0u64), &mut visited, &mut pending, budget)?;
+        let mut deliveries = BTreeMap::new();
+        while let Some((block, yes_bits, no_bits)) = pending.pop() {
+            if !complete && self.retained.is_empty() {
+                return Ok(None);
+            }
+            budget.step(1)?;
+            let Instruction { node, action, .. } = self.code[self.pending[block].0];
+            if !flat_action(action, &self.slots) {
+                complete = false;
+                continue;
+            }
+            let callee = if let Action::Call(index) = action {
+                let callee = self.calls[index].callee;
+                let Some(&Some(site)) = entries.get(callee) else {
+                    complete = false;
+                    continue;
+                };
+                Some(CalleeEntry { callee, site })
+            } else {
+                None
+            };
+            if (callee.is_some() || matches!(action, Action::BudgetBackedge))
+                && !deliveries.contains_key(&block)
+            {
+                // Even after losing the receipt, a feasible independent path
+                // can expose a forbidden outward loan. Don't build cleanup
+                // or accumulate successors for a proof we cannot publish.
+                let admitted = frame.check(inputs[block], node, budget)?;
+                complete &= admitted;
+                if complete {
+                    budget.reserve(1)?;
+                    deliveries.insert(block, callee);
+                }
+            }
+            match mir.blocks[block].terminator {
+                Terminator::Goto(next) => {
+                    enqueue(
+                        (next, yes_bits, no_bits),
+                        &mut visited,
+                        &mut pending,
+                        budget,
+                    )?;
+                }
+                Terminator::Branch { yes, no } => {
+                    let Some(bit) = self.branch_bit(node, budget)? else {
+                        complete = false;
+                        continue;
+                    };
+                    if yes_bits & bit == 0 {
+                        enqueue(
+                            (no, yes_bits, no_bits | bit),
+                            &mut visited,
+                            &mut pending,
+                            budget,
+                        )?;
+                    }
+                    if no_bits & bit == 0 {
+                        enqueue(
+                            (yes, yes_bits | bit, no_bits),
+                            &mut visited,
+                            &mut pending,
+                            budget,
+                        )?;
+                    }
+                }
+                Terminator::Return => {}
+            }
+        }
+        if !complete {
+            return Ok(None);
+        }
+
+        let Some(mut proof) = frame.entry(inputs[mir.entry], self.body, budget)? else {
+            return Ok(None);
+        };
+        for (block, callee) in deliveries {
+            budget.step(1)?;
+            let on_delivery = frame.exit(inputs[block], mir.blocks[block].site.node, budget)?;
+            let successor = match callee {
+                Some(CalleeEntry { callee, site }) => CancellationSuccessor::CalleeEntry {
+                    callee,
+                    entry: site,
+                    on_delivery,
+                },
+                None => CancellationSuccessor::LoopBackedge { on_delivery },
+            };
+            budget.reserve(1)?;
+            proof.successors.insert(block, successor);
+        }
+        Ok(Some(proof))
     }
-    Ok(Some(calls))
 }
 
 struct CancellationFrame<'a, 'g> {
@@ -1070,14 +1197,28 @@ struct CancellationFrame<'a, 'g> {
 }
 
 impl<'g> CancellationFrame<'_, 'g> {
-    fn exit(
+    fn entry(
         &self,
         state: &[State],
-        node: NodeId,
+        body: NodeId,
         budget: &mut Budget,
-    ) -> ResultOf<Option<CancellationExit<'g>>> {
-        let outward = self.retained.iter().next();
-        let contents = outward.map(|(_, contents)| contents.slot());
+    ) -> ResultOf<Option<Cancellation<'g>>> {
+        if !self.check(state, body, budget)? {
+            return Ok(None);
+        }
+        Ok(Some(Cancellation {
+            entry_site: site_at(self.module, body),
+            on_entry_delivery: self.exit(state, body, budget)?,
+            successors: BTreeMap::new(),
+        }))
+    }
+
+    fn check(&self, state: &[State], node: NodeId, budget: &mut Budget) -> ResultOf<bool> {
+        let contents = self
+            .retained
+            .values()
+            .next()
+            .map(|contents| contents.slot());
         for (slot, held) in state.iter().enumerate() {
             budget.step(1)?;
             if matches!(held, State::Initialized(_))
@@ -1086,11 +1227,10 @@ impl<'g> CancellationFrame<'_, 'g> {
                 && self.params.binary_search(&slot).is_err()
             {
                 // Nested scopes and in-flight staging are not flat boundaries.
-                return Ok(None);
+                return Ok(false);
             }
         }
-        // Outward storage is live on delivery, regardless of the ordinary
-        // continuation. Check it before ending even the first local owner.
+        // Check outward storage before ending even the first local owner.
         match check_retained(
             self.retained,
             state,
@@ -1098,9 +1238,19 @@ impl<'g> CancellationFrame<'_, 'g> {
             false,
             budget,
         ) {
-            Err(Stop::Pending(_)) => return Ok(None),
-            checked => checked?,
+            Err(Stop::Pending(_)) => Ok(false),
+            checked => checked.map(|()| true),
         }
+    }
+
+    fn exit(
+        &self,
+        state: &[State],
+        node: NodeId,
+        budget: &mut Budget,
+    ) -> ResultOf<CancellationExit<'g>> {
+        let outward = self.retained.iter().next();
+        let contents = outward.map(|(_, contents)| contents.slot());
         let retained = outward.map(|(&parameter, contents)| RetainedAtDelivery {
             parameter: self.slots[parameter].place(self.module),
             last_store: match &state[contents.slot()] {
@@ -1146,29 +1296,37 @@ impl<'g> CancellationFrame<'_, 'g> {
         )?;
         budget.reserve(parameters.len())?;
         cleanup.extend(parameters);
-        Ok(Some(CancellationExit { retained, cleanup }))
+        Ok(CancellationExit { retained, cleanup })
     }
 }
 
-pub(super) fn run<'g>(
-    mut build: Build<'_, 'g>,
+pub(super) fn run<'a, 'g>(
+    build: Build<'a, 'g, '_>,
     entry: Pc,
-    params: &[Slot],
+    params: Vec<Slot>,
     active: Option<DisposerFrame>,
     check_cancellation: bool,
-) -> ResultOf<Mir<'g>> {
-    let cancellation_calls = if check_cancellation {
-        cancellation_calls(&mut build, entry)?
-    } else {
-        None
-    };
+) -> ResultOf<(Mir<'g>, Option<CancellationTrace<'a, 'g>>)> {
+    let candidate = check_cancellation
+        && build.module.key.origin == crate::loader::Origin::Application
+        && !build.retains_exclusive_bool
+        && build.retained.len() <= 1
+        && !matches!(
+            build.retained.values().next(),
+            Some(RetainedContents::TwoHop(_))
+        );
+    let mut flat = true;
+    let mut loop_delivery = false;
     let Build {
         module,
         body,
+        facts,
+        locals: bindings,
+        return_contract,
         slots,
         code,
         calls,
-        cleanups,
+        mut cleanups,
         body_scope,
         dispose,
         retained,
@@ -1180,11 +1338,11 @@ pub(super) fn run<'g>(
     let live = liveness(&slots, &code, &calls, &cleanups, &retained, budget)?;
     let empty = Held::default();
     let mut pending = Vec::new();
-    let mut known = BTreeMap::<Pc, BTreeMap<Vec<State>, usize>>::new();
+    let mut known = KnownStates::new();
     let mut blocks = Vec::new();
     let add = |pc,
                state: Vec<State>,
-               known: &mut BTreeMap<Pc, BTreeMap<Vec<State>, usize>>,
+               known: &mut KnownStates,
                pending: &mut Vec<(Pc, Vec<State>)>,
                budget: &mut Budget|
      -> ResultOf<usize> {
@@ -1207,7 +1365,7 @@ pub(super) fn run<'g>(
     // A worklist index is also the eventual MIR block index.
     budget.reserve(slots.len())?;
     let mut state = vec![State::Vacant; slots.len()];
-    for &slot in params {
+    for &slot in &params {
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
         state[region].fill(State::Initialized(empty.clone()));
@@ -1251,25 +1409,6 @@ pub(super) fn run<'g>(
         });
     }
     let remainder = active.map(|frame| frame.remainder);
-    let frame = CancellationFrame {
-        module,
-        slots: &slots,
-        locals: body_scope.map_or(&[], |index| cleanups[index].as_slice()),
-        params,
-        retained: &retained,
-    };
-    let mut cancellation = if cancellation_calls.is_some() {
-        frame
-            .exit(&state, body, budget)?
-            .map(|on_entry_delivery| Cancellation {
-                entry_site: site_at(module, body),
-                on_entry_delivery,
-                successors: BTreeMap::new(),
-            })
-    } else {
-        None
-    };
-    let mut cancellation_unknown = false;
     let entry = add(entry, state, &mut known, &mut pending, budget)?;
     let mut blocked = None;
     while blocks.len() < pending.len() {
@@ -1283,30 +1422,12 @@ pub(super) fn run<'g>(
         } = code[pc];
         let site = site_at(module, node);
         let local = |slot: Slot| slots[slot].place(module);
-        if let (Some(proof), Some(callees)) = (&mut cancellation, &cancellation_calls) {
-            let callee = if matches!(action, Action::Call(_)) {
-                callees.get(&pc)
-            } else {
-                None
-            };
-            if matches!(action, Action::BudgetBackedge) || callee.is_some() {
-                // Independent of the normal continuation: the loop condition
-                // has not run and a suspended call has produced no result.
-                if let Some(exit) = frame.exit(&state, node, budget)? {
-                    let successor = match callee {
-                        Some(CalleeEntry { callee, site }) => CancellationSuccessor::CalleeEntry {
-                            callee,
-                            entry: *site,
-                            on_delivery: exit,
-                        },
-                        None => CancellationSuccessor::LoopBackedge { on_delivery: exit },
-                    };
-                    budget.reserve(1)?;
-                    proof.successors.insert(blocks.len(), successor);
-                } else {
-                    cancellation_unknown = true;
-                }
-            }
+        // Constant-size admission tagging at an already charged ordinary
+        // state visit. No graph walk or allocation on behalf of cancellation.
+        if candidate {
+            flat &= flat_action(action, &slots)
+                && !matches!(action, Action::Call(index) if calls[index].callee == return_contract.0);
+            loop_delivery |= matches!(action, Action::BudgetBackedge);
         }
         let operation = (|| -> ResultOf<_> {
             Ok(match action {
@@ -2239,12 +2360,31 @@ pub(super) fn run<'g>(
     if let Some(node) = blocked {
         return Err(Stop::Pending(node));
     }
-    Ok(Mir {
-        entry,
-        blocks,
-        disposer_bodies: BTreeMap::new(),
-        cancellation: cancellation.filter(|_| !cancellation_unknown),
-    })
+    let trace = candidate.then(|| CancellationTrace {
+        module,
+        body,
+        slots,
+        locals: body_scope.map_or_else(Vec::new, |index| cleanups.swap_remove(index)),
+        params,
+        retained,
+        facts,
+        bindings,
+        code,
+        calls,
+        pending,
+        known,
+        flat,
+        loop_delivery,
+    });
+    Ok((
+        Mir {
+            entry,
+            blocks,
+            disposer_bodies: BTreeMap::new(),
+            cancellation: None,
+        },
+        trace,
+    ))
 }
 
 #[cfg(test)]

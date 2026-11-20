@@ -228,7 +228,7 @@ struct ProjectedTemporary {
     member: Slot,
 }
 
-impl<'a, 'g> Build<'a, 'g> {
+impl<'a, 'g> Build<'a, 'g, '_> {
     fn depth(&mut self, depth: usize) -> ResultOf<()> {
         self.budget.step(1)?;
         if depth > self.budget.limits.max_depth.min(64) {

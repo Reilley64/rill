@@ -37,6 +37,107 @@ function repairAfter(slot: &mut &bool, input: &bool, enter: bool): bool {
 }
 
 #[test]
+fn installed_correlated_repair_is_not_a_cancellation_escape() {
+    probe_with_typed(
+        "cancellation::installed_correlated_repair_is_not_a_cancellation_escape",
+        r#"
+function repairs(slot: &mut &bool, input: &bool, enter: bool): bool {
+    let flag = true;
+    *slot = &flag;
+    if (enter) { *slot = input; }
+    while (enter) { continue; }
+    *slot = input;
+    return flag;
+}
+
+function alias(slot: &mut &bool, input: &bool, enter: bool): bool {
+    let again = enter;
+    let flag = true;
+    *slot = &flag;
+    if (again) { *slot = input; }
+    while (enter) { continue; }
+    *slot = input;
+    return flag;
+}
+
+function constant(slot: &mut &bool, input: &bool): bool {
+    let never = false;
+    let flag = true;
+    *slot = &flag;
+    while (never) { continue; }
+    *slot = input;
+    return flag;
+}
+        "#,
+        |request, module, receipt, _| {
+            for name in ["repairs", "alias", "constant"] {
+                let report = query(receipt, module, name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::Checked,
+                    "{name}, test_mode={}: {:?}",
+                    request.test_mode,
+                    report
+                        .findings()
+                        .iter()
+                        .map(|finding| finding.code())
+                        .collect::<Vec<_>>()
+                );
+                let mir = report.mir().unwrap();
+                match name {
+                    "repairs" => {
+                        let proof = mir.cancellation().expect("direct immutable parameter");
+                        let [CancellationSuccessor::LoopBackedge { on_delivery }] =
+                            (0..mir.blocks.len())
+                                .filter_map(|index| proof.successor(index))
+                                .collect::<Vec<_>>()[..]
+                        else {
+                            panic!("only the repaired branch can reach the backedge");
+                        };
+                        assert_eq!(
+                            on_delivery
+                                .retained
+                                .as_ref()
+                                .unwrap()
+                                .last_store
+                                .unwrap()
+                                .span
+                                .bytes(),
+                            b"*slot = input;"
+                        );
+                        // The other identical store is after the loop, not its witness.
+                        let nodes = &module.syntax.nodes;
+                        let decl = declaration(module, name);
+                        let body = nodes[decl.node].children[1];
+                        let conditional = nodes[body].children[2];
+                        let repair = nodes[nodes[conditional].children[1]].children[0];
+                        assert_eq!(
+                            on_delivery
+                                .retained
+                                .as_ref()
+                                .unwrap()
+                                .last_store
+                                .unwrap()
+                                .node,
+                            repair
+                        );
+                    }
+                    "alias" => assert!(mir.cancellation().is_none()),
+                    "constant" => {
+                        if let Some(proof) = mir.cancellation() {
+                            assert!(
+                                (0..mir.blocks.len()).all(|index| proof.successor(index).is_none())
+                            );
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn installed_callee_entry_cancellation_rejects_unrepaired_store() {
     check_pair(
         "cancellation::installed_callee_entry_cancellation_rejects_unrepaired_store",
@@ -106,6 +207,36 @@ function outsideSubset(value: bool): void {
                     "{name}, test_mode={}: {report:?}",
                     request.test_mode
                 );
+                if !covered {
+                    // Exact ordinary stats from 0fbf765 for this unchanged capture.
+                    let exact = AnalysisLimits {
+                        max_work: 4022,
+                        max_entries: 197,
+                        ..AnalysisLimits::default()
+                    };
+                    let at_limit = lower_body(receipt, module, &declaration.id, exact).unwrap();
+                    assert_eq!(
+                        at_limit.completion(),
+                        Completion::Checked,
+                        "ordinary budget consumed by optional proof: {:?}",
+                        at_limit.statistics()
+                    );
+                    assert!(at_limit.mir().unwrap().cancellation().is_none());
+                    for limit in [
+                        AnalysisLimits {
+                            max_work: 4021,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_entries: 196,
+                            ..exact
+                        },
+                    ] {
+                        let short = lower_body(receipt, module, &declaration.id, limit).unwrap();
+                        assert_eq!(short.completion(), Completion::ResourceLimit);
+                        assert!(short.mir().is_none());
+                    }
+                }
                 let mir = report.mir().unwrap();
                 assert_eq!(mir.cancellation().is_some(), covered);
                 if let Some(proof) = mir.cancellation() {
@@ -121,17 +252,121 @@ function outsideSubset(value: bool): void {
     );
 }
 
+#[test]
+fn installed_unknown_paths_withhold_receipts_but_preserve_independent_witnesses() {
+    probe_with_typed(
+        "cancellation::installed_unknown_paths_withhold_receipts_but_preserve_independent_witnesses",
+        r#"
+function leaf(): void {}
+function nonempty(): void { leaf(); }
+
+function mixedState(enter: bool, moveIt: bool): void {
+    leaf();
+    if (enter) {
+        let nested = "owned";
+        if (moveIt) { let moved = nested; }
+        leaf();
+    }
+}
+
+function badCall(slot: &mut &bool, input: &bool): bool {
+    let flag = true;
+    *slot = &flag;
+    leaf();
+    *slot = input;
+    nonempty();
+    return flag;
+}
+
+function badLoop(slot: &mut &bool, input: &bool, takeLoop: bool, enter: bool): bool {
+    let flag = true;
+    *slot = &flag;
+    if (takeLoop) { while (enter) { continue; } }
+    else { nonempty(); }
+    *slot = input;
+    return flag;
+}
+
+function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+}
+
+function caller(enter: bool): void {
+    let flag = true;
+    let input = false;
+    let mut slot = &flag;
+    unsafeBody(&mut slot, &input, enter);
+}
+        "#,
+        |request, module, receipt, _| {
+            for name in ["mixedState", "caller"] {
+                let report = query(receipt, module, name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::Checked,
+                    "{name}, mode={}",
+                    request.test_mode
+                );
+                assert!(
+                    report.mir().unwrap().cancellation().is_none(),
+                    "partial proof for {name}"
+                );
+            }
+            for (name, checkpoint) in [
+                ("badCall", b"leaf()".as_slice()),
+                ("badLoop", b"while (enter) { continue; }".as_slice()),
+                ("unsafeBody", b"while (enter) { continue; }".as_slice()),
+            ] {
+                let report = query(receipt, module, name);
+                assert_eq!(
+                    report.completion(),
+                    Completion::SourceRejected,
+                    "{name}, mode={}",
+                    request.test_mode
+                );
+                assert!(report.mir().is_none());
+                let [finding] = report.findings() else {
+                    panic!("expected one cancellation escape for {name}");
+                };
+                assert_eq!(finding.code(), "R0202");
+                assert_eq!(
+                    finding.cancellation_delivery.unwrap().span.bytes(),
+                    checkpoint
+                );
+            }
+        },
+    );
+}
+
+fn declaration<'g>(module: &'g loader::Module, name: &str) -> &'g loader::Declaration {
+    module
+        .declarations
+        .iter()
+        .find(|decl| decl.scope.is_none() && decl.name.as_deref() == Some(name))
+        .unwrap()
+}
+
+fn query<'g>(
+    receipt: &TypedReceipt<'_, 'g>,
+    module: &'g loader::Module,
+    name: &str,
+) -> compiler::analysis::ownership::Report<'g> {
+    lower_body(
+        receipt,
+        module,
+        &declaration(module, name).id,
+        AnalysisLimits::default(),
+    )
+    .unwrap()
+}
+
 fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
     probe_with_typed(test, source, |request, module, receipt, typed| {
         let bodies = typed.bodies();
         let nodes = &module.syntax.nodes;
-        let declaration = |name| {
-            module
-                .declarations
-                .iter()
-                .find(|d| d.scope.is_none() && d.name.as_deref() == Some(name))
-                .unwrap()
-        };
         let fact = |node| bodies.node(module, node).unwrap().unwrap();
         let expr = |node| {
             let NodeFactKind::Expression(facts) = &fact(node).kind else {
@@ -143,7 +378,14 @@ fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
             facts
         };
         for name in ["repairBefore", "repairAfter"] {
-            let decl = declaration(name);
+            let decl = declaration(module, name);
+            let signature = nodes[decl.node].children[0];
+            let parameter_list = nodes[signature]
+                .children
+                .iter()
+                .find(|&&node| nodes[node].kind == NodeKind::ValueParameters)
+                .unwrap();
+            let parameters = &nodes[*parameter_list].children;
             let body = bodies
                 .body(module, BodyOwner::Declaration(&decl.id))
                 .unwrap()
@@ -168,7 +410,21 @@ fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
                     let [condition, loop_body] = nodes[site].children[..] else {
                         panic!("expected loop condition and body");
                     };
-                    let outcomes = expr(condition).boolean.unwrap();
+                    // A concrete bad input is enter=true: the direct immutable
+                    // parameter read enters the loop, and the continue is unconditional.
+                    // The normal zero-iteration path instead uses enter=false.
+                    let condition_facts = expr(condition);
+                    assert_eq!(
+                        condition_facts.place,
+                        compiler::analysis::scalars::Place::ReadOnly
+                    );
+                    let path = condition_facts.path.as_ref().unwrap();
+                    let enter = *parameters.last().unwrap();
+                    assert_eq!(nodes[enter].span.bytes(), b"enter: bool");
+                    assert_eq!(path.root.start, nodes[enter].span.start());
+                    assert!(path.projections.is_empty());
+                    assert_eq!(condition_facts.binding, Some(path.root));
+                    let outcomes = condition_facts.boolean.unwrap();
                     assert!(outcomes.can_be_true() && outcomes.can_be_false());
                     let [backedge] = nodes[loop_body].children[..] else {
                         panic!("expected one continue");
@@ -184,7 +440,7 @@ fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
                         panic!("expected one call");
                     };
                     assert_eq!(nodes[call].span.bytes(), b"observe()");
-                    let callee = declaration("observe");
+                    let callee = declaration(module, "observe");
                     assert_eq!(expr(call).call.as_ref().unwrap().callee, &callee.id);
                     let entry = bodies
                         .body(module, BodyOwner::Declaration(&callee.id))
@@ -207,15 +463,34 @@ fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
                 assert!(report.blocked_at().is_none() && report.findings().is_empty());
                 let mir = report.mir().unwrap();
                 let proof = mir.cancellation().expect("known flat cancellation proof");
+                let used = report.statistics();
+                let exact = AnalysisLimits {
+                    max_work: used.work,
+                    max_entries: used.entries,
+                    max_depth: used.max_depth,
+                };
+                let at_limit = lower_body(receipt, module, &decl.id, exact).unwrap();
+                assert!(at_limit.mir().unwrap().cancellation().is_some());
+                for limit in [
+                    AnalysisLimits {
+                        max_work: used.work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: used.entries - 1,
+                        ..exact
+                    },
+                ] {
+                    let short = lower_body(receipt, module, &decl.id, limit).unwrap();
+                    assert_eq!(short.completion(), Completion::ResourceLimit);
+                    assert!(short.mir().is_none());
+                }
                 assert_eq!(proof.entry_site.node, body.site.node);
                 let entry_exit = &proof.on_entry_delivery;
-                assert!(entry_exit.retained.as_ref().unwrap().last_store.is_none());
-                assert!(
-                    entry_exit
-                        .cleanup
-                        .iter()
-                        .all(|action| matches!(action, MirCleanup::EndStorage(_)))
-                );
+                let retained = entry_exit.retained.as_ref().unwrap();
+                assert!(retained.last_store.is_none());
+                assert_place(retained.parameter, parameters[0], module);
+                assert_parameter_ends(&entry_exit.cleanup, parameters, module);
                 let [(block, edge)] = mir
                     .blocks
                     .iter()
@@ -233,10 +508,21 @@ fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
                         assert_eq!(block.site.node, site);
                         assert_eq!(mir.blocks[next].site.node, nodes[site].children[0]);
                         let next_test = straight_blocks(mir, next);
-                        let Terminator::Branch { no, .. } = next_test.last().unwrap().terminator
-                        else {
-                            panic!("ordinary backedge did not re-test the loop condition");
+                        let retest = next_test.last().unwrap();
+                        assert_eq!(retest.site.node, nodes[site].children[0]);
+                        assert!(matches!(retest.terminator, Terminator::Branch { .. }));
+
+                        let initial_path = straight_blocks(mir, mir.entry);
+                        let first_test = initial_path.last().unwrap();
+                        assert_eq!(first_test.site.node, retest.site.node);
+                        let Terminator::Branch { yes, no } = first_test.terminator else {
+                            panic!("the initial test must permit zero iterations");
                         };
+                        assert!(
+                            straight_blocks(mir, yes)
+                                .iter()
+                                .any(|item| std::ptr::eq(*item, block))
+                        );
                         (on_delivery, no)
                     }
                     (
@@ -268,7 +554,7 @@ fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
                     }
                     _ => panic!("wrong delivery origin"),
                 };
-                assert_repaired_exit(exit, repair, module);
+                assert_repaired_exit(exit, repair, parameters, module);
                 assert!(straight_blocks(mir, mir.entry).iter().any(|block| {
                     block.site.node == repair
                         && matches!(block.operation, Operation::InstallThrough { .. })
@@ -310,10 +596,14 @@ fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
     });
 }
 
-fn assert_repaired_exit(exit: &CancellationExit<'_>, repair: NodeId, module: &loader::Module) {
+fn assert_repaired_exit(
+    exit: &CancellationExit<'_>,
+    repair: NodeId,
+    params: &[NodeId],
+    module: &loader::Module,
+) {
     let retained = exit.retained.as_ref().unwrap();
-    assert_eq!(retained.parameter.root.span.bytes(), b"slot: &mut &bool");
-    assert!(retained.parameter.projection.is_none());
+    assert_place(retained.parameter, params[0], module);
     let written = retained.last_store.unwrap();
     assert_eq!(written.module, &module.key);
     assert_eq!(written.node, repair);
@@ -331,5 +621,28 @@ fn assert_repaired_exit(exit: &CancellationExit<'_>, repair: NodeId, module: &lo
     assert_eq!(flag.root.span.bytes(), b"flag");
     assert_eq!(text.root.span.bytes(), b"text");
     assert!(holder.root.span.start() < flag.root.span.start());
-    assert!(parameters.iter().all(|action| matches!(action, MirCleanup::EndStorage(place) if place.root.span.end() < text.root.span.start())));
+    assert_parameter_ends(parameters, params, module);
+}
+
+fn assert_parameter_ends(cleanup: &[MirCleanup<'_>], params: &[NodeId], module: &loader::Module) {
+    // Each frame parameter ends once. The outward contents are not a
+    // parameter-owned cleanup operand, even when they were overwritten.
+    assert_eq!(cleanup.len(), params.len());
+    for (action, &param) in cleanup.iter().zip(params.iter().rev()) {
+        let MirCleanup::EndStorage(place) = action else {
+            panic!("expected parameter descriptor storage, got {action:?}");
+        };
+        assert_place(*place, param, module);
+    }
+}
+
+fn assert_place(
+    place: compiler::analysis::ownership::Place<'_>,
+    node: NodeId,
+    module: &loader::Module,
+) {
+    assert_eq!(place.root.module, &module.key);
+    assert_eq!(place.root.node, node);
+    assert_eq!(place.root.span, &module.syntax.nodes[node].span);
+    assert!(place.projection.is_none());
 }
