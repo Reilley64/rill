@@ -2078,6 +2078,25 @@ impl<'a, 'g> Build<'a, 'g> {
         Ok(())
     }
 
+    fn shared_record_fields(
+        &mut self,
+        site: NodeId,
+        referent: &Type<'g>,
+    ) -> ResultOf<&'a [MemberType<'g>]> {
+        let fields = self
+            .record_fields(referent.as_ref())?
+            .ok_or(Stop::Pending(site))?;
+        self.budget.step(fields.len())?;
+        if !fields
+            .iter()
+            .all(|field| shared_pattern_member_type(field.ty.as_ref()))
+            || self.outer_disposer(site, referent)?.is_some()
+        {
+            return Err(Stop::Pending(site));
+        }
+        Ok(fields)
+    }
+
     fn bind_product(
         &mut self,
         node: NodeId,
@@ -2092,18 +2111,7 @@ impl<'a, 'g> Build<'a, 'g> {
             && matches!(referent.as_ref(), TypeTerm::Nominal { .. })
         {
             let pattern = self.module.syntax.nodes[node].children[0];
-            let fields = self
-                .record_fields(referent.as_ref())?
-                .ok_or(Stop::Pending(pattern))?;
-            self.budget.step(fields.len())?;
-            if !fields
-                .iter()
-                .all(|field| shared_pattern_member_type(field.ty.as_ref()))
-                || self.outer_disposer(pattern, referent)?.is_some()
-            {
-                return Err(Stop::Pending(pattern));
-            }
-            Some(fields)
+            Some(self.shared_record_fields(pattern, referent)?)
         } else {
             None
         };
@@ -3259,6 +3267,56 @@ impl<'a, 'g> Build<'a, 'g> {
         self.expression_with_proof(node, into, next, depth, None)
     }
 
+    fn copy_incoming_shared_field(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        into: Option<Slot>,
+    ) -> ResultOf<Action<'g>> {
+        let Some(DataExpression::Projection(field)) = &facts.data else {
+            return Err(Stop::Pending(node));
+        };
+        let into = into.ok_or(Stop::Pending(node))?;
+        self.budget.step(1)?;
+        if self.module.syntax.nodes[field.base].kind != NodeKind::ValueReference {
+            return Err(Stop::Pending(node));
+        }
+        let base = self.value(field.base)?;
+        let TypeTerm::Reference {
+            mutable: false,
+            referent,
+        } = base.ty.as_ref()
+        else {
+            return Err(Stop::Pending(node));
+        };
+        let path = base.path.as_ref().ok_or(Stop::Pending(node))?;
+        if path.root.kind != DeclarationKind::Parameter
+            || !path.projections.is_empty()
+            || !facts.path.as_ref().is_some_and(|projected| {
+                projected.root == path.root
+                    && matches!(projected.projections.as_slice(),
+                        [PathProjection::Dereference, PathProjection::Field(id)] if **id == field.field.id)
+            })
+        {
+            return Err(Stop::Pending(node));
+        }
+        let fields = self.shared_record_fields(node, referent)?;
+        self.budget.step(fields.len() + 1)?;
+        let member = fields
+            .iter()
+            .find(|member| member.declaration.id == field.field.id && member.ty == facts.ty)
+            .ok_or(Stop::Pending(node))?;
+        let descriptor = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
+        // This reads a descriptor stored in caller-owned storage. It does not
+        // borrow that slot or prove which caller sources back the copied value.
+        Ok(Action::BindBorrowedMember {
+            descriptor,
+            projection: Projection::Field(member.declaration),
+            into,
+            binding: BorrowedMemberBinding::CopyReference,
+        })
+    }
+
     fn expression_with_proof(
         &mut self,
         node: NodeId,
@@ -3315,13 +3373,18 @@ impl<'a, 'g> Build<'a, 'g> {
             let finish = self.cleanup(node, &[temp.scratch], next)?;
             return self.stage_value(node, into, finish, Some(temp), depth + 1);
         }
-        if projection(facts).is_some() {
+        if let Some((_, projection)) = projection(facts) {
             let action = if let Some(ExpressionProof::UnloweredRebuildRead(slot)) = proof {
                 Action::UnloweredRebuildRead(slot)
             } else if facts.access != Access::Owned && owns_text(&facts.ty) {
                 let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
                 let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
                 Action::ForbiddenBorrowedMove(root)
+            } else if matches!(projection, Projection::Field(_))
+                && facts.access == Access::ReadOnly
+                && shared_primitive_reference(&facts.ty)
+            {
+                self.copy_incoming_shared_field(node, facts, into)?
             } else {
                 let leaf = if matches!(proof, Some(ExpressionProof::NamedNestedTupleLeaf)) {
                     self.named_nested_tuple_leaf(node, facts)?

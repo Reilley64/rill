@@ -8,6 +8,129 @@ fn require_mir<'a, 'g>(report: &'a Report<'g>, name: &str) -> &'a Mir<'g> {
 }
 
 #[test]
+fn incoming_shared_record_copies_carried_field() {
+    use compiler::analysis::ownership::{BorrowedMemberBinding::CopyReference, Projection};
+
+    let mut blockers = Vec::new();
+    probe_with_typed(
+        "field_routes::incoming_shared_record_copies_carried_field",
+        r#"
+            type Other = { value: &bool; }
+            type Holder = { value: &bool; }
+            function project(x: &Holder): &bool { return x.value; }
+            function slot(x: &Holder): &&bool { return &x.value; }
+            function localSlot(x: &Holder): &&bool {
+                let view = x.value;
+                return &view;
+            }
+            function liveSlot(x: &Holder, seed: &bool): &bool {
+                let mut view = x.value;
+                let slot = &view;
+                view = seed;
+                let stillLive = slot;
+                return view;
+            }
+            function callerEscape(): &bool {
+                let local = true;
+                let x = Holder { value: &local };
+                return project(&x);
+            }
+        "#,
+        |request, module, receipt, typed| {
+            let lower = |name| {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+            };
+            let report = lower("project");
+            if report.completion() != Completion::Checked {
+                blockers.push((
+                    request.test_mode,
+                    report.completion(),
+                    report
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string()),
+                ));
+            } else {
+                let mir = require_mir(&report, "project");
+                assert!(report.findings().is_empty());
+                let record = typed
+                    .inventory()
+                    .type_facts()
+                    .declarations()
+                    .find(|facts| {
+                        facts.declaration.id.module == module.key
+                            && facts.declaration.name.as_deref() == Some("Holder")
+                    })
+                    .unwrap();
+                let compiler::analysis::DeclarationShape::Record { fields } = &record.shape else {
+                    panic!("expected canonical Holder fields");
+                };
+                let ops = linear(mir, mir.entry);
+                let [
+                    Operation::BindBorrowedMember {
+                        descriptor,
+                        projection: Projection::Field(field),
+                        into,
+                        binding: CopyReference,
+                    },
+                ] = ops
+                    .iter()
+                    .copied()
+                    .filter(|op| matches!(op, Operation::BindBorrowedMember { .. }))
+                    .collect::<Vec<_>>()
+                    .as_slice()
+                else {
+                    panic!("expected a single copy through the incoming descriptor: {ops:?}");
+                };
+                assert_eq!(descriptor.root.span.bytes(), b"x: &Holder");
+                assert!(descriptor.projection.is_none());
+                assert_eq!(field.name.as_deref(), Some("value"));
+                assert_eq!(field.id, fields[0].declaration.id);
+                assert!(ops.iter().any(|op| matches!(op, Operation::Export(place) if place.root.node == into.root.node && place.projection.is_none())));
+                assert!(
+                    !ops.iter().any(|op| matches!(
+                        op,
+                        Operation::Borrow { .. } | Operation::Reborrow { .. }
+                    ))
+                );
+                assert!(path_drops(mir, mir.entry).is_empty());
+            }
+            if report.completion() == Completion::Checked {
+                let local_slot = lower("localSlot");
+                assert_eq!(local_slot.completion(), Completion::SourceRejected);
+                assert!(local_slot.mir().is_none());
+                let [finding] = local_slot.findings() else {
+                    panic!("expected an escaping local-slot borrow");
+                };
+                assert_eq!(finding.code(), "R0202");
+                assert_eq!(finding.site.span.bytes(), b"return &view;");
+                assert_eq!(finding.related.span.bytes(), b"view");
+
+                let live_slot = lower("liveSlot");
+                assert_eq!(live_slot.completion(), Completion::SourceRejected);
+                assert!(live_slot.mir().is_none());
+                let [finding] = live_slot.findings() else {
+                    panic!("expected a conflict with the live slot borrow");
+                };
+                assert_eq!(finding.code(), "R0203");
+                assert_eq!(finding.related.span.bytes(), b"&view");
+            }
+            for (name, blocked) in [("slot", b"x.value".as_slice()), ("callerEscape", b"&x")] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(report.blocked_at().unwrap().span.bytes(), blocked, "{name}");
+                assert!(report.mir().is_none(), "{name}");
+            }
+        },
+    );
+    assert!(blockers.is_empty(), "{blockers:?}");
+}
+
+#[test]
 fn carried_field_and_slot_borrow_differ() {
     probe(
         "field_routes::carried_field_and_slot_borrow_differ",

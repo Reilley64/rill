@@ -161,7 +161,7 @@ pub enum Operation<'g> {
         exclusive: bool,
     },
     Dereference(Place<'g>),
-    /// Bind a fixed projection relative to a staged borrow's referent.
+    /// Bind a fixed projection relative to a borrow's referent.
     /// No mode moves a member out of the aggregate.
     BindBorrowedMember {
         descriptor: Place<'g>,
