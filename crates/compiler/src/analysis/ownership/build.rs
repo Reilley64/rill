@@ -4767,7 +4767,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let path = invocation.path.as_ref().ok_or(Stop::Pending(node))?;
         if syntax.kind != NodeKind::Call
             || syntax.children.as_slice() != [invocation.receiver]
-            || invocation.mode != InvocationMode::Once
+            || !matches!(
+                invocation.mode,
+                InvocationMode::Once | InvocationMode::ReadOnly
+            )
             || invocation.access != Access::Owned
             || invocation.assumption.is_some()
             || path.root.kind != DeclarationKind::Binding
@@ -4776,18 +4779,58 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(Stop::Pending(node));
         }
         let receiver = self.ungroup(invocation.receiver)?;
-        if self.module.syntax.nodes[receiver].kind != NodeKind::ValueReference
-            || !matches!(self.value(receiver)?.ty.as_ref(), TypeTerm::Callable {
-                mode: InvocationMode::Once, parameters, result
-            } if parameters.is_empty() && matches!(result.as_ref(), TypeTerm::Tuple(elements) if elements.len() == 2))
+        if self.module.syntax.nodes[receiver].kind != NodeKind::ValueReference {
+            return Err(Stop::Pending(node));
+        }
+        let TypeTerm::Callable {
+            mode,
+            parameters,
+            result,
+        } = self.value(receiver)?.ty.as_ref()
+        else {
+            return Err(Stop::Pending(node));
+        };
+        let TypeTerm::Tuple(elements) = result.as_ref() else {
+            return Err(Stop::Pending(node));
+        };
+        if *mode != invocation.mode
+            || !parameters.is_empty()
+            || elements.len() != 2
             || self.slots[into].members != 2
         {
             return Err(Stop::Pending(node));
         }
+        let read_only_origin = if *mode == InvocationMode::ReadOnly {
+            // The callable interface alone proves neither the environment nor
+            // the dependencies of a result. Pair formation checks the original
+            // captures against the two written expressions, in lexical order.
+            self.budget.step(3)?;
+            let arrow = self
+                .fact(&invocation.receiver)
+                .and_then(|fact| fact.callable.as_ref()?.arrow.as_deref())
+                .ok_or(Stop::Pending(node))?;
+            if !elements.iter().all(|ty| {
+                matches!(ty.as_ref(), TypeTerm::Primitive(_)) && !owns_text(ty)
+                    || shared_primitive_reference(ty)
+            }) || arrow.site.module != &self.module.key
+                || arrow.mode != Some(InvocationMode::ReadOnly)
+                || arrow.result != *result
+                || self.slots[into].moves
+            {
+                return Err(Stop::Pending(node));
+            }
+            Some(arrow.site.node)
+        } else {
+            None
+        };
         let receiver = self.resolve_place(receiver, path)?;
         self.emit(
             node,
-            Action::InvokeClosurePair { receiver, into },
+            Action::InvokeClosurePair {
+                receiver,
+                into,
+                read_only_origin,
+            },
             Edges::Next(next),
         )
     }

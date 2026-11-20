@@ -316,6 +316,15 @@ pub enum Operation<'g> {
         origin: Site<'g>,
         into: Place<'g>,
     },
+    /// Copy both values from a known pair environment into a fresh result,
+    /// in the order established by FormClosurePair. Descriptors retain their
+    /// carried sources without borrowing the receiver's storage. The
+    /// environment remains initialized.
+    InvokeReadOnlyClosurePair {
+        receiver: Place<'g>,
+        origin: Site<'g>,
+        into: Place<'g>,
+    },
     /// A direct call may retain an input's backing in the destination's
     /// contents, including the exclusive restriction on a shared view.
     CallRetaining {
@@ -1421,6 +1430,9 @@ enum Action<'g> {
     InvokeClosurePair {
         receiver: Slot,
         into: Slot,
+        // None denotes the existing consuming invocation. A read-only
+        // invocation must reach the environment identified by its typed origin.
+        read_only_origin: Option<NodeId>,
     },
     TestVariant {
         operand: Slot,

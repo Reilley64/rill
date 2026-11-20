@@ -151,7 +151,7 @@ fn liveness(
                 ..
             } => ([Some(capture), second], Some(into)),
             Action::Call(index) => use_one(None, calls[index].into),
-            Action::InvokeClosurePair { receiver, into } => use_one(Some(receiver), Some(into)),
+            Action::InvokeClosurePair { receiver, into, .. } => use_one(Some(receiver), Some(into)),
             // External contents are already live at every instruction.
             Action::CopyThrough {
                 descriptor, into, ..
@@ -2401,34 +2401,54 @@ pub(super) fn run<'a, 'g>(
                         }
                     }
                 }
-                Action::InvokeClosurePair { receiver, into } => {
+                Action::InvokeClosurePair {
+                    receiver,
+                    into,
+                    read_only_origin,
+                } => {
                     let held = initialized(&state[receiver], node)?;
                     let origin = held.pair_origin.ok_or(Stop::Pending(node))?;
+                    let (kind, access) = if let Some(expected) = read_only_origin {
+                        if origin != expected || held.capture_drops != [None, None] {
+                            return Err(Stop::Pending(node));
+                        }
+                        (Conflict::Access, Access::Observe)
+                    } else {
+                        (Conflict::Release, Access::Exclusive)
+                    };
                     let loans = held.loans.clone();
                     conflict(
                         &slots,
                         &state,
                         &live[pc],
                         receiver,
-                        (node, Conflict::Release),
-                        Access::Exclusive,
+                        (node, kind),
+                        access,
                         budget,
                     )?;
                     let storage = slots[into].storage(into);
                     budget.step(storage.len())?;
                     state[storage].fill(State::Initialized(empty.clone()));
-                    // As with a direct tuple call result, a reference member
-                    // consults the conservative carried sources at the root.
+                    // Reference members consult the conservative carried sources
+                    // at the tuple root. They are not borrows of the receiver slot.
                     state[into] = State::Initialized(Held {
                         loans,
                         ..Held::default()
                     });
-                    state[receiver] = State::Moved(node);
-                    retire_loans(&slots, &mut state, &[receiver], budget)?;
-                    Operation::InvokeClosurePair {
-                        receiver: local(receiver),
-                        origin: site_at(module, origin),
-                        into: local(into),
+                    if read_only_origin.is_some() {
+                        Operation::InvokeReadOnlyClosurePair {
+                            receiver: local(receiver),
+                            origin: site_at(module, origin),
+                            into: local(into),
+                        }
+                    } else {
+                        state[receiver] = State::Moved(node);
+                        retire_loans(&slots, &mut state, &[receiver], budget)?;
+                        Operation::InvokeClosurePair {
+                            receiver: local(receiver),
+                            origin: site_at(module, origin),
+                            into: local(into),
+                        }
                     }
                 }
                 Action::Dispose(slot) => {

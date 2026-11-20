@@ -1,4 +1,8 @@
 use super::*;
+use compiler::analysis::{
+    ownership::Place,
+    scalars::{data::Access, generics::callables::CaptureForm},
+};
 
 #[test]
 fn stored_pair_captures_transfer_backing_and_cleanup() {
@@ -481,10 +485,6 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 let _ = view;
                 return job();
             }
-            function repeatable(flag: bool, other: bool): [bool, bool] {
-                let job: () => [bool, bool] = () => [flag, other];
-                return job();
-            }
         "#,
         |request, module, receipt, typed| {
             use compiler::analysis::InvocationMode;
@@ -753,11 +753,6 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 if receiver.root.span.bytes() == b"job")
             ));
             assert!(path_drops(mir, mir.entry).is_empty());
-            let repeatable = lower("repeatable");
-            assert_eq!(repeatable.completion(), Completion::Incomplete);
-            assert!(repeatable.mir().is_none());
-            assert_eq!(repeatable.blocked_at().unwrap().span.bytes(), b"job()");
-
             let type_limits = AnalysisLimits {
                 max_work: typed.statistics().work,
                 max_entries: typed.statistics().entries,
@@ -783,6 +778,439 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 );
                 assert!(report.receipt().is_none());
             }
+        },
+    );
+}
+
+fn read_only_pair_results<'g>(
+    module: &'g loader::Module,
+    typed: &TypedReport<'g>,
+    mir: &Mir<'g>,
+    entry: usize,
+    written: [&str; 2],
+    forms: [CaptureForm; 2],
+) -> [Place<'g>; 2] {
+    use compiler::analysis::InvocationMode;
+
+    let path = straight_blocks(mir, entry);
+    assert!(matches!(
+        path.last().unwrap().terminator,
+        Terminator::Return
+    ));
+    let route: Vec<_> = path
+        .iter()
+        .copied()
+        .filter(|block| {
+            matches!(
+                block.operation,
+                Operation::FormClosurePair { .. }
+                    | Operation::InvokeReadOnlyClosurePair { .. }
+                    | Operation::InvokeClosurePair { .. }
+            )
+        })
+        .collect();
+    let [formation, first, second] = route.as_slice() else {
+        panic!("expected one environment and two invocations")
+    };
+    let Operation::FormClosurePair {
+        closure,
+        captures,
+        mode: InvocationMode::ReadOnly,
+    } = &formation.operation
+    else {
+        panic!("expected formation of a read-only pair")
+    };
+    let fact = |node| typed.bodies().node(module, node).unwrap().unwrap();
+    let declaration_at = |start, name| {
+        module
+            .declarations
+            .iter()
+            .find(|d| d.id.start == start && d.name.as_deref() == Some(name))
+            .unwrap()
+    };
+    let binding = declaration_at(closure.span.start(), "job");
+    let results = [first, second].map(|block| {
+        let Operation::InvokeReadOnlyClosurePair {
+            receiver,
+            origin,
+            into,
+        } = block.operation
+        else {
+            panic!("expected a nonconsuming invocation")
+        };
+        assert_eq!(receiver.root.node, closure.node);
+        assert_eq!(origin.node, formation.site.node);
+        assert_eq!(origin.module, &module.key);
+        assert_eq!(block.site.span.bytes(), b"job()");
+        let invocation = fact(block.site.node)
+            .callable
+            .as_ref()
+            .unwrap()
+            .invocation
+            .as_ref()
+            .unwrap();
+        assert_eq!(invocation.mode, InvocationMode::ReadOnly);
+        assert_eq!(invocation.access, Access::Owned);
+        assert!(invocation.assumption.is_none());
+        let receiver_path = invocation.path.as_ref().unwrap();
+        assert_eq!(receiver_path.root, &binding.id);
+        assert!(receiver_path.projections.is_empty());
+        let arrow = fact(invocation.receiver)
+            .callable
+            .as_ref()
+            .unwrap()
+            .arrow
+            .as_ref()
+            .unwrap();
+        assert_eq!(arrow.site.node, origin.node);
+        assert_eq!(arrow.site.module, origin.module);
+        assert_eq!(
+            arrow.site.span.bytes(),
+            format!("() => [{}, {}]", written[0], written[1]).as_bytes()
+        );
+        assert_eq!(arrow.captures.len(), 2);
+        for ((name, form), capture) in written.into_iter().zip(forms).zip(captures) {
+            assert_eq!(capture.span.bytes(), name.as_bytes());
+            let fact = arrow
+                .captures
+                .iter()
+                .find(|fact| fact.site.node == capture.node)
+                .unwrap();
+            assert_eq!(fact.form, form);
+            assert!(fact.reachable);
+            assert!(fact.path.projections.is_empty());
+            let source = path
+                .iter()
+                .find_map(|step| match step.operation {
+                    Operation::Copy {
+                        from,
+                        into: Some(stage),
+                    } if stage.root.node == capture.node => Some(from.root.span.start()),
+                    _ => None,
+                })
+                .expect("each written tuple position has its own capture stage");
+            assert_eq!(fact.path.root, &declaration_at(source, name).id);
+        }
+        into
+    });
+    assert_ne!(results[0].root.node, results[1].root.node);
+    assert!(path.iter().all(|step| !matches!(step.operation,
+        Operation::Move { from, .. } if from.root.node == closure.node
+    )));
+    assert!(path_drops(mir, entry).is_empty());
+    let ends = path.iter().flat_map(|step| match &step.operation {
+        Operation::Cleanup(actions) => actions.as_slice(),
+        _ => &[],
+    }).filter(|action| matches!(action, Obligation::EndStorage(place) if place.root.node == closure.node));
+    assert_eq!(ends.count(), 1);
+    results
+}
+
+#[test]
+fn invokes_a_known_read_only_scalar_pair_twice() {
+    probe_with_typed(
+        "captures::invokes_a_known_read_only_scalar_pair_twice",
+        r#"
+            function twice(left: bool, right: bool): [bool, bool] {
+                let job: () => [bool, bool] = () => [left, right];
+                let first = job();
+                return job();
+            }
+            function onceTwin(left: bool, right: bool): [bool, bool] {
+                let job: once () => [bool, bool] = () => [left, right];
+                let first = job();
+                return job();
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let lower = |name| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, AnalysisLimits::default()).unwrap()
+            };
+            let report = lower("twice");
+            let mir = report.mir().unwrap_or_else(|| {
+                panic!(
+                    "twice: {:?} at {:?}",
+                    report.completion(),
+                    report
+                        .blocked_at()
+                        .map(|s| s.span.bytes().escape_ascii().to_string())
+                )
+            });
+            let [first, second] = read_only_pair_results(
+                module,
+                typed,
+                mir,
+                mir.entry,
+                ["left", "right"],
+                [CaptureForm::Value; 2],
+            );
+            let ops = linear(mir, mir.entry);
+            assert_eq!(first.root.span.bytes(), b"first");
+            assert!(ops.iter().any(
+                |op| matches!(op, Operation::Export(result) if result.root.node == second.root.node)
+            ));
+
+            let once = lower("onceTwin");
+            assert_eq!(once.completion(), Completion::SourceRejected);
+            assert!(once.mir().is_none());
+            let [finding] = once.findings() else {
+                panic!("expected exactly one moved receiver finding")
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(finding.site.span.bytes(), b"job()");
+            assert_eq!(finding.related.span.bytes(), b"job()");
+            assert!(finding.related.span.start() < finding.site.span.start());
+        },
+    );
+}
+
+#[test]
+fn repeated_descriptor_pairs_keep_backing_through_last_use() {
+    probe_with_typed(
+        "captures::repeated_descriptor_pairs_keep_backing_through_last_use",
+        r#"
+            function views(left: &bool, right: &bool): [&bool, &bool] {
+                let job: () => [&bool, &bool] = () => [left, right];
+                let first = job();
+                return job();
+            }
+            function overlap(seed: &bool): bool {
+                let mut flag = true;
+                let left = &flag;
+                let job: () => [&bool, &bool] = () => [left, seed];
+                let first = job(); flag = false; let again = job(); return *again[0];
+            }
+            function after(seed: &bool): bool {
+                let mut flag = true;
+                let left = &flag;
+                let job: () => [&bool, &bool] = () => [left, seed];
+                let first = job(); let again = job(); let scalar = *again[0]; flag = false; return scalar;
+            }
+            function mixed(bit: bool, view: &bool): [bool, &bool] {
+                let job: () => [&bool, bool] = () => [view, bit];
+                let [_, saved] = job();
+                let [carried, _] = job();
+                return [saved, carried];
+            }
+            function liveFirst(seed: &bool): bool {
+                let mut flag = true;
+                let left = &flag;
+                let job: () => [&bool, &bool] = () => [seed, left];
+                let first = job(); let _ = job(); flag = false; return *first[1];
+            }
+            function selected(choose: bool, a: &bool, b: &bool): bool {
+                let mut flag = true;
+                let view = &flag;
+                if (choose) {
+                    let job: () => [&bool, &bool] = () => [view, b];
+                    let observing = &job;
+                    let first = job(); let again = job();
+                    let _ = observing;
+                    let answer = *again[0]; flag = false; return answer;
+                }
+                flag = false;
+                let job: () => [&bool, &bool] = () => [b, a];
+                let first = job(); let again = job(); return *again[1];
+            }
+        "#,
+        |_, module, receipt, typed| {
+            let check = |name, limits| {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                lower_body(receipt, module, &declaration.id, limits).unwrap()
+            };
+            let lower = |name| check(name, AnalysisLimits::default());
+            let shared = CaptureForm::CarriedReference { mutable: false };
+            let views = lower("views");
+            let mir = views
+                .mir()
+                .expect("descriptor results carry caller backing, not a loan of job");
+            let [_, returned] = read_only_pair_results(
+                module,
+                typed,
+                mir,
+                mir.entry,
+                ["left", "right"],
+                [shared; 2],
+            );
+            assert!(linear(mir, mir.entry).iter().any(|op| matches!(op, Operation::Export(result) if result.root.node == returned.root.node)));
+
+            let mixed = lower("mixed");
+            let mir = mixed
+                .mir()
+                .expect("independent scalar and descriptor stages can be copied");
+            let [first, second] = read_only_pair_results(
+                module,
+                typed,
+                mir,
+                mir.entry,
+                ["view", "bit"],
+                [shared, CaptureForm::Value],
+            );
+            let ops = linear(mir, mir.entry);
+            for (result, position, name) in
+                [(first, 1, b"saved".as_slice()), (second, 0, b"carried")]
+            {
+                assert!(ops.iter().any(
+                    |op| matches!(op, Operation::Copy { from, into: Some(binding) }
+                    if from.root.node == result.root.node && from.tuple_element() == Some(position)
+                    && binding.root.span.bytes() == name)
+                ));
+            }
+
+            for name in ["overlap", "liveFirst"] {
+                let rejected = lower(name);
+                assert_eq!(rejected.completion(), Completion::SourceRejected, "{name}");
+                assert!(rejected.mir().is_none());
+                let [finding] = rejected.findings() else {
+                    panic!("expected one backing conflict in {name}")
+                };
+                assert_eq!(finding.code(), "R0203", "{name}");
+                assert_eq!(finding.site.span.bytes(), b"flag = false;", "{name}");
+                assert_eq!(finding.related.span.bytes(), b"&flag", "{name}");
+            }
+            let after = lower("after");
+            let mir = after
+                .mir()
+                .expect("the carried loan ends after the last descriptor use");
+            let [_, again] = read_only_pair_results(
+                module,
+                typed,
+                mir,
+                mir.entry,
+                ["left", "seed"],
+                [shared; 2],
+            );
+            let last_use = |mir: &Mir<'_>, entry, result: Place<'_>, position| {
+                let path = straight_blocks(mir, entry);
+                let read = path.iter().position(|step| matches!(step.operation,
+                    Operation::Dereference(from) if from.root.node == result.root.node && from.tuple_element() == Some(position)
+                )).expect("dereference the written result position");
+                let write = path
+                    .iter()
+                    .position(|step| {
+                        matches!(step.operation,
+                            Operation::Install { target, .. } if target.root.span.bytes() == b"flag"
+                        )
+                    })
+                    .expect("install the replacement of flag");
+                (read, write)
+            };
+            let (read, write) = last_use(mir, mir.entry, again, 0);
+            assert!(read < write);
+
+            let selected = lower("selected");
+            let mir = selected.mir().unwrap_or_else(|| {
+                panic!(
+                    "selected: {:?} at {:?}",
+                    selected.completion(),
+                    selected
+                        .blocked_at()
+                        .map(|s| s.span.bytes().escape_ascii().to_string())
+                )
+            });
+            let (yes, no) = branch_targets(mir);
+            let [_, yes_result] =
+                read_only_pair_results(module, typed, mir, yes, ["view", "b"], [shared; 2]);
+            let [_, no_result] =
+                read_only_pair_results(module, typed, mir, no, ["b", "a"], [shared; 2]);
+            let (read, write) = last_use(mir, yes, yes_result, 0);
+            assert!(read < write);
+            let (read, write) = last_use(mir, no, no_result, 1);
+            assert!(write < read);
+
+            let limits = AnalysisLimits {
+                max_work: after.statistics().work,
+                max_entries: after.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(check("after", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let report = check("after", short);
+                assert_eq!(report.completion(), Completion::ResourceLimit);
+                assert!(report.mir().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn erased_read_only_pair_has_no_typed_receipt() {
+    use compiler::analysis::{
+        InvocationMode,
+        typed::{ResultUseBlocker, TypedCompletion},
+    };
+
+    probe_report(
+        "captures::erased_read_only_pair_has_no_typed_receipt",
+        r#"
+            function twice(job: () => [bool, bool]): [bool, bool] {
+                let first = job();
+                return job();
+            }
+        "#,
+        |_, module, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            assert!(typed.core_blockers().is_empty());
+            let pending = typed.result_use().unwrap().pending();
+            let calls: Vec<_> = pending
+                .iter()
+                .filter(|p| {
+                    p.blocker == ResultUseBlocker::CallBoundary && p.site.module == &module.key
+                })
+                .collect();
+            let [first, second] = calls.as_slice() else {
+                panic!("expected a blocker at both calls")
+            };
+            assert_ne!(first.site.node, second.site.node);
+            for call in [first, second] {
+                assert_eq!(call.site.span.bytes(), b"job()");
+                let fact = typed
+                    .bodies()
+                    .node(module, call.site.node)
+                    .unwrap()
+                    .unwrap();
+                let invocation = fact.callable.as_ref().unwrap().invocation.as_ref().unwrap();
+                assert_eq!(invocation.mode, InvocationMode::ReadOnly);
+                assert_eq!(invocation.access, Access::Owned);
+                let receiver = typed
+                    .bodies()
+                    .node(module, invocation.receiver)
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    receiver
+                        .callable
+                        .as_ref()
+                        .and_then(|f| f.arrow.as_ref())
+                        .is_none()
+                );
+            }
+            assert!(
+                pending
+                    .iter()
+                    .any(|p| p.blocker == ResultUseBlocker::Containment
+                        && p.site.module == &module.key
+                        && p.site.span.bytes() == b"job: () => [bool, bool]")
+            );
         },
     );
 }
