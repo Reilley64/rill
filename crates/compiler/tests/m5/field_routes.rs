@@ -137,6 +137,38 @@ fn carried_field_and_slot_borrow_differ() {
                 let mut x = LocalView { owned: true, view: seed };
                 x.view = &x.owned;
             }
+            type ReverseView = { view: &bool; owned: bool; }
+            function outOfOrder(seed: &bool): void {
+                let mut x = ReverseView { owned: true, view: seed };
+                x.view = &x.owned;
+            }
+            function recordCycle(seed: &bool): void {
+                let mut x = LocalView { owned: true, view: seed };
+                let mut y = LocalView { owned: false, view: seed };
+                x.view = &y.owned;
+                y.view = &x.owned;
+            }
+            type TextView = { owned: bool; view: &bool; text: string; }
+            function observable(seed: &bool, text: string): void {
+                let mut x = TextView { owned: true, view: seed, text: text };
+                x.view = &x.owned;
+            }
+            function moveOwner(seed: &bool, text: string): bool {
+                let mut x = TextView { owned: true, view: seed, text: text };
+                x.view = &x.owned;
+                let moved = x;
+                return *moved.view;
+            }
+            type GuardView = { owned: bool; view: &bool; lock: LockGuard<i32>; }
+            function protected(seed: &bool, lock: LockGuard<i32>): void {
+                let mut x = GuardView { owned: true, view: seed, lock: lock };
+                x.view = &x.owned;
+            }
+            function replaceOwner(seed: &bool): void {
+                let mut x = LocalView { owned: true, view: seed };
+                x.view = &x.owned;
+                x = LocalView { owned: false, view: seed };
+            }
             function usedCopy(seed: &bool): bool {
                 let mut x = LocalView { owned: true, view: seed };
                 x.view = &x.owned;
@@ -154,16 +186,26 @@ fn carried_field_and_slot_borrow_differ() {
                 x.owned = false;
                 return *copied;
             }
+            function liveAcrossBoundary(seed: &bool): bool {
+                let mut copied = seed;
+                {
+                    let mut x = LocalView { owned: true, view: seed };
+                    x.view = &x.owned;
+                    copied = x.view;
+                }
+                return *copied;
+            }
         "#,
         |_, module, receipt| {
-            let lower = |name| {
+            let lower_with = |name, limits| {
                 let decl = module
                     .declarations
                     .iter()
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap();
-                lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap()
+                lower_body(receipt, module, &decl.id, limits).unwrap()
             };
+            let lower = |name| lower_with(name, AnalysisLimits::default());
 
             let forwarded = lower("forward");
 
@@ -237,16 +279,109 @@ fn carried_field_and_slot_borrow_differ() {
             assert_eq!(finding.code(), "R0201");
             assert_eq!(finding.related.span.bytes(), b"&mut local");
 
-            // Acquiring and copying this route works; keeping it until cleanup does not.
             let grouped = lower("groupedOnly");
-            assert_eq!(grouped.completion(), Completion::Incomplete);
+            let mir = require_mir(&grouped, "groupedOnly");
+            assert_eq!(grouped.completion(), Completion::Checked);
             assert!(grouped.findings().is_empty());
-            assert!(grouped.mir().is_none());
-            let blocker = grouped.blocked_at().unwrap().span.bytes();
-            assert_eq!(
-                blocker,
-                b"{\n                let mut x = LocalView { owned: true, view: seed };\n                x.view = &x.owned;\n            }",
-            );
+            let ops = linear(mir, mir.entry);
+            let (backing, staged) = ops
+                .iter()
+                .find_map(|op| match op {
+                    Operation::Borrow {
+                        source,
+                        holder,
+                        exclusive: false,
+                    } => Some((source, holder)),
+                    _ => None,
+                })
+                .expect("borrow the sibling field");
+            let stored = ops
+                .iter()
+                .find_map(|op| match op {
+                    Operation::Install { target, incoming }
+                        if incoming.root.node == staged.root.node =>
+                    {
+                        Some(target)
+                    }
+                    _ => None,
+                })
+                .expect("install the borrowed view");
+            let owned = &backing.field().unwrap().id;
+            let view = &stored.field().unwrap().id;
+            assert_eq!(backing.field().unwrap().name.as_deref(), Some("owned"));
+            assert_eq!(stored.field().unwrap().name.as_deref(), Some("view"));
+            let x = backing.root.node;
+            assert_eq!(backing.root.span.bytes(), b"x");
+            assert_eq!(stored.root.node, x);
+            let mut ends = Vec::new();
+            for block in straight_blocks(mir, mir.entry) {
+                let Operation::Cleanup(actions) = &block.operation else {
+                    continue;
+                };
+                for action in actions {
+                    if let Obligation::EndStorage(place) = action
+                        && place.root.node == x
+                    {
+                        assert_eq!(block.site.span.bytes(), b"{\n                let mut x = LocalView { owned: true, view: seed };\n                x.view = &x.owned;\n            }");
+                        assert!(place.projection.is_none() || place.field().is_some());
+                        ends.push(place.field().map(|field| &field.id));
+                    }
+                }
+            }
+            assert_eq!(ends, [Some(view), Some(owned), None]);
+            assert!(path_drops(mir, mir.entry).is_empty());
+
+            let limits = AnalysisLimits {
+                max_work: grouped.statistics().work,
+                max_entries: grouped.statistics().entries,
+                ..AnalysisLimits::default()
+            };
+            assert!(lower_with("groupedOnly", limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: limits.max_work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: limits.max_entries - 1,
+                    ..limits
+                },
+            ] {
+                let limited = lower_with("groupedOnly", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none());
+            }
+
+            for name in [
+                "outOfOrder",
+                "recordCycle",
+                "observable",
+                "protected",
+                "replaceOwner",
+            ] {
+                let report = lower(name);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert!(report.findings().is_empty(), "{name}");
+                assert!(report.mir().is_none(), "{name}");
+                let site = report.blocked_at().unwrap().span.bytes();
+                if name == "replaceOwner" {
+                    assert_eq!(site, b"x = LocalView { owned: false, view: seed };");
+                } else {
+                    assert!(
+                        site.starts_with(b"{\n                let mut x = "),
+                        "{name}: {site:?}"
+                    );
+                }
+            }
+            let moved = lower("moveOwner");
+            assert_eq!(moved.completion(), Completion::SourceRejected);
+            assert!(moved.mir().is_none());
+            let [finding] = moved.findings() else {
+                panic!("expected the self-borrow to block the owner move")
+            };
+            assert_eq!(finding.code(), "R0203");
+            assert_eq!(finding.site.span.bytes(), b"x");
+            assert_eq!(finding.related.span.bytes(), b"&x.owned");
 
             let used = lower("usedCopy");
             let mir = require_mir(&used, "usedCopy");
@@ -283,15 +418,36 @@ fn carried_field_and_slot_borrow_differ() {
                     && to.root.span.bytes() == b"copied"))
             );
 
-            let live = lower("liveCopy");
-            assert_eq!(live.completion(), Completion::SourceRejected);
-            assert!(live.mir().is_none());
-            let [finding] = live.findings() else {
-                panic!("expected the copied view to block backing replacement");
-            };
-            assert_eq!(finding.code(), "R0203");
-            assert_eq!(finding.site.span.bytes(), b"x.owned = false;");
-            assert_eq!(finding.related.span.bytes(), b"&x.owned");
+            let last_use = ops
+                .iter()
+                .position(|op| {
+                    matches!(op, Operation::Dereference(place)
+                if place.root.span.bytes() == b"copied")
+                })
+                .expect("use the copied view");
+            let replace = ops
+                .iter()
+                .position(|op| {
+                    matches!(op, Operation::Install { target, .. }
+                if target.field().is_some_and(|field| &field.id == owned))
+                })
+                .expect("replace the backing field");
+            assert!(last_use < replace);
+
+            for (name, site) in [
+                ("liveCopy", b"x.owned = false;".as_slice()),
+                ("liveAcrossBoundary", b"{\n                    let mut x = LocalView { owned: true, view: seed };\n                    x.view = &x.owned;\n                    copied = x.view;\n                }"),
+            ] {
+                let live = lower(name);
+                assert_eq!(live.completion(), Completion::SourceRejected, "{name}");
+                assert!(live.mir().is_none(), "{name}");
+                let [finding] = live.findings() else {
+                    panic!("{name}: expected the copied view to block release of its backing");
+                };
+                assert_eq!(finding.code(), "R0203", "{name}");
+                assert_eq!(finding.site.span.bytes(), site, "{name}");
+                assert_eq!(finding.related.span.bytes(), b"&x.owned", "{name}");
+            }
 
             for name in [
                 "callerRetains",

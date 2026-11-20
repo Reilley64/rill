@@ -594,13 +594,65 @@ fn finish_tuple_cleanup<'g>(
     Ok(())
 }
 
+// A flat record can keep its ordinary reverse field order when every
+// intra-record edge already points from a later view to an earlier leaf.
+fn can_end_record_in_reverse_order(
+    slots: &[Local<'_>],
+    state: &[State],
+    owner: Slot,
+    budget: &mut Budget,
+) -> ResultOf<bool> {
+    let root = slots[owner];
+    if root.custom_disposer.is_some() || root.contains_guard() {
+        return Ok(false);
+    }
+    for slot in root.storage(owner) {
+        budget.step(1)?;
+        let local = slots[slot];
+        if local.owner != owner
+            || local.cleanup != StorageCleanup::End
+            || (slot != owner
+                && (local.members != 0 || !matches!(local.projection, Some(Projection::Field(_)))))
+        {
+            return Ok(false);
+        }
+        let State::Initialized(held) = &state[slot] else {
+            continue;
+        };
+        if held.capture_drops != [None, None] || held.disposal_started_at.is_some() {
+            return Ok(false);
+        }
+        for loan in held.loans.iter() {
+            budget.step(1)?;
+            if loan.kind.borrows_local_storage()
+                && slots[loan.source].owner == owner
+                && (!local.reference_member
+                    || loan.kind != LoanKind::Backing
+                    || loan.exclusive
+                    || !(owner < loan.source && loan.source < slot)
+                    || slots[loan.source].reference_member
+                    || !matches!(state[loan.source], State::Initialized(_)))
+            {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+#[derive(Clone, Copy)]
+enum Boundary {
+    Scope { remainder: Option<Slot> },
+    Replacement,
+}
+
 fn cleanup_boundary<'g>(
     module: &'g Module,
     slots: &[Local<'g>],
     state: &mut [State],
     scope: &[Slot],
     live: &BTreeSet<Slot>,
-    (node, remainder): (NodeId, Option<Slot>),
+    (node, boundary): (NodeId, Boundary),
     budget: &mut Budget,
 ) -> ResultOf<Operation<'g>> {
     budget.reserve(3 * scope.len())?;
@@ -617,7 +669,7 @@ fn cleanup_boundary<'g>(
     };
     // Count an incoming edge at each source for every dependent that must
     // retire before it. Only initialized storage participates.
-    for &slot in scope {
+    for (i, &slot) in scope.iter().enumerate() {
         budget.step(1)?;
         if !matches!(state[slot], State::Initialized(_)) {
             continue;
@@ -632,14 +684,23 @@ fn cleanup_boundary<'g>(
             Access::EndScope,
             budget,
         )?;
+        let mut internal = 0;
         visit_loans(state, slots[slot].storage(slot), budget, |loan, _| {
             if let Some(source) = source_rank(&loan, state) {
                 indegrees[source] += 1;
+                internal += usize::from(source == i);
                 grouped_dependencies |=
                     slots[slot].members != 0 || slots[scope[source]].members != 0;
             }
             Ok(())
         })?;
+        if internal != 0
+            && slots[slot].members != 0
+            && matches!(boundary, Boundary::Scope { .. })
+            && can_end_record_in_reverse_order(slots, state, slot, budget)?
+        {
+            indegrees[i] -= internal;
+        }
     }
     let mut ready = BTreeSet::new();
     for (i, &slot) in scope.iter().enumerate() {
@@ -654,7 +715,9 @@ fn cleanup_boundary<'g>(
         budget.step(1)?;
         let slot = scope[i];
         visit_loans(state, slots[slot].storage(slot), budget, |loan, _| {
-            if let Some(source) = source_rank(&loan, state) {
+            // A ready owner had no counted self-edges; its field cleanup
+            // satisfies any admitted internal dependencies.
+            if let Some(source) = source_rank(&loan, state).filter(|&source| source != i) {
                 indegrees[source] -= 1;
                 if indegrees[source] == 0 {
                     ready.insert(source);
@@ -664,7 +727,10 @@ fn cleanup_boundary<'g>(
         })?;
         scheduled += 1;
         if disposal_origin(&state[slot]).is_some()
-            && let Some(remainder) = remainder.filter(|&remainder| remainder != slot)
+            && let Boundary::Scope {
+                remainder: Some(remainder),
+            } = boundary
+            && remainder != slot
         {
             // This lexical alias ends before the outer disposer has returned.
             // Its source-level storage still goes out of scope. Keep only the
@@ -1523,7 +1589,7 @@ pub(super) fn run<'g>(
                             &mut state,
                             &[target],
                             &live[pc],
-                            (node, remainder),
+                            (node, Boundary::Replacement),
                             budget,
                         )?
                     } else {
@@ -1685,7 +1751,7 @@ pub(super) fn run<'g>(
                     &mut state,
                     &cleanups[index],
                     &live[pc],
-                    (node, remainder),
+                    (node, Boundary::Scope { remainder }),
                     budget,
                 )?,
                 Action::End(slot) => {
