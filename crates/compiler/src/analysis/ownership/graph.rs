@@ -957,7 +957,8 @@ pub(super) fn visit_dependencies<'g>(
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
             }
-            Operation::CallScalarCopy { implementation, .. } => {
+            Operation::CallScalarCopy { implementation, .. }
+            | Operation::CallScalarDispose { implementation, .. } => {
                 emit(implementation, OrdinaryCall, budget)?
             }
             Operation::Dispose { callee, .. } => emit(callee, BuiltinDispose, budget)?,

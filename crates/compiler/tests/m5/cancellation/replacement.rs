@@ -169,12 +169,13 @@ fn installed_replacement_without_the_proved_leaf_stays_unresolved() {
         "cancellation::replacement::installed_replacement_without_the_proved_leaf_stays_unresolved",
         &source,
         |_, module, receipt, _| {
-            // Exact ordinary bounds on the unchanged negative capture at c75d294.
+            // The full graph also checks the 14 scalar disposal source roots.
+            // The targeted ordinary bounds below are unchanged.
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_work: 201439,
-                    max_entries: 7762,
+                    max_work: 203358,
+                    max_entries: 8126,
                     max_depth: 3,
                 },
             );

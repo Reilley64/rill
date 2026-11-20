@@ -703,13 +703,19 @@ fn installed_inventory_keeps_standard_and_independent_application_roots() {
                     .count(),
                 17
             );
+            let core = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.path == "core.rill")
+                .unwrap();
+            scalar::assert_standard_bodies(&report, typed, receipt, core);
             assert_eq!(
                 report
                     .roots()
                     .iter()
                     .filter(|root| root.ordinary_completion() == Completion::Checked)
                     .count(),
-                39
+                53
             );
             assert_eq!(
                 standard
@@ -718,14 +724,13 @@ fn installed_inventory_keeps_standard_and_independent_application_roots() {
                         && root.blocked_at().is_some()
                         && root.mir().is_none())
                     .count(),
-                134
+                120
             );
             for (kind, count) in [(Function, 18), (Implementation, 130)] {
                 assert_eq!(standard.iter().filter(|root| matches!(root.owner(), BodyOwner::Declaration(id) if id.kind == kind)).count(), count);
             }
             assert_eq!(standard.iter().filter(|root| root.completion() == Completion::Incomplete
-                && matches!(root.owner(), BodyOwner::Declaration(id) if id.kind == Implementation)).count(), 116);
-            scalar::assert_standard_bodies(&report, typed);
+                && matches!(root.owner(), BodyOwner::Declaration(id) if id.kind == Implementation)).count(), 102);
 
             let expectation = app[4].mir().unwrap();
             assert_eq!(
@@ -840,7 +845,7 @@ fn one_budget_leaves_unfinished_work_unproved() {
                     .iter()
                     .filter(|root| root.mir().is_some())
                     .count(),
-                38
+                52
             );
             for short in [
                 AnalysisLimits {

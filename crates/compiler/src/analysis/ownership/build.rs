@@ -5706,15 +5706,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(true)
     }
 
-    fn written_scalar_copy(
+    fn written_scalar_argument(
         &mut self,
         node: NodeId,
         facts: &ExpressionFacts<'g>,
         call: &CallFacts<'g>,
-        into: Option<Slot>,
-        next: Pc,
-        depth: usize,
-    ) -> ResultOf<Pc> {
+    ) -> ResultOf<NodeId> {
         let pending = || Stop::Pending(node);
         let syntax = &self.module.syntax.nodes[node];
         let (NodeKind::Call, [callee, argument], [typed_argument]) = (
@@ -5730,14 +5727,29 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || !call.defaults.is_empty()
             || facts.admission.is_some()
             || facts.ordinary_context.is_some()
-            || into.is_some_and(|slot| self.slots[slot].contains_guard())
             || !matches!(self.fact(callee).map(|fact| &fact.kind),
-                Some(NodeFactKind::Callee { declaration }) if *declaration == call.callee)
+                Some(NodeFactKind::Callee { declaration }) if std::ptr::eq(*declaration, call.callee))
         {
             return Err(pending());
         }
+        Ok(*argument)
+    }
 
-        let input = &self.normal_value(*argument)?.ty;
+    fn written_scalar_copy(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let argument = self.written_scalar_argument(node, facts, call)?;
+        if into.is_some_and(|slot| self.slots[slot].contains_guard()) {
+            return Err(pending());
+        }
+        let input = &self.normal_value(argument)?.ty;
         let implementation = scalar::call_target(
             self.typed,
             self.module,
@@ -5747,7 +5759,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             input,
             self.budget,
         )?;
-        let (root, argument_depth) = self.ungroup_expression_at(*argument, depth + 1)?;
+        let (root, argument_depth) = self.ungroup_expression_at(argument, depth + 1)?;
         let syntax = &self.module.syntax.nodes[root];
         match syntax.kind {
             NodeKind::ValueReference if self.named_owned_place(root)?.is_some() => {}
@@ -5768,7 +5780,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
 
         // Stage the input using the ordinary descriptor copy or borrow. The
         // call consumes only that stage and the scalar result has no loans.
-        let stage = self.slot(*argument, input)?;
+        let stage = self.slot(argument, input)?;
         self.budget.reserve(2)?;
         let index = self.calls.len();
         self.calls.push(Call {
@@ -5779,7 +5791,37 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             destination: None,
         });
         let invoke = self.emit(node, Action::Call(index), Edges::Next(next))?;
-        self.expression(*argument, Some(stage), invoke, depth + 1)
+        self.expression(argument, Some(stage), invoke, depth + 1)
+    }
+
+    fn scalar_dispose_target(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        depth: usize,
+    ) -> ResultOf<&'g DeclarationId> {
+        let pending = || Stop::Pending(node);
+        let argument = self.written_scalar_argument(node, facts, call)?;
+        let (name, _) = self.ungroup_expression_at(argument, depth + 1)?;
+        let (named, path) = self.named_owned_place(name)?.ok_or_else(pending)?;
+        let actual = self.normal_value(argument)?;
+        if !named.binding.is_some_and(|id| std::ptr::eq(id, path.root))
+            || actual.ty != named.ty
+            || actual.access != Access::Owned
+            || !matches!(&actual.path, Some(actual) if std::ptr::eq(actual.root, path.root) && actual.projections.is_empty())
+        {
+            return Err(pending());
+        }
+        scalar::call_target(
+            self.typed,
+            self.module,
+            node,
+            call,
+            facts,
+            &actual.ty,
+            self.budget,
+        )
     }
 
     fn invoke_mutable_cell(
@@ -5928,6 +5970,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 return Err(Stop::Pending(node));
             };
             let operand = self.place(*arg)?;
+            let mut scalar_implementation = None;
             if let Some(release) = self.slots[operand].guard_release() {
                 let Some(DataExpression::NativeOwnership(native)) = &facts.data else {
                     return Err(Stop::Pending(node));
@@ -5940,19 +5983,37 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 {
                     return Err(Stop::Pending(node));
                 }
-            } else if !matches!(self.value(*arg)?.ty.as_ref(), TypeTerm::Primitive(_))
-                && !matches!((self.slots[operand].custom_disposer, &call.selection),
-                    (Some(expected), Some(selection))
-                        if selection.implementation == expected && selection.substitution.is_empty())
-            {
-                return Err(Stop::Pending(node));
+            } else {
+                let actual = self.value(*arg)?;
+                if scalar::scalar(&actual.ty).is_some()
+                    && actual
+                        .path
+                        .as_ref()
+                        .is_some_and(|path| path.projections.is_empty())
+                {
+                    scalar_implementation =
+                        Some(self.scalar_dispose_target(node, facts, call, depth)?);
+                } else if !matches!(actual.ty.as_ref(), TypeTerm::Primitive(_))
+                    && !matches!((self.slots[operand].custom_disposer, &call.selection),
+                        (Some(expected), Some(selection))
+                            if selection.implementation == expected && selection.substitution.is_empty())
+                {
+                    return Err(Stop::Pending(node));
+                }
             }
             let next = if let Some(into) = into {
                 self.emit(node, Action::Init(into), Edges::Next(next))?
             } else {
                 next
             };
-            return self.emit(node, Action::Dispose(operand), Edges::Next(next));
+            return self.emit(
+                node,
+                Action::Dispose {
+                    operand,
+                    scalar_implementation,
+                },
+                Edges::Next(next),
+            );
         }
         if self
             .typed

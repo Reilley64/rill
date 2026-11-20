@@ -171,9 +171,9 @@ fn liveness(
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
             Action::CheckCallableReturn(slot) => use_one(Some(slot), None),
-            Action::Dispose(slot) | Action::Export(slot) | Action::EndEmptyOption(slot) => {
-                use_one(Some(slot), Some(slot))
-            }
+            Action::Dispose { operand: slot, .. }
+            | Action::Export(slot)
+            | Action::EndEmptyOption(slot) => use_one(Some(slot), Some(slot)),
             Action::Displace { target, incoming } | Action::Install { target, incoming } => {
                 use_one(Some(incoming), Some(target))
             }
@@ -2176,7 +2176,7 @@ pub(super) fn run<'a, 'g>(
                 if matches!(
                     action,
                     Action::Call(_)
-                        | Action::Dispose(_)
+                        | Action::Dispose { .. }
                         | Action::ConstructResultError { .. }
                         | Action::WrapResultFailure { .. }
                         | Action::InvokeClosurePair { .. }
@@ -2959,7 +2959,10 @@ pub(super) fn run<'a, 'g>(
                         }
                     }
                 }
-                Action::Dispose(slot) => {
+                Action::Dispose {
+                    operand: slot,
+                    scalar_implementation,
+                } => {
                     require_initialized(&slots, &state, slot, node, budget)?;
                     forbid_custom_partial(&slots, &state, slot, node)?;
                     forbid_active_escape(&state[slot], node)?;
@@ -2986,6 +2989,11 @@ pub(super) fn run<'a, 'g>(
                     } else if let Some(release) = slots[slot].guard_release() {
                         budget.reserve(1)?;
                         Operation::Cleanup(vec![release.cleanup(local(slot))])
+                    } else if let Some(implementation) = scalar_implementation {
+                        Operation::CallScalarDispose {
+                            implementation,
+                            operand: local(slot),
+                        }
                     } else {
                         Operation::Dispose {
                             callee: dispose.ok_or(Stop::Pending(node))?,

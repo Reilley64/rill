@@ -459,6 +459,12 @@ pub enum Operation<'g> {
         argument: Place<'g>,
         into: Option<Place<'g>>,
     },
+    /// Transfer the original named operand to the selected scalar disposer.
+    /// The callee ends its parameter storage; there is no argument copy.
+    CallScalarDispose {
+        implementation: &'g DeclarationId,
+        operand: Place<'g>,
+    },
     /// Call with a staged shared record descriptor. The result may retain the
     /// whole record access and the sources carried by its contents.
     CallBorrowingRecord {
@@ -911,10 +917,11 @@ fn checked_graph<'g>(
     plan: RootPlan<'_, 'g>,
     budget: &mut Budget,
 ) -> Result<Mir<'g>, (&'g Module, Stop)> {
-    let reached = |mir: &Mir<'g>,
-                   pending: &mut VecDeque<(&'g Module, &'g DeclarationId, bool)>,
-                   seen: &mut BTreeMap<&'g DeclarationId, Option<Site<'g>>>,
-                   budget: &mut Budget|
+    let mut scalar_module = None;
+    let mut reached = |mir: &Mir<'g>,
+                       pending: &mut VecDeque<(&'g Module, &'g DeclarationId, bool)>,
+                       seen: &mut BTreeMap<&'g DeclarationId, Option<Site<'g>>>,
+                       budget: &mut Budget|
      -> ResultOf<()> {
         graph::visit_dependencies(mir, budget, |_, edge, budget| {
             let is_disposer = match edge.contract {
@@ -927,8 +934,15 @@ fn checked_graph<'g>(
             if seen.contains_key(callee) {
                 return Ok(());
             }
+            let scalar = !is_disposer && callee.kind == DeclarationKind::Implementation;
+            let modules = match scalar_module.filter(|_| scalar) {
+                // Every admitted ordinary scalar implementation is in the
+                // same captured module, regardless of family or width.
+                Some(module) => std::slice::from_ref(module),
+                None => typed.inventory().graph().modules(),
+            };
             let mut target = None;
-            for candidate in typed.inventory().graph().modules() {
+            for candidate in modules {
                 budget.step(1)?;
                 if candidate.key == callee.module {
                     target = Some(candidate);
@@ -936,6 +950,9 @@ fn checked_graph<'g>(
                 }
             }
             let target = target.ok_or(Stop::Pending(edge.site.node))?;
+            if scalar {
+                scalar_module = Some(target);
+            }
             budget.reserve(2)?;
             seen.insert(callee, None);
             pending.push_back((target, callee, is_disposer));
@@ -1002,9 +1019,9 @@ fn checked_graph<'g>(
         let missing = (module, Stop::Pending(root_site));
         let enabled = !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
         let lowered = if !is_disposer && id.kind == DeclarationKind::Implementation {
-            // Only scalar-copy edges target ordinary implementations here. All
-            // widths are in the same core module; index its captured facts once.
-            let index = match &scalar_targets {
+            // Only selected scalar edges target ordinary implementations here.
+            // All widths share the same core module and capture index.
+            let index = match &mut scalar_targets {
                 Some(index) => index,
                 None => scalar_targets.insert(
                     scalar::TargetIndex::new(typed, target, target.syntax.root, budget)
@@ -1402,7 +1419,7 @@ fn lower_implementation<'a, 'g>(
     // In the installed typed receipt the closed protection catalogue is keyed
     // by canonical standard family, including its implementations on app types.
     // Application registrations of those families are not plain bodies here.
-    // Standard scalar copy requires the separate proof below.
+    // Standard scalar bodies require the separate proof below.
     if (!standard && source.family.module.origin != Origin::Application)
         || source.family.kind != DeclarationKind::Family
     {
@@ -1834,7 +1851,10 @@ enum Action<'g> {
         layout: Option<CallableLayout>,
         local_exclusive: bool,
     },
-    Dispose(Slot),
+    Dispose {
+        operand: Slot,
+        scalar_implementation: Option<&'g DeclarationId>,
+    },
     Displace {
         target: Slot,
         incoming: Slot,
