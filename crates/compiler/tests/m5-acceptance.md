@@ -1442,6 +1442,21 @@ The parameter handoff identifies a named yield from a reachable top-level loop i
 
 Thirteen focused M5 tests, two installed M4 controls, three Rust collection-storage tests, scoped Clippy and formatting passed. List literals, record-valued yields, propagation with a live string cursor, and iterator cancellation remain outside this judgment. [#76](https://github.com/Reilley64/rill/issues/76) remains open.
 
+## Returning `None` while a consuming string cursor is live
+
+At `f4ff41b`, the [installed cursor-postfix tests](m5/iteration_postfix.rs) check a reached postfix on a named `Option<bool>` inside a loop over an incoming `List<string>`. The gate is separate from the string yielded by `next`; this does not establish propagation *from* a yielded `Option<string>`.
+
+| Reached path | Ownership MIR |
+| --- | --- |
+| The first `next` reports exhaustion | Retire the empty cursor. Do not initialize a current item or evaluate the gate. Execute the parent's ordinary suffix. |
+| The loop has yielded, and the gate returns `None` | Construct and export canonical `None` first. Clean the body’s live view and string owners, then the still-owned current item, the cursor's unyielded suffix, and the parent’s lexical owners. No second advance, normal suffix or additional wrapper. |
+| The item moved before `gate?` | Clean the string from the destination binding, not from its vacated item slot. The returning edge still retires the cursor. Only a continuing edge can reach another advance. |
+| The gate is statically `Some` or `None` | Keep only the typed feasible edge. A grouped direct postfix and grouped `Some` return preserve the same source and cleanup order. |
+
+The loop itself and the postfix inside it must each be reachable. Adding `gate?;` after an unconditional return, or in `if (false)`, does not authorize an otherwise unsupported loop body. Those two controls and a nested-loop contrast retain ordinary `Incomplete` with no MIR or finding at their original caps. Type-checking all written source is distinct from proving a reached ownership edge.
+
+Both installed modes checked the targeted `onPostfix` body at 5,413 work / 1,468 entries / depth 6 and its graph root in a graph using 203,063 / 8,239 / 6. Independently one-short limits withhold MIR. Nineteen focused M5 tests (including the Rust suffix-order control), three installed M4 tests and two M4 flow controls passed, as did scoped Clippy, formatting and the external staged replay. No cancellation poll is added at `?`, `next` or disposal. Propagating before cursor commitment, an owning yielded carrier, borrowed iteration and cancellation with live propagation state remain separate [#76](https://github.com/Reilley64/rill/issues/76) obligations. No Rill program ran.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
