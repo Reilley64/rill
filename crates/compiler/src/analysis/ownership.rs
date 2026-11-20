@@ -842,6 +842,7 @@ enum Action<'g> {
         // None selects the base; Some is the contiguous stage range at commit.
         staged: Option<(Slot, usize)>,
     },
+    CheckNestedFieldBase(Slot),
     UnloweredRebuildRead(Slot),
     ForbiddenBorrowedMove(Slot),
     Borrow {

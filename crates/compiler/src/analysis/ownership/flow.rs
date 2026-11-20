@@ -127,6 +127,7 @@ fn liveness(
             Action::CheckRebuild { base, .. }
             | Action::UnloweredRebuildRead(base)
             | Action::ForbiddenBorrowedMove(base) => use_one(Some(base), None),
+            Action::CheckNestedFieldBase(child) => ([Some(slots[child].owner), Some(child)], None),
             Action::Borrow { from, into, .. } => use_one(Some(from), Some(into)),
             Action::BindBorrowedMember {
                 descriptor, into, ..
@@ -1096,6 +1097,14 @@ pub(super) fn run<'g>(
                             budget,
                         )?;
                     }
+                    Operation::None
+                }
+                Action::CheckNestedFieldBase(child) => {
+                    // Form the destination using the two headers, not a read
+                    // of the whole record or its remaining leaves.
+                    budget.step(2)?;
+                    initialized(&state[slots[child].owner], node)?;
+                    initialized(&state[child], node)?;
                     Operation::None
                 }
                 Action::UnloweredRebuildRead(source) => {

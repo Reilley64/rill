@@ -739,10 +739,6 @@ fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
                 let gone = saved;
                 saved.child = fresh;
             }
-            function deep(seed: Outer, fresh: string): void {
-                let mut saved = seed;
-                saved.child.first = fresh;
-            }
             function scalar(seed: Outer, fresh: string): void {
                 let mut saved = seed;
                 saved.sibling = fresh;
@@ -913,7 +909,6 @@ fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
             assert!(finding.related.span.start() < finding.site.span.start());
             for (name, site) in [
                 ("movedRoot", b"saved.child = fresh;".as_slice()),
-                ("deep", b"saved.child.first"),
                 ("scalar", b"saved.sibling"),
                 ("projected", b"fresh.child"),
                 (
@@ -948,6 +943,165 @@ fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
             }
         },
     );
+}
+
+#[test]
+fn replacing_an_initialized_nested_string_leaf_preserves_its_neighbors() {
+    use compiler::analysis::TypeTerm;
+    use compiler::analysis::data::{Access, PathProjection};
+    use compiler::analysis::ownership::{Place, Projection};
+    use compiler::analysis::scalars::{NodeFactKind, Place as TypedPlace};
+    use compiler::analysis::typed::TypedCompletion;
+    use compiler::parser::NodeKind;
+
+    let mut failures = Vec::new();
+    probe_with_typed(
+        "records::replacing_an_initialized_nested_string_leaf_preserves_its_neighbors",
+        r#"
+            type Inner = { first: string; flag: bool; last: string; }
+            type Outer = { child: Inner; sibling: string; }
+            function replace(seed: Outer, fresh: string): bool {
+                let mut saved = seed;
+                saved.child.first = fresh;
+                return true;
+            }
+            function movedChild(seed: Outer, fresh: string): void {
+                let mut saved = seed;
+                let taken = saved.child;
+                saved.child.first = fresh;
+            }
+            function movedRoot(seed: Outer, fresh: string): void {
+                let mut saved = seed;
+                let taken = saved;
+                saved.child.first = fresh;
+            }
+        "#,
+        |request, module, receipt, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Checked);
+            let field = |record, name| canonical_record_field(typed, &module.key, record, name);
+            let child = field("Outer", "child");
+            let first = field("Inner", "first");
+            for assignment in module
+                .syntax
+                .nodes
+                .iter()
+                .filter(|node| node.kind == NodeKind::Assignment("="))
+            {
+                let expression =
+                    |node| match &typed.bodies().node(module, node).unwrap().unwrap().kind {
+                        NodeFactKind::Expression(facts) => facts,
+                        _ => panic!("expected typed assignment operand"),
+                    };
+                let lhs = expression(assignment.children[0]);
+                let rhs = expression(assignment.children[1]);
+                assert_eq!(lhs.place, TypedPlace::Writable);
+                assert_eq!(lhs.access, Access::Owned);
+                assert_eq!(rhs.access, Access::Owned);
+                let path = lhs.path.as_ref().unwrap();
+                assert_eq!(path.root.kind, loader::DeclarationKind::Binding);
+                assert_eq!(
+                    path.projections,
+                    [PathProjection::Field(child), PathProjection::Field(first)]
+                );
+                let source = rhs.path.as_ref().unwrap();
+                assert_eq!(source.root.kind, loader::DeclarationKind::Parameter);
+                assert!(source.projections.is_empty());
+                assert!(matches!(lhs.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string"));
+                assert_eq!(lhs.ty, rhs.ty);
+            }
+
+            for (name, moved_at) in [
+                ("replace", None),
+                ("movedChild", Some(b"saved.child".as_slice())),
+                ("movedRoot", Some(b"saved".as_slice())),
+            ] {
+                let expected = if moved_at.is_some() {
+                    Completion::SourceRejected
+                } else {
+                    Completion::Checked
+                };
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|decl| decl.name.as_deref() == Some(name))
+                    .unwrap();
+                let report =
+                    lower_body(receipt, module, &declaration.id, AnalysisLimits::default())
+                        .unwrap();
+                if report.completion() != expected {
+                    failures.push(format!(
+                        "test_mode={}: M4 {:?}; {name}: expected {expected:?}, got {:?} at {:?}; MIR={}, findings={:?}",
+                        request.test_mode, typed.completion(), report.completion(),
+                        report.blocked_at().map(|site| site.span.bytes().escape_ascii().to_string()),
+                        report.mir().is_some(), report.findings().iter().map(|finding| finding.code()).collect::<Vec<_>>()
+                    ));
+                    continue;
+                }
+                if let Some(moved_at) = moved_at {
+                    assert!(report.mir().is_none());
+                    let [finding] = report.findings() else {
+                        panic!("expected one moved-ancestor finding")
+                    };
+                    assert_eq!(finding.code(), "R0200");
+                    assert_eq!(finding.site.span.bytes(), b"saved.child.first = fresh;");
+                    assert_eq!(finding.related.span.bytes(), moved_at);
+                    assert!(finding.related.span.start() < finding.site.span.start());
+                    continue;
+                }
+
+                let mir = report.mir().unwrap();
+                let ops = linear(mir, mir.entry);
+                let from_fresh = |op: &&Operation<'_>| {
+                    matches!(op, Operation::Move { from, .. }
+                    if from.root.span.bytes() == b"fresh: string" && from.projection.is_none())
+                };
+                assert_eq!(ops.iter().filter(|op| from_fresh(op)).count(), 1);
+                let stage = ops.iter().position(from_fresh).unwrap();
+                let [
+                    Operation::Move {
+                        into: Some(staged), ..
+                    },
+                    Operation::Drop(old),
+                    Operation::Install { target, incoming },
+                    ..,
+                ] = &ops[stage..]
+                else {
+                    panic!("expected staging, one old leaf drop, then install: {ops:?}");
+                };
+                assert_eq!(staged.root.node, incoming.root.node);
+                assert!(staged.projection.is_none() && incoming.projection.is_none());
+                assert_eq!(target.root.span.bytes(), b"saved");
+                let nested = |place: &Place<'_>, member| {
+                    place.root.node == target.root.node
+                        && matches!(place.projection, Some(Projection::NestedField { outer, inner })
+                        if &outer.id == child && &inner.id == member)
+                };
+                assert!(nested(target, first) && nested(old, first));
+                assert_eq!(
+                    ops.iter()
+                        .filter(|op| matches!(op, Operation::Install { .. }))
+                        .count(),
+                    1
+                );
+
+                let export = ops
+                    .iter()
+                    .position(|op| matches!(op, Operation::Export(_)))
+                    .unwrap();
+                assert!(stage + 2 < export);
+                assert!(ops[export + 1..].iter().any(|op| matches!(op, Operation::Cleanup(actions)
+                    if matches!(actions.as_slice(), [Obligation::Drop(sibling), Obligation::Drop(last), Obligation::EndStorage(flag), Obligation::Drop(replacement), ..]
+                        if sibling.root.node == target.root.node && sibling.field().is_some_and(|decl| &decl.id == field("Outer", "sibling"))
+                            && nested(last, field("Inner", "last")) && nested(flag, field("Inner", "flag")) && nested(replacement, first)))));
+                assert_eq!(
+                    path_drops(mir, mir.entry).len(),
+                    4,
+                    "no extra drops before or after install"
+                );
+            }
+        },
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]

@@ -213,6 +213,14 @@ enum Binding<'a, 'g> {
 }
 
 #[derive(Clone, Copy)]
+enum AssignmentSource<'a, 'g> {
+    General,
+    Exact(&'a Type<'g>),
+    NestedTuple(Slot),
+    NestedRecordLeaf { ty: &'a Type<'g>, child: Slot },
+}
+
+#[derive(Clone, Copy)]
 struct ProjectedTemporary {
     site: NodeId,
     base: NodeId,
@@ -976,7 +984,7 @@ impl<'a, 'g> Build<'a, 'g> {
         left: NodeId,
         facts: &'a ExpressionFacts<'g>,
         value: NodeId,
-    ) -> ResultOf<(Slot, Option<&'a Type<'g>>, Option<Slot>)> {
+    ) -> ResultOf<(Slot, AssignmentSource<'a, 'g>)> {
         let path = facts.path.as_ref().ok_or(Stop::Pending(left))?;
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
@@ -989,7 +997,7 @@ impl<'a, 'g> Build<'a, 'g> {
                 let from = self
                     .nested_tuple_transfer_source(value, &facts.ty)?
                     .ok_or(Stop::Pending(value))?;
-                return Ok((target, None, Some(from)));
+                return Ok((target, AssignmentSource::NestedTuple(from)));
             }
         }
         if facts.place == TypedPlace::Writable
@@ -1000,7 +1008,7 @@ impl<'a, 'g> Build<'a, 'g> {
             if self.value(value)?.ty != facts.ty {
                 return Err(Stop::Pending(value));
             }
-            return Ok((target, Some(&facts.ty), None));
+            return Ok((target, AssignmentSource::Exact(&facts.ty)));
         }
         if facts.access == Access::Owned
             && facts.place == TypedPlace::Writable
@@ -1020,9 +1028,33 @@ impl<'a, 'g> Build<'a, 'g> {
             if source.ty != facts.ty {
                 return Err(Stop::Pending(value));
             }
-            return Ok((child, Some(&source.ty), None));
+            return Ok((child, AssignmentSource::Exact(&source.ty)));
         }
-        Ok((self.resolve_place(left, path)?, None, None))
+        if facts.access == Access::Owned
+            && facts.place == TypedPlace::Writable
+            && path.root.kind == DeclarationKind::Binding
+            && owns_text(&facts.ty)
+            && let [PathProjection::Field(outer), PathProjection::Field(inner)] =
+                path.projections.as_slice()
+            && let Some(root) = self.nested_record_root(path)?
+        {
+            let (child, target) = self.nested_field(left, root, outer, inner)?;
+            let Some((source, _)) = self.whole_named_owned_place(value)? else {
+                return Err(Stop::Pending(value));
+            };
+            self.budget.step(1)?;
+            if source.ty != facts.ty {
+                return Err(Stop::Pending(value));
+            }
+            return Ok((
+                target,
+                AssignmentSource::NestedRecordLeaf {
+                    ty: &source.ty,
+                    child,
+                },
+            ));
+        }
+        Ok((self.resolve_place(left, path)?, AssignmentSource::General))
     }
 
     fn nested_transfer_slot(
@@ -1203,14 +1235,14 @@ impl<'a, 'g> Build<'a, 'g> {
         root: Slot,
         outer: &DeclarationId,
         inner: &DeclarationId,
-    ) -> ResultOf<Slot> {
+    ) -> ResultOf<(Slot, Slot)> {
         let child = self.field(node, root, outer)?;
         for field in self.slots[child].storage(child).skip(1) {
             self.budget.step(1)?;
             if matches!(self.slots[field].projection, Some(Projection::NestedField { outer: parent, inner: leaf })
                 if parent.id == *outer && leaf.id == *inner)
             {
-                return Ok(field);
+                return Ok((child, field));
             }
         }
         Err(Stop::Pending(node))
@@ -1535,17 +1567,18 @@ impl<'a, 'g> Build<'a, 'g> {
                     )?;
                     return self.expression(value, Some(incoming), install, depth + 1);
                 }
-                let (target, proved_type, tuple_source) =
-                    self.assignment_target(left, facts, value)?;
+                let (target, source) = self.assignment_target(left, facts, value)?;
                 if self.slots[target].projection.is_some()
                     && self.slots[target].guard_release().is_some()
                 {
                     return Err(Stop::Pending(left));
                 }
-                let (incoming, temporary) = if let Some(from) = tuple_source {
+                let (incoming, temporary) = if let AssignmentSource::NestedTuple(from) = source {
                     (self.clone_region(from, value)?, None)
                 } else {
-                    let ty = if let Some(ty) = proved_type {
+                    let ty = if let AssignmentSource::Exact(ty)
+                    | AssignmentSource::NestedRecordLeaf { ty, .. } = source
+                    {
                         ty
                     } else {
                         self.budget.step(1)?;
@@ -1570,7 +1603,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     Action::Displace { target, incoming },
                     Edges::Next(install),
                 )?;
-                if let Some(from) = tuple_source {
+                if let AssignmentSource::NestedTuple(from) = source {
                     return self.expression_with_proof(
                         value,
                         Some(incoming),
@@ -1579,7 +1612,16 @@ impl<'a, 'g> Build<'a, 'g> {
                         Some(ExpressionProof::NestedTupleSource(from)),
                     );
                 }
-                self.stage_named_transfer(value, incoming, displace, temporary, depth + 1)
+                let stage =
+                    self.stage_named_transfer(value, incoming, displace, temporary, depth + 1)?;
+                if let AssignmentSource::NestedRecordLeaf { child, .. } = source {
+                    return self.emit(
+                        node,
+                        Action::CheckNestedFieldBase(child),
+                        Edges::Next(stage),
+                    );
+                }
+                Ok(stage)
             }
             NodeKind::Return => {
                 let returning = self.check_retained(node, exits.returning)?;
@@ -2365,7 +2407,7 @@ impl<'a, 'g> Build<'a, 'g> {
                     }
                     ProductMember::Field(field) => self.field(site, scratch, field)?,
                     ProductMember::NestedField { outer, inner } => {
-                        self.nested_field(site, scratch, outer, inner)?
+                        self.nested_field(site, scratch, outer, inner)?.1
                     }
                     ProductMember::NestedTupleElement { outer, inner } if nested_tuple => {
                         self.nested_tuple_member_slot(site, scratch, outer, Some(inner))?
