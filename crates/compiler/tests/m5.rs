@@ -36,6 +36,8 @@ mod retained;
 mod roots;
 #[path = "m5/scoped_jobs.rs"]
 mod scoped_jobs;
+#[path = "m5/scoped_join.rs"]
+mod scoped_join;
 mod support;
 #[path = "m5/tuples.rs"]
 mod tuples;
@@ -769,7 +771,10 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
         fs::create_dir_all(path).unwrap();
     }
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for name in include_str!("../../../tests/installed/typed/stdlib-sources.txt").lines() {
+    for name in include_str!("../../../tests/installed/typed/stdlib-sources.txt")
+        .lines()
+        .chain(include_str!("../../../tests/installed/typed/routine-sources.txt").lines())
+    {
         fs::copy(repo.join("stdlib").join(name), stdlib.join(name)).unwrap();
     }
     fs::copy(

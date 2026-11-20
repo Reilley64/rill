@@ -121,14 +121,14 @@ fn parameter<'a, 'g>(candidate: &'a SourceCandidate<'_, 'g>, column: usize) -> &
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
-    pub(super) fn has_application_ordinary_scope(&self, family: &DeclarationId) -> bool {
+    pub(super) fn has_installed_ordinary_scope(&self, family: &DeclarationId) -> bool {
         self.ordinary_scope
             .as_ref()
             .is_some_and(|scope| scope.contains(family))
     }
 
     fn ordinary_use_premise(&self, family: &DeclarationId) -> Option<InputPremise> {
-        if self.has_application_ordinary_scope(family) {
+        if self.has_installed_ordinary_scope(family) {
             self.arrow_premise
         } else {
             Some(self.arrow_premise.map_or(PREMISE, |p| p.combine(PREMISE)))
@@ -366,7 +366,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 _ => None,
             };
             let result = (|| {
-                if self.has_application_ordinary_scope(call.fact.callee)
+                if self.has_installed_ordinary_scope(call.fact.callee)
                     || eligible_local_disposer
                     || scope.and_then(|scope| scope.winner()).is_some()
                 {
@@ -418,7 +418,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
             }
             let actual_scope =
-                eligible_local_disposer || self.has_application_ordinary_scope(call.fact.callee);
+                eligible_local_disposer || self.has_installed_ordinary_scope(call.fact.callee);
             if proof.premise.is_none() && (!actual_scope || premise.is_none()) {
                 match (proof.state, &output.agreement, &output.ty) {
                     (GoalState::Proved, OutputAgreement::Agrees, Some(ty)) => {
@@ -560,7 +560,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<Comparison<'r, 'g>> {
         let inventory = self.input.ordinary.unwrap();
         let id = call.fact.callee;
-        let family = if self.has_application_ordinary_scope(id) {
+        let family = if self.has_installed_ordinary_scope(id) {
             source::admitted_family(inventory, id, budget)?
         } else {
             source::family(inventory, id, budget)?
@@ -1319,7 +1319,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 required,
                 None,
             )?;
-            let formed = self.has_application_ordinary_scope(written.declaration)
+            let formed = self.has_installed_ordinary_scope(written.declaration)
                 && self.form_ordinary_value(inference, node, written, &goal, &output)?;
             self.elab.reserve(1)?;
             self.ordinary_values.insert(
@@ -1554,7 +1554,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             .evidence
             .get(call.instantiation.as_ref().or(call.goal.as_ref()).unwrap())
             .unwrap();
-        if self.has_application_ordinary_scope(call.family) || call.checked_local_disposer {
+        if self.has_installed_ordinary_scope(call.family) || call.checked_local_disposer {
             self.elab.reserve(call.defaults.len())?;
             facts.defaults = call.defaults.clone();
             if let Some(selection) = &proof.selection {
@@ -1610,7 +1610,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 })
                     })
                 || ((self.is_canonical_scalar_family(call.fact.callee)
-                    || self.has_application_ordinary_scope(call.fact.callee))
+                    || self.has_installed_ordinary_scope(call.fact.callee))
                     && inference.slots[&node].blocked)
             {
                 continue;

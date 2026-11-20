@@ -363,7 +363,7 @@ pub(in crate::analysis) struct IntegratedInputs<'r, 'g> {
     pub conversions: Option<&'r crate::analysis::typed::ConversionCore<'g>>,
     pub collections: crate::analysis::typed::CollectionCore<'g>,
     pub native_ownership: &'r [crate::analysis::typed::OwnershipProtection<'g>],
-    pub ordinary_scope: Option<crate::analysis::typed::ApplicationOrdinaryScope>,
+    pub ordinary_scope: Option<crate::analysis::typed::InstalledOrdinaryScope<'g>>,
     pub exhausted: bool,
 }
 

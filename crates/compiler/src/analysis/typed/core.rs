@@ -8,8 +8,9 @@ use crate::loader::{DeclarationKind, Module, Namespace, Target};
 
 mod inventories;
 mod result;
+pub(super) mod routine;
 mod scalar;
-pub(in crate::analysis) use inventories::ApplicationOrdinaryScope;
+pub(in crate::analysis) use inventories::InstalledOrdinaryScope;
 pub(super) use inventories::{InventoryCompleteness, check_inventories};
 pub(super) use result::check_result;
 pub use result::{

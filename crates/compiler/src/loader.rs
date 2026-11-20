@@ -359,7 +359,20 @@ impl Graph {
                 .is_some()
     }
 
-    /// The source keys in the selected installed profile, not a discovery request.
+    /// This group is required only when captured by ordinary import discovery.
+    pub(crate) fn installed_routine_source(&self) -> Option<&Module> {
+        self.installed?;
+        let index = self
+            .modules
+            .binary_search_by(|module| {
+                (module.key.origin, module.key.path.as_str())
+                    .cmp(&(Origin::Standard, "routine.rill"))
+            })
+            .ok()?;
+        self.modules.get(index)
+    }
+
+    /// The baseline source keys, not a discovery request.
     pub(crate) fn installed_source_keys(&self) -> Option<impl Iterator<Item = &'static str>> {
         Some(self.installed?.sources().iter().map(|&(key, _)| key))
     }

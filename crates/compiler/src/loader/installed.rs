@@ -137,6 +137,11 @@ impl InstalledProfile {
     }
 
     pub(super) fn source(self, path: &str) -> Option<&'static [u8]> {
+        // Explicit import discovery can capture this extension. It is not a
+        // member of the baseline required by every admitted role.
+        if path == "routine.rill" {
+            return Some(include_bytes!("../../../../stdlib/routine.rill"));
+        }
         self.sources()
             .iter()
             .find_map(|&(key, bytes)| (path == key).then_some(bytes))

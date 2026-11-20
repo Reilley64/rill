@@ -501,7 +501,7 @@ struct Checker<'r, 'g> {
     installed_conversions: Option<&'r super::typed::ConversionCore<'g>>,
     collections: CollectionCore<'g>,
     native_ownership: &'r [super::typed::OwnershipProtection<'g>],
-    ordinary_scope: Option<super::typed::ApplicationOrdinaryScope>,
+    ordinary_scope: Option<super::typed::InstalledOrdinaryScope<'g>>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,

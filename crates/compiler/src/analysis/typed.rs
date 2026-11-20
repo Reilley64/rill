@@ -20,8 +20,9 @@ pub use collections::{
     CollectionRepresentation, CollectionStorage, ListRole, ListTraversal,
 };
 pub use completion::TypedCompletion;
-pub(in crate::analysis) use core::ApplicationOrdinaryScope;
+pub(in crate::analysis) use core::InstalledOrdinaryScope;
 pub(super) use core::PrimitiveCore;
+pub use core::routine::RoutineRole;
 pub use core::{
     DisplayProtection, ErrorBridge, ErrorOperation, ErrorProviders, ErrorRepresentation,
     OptionRole, PrimitiveBinding, PrimitiveCoverage, PrimitiveOverlap, PrimitiveProtection,
@@ -60,6 +61,7 @@ pub struct TypedReport<'g> {
     bodies: GenericReport<'g>,
     public_interface_findings: Vec<PublicInterfaceFinding<'g>>,
     core: core::InstalledCore<'g>,
+    routine: Option<RoutineRole<'g>>,
     ownership: ownership::Report<'g>,
     collections: CollectionCore<'g>,
     collection_overlaps: Vec<CollectionOverlap<'g>>,
@@ -112,6 +114,11 @@ impl<'g> TypedReport<'g> {
     /// Stages not reached or outside this increment. An omitted stage is not a pass.
     pub fn not_performed(&self) -> &[Stage] {
         &self.not_performed
+    }
+
+    /// The pinned source designation, independent of operation availability.
+    pub fn routine_role(&self) -> Option<RoutineRole<'g>> {
+        self.routine
     }
 
     pub fn option_role(&self) -> Option<&OptionRole<'g>> {
@@ -354,8 +361,16 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     } else {
         core::roles_complete(&inventory, &core, &collections, &ownership, &mut budget)
     };
+    let routine_source = graph.installed_routine_source();
+    let routine_role = match routine_source {
+        Some(module) if !authority_exhausted => {
+            core::routine::check(&inventory, module, &mut budget)
+        }
+        _ => Ok(None),
+    };
+    let routine = routine_role.unwrap_or_default();
     let ordinary_scope = matches!(roles_complete, Ok(true))
-        .then(|| core::ApplicationOrdinaryScope::from_closed_roles(graph));
+        .then(|| core::InstalledOrdinaryScope::from_closed_roles(graph, routine));
     let mut bodies = analyze_integrated_bodies(
         &inventory,
         budget,
@@ -368,7 +383,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             collections,
             native_ownership: &ownership.protection,
             ordinary_scope,
-            exhausted: authority_exhausted || roles_complete.is_err(),
+            exhausted: authority_exhausted || roles_complete.is_err() || routine_role.is_err(),
         },
     );
     let mut budget = Budget {
@@ -448,9 +463,21 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         && collections.representations().count() == 4
         && ownership.representations_complete();
     let core_blockers = [
-        (!matches!(roles_complete, Ok(true)), CoreBlocker::Roles),
-        (!core_inventories.providers, CoreBlocker::Providers),
-        (!core_inventories.protection, CoreBlocker::Protection),
+        (
+            !matches!(roles_complete, Ok(true)) || routine_source.is_some() && routine.is_none(),
+            CoreBlocker::Roles,
+        ),
+        // The conditional group has source identity and ordinary dispatch only.
+        // It cannot close the installed checkpoint without a checked operation
+        // binding and protection over the captured contenders.
+        (
+            !core_inventories.providers || routine_source.is_some(),
+            CoreBlocker::Providers,
+        ),
+        (
+            !core_inventories.protection || routine_source.is_some(),
+            CoreBlocker::Protection,
+        ),
         (!representation_complete, CoreBlocker::Representation),
     ]
     .into_iter()
@@ -491,6 +518,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         bodies,
         public_interface_findings,
         core,
+        routine,
         ownership,
         collections,
         collection_overlaps,

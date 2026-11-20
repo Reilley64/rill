@@ -271,7 +271,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Some(InputPremise::HypotheticalConversionRole)
             }
             RequirementTarget::Family(id)
-                if self.has_application_ordinary_scope(id)
+                if self.has_installed_ordinary_scope(id)
                     || self.ordinary_scalar_role(id).is_some() =>
             {
                 None
@@ -456,7 +456,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(substitutions) = &body.substitution else {
             return Ok(None);
         };
-        let application_ordinary = self.has_application_ordinary_scope(&source.family);
+        let installed_ordinary = self.has_installed_ordinary_scope(&source.family);
         // The closed installed role inventory also permits checking a canonical
         // disposer in the module that defines its monomorphic record. The
         // typed receipt still requires the separate protection inventory.
@@ -464,7 +464,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         if body.placement == ordinary::Placement::OutsideOwners
             && self.conversion_family(&source.family).is_none()
         {
-            if !application_ordinary {
+            if !installed_ordinary {
                 return Ok(None);
             }
             self.finding(
@@ -473,7 +473,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 ScalarFindingKind::UnauthorizedImplementation,
             )?;
         }
-        if application_ordinary || local_disposer {
+        if installed_ordinary || local_disposer {
             for group in &family.duplicate_keys {
                 self.elab.step(1 + group.len())?;
                 if group.contains(&&declaration.id) {
@@ -508,7 +508,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .all(|issue| issue.declaration != &declaration.id);
         }
         let admitted = conversion
-            || (application_ordinary
+            || (installed_ordinary
                 || self.ordinary_scalar_role(&source.family).is_some()
                 || self.is_error_display(&source.family)
                 || self.is_error_observer(&source.family)
@@ -1417,7 +1417,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             && let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)?
         {
             // The assumed contract does not prove a concrete dispatch target.
-            if self.has_application_ordinary_scope(id) {
+            if self.has_installed_ordinary_scope(id) {
                 self.evidence.goals[goal].selection = None;
             }
             return Ok(state);
@@ -1630,7 +1630,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         let selected = (|| {
             let admitted = admitted_role
-                || self.has_application_ordinary_scope(family)
+                || self.has_installed_ordinary_scope(family)
                 || self.ordinary_scalar_role(family).is_some();
             let inventory = self.input.ordinary.unwrap();
             let facts = if admitted {
@@ -1849,7 +1849,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             &routes,
             false,
         )?;
-        if self.has_application_ordinary_scope(family)
+        if self.has_installed_ordinary_scope(family)
             && let Some(premise) = premise
         {
             self.add_goal_premise(&id, premise);
@@ -1906,7 +1906,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             };
             if let GoalJudgment::Instantiate { family, .. } = self.evidence.goals[goal].judgment
-                && !self.has_application_ordinary_scope(family)
+                && !self.has_installed_ordinary_scope(family)
             {
                 self.add_goal_premise(&child, InputPremise::HypotheticalOrdinaryRole);
             }
