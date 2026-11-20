@@ -1350,6 +1350,45 @@ fn grouped_reference_children_charge_depth_and_keep_the_written_escape() {
 }
 
 #[test]
+fn typed_reference_operand_groups_count_toward_depth() {
+    installed(
+        "scoped_join::typed_reference_operand_groups_count_toward_depth",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            for test_mode in [false, true] {
+                let mut bare_depth = 0;
+                for groups in [0, 20] {
+                    let open = "(".repeat(groups);
+                    let close = ")".repeat(groups);
+                    fs::write(&request.entry,format!("{BASE}\nimport std::routine::join;\nfunction joined(input:&i32): [&i32,&i32] {{ return join([() => input, () => {{ let local=2i32; return &{open}local{close}; }}]); }}")).unwrap();
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let typed = analyze_typed(&graph, AnalysisLimits::default());
+                    assert!(typed.receipt().is_some());
+                    if groups == 0 {
+                        bare_depth = typed.statistics().max_depth;
+                    } else {
+                        assert!(typed.statistics().max_depth >= groups);
+                        let short = analyze_typed(
+                            &graph,
+                            AnalysisLimits {
+                                max_depth: bare_depth,
+                                ..Default::default()
+                            },
+                        );
+                        assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
+                        assert!(short.receipt().is_none());
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn unsupported_reference_children_preserve_prior_typed_caps() {
     installed(
         "scoped_join::unsupported_reference_children_preserve_prior_typed_caps",

@@ -502,7 +502,13 @@ impl<'a, 'g> Check<'a, 'g> {
         {
             return Ok(false);
         }
-        let tuple = self.ungroup_value(*argument)?;
+        let references = scoped.is_some()
+            && matches!(value.ty.as_ref(),TypeTerm::Tuple(items) if matches!(items.as_slice(),[a,b] if shared_i32(a) && shared_i32(b)));
+        let (tuple, tuple_depth) = if references {
+            self.reference_root(*argument, depth + 1)?
+        } else {
+            (self.ungroup_value(*argument)?, depth + 1)
+        };
         let Some(input) = self.expression_facts(tuple)? else {
             return Ok(false);
         };
@@ -519,12 +525,11 @@ impl<'a, 'g> Check<'a, 'g> {
         else {
             return Ok(false);
         };
-        let references = scoped.is_some() && shared_i32(out0) && shared_i32(out1);
         let shapes = if references {
-            let Some(a) = self.reference_shape(*first)? else {
+            let Some(a) = self.reference_shape(*first, tuple_depth + 1)? else {
                 return Ok(false);
             };
-            let Some(b) = self.reference_shape(*second)? else {
+            let Some(b) = self.reference_shape(*second, tuple_depth + 1)? else {
                 return Ok(false);
             };
             Some([a, b])
