@@ -1005,6 +1005,37 @@ fn invokes_a_known_mutable_scalar_cell_twice() {
         "#,
         |request, module, receipt, typed| {
             let report = lower_capture_root(module, receipt, "counter");
+            let stats = report.statistics();
+            let limits = AnalysisLimits {
+                max_work: stats.work,
+                max_entries: stats.entries,
+                max_depth: stats.max_depth,
+            };
+            let counter = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("counter"))
+                .unwrap();
+            let query = |limits| lower_body(receipt, module, &counter.id, limits).unwrap();
+            assert!(query(limits).mir().is_some());
+            for short in [
+                AnalysisLimits {
+                    max_work: stats.work - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_entries: stats.entries - 1,
+                    ..limits
+                },
+                AnalysisLimits {
+                    max_depth: stats.max_depth - 1,
+                    ..limits
+                },
+            ] {
+                let result = query(short);
+                assert_eq!(result.completion(), Completion::ResourceLimit);
+                assert!(result.mir().is_none() && result.findings().is_empty());
+            }
             let mir = report.mir().unwrap_or_else(|| {
                 panic!(
                     "mode {}: {:?} at {:?}",
@@ -1161,6 +1192,14 @@ fn mutable_cell_receiver_checks_and_arithmetic_limit() {
                 let used = view;
                 return value;
             }
+            function callsOverlap(): i32 { return overlap(); }
+            function joinedCounter(choose: bool): [i32, i32] {
+                let mut a = 2i32;
+                let mut b = 7i32;
+                let mut job: mut () => i32 = () => { a += 3i32; return a; };
+                if (choose) { job = () => { b += 4i32; return b; }; }
+                let first = job(); let second = job(); return [first, second];
+            }
             function retarget(): [i32, i32, i32] {
                 let mut seed = 4i32;
                 let mut job: mut () => i32 = () => { seed += 3i32; return seed; };
@@ -1213,6 +1252,83 @@ fn mutable_cell_receiver_checks_and_arithmetic_limit() {
             assert_eq!(finding.code(), "R0201");
             assert_eq!(finding.site.span.bytes(), b"job()");
             assert_eq!(finding.related.span.bytes(), b"&job");
+
+            let caller = lower("callsOverlap");
+            assert_eq!(caller.completion(), Completion::SourceRejected);
+            assert!(caller.mir().is_none());
+            let [reached] = caller.findings() else {
+                panic!("expected callee receiver conflict")
+            };
+            assert_eq!(
+                (reached.code(), reached.site.node, reached.related.node),
+                (finding.code(), finding.site.node, finding.related.node)
+            );
+            let graph = compiler::analysis::ownership::analyze_ownership(
+                receipt,
+                AnalysisLimits::default(),
+            );
+            for name in ["overlap", "callsOverlap"] {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == decl.node)
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::SourceRejected);
+                assert!(root.mir().is_none());
+            }
+            assert_eq!(
+                graph
+                    .findings()
+                    .iter()
+                    .filter(|f| f.code() == "R0201"
+                        && f.site.module == &module.key
+                        && f.site.node == finding.site.node
+                        && f.related.node == finding.related.node)
+                    .count(),
+                1
+            );
+
+            let joined = lower("joinedCounter");
+            let mir = joined
+                .mir()
+                .expect("the receiver retains its path-specific cell");
+            let prefix = straight_blocks(mir, mir.entry);
+            let formation = |blocks: &[&compiler::analysis::ownership::Block<'_>]| {
+                blocks.iter().find_map(|b| match b.operation {
+                    Operation::FormClosure { capture, .. } => Some((b.site.node, capture.node)),
+                    _ => None,
+                })
+            };
+            let first = formation(&prefix).unwrap();
+            let (yes, no) = branch_targets(mir);
+            for (arm, replaced) in [(yes, true), (no, false)] {
+                let path = straight_blocks(mir, arm);
+                let new = formation(&path);
+                assert_eq!(new.is_some(), replaced);
+                let expected = new.unwrap_or(first);
+                let updates: Vec<_> = path
+                    .iter()
+                    .filter_map(|b| match b.operation {
+                        Operation::InvokeMutableI32Cell {
+                            receiver,
+                            origin,
+                            field,
+                            addend,
+                            ..
+                        } => {
+                            assert_eq!(receiver.root.span.bytes(), b"job");
+                            Some(((origin.node, field.node), addend))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(updates, [(expected, if replaced { 4 } else { 3 }); 2]);
+            }
 
             let retarget = lower("retarget");
             let mir = retarget
@@ -1273,6 +1389,37 @@ fn mutable_cell_receiver_checks_and_arithmetic_limit() {
                 assert!(report.mir().is_none());
                 assert_eq!(report.blocked_at().unwrap().span.bytes(), site);
             }
+        },
+    );
+}
+
+#[test]
+fn mutable_cell_preflight_checks_depth_before_inspecting_the_update() {
+    probe(
+        "captures::mutable_cell_preflight_checks_depth_before_inspecting_the_update",
+        r#"
+function f(): i32 {
+    let mut seed = 0i32;
+    let job: mut () => i32 = () => { seed -= 1i32; return seed; };
+    return seed;
+}
+"#,
+        |_, module, receipt| {
+            let decl = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("f"))
+                .unwrap();
+            let query = |limits| lower_body(receipt, module, &decl.id, limits).unwrap();
+            let unsupported = query(AnalysisLimits::default());
+            assert_eq!(unsupported.completion(), Completion::Incomplete);
+            assert!(unsupported.mir().is_none());
+            let short = query(AnalysisLimits {
+                max_depth: 4,
+                ..Default::default()
+            });
+            assert_eq!(short.completion(), Completion::ResourceLimit);
+            assert!(short.mir().is_none() && short.blocked_at().is_none());
         },
     );
 }

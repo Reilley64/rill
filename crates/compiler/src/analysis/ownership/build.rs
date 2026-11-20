@@ -4586,6 +4586,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<Pc> {
         // The update and returned value are two source occurrences of one
         // captured binding. Only the initial scalar copy runs at formation.
+        self.depth(depth)?;
         self.budget.step(8)?;
         let pending = Stop::Pending(node);
         let syntax = &self.module.syntax.nodes;
@@ -4594,6 +4595,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         else {
             return Err(pending);
         };
+        self.depth(depth + 1)?;
         let (NodeKind::Assignment("+="), [write, operand]) =
             (syntax[*update].kind, syntax[*update].children.as_slice())
         else {
@@ -4605,7 +4607,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         ) else {
             return Err(pending);
         };
-        if arrow.site.module != &self.module.key
+        if !std::ptr::eq(arrow.site.module, &self.module.key)
             || arrow.site.node != node
             || !matches!(self.fact(returning).map(|f| &f.kind),
                 Some(NodeFactKind::ArrowReturn { target }) if *target == node)
@@ -4630,17 +4632,19 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         for use_ in [first, second] {
             let value = self.normal_value(use_.site.node)?;
-            if use_.site.module != &self.module.key
+            if !std::ptr::eq(use_.site.module, &self.module.key)
                 || !use_.reachable
                 || use_.through.is_some()
                 || use_.form != CaptureForm::Value
                 || use_.access != Access::Owned
                 || use_.ty != arrow.result
                 || use_.storage.as_ref() != Some(&arrow.result)
-                || use_.path.root != capture.path.root
+                || !std::ptr::eq(use_.path.root, capture.path.root)
                 || !use_.path.projections.is_empty()
                 || syntax[use_.site.node].kind != NodeKind::ValueReference
-                || value.binding != Some(capture.path.root)
+                || !value
+                    .binding
+                    .is_some_and(|id| std::ptr::eq(id, capture.path.root))
                 || value.ty != arrow.result
                 || (use_.site.node == write && value.place != TypedPlace::Writable)
             {
@@ -5299,7 +5303,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let value = self.normal_value(receiver)?;
         if self.module.syntax.nodes[receiver].kind != NodeKind::ValueReference
             || value.place != TypedPlace::Writable
-            || value.binding != Some(path.root)
+            || !value.binding.is_some_and(|id| std::ptr::eq(id, path.root))
             || !matches!(value.ty.as_ref(), TypeTerm::Callable {
                 mode: InvocationMode::Mutable, parameters, result,
             } if parameters.is_empty() && matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
