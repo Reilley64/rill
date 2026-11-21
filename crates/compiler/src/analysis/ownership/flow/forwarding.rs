@@ -1,5 +1,4 @@
 use super::*;
-use crate::parser::NodeKind;
 
 impl<'g> CancellationTrace<'_, 'g> {
     pub(in crate::analysis::ownership) fn forwarding_call(
@@ -14,6 +13,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             unreachable!("call block records a reached call");
         };
         (self.params.len() == 1
+            && self.calls[call].direct_bool_parameter
             && self.calls[call].args.len() == 1
             && callee.kind == DeclarationKind::Function)
             .then_some((block, callee))
@@ -48,19 +48,9 @@ impl<'g> CancellationTrace<'_, 'g> {
         if !std::ptr::eq(facts.callee, call.callee) || facts.pipe_input.is_some() {
             return Ok(None);
         }
-        // This selects an actual straight-line argument transfer, not a call
-        // hidden in a branch (even one folded out of the ordinary CFG).
-        let syntax = &self.module.syntax.nodes;
-        let mut top_level = false;
-        for &statement in &syntax[self.body].children {
-            budget.step(1)?;
-            match syntax[statement].kind {
-                NodeKind::ExpressionStatement => top_level |= syntax[statement].children == [node],
-                NodeKind::Binding { .. } | NodeKind::Return => {}
-                _ => return Ok(None),
-            }
-        }
-        if !top_level
+        // Lowering recorded the actual straight-line call, not a call hidden
+        // in a pruned branch. Check the formal against the transferred stage.
+        if !call.direct_bool_parameter
             || self.branch_parameter(self.slots[stage].node, budget)? != Some(self.params[0])
         {
             return Ok(None);

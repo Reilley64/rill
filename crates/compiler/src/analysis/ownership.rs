@@ -2456,6 +2456,8 @@ struct Build<'a, 'g, 'b> {
     incoming_list_arrow: Option<(Slot, Slot, bool)>,
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
+    /// The sole written call statement in a reached, straight top-level frame.
+    forwarding_statement: Option<NodeId>,
     /// A top-level empty/continue loop whose only decision reads a Bool formal.
     list_delivery_loop: Option<(NodeId, NodeId)>,
     scalar_copy_read: Option<NodeId>,
@@ -2491,6 +2493,8 @@ struct OriginalTwoHopBool {
 
 struct Call<'a, 'g> {
     callee: &'g DeclarationId,
+    /// Necessary, not sufficient, for a suspended Boolean forwarding frame.
+    direct_bool_parameter: bool,
     args: Vec<Slot>,
     into: Option<Slot>,
     result: CallResult<'a, 'g>,

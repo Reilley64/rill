@@ -369,6 +369,36 @@ fn good_only_graph_needs_the_complete_work_entry_and_depth_budget() {
 }
 
 #[test]
+fn unsupported_forwarders_keep_the_original_frame_budgets() {
+    let retaining = r#"function outer(enter: bool): void { middle(ARG); }
+function middle(enter: bool): void {
+    let prior = false; let input = true; let mut slot = &prior;
+    unsafeBody(&mut slot, &input, enter);
+}
+function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true; *slot = &flag; while (enter) { continue; } *slot = input;
+}"#;
+    for (source, target_cap, graph_cap, expected_graph) in [
+        (retaining.replace("ARG", "false"), (7419,935,6), (190151,4842,6), GraphCompletion::SourceRejected),
+        (retaining.replace("ARG", "((false))"), (7439,941,7), (190283,4844,7), GraphCompletion::SourceRejected),
+        (retaining.replace("middle(ARG);", "if (true) { middle(enter); }"), (7499,975,7), (190399,4876,7), GraphCompletion::SourceRejected),
+        ("function outer(enter: bool): void { middle(enter); }\nfunction middle(enter: bool): void { let _ = enter; }".to_owned(), (3954,162,5), (186093,4126,5), GraphCompletion::Incomplete),
+    ] {
+        probe("graph::delivery::unsupported_forwarders_keep_the_original_frame_budgets", &source, |_, module, receipt| {
+            let cap = |(max_work,max_entries,max_depth)| AnalysisLimits {max_work,max_entries,max_depth};
+            let graph = analyze_ownership(receipt, cap(graph_cap));
+            assert_eq!(graph.completion(), expected_graph);
+            let outer = root(&graph, b"function outer");
+            assert!(matches!(outer.forwarded_call(), Delivery::Unresolved));
+            let target = lower_root(receipt, module, outer.owner(), cap(target_cap)).unwrap();
+            assert_eq!(target.completion(), Completion::Checked);
+            assert!(target.mir().unwrap().cancellation().is_none());
+            assert!(target.findings().is_empty());
+        });
+    }
+}
+
+#[test]
 fn forwarded_call_uses_the_selected_module_not_the_function_spelling() {
     let unsafe_middle = format!("{}\n", OTHER.split("function nestedCaller").next().unwrap())
         .replace("function bad(", "export function bad(");

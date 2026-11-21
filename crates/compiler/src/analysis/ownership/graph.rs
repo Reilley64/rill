@@ -352,6 +352,7 @@ struct WorkItem<'a, 'g> {
     retaining_parameters: Option<[Place<'g>; 3]>,
     selected_proof: Option<Box<GraphRetainingCall<'g>>>,
     selected_gate: Option<Place<'g>>,
+    has_retaining_call: bool,
     forwarded_proof: Option<Box<GraphForwardedRetainingCall<'g>>>,
 }
 
@@ -460,6 +461,7 @@ fn push_body<'a, 'g>(
         retaining_parameters: None,
         selected_proof: None,
         selected_gate: None,
+        has_retaining_call: false,
         forwarded_proof: None,
     });
     Ok(index)
@@ -877,7 +879,9 @@ fn check_enabled_frames<'g>(
             }
             Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => {}
         }
-        if ordinary_checked && trace.retaining_call_block().is_some() {
+        if ordinary_checked && let Some(block) = trace.retaining_call_block() {
+            work[index].has_retaining_call = matches!(work[index].ordinary.as_ref().unwrap().blocks[block].operation,
+                Operation::CallRetainingWithBool { second_input: None, ref arguments, .. } if arguments.len() == 3);
             work[index].trace = Some(trace);
         }
     }
@@ -904,6 +908,7 @@ fn check_selected_calls<'g>(
         let mir = item.ordinary.as_ref().unwrap();
         let Some(parameters) = work[callee_root].retaining_parameters else {
             if callee_root != index
+                && work[callee_root].has_retaining_call
                 && work[callee_root].ordinary_completion == Completion::Checked
                 && let Some((_, callee)) = trace.forwarding_call(mir)
                 && work[callee_root]

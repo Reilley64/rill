@@ -525,6 +525,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             incoming_list_arrow: None,
             cleanups: Vec::new(),
             body_scope: None,
+            forwarding_statement: None,
             list_delivery_loop: None,
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
@@ -2164,9 +2165,25 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<Pc> {
         let mut locals = Vec::new();
         let mut prefix = children.len();
+        let mut straight = node == self.body;
+        let mut forwarding = None;
         for (index, &child) in children.iter().enumerate() {
             self.budget.step(1)?;
             let statement = &self.module.syntax.nodes[child];
+            if straight {
+                match (statement.kind, statement.children.as_slice()) {
+                    (NodeKind::ExpressionStatement, [value])
+                        if self.module.syntax.nodes[*value].kind == NodeKind::Call =>
+                    {
+                        straight = forwarding.replace(*value).is_none();
+                    }
+                    (
+                        NodeKind::ExpressionStatement | NodeKind::Binding { .. } | NodeKind::Return,
+                        _,
+                    ) => (),
+                    _ => straight = false,
+                }
+            }
             let control = if matches!(statement.kind, NodeKind::Binding { .. }) {
                 let initializer = *statement.children.last().unwrap();
                 self.declare_binding(child, initializer, &mut locals, depth + 2)?;
@@ -2206,6 +2223,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         };
         let mut tail = self.cleanup_scope(exit_site, &locals, next)?;
         if node == self.body {
+            if straight && prefix == children.len() {
+                self.forwarding_statement = forwarding;
+            }
             if !locals.is_empty()
                 && let Action::EndScope(index) = self.code[tail].action
             {
@@ -6333,6 +6353,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let index = self.calls.len();
             self.calls.push(Call {
                 callee: call.callee,
+                direct_bool_parameter: false,
                 args: std::mem::take(&mut args),
                 into,
                 result: CallResult::Plain,
@@ -6565,6 +6586,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let index = self.calls.len();
         self.calls.push(Call {
             callee: implementation,
+            direct_bool_parameter: false,
             args: vec![stage],
             into,
             result: CallResult::ScalarCopy,
@@ -6751,6 +6773,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let index = self.calls.len();
         self.calls.push(Call {
             callee: &header.declaration.id,
+            direct_bool_parameter: false,
             args: vec![stage],
             into: Some(into),
             result: CallResult::TransfersCallable(header),
@@ -6966,6 +6989,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         self.budget.reserve(call.arguments.len() + 1)?;
         let mut args = Vec::with_capacity(call.arguments.len());
+        let mut direct_bool_parameter = false;
         let mut destination = None;
         let mut two_hop = None;
         let mut pipe_formal = None;
@@ -6974,7 +6998,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             if Some(arg) == call.pipe_input {
                 pipe_formal = Some(position);
             }
-            let ty = self.value(arg)?.ty.clone();
+            let value = self.value(arg)?;
+            let ty = value.ty.clone();
+            direct_bool_parameter = self.forwarding_statement == Some(node)
+                && call.arguments.len() == 1
+                && !piped
+                && scalar::scalar(&ty) == Some(Primitive::Bool)
+                && value.refinement.is_none()
+                && value.access == Access::Owned
+                && value.place == TypedPlace::ReadOnly
+                && value.path.as_ref().is_some_and(|p| {
+                    p.root.kind == DeclarationKind::Parameter && p.projections.is_empty()
+                });
             if self.reference_option(&ty) {
                 return Err(Stop::Pending(arg));
             }
@@ -7031,6 +7066,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         };
         self.calls.push(Call {
             callee,
+            direct_bool_parameter,
             args,
             into,
             result: if borrows_record {
