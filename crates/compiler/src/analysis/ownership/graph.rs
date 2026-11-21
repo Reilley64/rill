@@ -1161,6 +1161,62 @@ pub(super) fn visit_dependencies<'g>(
                         emit(implementation, ListI32Disposal { bridge }, budget)?;
                     }
                 }
+                for frame in &join.frames {
+                    if frame.result_origin.is_none() {
+                        continue;
+                    }
+                    // A child and its unpublished output are not ordinary
+                    // graph roots. Include the sealed edges of the actual
+                    // child body and the cleanup owed only on cancellation.
+                    for child in &frame.body.blocks {
+                        budget.step(1)?;
+                        let (declaration, contract) = match child.operation {
+                            Operation::ConstructResultError {
+                                constructor,
+                                variant,
+                                wrapper,
+                                ..
+                            } => (
+                                constructor,
+                                FreshResultConstructor {
+                                    variant,
+                                    wrapper,
+                                    storage_source: child
+                                        .fresh_result_storage
+                                        .ok_or(Stop::Pending(child.site.node))?,
+                                },
+                            ),
+                            Operation::StageScopedValue {
+                                retirement:
+                                    Cleanup::DropFreshResultError {
+                                        origin,
+                                        variant,
+                                        wrapper,
+                                        storage_source,
+                                        ..
+                                    },
+                                ..
+                            } => (
+                                wrapper,
+                                FreshResultErrorDisposal {
+                                    origin: origin.node,
+                                    variant,
+                                    storage_source,
+                                },
+                            ),
+                            _ => continue,
+                        };
+                        visit(
+                            index,
+                            Dependency {
+                                site: child.site,
+                                declaration,
+                                contract,
+                            },
+                            budget,
+                        )?;
+                    }
+                }
             }
             Operation::CopyClosure { ref captures, .. } => {
                 budget.step(captures.len())?;

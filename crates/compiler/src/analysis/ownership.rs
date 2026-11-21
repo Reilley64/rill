@@ -544,6 +544,18 @@ pub enum Operation<'g> {
         capture: Site<'g>,
         mode: InvocationMode,
     },
+    /// Form a scoped environment, copying its sole Bool capture if present.
+    FormScopedValueArrow {
+        environment: Place<'g>,
+        capture: Option<Place<'g>>,
+    },
+    /// Move the actual checked child output into its unpublished join stage.
+    /// The export place identifies the stage within this child. Retirement
+    /// describes cleanup only if cancellation later abandons that stage.
+    StageScopedValue {
+        from: Place<'g>,
+        retirement: Cleanup<'g>,
+    },
     /// Form a pair environment from the two already-staged captures, in order.
     FormClosurePair {
         closure: Site<'g>,
@@ -2121,6 +2133,9 @@ enum PairCall {
 #[derive(Clone, Copy)]
 enum ScopedFrames {
     Prepared(usize),
+    FreshResult {
+        tuple_depth: usize,
+    },
     /// Captures are checked in caller flow before either body proof is built.
     DisjointExclusive {
         sources: [Slot; 2],
@@ -2277,6 +2292,11 @@ enum Action<'g> {
         into: Slot,
         mode: InvocationMode,
     },
+    FormScopedValueArrow {
+        capture: Option<Slot>,
+        into: Slot,
+    },
+    StageScopedValue(Slot),
     CallListArrows {
         pair: usize,
         receivers: [Slot; 2],

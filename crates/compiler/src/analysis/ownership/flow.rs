@@ -56,6 +56,7 @@ impl ValueOrigin {
 enum CallableOwner {
     LocalCapture(NodeId),
     ListArrow(NodeId),
+    ScopedValue(NodeId),
     LocalExclusive(Option<CallableLayout>),
     Pair(CallableLayout),
     Formal(CallableLayout),
@@ -67,6 +68,7 @@ impl CallableOwner {
         match self {
             Self::LocalCapture(_)
             | Self::ListArrow(_)
+            | Self::ScopedValue(_)
             | Self::LocalExclusive(_)
             | Self::Pair(_) => None,
             Self::Formal(layout) | Self::Returned(layout) => Some(layout),
@@ -216,6 +218,7 @@ fn liveness(
             Action::CheckCallableReturn(slot) => use_one(Some(slot), None),
             Action::Dispose { operand: slot, .. }
             | Action::Export(slot)
+            | Action::StageScopedValue(slot)
             | Action::EndEmptyOption(slot)
             | Action::DropResultFailure { operand: slot, .. } => use_one(Some(slot), Some(slot)),
             Action::Displace { target, incoming } | Action::Install { target, incoming } => {
@@ -228,6 +231,7 @@ fn liveness(
                 ..
             } => ([Some(capture), second], Some(into)),
             Action::FormListArrow { capture, into, .. } => use_one(Some(capture), Some(into)),
+            Action::FormScopedValueArrow { capture, into } => use_one(capture, Some(into)),
             Action::CallListArrows {
                 receivers, into, ..
             }
@@ -3338,6 +3342,34 @@ pub(super) fn run<'a, 'g>(
                         mode,
                     }
                 }
+                Action::FormScopedValueArrow { capture, into } => {
+                    if !matches!(state[into], State::Vacant) {
+                        return Err(Stop::Pending(node));
+                    }
+                    if let Some(from) = capture {
+                        require_initialized(&slots, &state, from, node, budget)?;
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            from,
+                            (node, Conflict::Access),
+                            Access::Observe,
+                            budget,
+                        )?;
+                        if initialized(&state[from], node)? != &Held::default() {
+                            return Err(Stop::Pending(node));
+                        }
+                    }
+                    state[into] = State::Initialized(Held {
+                        callable_owner: Some(CallableOwner::ScopedValue(slots[into].node)),
+                        ..Held::default()
+                    });
+                    Operation::FormScopedValueArrow {
+                        environment: local(into),
+                        capture: capture.map(local),
+                    }
+                }
                 Action::CheckScopedReferenceResults {
                     entries,
                     body_depths,
@@ -3371,102 +3403,136 @@ pub(super) fn run<'a, 'g>(
                     if active.is_some() {
                         return Err(Stop::Pending(node));
                     }
-                    let deferred;
-                    let frames = match pair {
-                        ScopedFrames::Prepared(index) => &list_arrow_pairs[index],
-                        ScopedFrames::DisjointExclusive {
-                            sources,
-                            tuple_depth,
-                        } => {
-                            deferred = build::reached_exclusive_pair(
-                                typed,
-                                module,
-                                facts.nodes(),
-                                node,
-                                (sources, tuple_depth),
-                                &slots,
-                                budget,
-                            )?;
-                            &deferred
-                        }
-                    };
-                    budget.reserve(2)?;
-                    for (receiver, child) in receivers.into_iter().zip(&frames.children) {
-                        if matches!(child.body, build::ArrowBody::Reference(_)) {
-                            budget.step(1)?;
-                            initialized(&state[receiver], node)?;
-                        }
-                        conflict(
-                            &slots,
-                            &state,
-                            &live[pc],
-                            receiver,
-                            (node, Conflict::Access),
-                            Access::Exclusive,
-                            budget,
-                        )?;
-                        let exclusive = matches!(
-                            child.body,
-                            build::ArrowBody::List {
-                                exclusive: true,
-                                ..
-                            }
-                        );
-                        // Check the transferred access, not an observation
-                        // by the parent. Staged::check binds this loan to
-                        // the child's actual capture site and backing proxy.
-                        conflict(
-                            &slots,
-                            &state,
-                            &live[pc],
-                            child.source,
-                            (node, Conflict::Access),
-                            if exclusive {
-                                Access::ThroughExclusive(receiver)
-                            } else {
-                                Access::Observe
-                            },
-                            budget,
-                        )?;
-                    }
-                    // Both captures have formed before probing either
-                    // reference child. The scalar frames are prebuilt.
-                    let mut frame = |i: usize| -> ResultOf<_> {
-                        let child = &frames.children[i];
-                        let environment = local(receivers[i]);
-                        let (incoming_list_backing, exclusive, body) = match &child.body {
-                            build::ArrowBody::List {
-                                incoming_backing,
-                                exclusive,
-                                mir,
-                            } => (Some(*incoming_backing), *exclusive, Arc::clone(mir)),
-                            build::ArrowBody::Reference(ty) => (
-                                None,
-                                false,
-                                build::lower_reference_child(
+                    let mut ordinary_frames = || -> ResultOf<_> {
+                        let deferred;
+                        let frames = match pair {
+                            ScopedFrames::FreshResult { .. } => return Err(Stop::Pending(node)),
+                            ScopedFrames::Prepared(index) => &list_arrow_pairs[index],
+                            ScopedFrames::DisjointExclusive {
+                                sources,
+                                tuple_depth,
+                            } => {
+                                deferred = build::reached_exclusive_pair(
                                     typed,
                                     module,
-                                    child,
-                                    environment.root.node,
-                                    ty,
+                                    facts.nodes(),
+                                    node,
+                                    (sources, tuple_depth),
+                                    &slots,
                                     budget,
-                                )?,
-                            ),
+                                )?;
+                                &deferred
+                            }
                         };
-                        Ok(ScopedJoinFrame {
-                            origin: environment.root,
-                            invocation: child.invocation,
-                            body_site: child.body_site,
-                            environment,
-                            capture: child.capture,
-                            backing: local(child.source),
-                            incoming_list_backing,
-                            exclusive,
-                            result: local(into + 1 + i),
-                            body,
-                        })
+                        budget.reserve(2)?;
+                        for (receiver, child) in receivers.into_iter().zip(&frames.children) {
+                            if matches!(child.body, build::ArrowBody::Reference(_)) {
+                                budget.step(1)?;
+                                initialized(&state[receiver], node)?;
+                            }
+                            conflict(
+                                &slots,
+                                &state,
+                                &live[pc],
+                                receiver,
+                                (node, Conflict::Access),
+                                Access::Exclusive,
+                                budget,
+                            )?;
+                            let exclusive = matches!(
+                                child.body,
+                                build::ArrowBody::List {
+                                    exclusive: true,
+                                    ..
+                                }
+                            );
+                            // Check the transferred access, not an observation
+                            // by the parent. Staged::check binds this loan to
+                            // the child's actual capture site and backing proxy.
+                            conflict(
+                                &slots,
+                                &state,
+                                &live[pc],
+                                child.source,
+                                (node, Conflict::Access),
+                                if exclusive {
+                                    Access::ThroughExclusive(receiver)
+                                } else {
+                                    Access::Observe
+                                },
+                                budget,
+                            )?;
+                        }
+                        // Both captures have formed before probing either
+                        // reference child. The scalar frames are prebuilt.
+                        let mut frame = |i: usize| -> ResultOf<_> {
+                            let child = &frames.children[i];
+                            let environment = local(receivers[i]);
+                            let (incoming_list_backing, exclusive, body) = match &child.body {
+                                build::ArrowBody::List {
+                                    incoming_backing,
+                                    exclusive,
+                                    mir,
+                                } => (Some(*incoming_backing), *exclusive, Arc::clone(mir)),
+                                build::ArrowBody::Reference(ty) => (
+                                    None,
+                                    false,
+                                    build::lower_reference_child(
+                                        typed,
+                                        module,
+                                        child,
+                                        environment.root.node,
+                                        ty,
+                                        budget,
+                                    )?,
+                                ),
+                            };
+                            Ok(ScopedJoinFrame {
+                                origin: environment.root,
+                                invocation: child.invocation,
+                                body_site: child.body_site,
+                                environment,
+                                capture: Some(child.capture),
+                                backing: Some(local(child.source)),
+                                incoming_list_backing,
+                                exclusive,
+                                result: local(into + 1 + i),
+                                body,
+                                value: false,
+                                result_origin: None,
+                            })
+                        };
+                        Ok([frame(0)?, frame(1)?])
                     };
-                    let frames = [frame(0)?, frame(1)?];
+                    let frames = if let ScopedFrames::FreshResult { tuple_depth } = pair {
+                        // The only inputs on this route are owned environments.
+                        // Check both actual acquisitions before lowering a child.
+                        for receiver in receivers {
+                            scoped_join::check_value_receiver(
+                                &slots, &state, receiver, node, budget,
+                            )?;
+                            conflict(
+                                &slots,
+                                &state,
+                                &live[pc],
+                                receiver,
+                                (node, Conflict::Access),
+                                Access::Exclusive,
+                                budget,
+                            )?;
+                        }
+                        build::lower_fresh_scoped_children(
+                            typed,
+                            module,
+                            facts.nodes(),
+                            node,
+                            tuple_depth,
+                            std::array::from_fn(|i| (local(receivers[i]), local(into + 1 + i))),
+                            budget,
+                        )?
+                    } else {
+                        ordinary_frames()?
+                    };
                     let parent = CancellationFrame {
                         module,
                         disposer: Some(disposer),
@@ -4141,7 +4207,9 @@ pub(super) fn run<'a, 'g>(
                     )?;
                     Operation::None
                 }
-                Action::CheckCallableReturn(slot) | Action::Export(slot) => {
+                Action::CheckCallableReturn(slot)
+                | Action::Export(slot)
+                | Action::StageScopedValue(slot) => {
                     require_initialized(&slots, &state, slot, node, budget)?;
                     let owner = initialized(&state[slot], node)?.callable_owner;
                     forbid_active_escape(&state[slot], node)?;
@@ -4185,10 +4253,31 @@ pub(super) fn run<'a, 'g>(
                         // Nothing proves a further erased output boundary.
                         return Err(Stop::Pending(node));
                     }
+                    let operation = if matches!(action, Action::StageScopedValue(_)) {
+                        budget.step(1)?;
+                        let held = initialized(&state[slot], node)?;
+                        if slots[slot].members != 0
+                            || slots[slot].custom_disposer.is_some()
+                            || !held.loans.is_empty()
+                            || owner.is_some()
+                            || !matches!(
+                                slots[slot].cleanup,
+                                StorageCleanup::End | StorageCleanup::FreshBoolResult(_)
+                            )
+                        {
+                            return Err(Stop::Pending(node));
+                        }
+                        Operation::StageScopedValue {
+                            from: local(slot),
+                            retirement: cleanup_of(module, slots[slot], held, node)?,
+                        }
+                    } else {
+                        Operation::Export(local(slot))
+                    };
                     let region = slots[slot].storage(slot);
                     budget.step(region.len())?;
                     state[region].fill(State::Vacant);
-                    Operation::Export(local(slot))
+                    operation
                 }
                 Action::Cleanup(index) | Action::EndScope(index) => {
                     Operation::Cleanup(cleanup_boundary(

@@ -25,6 +25,8 @@ use std::sync::Arc;
 
 mod iteration;
 mod list_arrows;
+mod scoped_result;
+pub(super) use scoped_result::lower_fresh_scoped_children;
 mod reference_results;
 pub(super) use list_arrows::{ArrowBody, ListArrowPair, reached_exclusive_pair};
 pub(super) use reference_results::{check_scoped_reference_results, lower_reference_child};
@@ -2535,6 +2537,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         self.clone_region(from, value)?
                     } else if let Some(slot) = self.nested_transfer_slot(value, value, result)? {
                         slot
+                    } else if let Some(slot) = self.scoped_result_destination(value, value, &ty)? {
+                        slot
                     } else {
                         self.slot(value, &ty)?
                     };
@@ -3222,6 +3226,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     let slot = self.clone_region(from, site)?;
                     self.budget.reserve(1)?;
                     self.nested_tuple_bindings.insert(declaration, (slot, from));
+                    slot
+                } else if let Some(slot) = self.scoped_result_destination(initializer, site, ty)? {
+                    self.budget.reserve(1)?;
+                    self.locals.insert(declaration, slot);
                     slot
                 } else {
                     self.local(declaration, site, ty)?
@@ -6847,10 +6855,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if checked_carrier.is_none()
             && let Some(join) = call.scoped_join.as_deref()
         {
-            // Result-use transfers the occurrence, not its initialized owner.
-            // Result stages need checked publication and cancellation cleanup.
             if join.slots.iter().any(|slot| slot.result_origin.is_some()) {
-                return Err(Stop::Pending(node));
+                return self.stage_fresh_scoped_result(node, join, into, next, depth);
             }
             if join
                 .slots

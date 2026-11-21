@@ -6,6 +6,9 @@ use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 use compiler::loader::{FailureKind, Lookup, Module, Namespace, Target};
 use compiler::parser::NodeKind;
 
+#[path = "scoped_join/fresh_result.rs"]
+mod fresh_result;
+
 const BASE: &str = include_str!("../../../../tests/installed/typed/main.rill");
 const CHECKS: &str = include_str!("../../../../tests/installed/typed/checks.rill");
 const KEYS: &str = include_str!("../../../../tests/installed/typed/stdlib-sources.txt");
@@ -98,6 +101,13 @@ fn check_typed_budget(graph: &loader::Graph, typed: &TypedReport<'_>) {
     );
     assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
     assert!(short.receipt().is_none());
+}
+
+fn ended(cleanup: Obligation<'_>) -> compiler::analysis::ownership::Place<'_> {
+    let Obligation::EndStorage(place) = cleanup else {
+        panic!("expected end-storage for this stage")
+    };
+    place
 }
 
 fn named(module: &Module, name: &str) -> usize {
@@ -561,9 +571,14 @@ fn prove_join<'a, 'g>(
         unreachable!()
     };
     assert_eq!([join.family, join.implementation, join.bridge], ids);
-    let roots = join.frames.each_ref().map(|frame| frame.backing.root.node);
+    let roots = join
+        .frames
+        .each_ref()
+        .map(|frame| frame.backing.unwrap().root.node);
     assert_eq!(
-        join.frames.each_ref().map(|f| f.backing.root.span.bytes()),
+        join.frames
+            .each_ref()
+            .map(|f| f.backing.unwrap().root.span.bytes()),
         reads.map(|(_, backing)| backing.as_bytes()),
     );
     assert_eq!(roots[0] == roots[1], reads[0].1 == reads[1].1);
@@ -594,7 +609,7 @@ fn prove_join<'a, 'g>(
             panic!("expected a checked List read, not a copied descriptor")
         };
         assert_eq!((index, exclusive), (reads[i].0, frame.exclusive));
-        assert_eq!(view.root.node, frame.capture.root.node);
+        assert_eq!(view.root.node, frame.capture.unwrap().root.node);
         assert_eq!(
             backing.root.node,
             frame.incoming_list_backing.unwrap().root.node
@@ -606,11 +621,11 @@ fn prove_join<'a, 'g>(
             }).unwrap() else { unreachable!() };
             assert!(
                 matches!(acquire.operation, Operation::Borrow { source, holder, exclusive: true }
-                if source.root.node == frame.backing.root.node && holder.root.node == frame.capture.root.node)
+                if source.root.node == frame.backing.unwrap().root.node && holder.root.node == frame.capture.unwrap().root.node)
             );
             assert!(
                 matches!(form.operation, Operation::FormClosure { capture, mode: compiler::analysis::InvocationMode::Mutable, .. }
-                if capture.node == frame.capture.root.node)
+                if capture.node == frame.capture.unwrap().root.node)
             );
             let child_path = straight_blocks(&frame.body, frame.body.entry);
             let [_, exported, cleaned, returned] = child_path.as_slice() else {
@@ -619,7 +634,7 @@ fn prove_join<'a, 'g>(
             assert!(matches!(exported.operation, Operation::Export(_)));
             assert!(
                 matches!(&cleaned.operation, Operation::Cleanup(actions) if matches!(actions.as_slice(),
-                [Obligation::EndStorage(place)] if place.root.node == frame.capture.root.node))
+                [Obligation::EndStorage(place)] if place.root.node == frame.capture.unwrap().root.node))
             );
             assert!(matches!(returned.terminator, Terminator::Return));
         }
@@ -713,7 +728,7 @@ fn prove_join<'a, 'g>(
         let info = &join.waiting[stopped];
         assert!(info.deferred && !info.delivery.pending);
         assert_eq!(info.stop_requested, [0 == second, 1 == second]);
-        assert_eq!(info.retained_backings.map(|p| p.root.node), roots);
+        assert_eq!(info.retained_backings.map(|p| p.unwrap().root.node), roots);
         let cleaning = waiting(step(
             stopped,
             EnterChild {
@@ -727,7 +742,9 @@ fn prove_join<'a, 'g>(
         assert_eq!(resumed, pending);
         assert!(join.waiting[resumed].delivery.pending && join.waiting[resumed].deferred);
         assert_eq!(
-            join.waiting[resumed].retained_backings.map(|p| p.root.node),
+            join.waiting[resumed]
+                .retained_backings
+                .map(|p| p.unwrap().root.node),
             roots
         );
         let at_exit = waiting(step(resumed, EndChildView(second)));
@@ -742,7 +759,7 @@ fn prove_join<'a, 'g>(
                 .blocks
                 .iter()
                 .any(|block| matches!(block.operation, Operation::Export(place)
-                if place.root.node == retired[first].unwrap().root.node))
+                if place.root.node == ended(retired[first].unwrap()).root.node))
         );
     }
     let inherited = waiting(entry(false, true, true));
@@ -1678,11 +1695,11 @@ function joined(input: List<i32>, extra: List<i32>): [i32, i32] {{
                         };
                         assert_eq!(first.frames.each_ref().map(|f| f.exclusive), [false, true]);
                         assert_eq!(second.frames.each_ref().map(|f| f.exclusive), [true, true]);
-                        let other = first.frames[1].backing.root.node;
-                        assert_eq!(second.frames[0].backing.root.node, other);
+                        let other = first.frames[1].backing.unwrap().root.node;
+                        assert_eq!(second.frames[0].backing.unwrap().root.node, other);
                         assert!(path[first_at + 1..*second_at].iter().any(|b| matches!(b.operation,
                             Operation::Borrow { source, holder, exclusive: true }
-                            if source.root.node == other && holder.root.node == second.frames[0].capture.root.node)));
+                            if source.root.node == other && holder.root.node == second.frames[0].capture.unwrap().root.node)));
                     }
                 }
             }
@@ -1718,8 +1735,8 @@ fn check_reference_lifecycle(module: &Module, mir: &Mir<'_>, sources: [&str; 2])
             format!("{}: &i32", sources[i]).as_bytes()
         );
         assert!(std::ptr::eq(from.root.module, &module.key));
-        assert_eq!(from.root.node, frame.backing.root.node);
-        assert_eq!(staged.root.node, frame.capture.root.node);
+        assert_eq!(from.root.node, frame.backing.unwrap().root.node);
+        assert_eq!(staged.root.node, frame.capture.unwrap().root.node);
         assert!(
             matches!([form_a, form_b][i].operation, Operation::FormClosure { closure, capture, .. }
             if closure.node == frame.environment.root.node && capture.node == staged.root.node)
@@ -1738,7 +1755,7 @@ fn check_reference_lifecycle(module: &Module, mir: &Mir<'_>, sources: [&str; 2])
         else {
             panic!("no child descriptor copy")
         };
-        assert_eq!(from.root.node, frame.capture.root.node);
+        assert_eq!(from.root.node, frame.capture.unwrap().root.node);
         assert_ne!(from.root.node, output.root.node);
         assert!(
             matches!(export.operation, Operation::Export(p) if p.root.node == output.root.node)
@@ -1751,7 +1768,7 @@ fn check_reference_lifecycle(module: &Module, mir: &Mir<'_>, sources: [&str; 2])
     let keys = join
         .frames
         .each_ref()
-        .map(|frame| Some(frame.backing.root.node));
+        .map(|frame| Some(frame.backing.unwrap().root.node));
     assert!(
         matches!(join.before_commit.as_slice(), [Obligation::EndStorage(b), Obligation::EndStorage(a)]
         if [a.root.node, b.root.node] == join.frames.each_ref().map(|frame| frame.environment.root.node))
@@ -1798,7 +1815,7 @@ fn check_reference_lifecycle(module: &Module, mir: &Mir<'_>, sources: [&str; 2])
                     assert_eq!(wait.children[1 - i], Complete);
                     assert!(matches!(wait.children[i], AtNormalReturn | AtDeliveredExit));
                     assert_eq!(
-                        places(*retired),
+                        places(retired.map(|action| action.map(ended))),
                         std::array::from_fn(
                             |i| wait.initialized_results[i].then_some(export_roots[i])
                         )
@@ -2440,7 +2457,7 @@ fn prove_ordered_join(
         else {
             panic!("the actual List index runs first")
         };
-        assert_eq!(view.root.node, frame.capture.root.node);
+        assert_eq!(view.root.node, frame.capture.unwrap().root.node);
         assert_eq!(
             backing.root.node,
             frame.incoming_list_backing.unwrap().root.node
@@ -2472,7 +2489,7 @@ fn prove_ordered_join(
             matches!(export.operation, Operation::Export(from) if from.root.node == result.root.node)
         );
         assert!(matches!(&cleanup.operation, Operation::Cleanup(actions)
-            if matches!(actions.as_slice(), [Obligation::EndStorage(view)] if view.root.node == frame.capture.root.node)));
+            if matches!(actions.as_slice(), [Obligation::EndStorage(view)] if view.root.node == frame.capture.unwrap().root.node)));
         assert!(matches!(terminal.terminator, Terminator::Return));
     }
     let path = straight_blocks(mir, mir.entry);
@@ -2513,8 +2530,8 @@ fn prove_ordered_join(
     for state in &join.waiting {
         use compiler::analysis::ownership::JoinChildState::{Cleaning, Entry, Running};
         for i in 0..2 {
-            let root = join.frames[i].backing.root.node;
-            assert_eq!(state.retained_backings[i].root.node, root);
+            let root = join.frames[i].backing.unwrap().root.node;
+            assert_eq!(state.retained_backings[i].unwrap().root.node, root);
             assert_eq!(state.retained_results[i].map(|p| p.root.node), None);
             assert_eq!(
                 state.environment_backings[i].map(|p| p.root.node),
@@ -3046,6 +3063,13 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             function failure(flag: bool): [bool, Result<bool, i32>] {
                 return join([() => flag, () => Err<bool, i32>(7i32)]);
             }
+            function successSecond(): [bool, Result<bool, i32>] {
+                return join([() => false, (): Result<bool, i32> => Result.Ok(true)]);
+            }
+            function failureFirst(): [Result<bool, i32>, bool] {
+                let pair = join([() => Err<bool, i32>(7i32), () => false]);
+                return pair;
+            }
         "#,
         |request, module, receipt, typed| {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
@@ -3058,6 +3082,8 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             for (name, prefix, slot, origin) in [
                 ("success", "join([():", 0, "Result.Ok(true)"),
                 ("failure", "join([() => flag", 1, "Err<bool, i32>(7i32)"),
+                ("successSecond", "join([() => false", 1, "Result.Ok(true)"),
+                ("failureFirst", "join([() => Err", 0, "Err<bool, i32>(7i32)"),
             ] {
                 let call = call_node(module, prefix);
                 let join = receipt.scoped_join(module, call).unwrap().unwrap();
@@ -3100,7 +3126,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                         }
                     }
                 }
-                if name == "failure" {
+                if name.starts_with("failure") {
                     let facts = typed.bodies().node(module, site.node).unwrap().unwrap();
                     let NodeFactKind::Expression(value) = &facts.kind else {
                         panic!("missing original error expression");
@@ -3125,15 +3151,27 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                     .iter()
                     .find(|r| r.site().module == &module.key && r.site().node == d.node)
                     .unwrap();
-                assert_eq!(local.completion(), Completion::Incomplete);
-                assert_eq!(root.completion(), Completion::Incomplete);
-                assert_eq!(local.blocked_at().unwrap().node, call);
-                assert_eq!(root.blocked_at().unwrap().node, call);
-                assert!(local.mir().is_none() && root.mir().is_none());
+                assert_eq!(
+                    local.completion(),
+                    Completion::Checked,
+                    "{name}: {:?}",
+                    local
+                        .blocked_at()
+                        .map(|site| site.span.bytes().escape_ascii().to_string())
+                );
+                assert_eq!(root.completion(), Completion::Checked);
                 assert!(local.findings().is_empty());
+                fresh_result::assert_fresh_result_lifecycle(
+                    local.mir().unwrap(),
+                    typed,
+                    join,
+                    slot,
+                );
+                fresh_result::assert_fresh_result_lifecycle(root.mir().unwrap(), typed, join, slot);
+                fresh_result::assert_dependencies(root, typed, join, site);
                 let (exact, short) = budget_caps(local.statistics());
                 let replay = lower_body(receipt, module, &d.id, exact).unwrap();
-                assert_eq!(replay.completion(), Completion::Incomplete);
+                assert_eq!(replay.completion(), Completion::Checked);
                 assert_eq!(replay.statistics(), local.statistics());
                 for cap in short {
                     let limited = lower_body(receipt, module, &d.id, cap).unwrap();
@@ -3146,9 +3184,13 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             assert_eq!(replay.completion(), GraphCompletion::Incomplete);
             assert_eq!(replay.statistics(), graph.statistics());
             for cap in short {
-                assert_eq!(
-                    analyze_ownership(receipt, cap).completion(),
-                    GraphCompletion::ResourceLimit
+                let limited = analyze_ownership(receipt, cap);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(
+                    limited
+                        .roots()
+                        .iter()
+                        .all(|root| root.mir().is_none() && root.ordinary_mir().is_none())
                 );
             }
             let loaded = loader::load_installed(request.clone()).unwrap();
@@ -3544,6 +3586,11 @@ fn installed_join_requires_a_real_fresh_canonical_result() {
         ),
         (
             "function probe(input: Result<bool, i32>): [Result<bool, i32>, bool] { return join([() => input, () => false]); }",
+            true,
+        ),
+        (
+            "function control(inner: Err<i32>): Result<bool, i32> { return Err<bool, i32, i32>(7i32, inner); }
+             function probe(inner: Err<i32>): [Result<bool, i32>, bool] { return join([() => Err<bool, i32, i32>(7i32, inner), () => false]); }",
             true,
         ),
         (

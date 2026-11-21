@@ -78,12 +78,14 @@ impl<'g> Probe<'g> {
                     invocation: frame.invocation,
                     body_site: frame.body_site,
                     environment: frame.environment,
-                    capture: frame.capture,
-                    backing: frame.backing,
+                    capture: Some(frame.capture),
+                    backing: Some(frame.backing),
                     incoming_list_backing: Some(frame.incoming_backing),
                     exclusive: false,
                     result: frame.result,
                     body: Arc::clone(&frame.body),
+                    value: false,
+                    result_origin: None,
                 });
                 // These actual zero/one/two-prefix states give cleanup if
                 // there is a proved exit. FormClosure itself is not a poll.
@@ -301,7 +303,7 @@ fn check_stop(proof: Staged<'_>, budget: &mut Budget) {
         state
             .backings()
             .iter()
-            .all(|backing| backing.root.span.bytes() == b"numbers")
+            .all(|backing| backing.unwrap().root.span.bytes() == b"numbers")
     );
     let state = wait(state, Child(1, EndView), budget);
     assert!(matches!(
@@ -372,7 +374,7 @@ fn check_publish<'g>(
         state
             .backings()
             .iter()
-            .all(|backing| backing.root.span.bytes() == b"numbers")
+            .all(|backing| backing.unwrap().root.span.bytes() == b"numbers")
     );
     let state = if masked_stop {
         let state = wait(state, RequestStop, budget);
