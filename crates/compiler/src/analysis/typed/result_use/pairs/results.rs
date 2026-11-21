@@ -139,16 +139,26 @@ impl<'a, 'g> Check<'a, 'g> {
             let scalar = match arrow.captures.as_slice() {
                 [] => nodes[node].kind == NodeKind::Literal,
                 [capture] => {
-                    nodes[node].kind == NodeKind::ValueReference
-                        && capture.site.module == &self.module.key
+                    if nodes[node].kind != NodeKind::ValueReference
+                        || !capture.reachable
+                        || capture.through.is_some()
+                        || capture.form != CaptureForm::Value
+                        || !capture.path.projections.is_empty()
+                        || !primitive(&capture.ty, "bool")
+                        || !capture
+                            .storage
+                            .as_ref()
+                            .is_some_and(|ty| primitive(ty, "bool"))
+                    {
+                        return Ok(None);
+                    }
+                    self.budget.step(2)?;
+                    std::ptr::eq(capture.site.module, &self.module.key)
                         && self.value_root_at(capture.site.node, depth + 1)?.0 == node
-                        && value.path.as_ref() == Some(&capture.path)
-                        && capture.reachable
-                        && capture.through.is_none()
-                        && capture.form == CaptureForm::Value
-                        && capture.path.projections.is_empty()
-                        && capture.storage.as_ref() == Some(&capture.ty)
-                        && primitive(&capture.ty, "bool")
+                        && value.path.as_ref().is_some_and(|path| {
+                            path.projections.is_empty()
+                                && std::ptr::eq(path.root, capture.path.root)
+                        })
                 }
                 _ => false,
             };

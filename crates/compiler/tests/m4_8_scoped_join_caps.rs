@@ -2,9 +2,9 @@
 mod support;
 
 use compiler::analysis::generics::{GoalBlocker, GoalState, OutputAgreement};
-use compiler::analysis::scalars::ScalarUnsupported;
+use compiler::analysis::scalars::{NodeFactKind, ScalarUnsupported};
 use compiler::analysis::typed::{
-    ResultDiscardKind, ResultUseBlocker, TypedCompletion, analyze_typed,
+    ResultDiscardKind, ResultUseBlocker, TypedCompletion, TypedReport, analyze_typed,
 };
 use compiler::analysis::{AnalysisLimits, TypeTerm};
 use compiler::loader::{self, InstalledRequest, Origin};
@@ -104,12 +104,14 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
         ));
         graph
     };
-    for (base, source, work, entries, obligation, blocker, goal_state) in [
+    for (base, source, work, entries, depth, result_slot, obligation, blocker, goal_state) in [
         (
             IMPORTS,
             "function joined(): void { join([() => Err<bool, i32>(7i32), () => !false]); }\n",
             426402,
             48883,
+            12,
+            0,
             None,
             ResultUseBlocker::CallBoundary,
             Some(GoalState::Proved),
@@ -119,6 +121,8 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
             "function joined(value: Result<bool, i32>): [Result<bool, i32>, bool] {\n    return join([() => value, () => false]);\n}\n",
             427260,
             49022,
+            12,
+            0,
             None,
             ResultUseBlocker::CallBoundary,
             Some(GoalState::Proved),
@@ -128,6 +132,41 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
             "function joined(job: () => Result<bool, i32>): [Result<bool, i32>, bool] { return join([job, () => false]); }\n",
             426353,
             48750,
+            12,
+            0,
+            Some(ScalarUnsupported::FamilySelection),
+            ResultUseBlocker::TypedInput,
+            Some(GoalState::Unresolved(GoalBlocker::CallableEnvironment)),
+        ),
+        (
+            IMPORTS,
+            "function joined(flag: bool): [bool, Result<bool,i32>] { return join<[() => bool, () => Result<bool,i32>], [bool,Result<bool,i32>]>([() => !flag, () => Err<bool,i32>(7i32)]); }\n",
+            431679,
+            49651,
+            14,
+            1,
+            None,
+            ResultUseBlocker::CallBoundary,
+            Some(GoalState::Proved),
+        ),
+        (
+            IMPORTS,
+            "function joined(a: () => bool, b: () => Result<bool,i32>): [bool, Result<bool,i32>] { return join([a,b]); }\n",
+            426373,
+            48709,
+            12,
+            1,
+            Some(ScalarUnsupported::FamilySelection),
+            ResultUseBlocker::TypedInput,
+            Some(GoalState::Unresolved(GoalBlocker::CallableEnvironment)),
+        ),
+        (
+            IMPORTS,
+            "function joined(pair: [() => bool, () => Result<bool,i32>]): [bool, Result<bool,i32>] { return join(pair); }\n",
+            425846,
+            48596,
+            12,
+            1,
             Some(ScalarUnsupported::FamilySelection),
             ResultUseBlocker::TypedInput,
             Some(GoalState::Unresolved(GoalBlocker::CallableEnvironment)),
@@ -137,6 +176,8 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
             "enum Fake<T,E> { Ok(T), Err(E) } function joined(): [Fake<bool,i32>, bool] { return join([(): Fake<bool,i32> => Fake.Ok(true), () => false]); }\n",
             428340,
             49094,
+            12,
+            0,
             None,
             ResultUseBlocker::CallBoundary,
             None,
@@ -146,6 +187,8 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
             "\nimport std::routine::join;\nfunction joined(): void {\n    join([() => Result.Ok(true), () => 29i32]);\n}\n",
             486641,
             55411,
+            12,
+            0,
             Some(ScalarUnsupported::FamilySelection),
             ResultUseBlocker::TypedInput,
             None,
@@ -155,12 +198,14 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
         let parent = AnalysisLimits {
             max_work: work,
             max_entries: entries,
-            max_depth: 12,
+            max_depth: depth,
         };
         for test_mode in [false, true] {
             let graph = load(test_mode);
-            for limits in [AnalysisLimits::default(), parent] {
-                let report = analyze_typed(&graph, limits);
+            for (limits, report) in [
+                (parent, analyze_typed(&graph, parent)),
+                exact_replay(&graph),
+            ] {
                 if report.completion() == TypedCompletion::Incomplete
                     && let Some(state) = goal_state
                 {
@@ -174,7 +219,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
                         .nodes
                         .iter()
                         .position(|n| {
-                            n.kind == NodeKind::Call && n.span.bytes().starts_with(b"join(")
+                            n.kind == NodeKind::Call && n.span.bytes().starts_with(b"join")
                         })
                         .unwrap();
                     let call = report
@@ -189,12 +234,19 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
                     assert!(call.premise.is_none());
                     assert!(matches!(call.output_agreement, OutputAgreement::Agrees));
                     assert_eq!(call.selected_result.as_ref(), Some(result));
+                    if call.checked {
+                        let facts = report.bodies().node(module, node).unwrap().unwrap();
+                        let NodeFactKind::Expression(value) = &facts.kind else {
+                            panic!("expected checked call expression");
+                        };
+                        assert_eq!(&value.ty, result);
+                    }
                     assert!(
-                        matches!(result.as_ref(), TypeTerm::Tuple(fields) if matches!(fields.as_slice(), [left, right]
-                        if matches!(left.as_ref(), TypeTerm::Nominal { declaration, arguments }
-                            if *declaration == &report.result_role().unwrap().declaration.id
-                                && matches!(arguments.as_slice(), [ok, err] if primitive(ok, "bool") && primitive(err, "i32")))
-                            && primitive(right, "bool")))
+                        matches!(result.as_ref(), TypeTerm::Tuple(fields) if fields.len() == 2
+                            && matches!(fields[result_slot].as_ref(), TypeTerm::Nominal { declaration, arguments }
+                                if *declaration == &report.result_role().unwrap().declaration.id
+                                    && matches!(arguments.as_slice(), [ok, err] if primitive(ok, "bool") && primitive(err, "i32")))
+                            && primitive(&fields[1 - result_slot], "bool"))
                     );
                 }
                 let uses = report.result_use();
@@ -223,33 +275,6 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
                     failures.push(format!("{source} test_mode={test_mode}, {limits:?}: {:?} {:?}, first obligation: {first_obligation:?}, first use: {first_use:?}, findings: {findings}, discards: {discards:?}", report.completion(), report.statistics()));
                 }
             }
-            let stats = analyze_typed(&graph, AnalysisLimits::default()).statistics();
-            let exact = AnalysisLimits {
-                max_work: stats.work,
-                max_entries: stats.entries,
-                max_depth: stats.max_depth,
-            };
-            let replay = analyze_typed(&graph, exact);
-            assert_eq!(replay.completion(), TypedCompletion::Incomplete);
-            assert_eq!(replay.statistics(), stats);
-            for short in [
-                AnalysisLimits {
-                    max_work: exact.max_work - 1,
-                    ..exact
-                },
-                AnalysisLimits {
-                    max_entries: exact.max_entries - 1,
-                    ..exact
-                },
-                AnalysisLimits {
-                    max_depth: exact.max_depth - 1,
-                    ..exact
-                },
-            ] {
-                let limited = analyze_typed(&graph, short);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
-            }
         }
     }
     // An unavailable handoff cannot hide the exit of unrelated caller storage.
@@ -266,7 +291,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
         fs::write(&entry, format!("{IMPORTS}{source}")).unwrap();
         for test_mode in [false, true] {
             let graph = load(test_mode);
-            let report = analyze_typed(&graph, AnalysisLimits::default());
+            let (_, report) = exact_replay(&graph);
             let discards = report
                 .result_use()
                 .unwrap()
@@ -299,7 +324,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
     fs::write(&entry, format!("{IMPORTS}{source}")).unwrap();
     for test_mode in [false, true] {
         let graph = load(test_mode);
-        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let (_, report) = exact_replay(&graph);
         assert!(report.receipt().is_none());
         let [binary, operand] = report.bodies().findings() else {
             panic!(
@@ -320,7 +345,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
     fs::write(&entry, format!("{IMPORTS}{source}")).unwrap();
     for test_mode in [false, true] {
         let graph = load(test_mode);
-        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let (_, report) = exact_replay(&graph);
         assert_eq!(report.completion(), TypedCompletion::SourceRejected);
         assert!(report.receipt().is_none());
         let [finding] = report.bodies().findings() else {
@@ -344,7 +369,79 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
         assert!(primitive(&actual[1], "bool"));
         assert!(report.result_use().unwrap().discards().is_empty());
     }
+    // Check both independent comparisons: the written output filter and the
+    // receiving annotation can disagree with the result fixed by the inputs.
+    for (written, receiving) in [
+        ("[bool, Result<bool,i32>]", "[Result<bool,i32>,bool]"),
+        ("[Result<bool,i32>,bool]", "[bool, Result<bool,i32>]"),
+    ] {
+        let call = format!(
+            "join<[() => bool, () => Result<bool,i32>], {written}>([() => flag, () => Err<bool,i32>(7i32)])"
+        );
+        fs::write(
+            &entry,
+            format!("{IMPORTS}function joined(flag: bool): {receiving} {{ return {call}; }}\n"),
+        )
+        .unwrap();
+        for mode in [false, true] {
+            let graph = load(mode);
+            let (_, report) = exact_replay(&graph);
+            assert_eq!(report.completion(), TypedCompletion::SourceRejected);
+            let [finding] = report.bodies().findings() else {
+                panic!(
+                    "expected one explicit output mismatch: {:?}",
+                    report.bodies().findings()
+                );
+            };
+            assert_eq!(finding.kind.code(), Some("R0100"));
+            assert_eq!(finding.site.span.bytes(), call.as_bytes());
+            let (Some(TypeTerm::Tuple(actual)), Some(TypeTerm::Tuple(expected))) =
+                (finding.actual.as_deref(), finding.expected.as_deref())
+            else {
+                panic!("expected tuple types: {finding:?}");
+            };
+            assert!(primitive(&actual[0], "bool"));
+            assert_eq!(actual[0], expected[1]);
+            assert_eq!(actual[1], expected[0]);
+        }
+    }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn exact_replay(graph: &loader::Graph) -> (AnalysisLimits, TypedReport<'_>) {
+    let report = analyze_typed(graph, AnalysisLimits::default());
+    let stats = report.statistics();
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let replay = analyze_typed(graph, exact);
+    assert_eq!(replay.completion(), report.completion());
+    assert_eq!(replay.statistics(), stats);
+    for short in [
+        AnalysisLimits {
+            max_work: exact.max_work - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_entries: exact.max_entries - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_depth: exact.max_depth - 1,
+            ..exact
+        },
+    ] {
+        let limited = analyze_typed(graph, short);
+        assert_eq!(
+            limited.completion(),
+            TypedCompletion::ResourceLimit,
+            "{short:?}"
+        );
+        assert!(limited.receipt().is_none());
+    }
+    (exact, replay)
 }
 
 fn primitive(ty: &compiler::analysis::Type<'_>, name: &str) -> bool {

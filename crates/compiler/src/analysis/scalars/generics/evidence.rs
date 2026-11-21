@@ -845,6 +845,45 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.evidence.goals[goal.index].arrow_origin = origin;
     }
 
+    // Revalidate the original occurrences, including operand premises. A
+    // named tuple or erased callable has no direct arrow to contribute.
+    pub(super) fn retained_argument_pair(
+        &mut self,
+        inference: &Inference<'g>,
+        call: &PreparedCall<'g>,
+        formal: &TypeTerm<'g>,
+    ) -> Work<Option<ArgumentPair<'g>>> {
+        let [argument] = call.fact.arguments.as_slice() else {
+            return Ok(None);
+        };
+        let tuple = self.source_leaf(inference.module, *argument)?;
+        self.elab.step(1)?;
+        let slot = &inference.slots[&tuple];
+        if slot.blocked || slot.ordinary_context.is_some() || slot.ty.is_none() {
+            return Ok(None);
+        }
+        let syntax = &inference.module.syntax.nodes[tuple];
+        match syntax.kind {
+            NodeKind::ValueReference => return Ok(Some([None, None])),
+            NodeKind::Bracket if syntax.children.len() == 2 => (),
+            _ => return Ok(None),
+        }
+        for &element in &syntax.children {
+            let leaf = self.source_leaf(inference.module, element)?;
+            self.elab.step(2)?;
+            for occurrence in [element, leaf] {
+                let slot = &inference.slots[&occurrence];
+                if slot.blocked || slot.ordinary_context.is_some() || slot.ty.is_none() {
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(Some(
+            self.direct_argument_pair(inference, call, formal)?
+                .unwrap_or_default(),
+        ))
+    }
+
     pub(super) fn direct_argument_pair(
         &mut self,
         inference: &Inference<'g>,

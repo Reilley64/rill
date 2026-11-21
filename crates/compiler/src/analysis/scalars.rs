@@ -409,6 +409,7 @@ struct Slot<'g> {
     propagation: Option<Propagation<'g>>,
     pending_core: bool,
     installed_operation: Option<data::DataExpression<'g>>,
+    scoped_result_determination: bool,
     pipe_target: Option<(PropagationTarget<'g>, Option<Type<'g>>)>,
     pipe_expected: Option<Type<'g>>,
     admission: Option<data::Admission<'g>>,
