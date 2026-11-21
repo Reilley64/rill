@@ -15,7 +15,10 @@ impl<'a, 'g> Check<'a, 'g> {
                     if primitive(ok, "bool") && primitive(err, "i32")))
     }
 
-    pub(super) fn fresh_result_slot(&self, ty: &Type<'g>) -> Option<usize> {
+    pub(in crate::analysis::typed::result_use) fn fresh_result_slot(
+        &self,
+        ty: &Type<'g>,
+    ) -> Option<usize> {
         let TypeTerm::Tuple(items) = ty.as_ref() else {
             return None;
         };
@@ -31,11 +34,48 @@ impl<'a, 'g> Check<'a, 'g> {
         }
     }
 
+    /// On the proved immediate handoff the sibling returns the value it just
+    /// captured. An unknown flag has two possible *equal* input/output values,
+    /// not four independent combinations. Future writes can change either slot.
+    pub(in crate::analysis::typed::result_use) fn split_captured_flag(
+        &mut self,
+        call: NodeId,
+        slot: usize,
+        state: &mut Residence<'g>,
+        forwarded: &mut Alternatives<'g>,
+    ) -> Work<()> {
+        self.budget.step(self.module.key.path.len() + 2)?;
+        let index = self.nodes[&(&self.module.key, call)].0;
+        let CheckedTransfer::Scoped(join) = &self.report.pair_calls[&index] else {
+            unreachable!()
+        };
+        let [capture] = join.slots[slot].child.arrow.captures.as_slice() else {
+            return Ok(());
+        };
+        let input = Root::Local(capture.path.root);
+        if state
+            .test(input, &[], &Constructor::Boolean(true), self.budget)?
+            .is_none()
+        {
+            let output = Root::Temporary(call);
+            let path = [ResultComponent::TupleElement(slot)];
+            let mut other = state.fork(self.budget)?;
+            for (branch, truth) in [(&mut other, false), (state, true)] {
+                self.record_boolean(branch, input, &[], truth)?;
+                self.record_boolean(branch, output, &path, truth)?;
+            }
+            self.budget.reserve(1)?;
+            forwarded.push(other);
+        }
+        Ok(())
+    }
+
     pub(super) fn fresh_pair_child(
         &mut self,
         arrow_node: NodeId,
         arrow: &crate::analysis::generics::callables::ArrowFacts<'g>,
         (stored, slot): (&[Located<'g>], ResultComponent<'g>),
+        caller: &Residence<'g>,
         returns_result: bool,
         depth: usize,
     ) -> Work<Option<FreshChild<'g>>> {
@@ -51,6 +91,7 @@ impl<'a, 'g> Check<'a, 'g> {
         if !facts.flow.normal || value.ordinary_context.is_some() || arrow.mode.is_none() {
             return Ok(None);
         }
+        let mut environment = Residence::default();
         let variant = if returns_result {
             if !arrow.captures.is_empty() {
                 return Ok(None);
@@ -91,7 +132,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 [] => nodes[node].kind == NodeKind::Literal,
                 [capture] => {
                     nodes[node].kind == NodeKind::ValueReference
-                        && capture.site.node == node
+                        && capture.site.module == &self.module.key
+                        && self.value_root_at(capture.site.node, depth + 1)?.0 == node
+                        && value.path.as_ref() == Some(&capture.path)
                         && capture.reachable
                         && capture.through.is_none()
                         && capture.form == CaptureForm::Value
@@ -108,6 +151,17 @@ impl<'a, 'g> Check<'a, 'g> {
             {
                 return Ok(None);
             }
+            if let [capture] = arrow.captures.as_slice() {
+                // The two arrows are immediate arguments and neither acquisition
+                // writes this scalar. The child reads the captured value, not a
+                // fresh unconstrained bool (which could invent a discard path).
+                let root = Root::Local(capture.path.root);
+                if let Some(truth) =
+                    caller.test(root, &[], &Constructor::Boolean(true), self.budget)?
+                {
+                    self.record_boolean(&mut environment, root, &[], truth)?;
+                }
+            }
             None
         };
         if !self.pair_environment(arrow_node, (stored, slot), None)? {
@@ -116,7 +170,7 @@ impl<'a, 'g> Check<'a, 'g> {
         // Reuse the expression's own construction and outcome tag. Seeding
         // from the return type would invent a new occurrence at the join.
         let mut proof = self.callable_check(self.module)?;
-        let mut alternatives = proof.expression(body, Residence::default(), depth + 1)?;
+        let mut alternatives = proof.expression(body, environment, depth + 1)?;
         let [state] = alternatives.as_mut_slice() else {
             return Ok(None);
         };

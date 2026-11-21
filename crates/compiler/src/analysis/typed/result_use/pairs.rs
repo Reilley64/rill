@@ -581,10 +581,18 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(false);
         }
         let elements = [*first, *second];
-        let [first, second] = if let Some(shapes) = shapes {
-            shapes.map(|s| s.origin)
+        let [(first, first_depth), (second, second_depth)] = if fresh_result.is_some() {
+            [
+                self.value_root_at(*first, tuple_depth + 1)?,
+                self.value_root_at(*second, tuple_depth + 1)?,
+            ]
+        } else if let Some(shapes) = shapes {
+            shapes.map(|s| (s.origin, depth + 1))
         } else {
-            [self.ungroup_value(*first)?, self.ungroup_value(*second)?]
+            [
+                (self.ungroup_value(*first)?, depth + 1),
+                (self.ungroup_value(*second)?, depth + 1),
+            ]
         };
         if first == second {
             return Ok(false);
@@ -672,8 +680,9 @@ impl<'a, 'g> Check<'a, 'g> {
                     origin,
                     arrow,
                     (&stored, slot_path),
+                    state,
                     i == result_slot,
-                    depth + 1,
+                    [first_depth, second_depth][i],
                 )?
                 else {
                     return Ok(false);

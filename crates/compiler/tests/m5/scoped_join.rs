@@ -2899,6 +2899,7 @@ fn installed_result_transfer_proves_the_actual_error_wrapper() {
             function whole(value: Result<bool, i32>): bool { return require(value); }
             function ok(): bool { return require(Result<bool, i32>.Ok(true)); }
             function err(): bool { return require(Err<bool, i32>(7i32)); }
+            function narrow(failure: Result<bool, i32>.Err): bool { return require(failure); }
         "#,
         |request, module, _, typed| {
             let installed = loader::load_installed(request.clone()).unwrap();
@@ -2924,7 +2925,12 @@ fn installed_result_transfer_proves_the_actual_error_wrapper() {
             let primitive = |ty: &Type<'_>, name| {
                 assert!(matches!(ty.as_ref(), TypeTerm::Primitive(p) if p.name() == name));
             };
-            for call in ["require(value)", "require(Result", "require(Err"] {
+            for call in [
+                "require(value)",
+                "require(Result",
+                "require(Err",
+                "require(failure)",
+            ] {
                 let node = call_node(module, call);
                 let result = typed
                     .bodies()
@@ -2942,16 +2948,31 @@ fn installed_result_transfer_proves_the_actual_error_wrapper() {
                     let [success] = result.dependencies.as_slice() else {
                         panic!("the exact Ok variant stores only the success payload");
                     };
+                    assert_eq!(send(success).0.source.node, role.ok.node);
                     primitive(send(success).1, "bool");
                     continue;
                 }
-                assert!(matches!(ty.as_ref(), TypeTerm::Nominal { declaration, .. }
-                    if *declaration == &role.declaration.id));
-                let [success, error] = result.dependencies.as_slice() else {
-                    panic!("expected both payload alternatives of the whole Result");
+                let error = if call == "require(failure)" {
+                    assert!(
+                        matches!(ty.as_ref(), TypeTerm::Variant { declaration, .. } if *declaration == &role.err.id)
+                    );
+                    let [error] = result.dependencies.as_slice() else {
+                        panic!("narrowed failure stores only the wrapper")
+                    };
+                    error
+                } else {
+                    assert!(matches!(ty.as_ref(), TypeTerm::Nominal { declaration, .. }
+                        if *declaration == &role.declaration.id));
+                    let [success, error] = result.dependencies.as_slice() else {
+                        panic!("expected both payload alternatives of the whole Result");
+                    };
+                    assert_eq!(send(success).0.source.node, role.ok.node);
+                    primitive(send(success).1, "bool");
+                    error
                 };
-                primitive(send(success).1, "bool");
                 let (wrapper, ty) = send(error);
+                assert_eq!(wrapper.source.module, &role.declaration.id.module);
+                assert_eq!(wrapper.source.node, role.err.node);
                 assert!(
                     matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
                     if *declaration == &representation.wrapper.id
@@ -3050,11 +3071,33 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                         .iter()
                         .all(|slot| slot.reference_result.is_none())
                 );
-                for slot in &join.slots {
+                let ordinary = typed.bodies().ordinary_call(module, call).unwrap().unwrap();
+                let winner = typed
+                    .bodies()
+                    .goal(ordinary.goal.as_ref().unwrap())
+                    .unwrap();
+                assert_eq!(
+                    winner.selection.as_ref().unwrap().implementation,
+                    &join.role.implementation.id
+                );
+                for (i, slot) in join.slots.iter().enumerate() {
+                    assert_eq!(slot.path, [i]);
+                    let arrow = slot.arrow();
+                    assert_eq!(arrow.site.module, &module.key);
+                    let source = &module.syntax.nodes[call];
+                    let tuple = source.children[1];
+                    assert_eq!(arrow.site.node, module.syntax.nodes[tuple].children[i]);
                     for id in [&slot.callable_once, &slot.send_job, &slot.send_result] {
+                        assert!(winner.dependencies.contains(id));
                         let goal = typed.bodies().goal(id).unwrap();
+                        assert_eq!(goal.site.module, &module.key);
+                        assert_eq!(goal.site.node, call);
+                        assert_eq!(goal.source.module, &join.role.implementation.id.module);
                         assert_eq!(goal.state, GoalState::Proved);
                         assert!(goal.premise.is_none() && goal.assumptions.is_empty());
+                        if id == &slot.send_job {
+                            assert!(std::ptr::eq(goal.arrow_origin.as_deref().unwrap(), arrow));
+                        }
                     }
                 }
                 if name == "failure" {
@@ -3161,6 +3204,92 @@ fn installed_join_checks_observation_in_the_result_slot() {
             },
         );
     }
+}
+
+#[test]
+fn fresh_join_reads_the_actual_captured_flag() {
+    for (decl, expected) in [
+        ("true", TypedCompletion::Checked),
+        ("false", TypedCompletion::SourceRejected),
+    ] {
+        let source = format!(
+            r#"import std::routine::join;
+            function probe(): void {{ let flag = {decl};
+                let [b,r] = join((([((() => ((flag)))), ((() => ((Err<bool, i32>((7i32))))))])));
+                if (b) {{ let _ = r; }} }}"#
+        );
+        probe_report(
+            "scoped_join::fresh_join_reads_the_actual_captured_flag",
+            &source,
+            |request, _, typed| {
+                assert_eq!(typed.completion(), expected, "{decl}");
+                assert_eq!(
+                    typed.statistics().max_depth,
+                    17,
+                    "tuple, arrow, body and payload groups"
+                );
+                let graph = loader::load_installed(request.clone()).unwrap();
+                let (exact, shorts) = budget_caps(typed.statistics());
+                let replay = analyze_typed(&graph, exact);
+                assert_eq!(replay.completion(), expected);
+                assert_eq!(replay.statistics(), typed.statistics());
+                assert_eq!(
+                    analyze_typed(&graph, shorts[2]).completion(),
+                    TypedCompletion::ResourceLimit
+                );
+                let uses = typed.result_use().unwrap();
+                assert!(uses.pending().is_empty());
+                if expected == TypedCompletion::Checked {
+                    assert!(uses.discards().is_empty());
+                } else {
+                    let [discard] = uses.discards() else {
+                        panic!("missing real discard")
+                    };
+                    assert_eq!(discard.origin.span.bytes(), b"Err<bool, i32>((7i32))");
+                }
+            },
+        );
+    }
+}
+
+#[test]
+fn fresh_join_preserves_the_relation_to_an_unknown_captured_flag() {
+    probe_report(
+        "scoped_join::fresh_join_preserves_the_relation_to_an_unknown_captured_flag",
+        r#"
+        import std::routine::join;
+        function probe(flag: bool): void {
+            let [b,r] = join([() => flag, () => Err<bool, i32>(7i32)]);
+            if (flag) { if (b) { let _ = r; } } else { if (!b) { let _ = r; } }
+        }
+    "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Checked);
+            assert!(typed.result_use().unwrap().discards().is_empty());
+        },
+    );
+}
+
+#[test]
+fn an_unproved_join_does_not_invent_a_discard() {
+    probe_report(
+        "scoped_join::an_unproved_join_does_not_invent_a_discard",
+        r#"
+        import std::routine::join;
+        function probe(): void { Err<bool, i32>(1i32); join([() => Err<bool, i32>(7i32), () => !false]); }
+    "#,
+        |_, _, typed| {
+            assert!(typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            assert!(!uses.pending().is_empty());
+            let origins = uses
+                .discards()
+                .iter()
+                .map(|d| d.origin.span.bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(origins, [b"Err<bool, i32>(1i32)".as_slice()]);
+        },
+    );
 }
 
 #[test]

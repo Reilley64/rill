@@ -2183,7 +2183,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         {
             if Predicate::of(intrinsic) == Predicate::Sendable
                 && **declaration == role.declaration.id
-                && variant.is_none_or(|id| *id == role.ok.id)
+                && variant.is_none_or(|id| *id == role.ok.id || *id == role.err.id)
                 && let [ok, error] = arguments.as_slice()
                 && primitive_name(ok) == Some("bool")
                 && primitive_name(error) == Some("i32")
@@ -2192,13 +2192,15 @@ impl<'r, 'g> Checker<'r, 'g> {
                 // pinned error storage seals the origin and retained cause.
                 // Only the exact Ok variant lacks storage for an Err wrapper.
                 let module = self.evidence_module(&declaration.module)?;
-                self.property_dependency(
-                    goal,
-                    intrinsic,
-                    ok.clone(),
-                    Self::site(module, role.ok.node),
-                )?;
-                if variant.is_some() {
+                if variant != Some(&role.err.id) {
+                    self.property_dependency(
+                        goal,
+                        intrinsic,
+                        ok.clone(),
+                        Self::site(module, role.ok.node),
+                    )?;
+                }
+                if variant == Some(&role.ok.id) {
                     return Ok(GoalState::Proved);
                 }
                 self.elab.reserve(2)?;
