@@ -214,7 +214,9 @@ fn independent_delivery_rejection_survives_an_unresolved_ordinary_edge() {
         "graph::delivery::independent_delivery_rejection_survives_an_unresolved_ordinary_edge",
         r#"
 function leaf(): void {}
-function pending(): void { let text = "owned"; dispose(text); }
+type PendingText = { text: string; }
+function pending(): void { let value = PendingText { text: "owned" }; dispose(value.text); }
+function closed(): void { let text = "owned"; dispose(text); }
 function before(slot: &mut &bool, input: &bool): void {
     let flag = true;
     *slot = &flag;
@@ -238,9 +240,13 @@ function beyond(slot: &mut &bool, input: &bool): void {
             };
             let early = root(&report, b"function before(");
             let late = root(&report, b"function beyond(");
+            assert!(root(&report, b"function closed(").ordinary_mir().is_some());
             for body in [early, late] {
                 assert_eq!(body.ordinary_completion(), Completion::Incomplete);
-                assert_eq!(body.blocked_at().unwrap().span.bytes(), b"dispose(text)");
+                assert_eq!(
+                    body.blocked_at().unwrap().span.bytes(),
+                    b"dispose(value.text)"
+                );
                 assert!(body.mir().is_none() && body.ordinary_mir().is_none());
                 assert!(matches!(body.selected_call(), Delivery::Unresolved));
             }

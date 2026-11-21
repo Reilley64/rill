@@ -12,6 +12,8 @@ use compiler::analysis::{
 };
 use loader::DeclarationKind::{Expectation, Function, Implementation};
 
+#[path = "graph/closed_release.rs"]
+mod closed_release;
 #[path = "graph/delivery.rs"]
 mod delivery;
 #[path = "graph/scalar.rs"]
@@ -1011,6 +1013,7 @@ fn aliases_share_a_canonical_body_and_cycles_require_all_edges() {
     let main = format!("{MAIN}\nimport helper::ready as second;\nexpect second();\n");
     let source = format!(
         r#"{HELPER}
+type PendingText = {{ text: string; }}
 function left(flag: bool): bool {{ return right(flag); }}
 function right(flag: bool): bool {{
     if (flag) {{ return left(flag); }}
@@ -1021,11 +1024,14 @@ function right(flag: bool): bool {{
 expect left(true);
 "#
     );
-    let closed = source.replace("    dispose(owner);\n", "");
+    let projected = source.replace(
+        "let owner = \"end\";\n    dispose(owner);",
+        "let owner = PendingText { text: \"end\" };\n    dispose(owner.text);",
+    );
     fixture_with_main(
         "graph::aliases_share_a_canonical_body_and_cycles_require_all_edges",
         &main,
-        &[&closed, &source],
+        &[&source, &projected],
         |index, _, _, receipt, typed| {
             let report = analyze_ownership(receipt, AnalysisLimits::default());
             assert_eq!(report.completion(), GraphCompletion::Incomplete);
@@ -1061,7 +1067,10 @@ expect left(true);
                 } else {
                     assert_eq!(root.completion(), Completion::Incomplete);
                     assert!(root.mir().is_none());
-                    assert_eq!(root.blocked_at().unwrap().span.bytes(), b"dispose(owner)");
+                    assert_eq!(
+                        root.blocked_at().unwrap().span.bytes(),
+                        b"dispose(owner.text)"
+                    );
                 }
             }
             for (caller, callee) in [(left, right), (right, left), (expectation, left)] {
@@ -1073,14 +1082,12 @@ expect left(true);
                             && BodyOwner::Declaration(edge.declaration) == callee.owner())
                 );
             }
-            assert_eq!(
-                right
-                    .dependencies()
-                    .iter()
-                    .any(|edge| edge.contract == DependencyContract::BuiltinDispose
-                        && edge.declaration == &typed.dispose_role().unwrap().id),
-                index == 1
-            );
+            assert!(right.dependencies().iter().any(|edge| {
+                edge.contract == DependencyContract::BuiltinDispose
+                    && edge.declaration == &typed.dispose_role().unwrap().id
+                    && edge.site.span.bytes()
+                        == [b"dispose(owner)".as_slice(), b"dispose(owner.text)"][index]
+            }));
         },
     );
 }
@@ -1133,8 +1140,10 @@ function neverCalled(owner: string): bool {{ let taken = owner; let again = owne
 fn local_blocker_is_not_a_finished_dependency_verdict_on_exhaustion() {
     let source = format!(
         r#"{HELPER}
+type PendingText = {{ text: string; }}
 function broken(v: string): void {{ let first = v; let again = v; }}
-function combined(v: string, other: string): void {{ broken(v); dispose(other); }}
+function combined(v: string, other: PendingText): void {{ broken(v); dispose(other.text); }}
+function closed(other: string): void {{ dispose(other); }}
 "#
     );
     fixture(
@@ -1146,6 +1155,7 @@ function combined(v: string, other: string): void {{ broken(v); dispose(other); 
                 root(&full, b"function combined(").completion(),
                 Completion::SourceRejected
             );
+            assert!(root(&full, b"function closed(").ordinary_mir().is_some());
             let short = analyze_ownership(
                 receipt,
                 AnalysisLimits {
@@ -1158,7 +1168,7 @@ function combined(v: string, other: string): void {{ broken(v); dispose(other); 
             assert_eq!(pending.completion(), Completion::ResourceLimit);
             assert_eq!(
                 pending.blocked_at().unwrap().span.bytes(),
-                b"dispose(other)"
+                b"dispose(other.text)"
             );
             assert!(pending.mir().is_none());
             let [finding] = short.findings() else {
@@ -1168,6 +1178,10 @@ function combined(v: string, other: string): void {{ broken(v); dispose(other); 
             assert_eq!(
                 finding.site.span.start(),
                 source.find("again = v").unwrap() + "again = ".len()
+            );
+            assert_eq!(
+                finding.related.span.start(),
+                source.find("first = v").unwrap() + "first = ".len()
             );
         },
     );
