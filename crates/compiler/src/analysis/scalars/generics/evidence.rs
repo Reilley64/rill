@@ -113,7 +113,7 @@ pub struct GoalFacts<'g> {
     pub arrow_origin: Option<Arc<ArrowFacts<'g>>>,
     // Direct source occurrences on a determination, or on a property goal
     // for its written whole input. Equal substituted output types do not inherit them.
-    argument_pair: Option<ArgumentPair<'g>>,
+    pub(super) argument_pair: Option<ArgumentPair<'g>>,
     /// A verdict only under the retained role and protection premise.
     pub hypothetical: Option<GoalVerdict>,
     pub selection: Option<GoalSelection<'g>>,
@@ -142,6 +142,10 @@ pub(in crate::analysis) struct Evidence<'g> {
 impl<'g> Evidence<'g> {
     pub(in crate::analysis) fn goals(&self) -> &[GoalFacts<'g>] {
         &self.goals
+    }
+
+    pub(super) fn uses_current_assumptions(&self, goal: &GoalFacts<'g>) -> bool {
+        goal.assumptions == self.assumptions
     }
 
     pub(in crate::analysis) fn get(&self, id: &GoalId) -> Result<&GoalFacts<'g>, QueryError> {

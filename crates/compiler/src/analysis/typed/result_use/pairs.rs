@@ -598,6 +598,7 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(false);
         }
         let mut reference_plans = [None, None];
+        let mut fresh_plans = [None, None];
         let mut outputs = [Vec::new(), Vec::new()];
         let mut children = [None, None];
         let mut scoped_slots = [None, None];
@@ -676,19 +677,19 @@ impl<'a, 'g> Check<'a, 'g> {
             let slot_path = ResultComponent::TupleElement(i);
             let mut result_origin = None;
             let (expression, result, reference_result) = if let Some(result_slot) = fresh_result {
-                let Some(child) = self.fresh_pair_child(
+                let Some(plan) = self.fresh_pair_plan(
                     origin,
                     arrow,
                     (&stored, slot_path),
-                    state,
                     i == result_slot,
                     [first_depth, second_depth][i],
                 )?
                 else {
                     return Ok(false);
                 };
-                result_origin = child.construction;
-                (Some(child.expression), child.output, None)
+                let plan = fresh_plans[i].insert(plan);
+                result_origin = plan.construction;
+                (Some(plan.expression), Vec::new(), None)
             } else if let Some(shapes) = shapes {
                 let Some(plan) =
                     self.reference_plan(shapes[i], arrow, (&stored, slot_path), state, depth + 1)?
@@ -737,6 +738,16 @@ impl<'a, 'g> Check<'a, 'g> {
                 });
             } else {
                 children[i] = child;
+            }
+        }
+        // Neither isolated child checker is needed until both source jobs,
+        // their environments, and their selected premises pass preflight.
+        if let [Some(left), Some(right)] = fresh_plans {
+            for (output, plan) in outputs.iter_mut().zip([left, right]) {
+                let Some(proved) = self.prove_fresh_pair_plan(plan, state)? else {
+                    return Ok(false);
+                };
+                *output = proved;
             }
         }
         if let [Some(left), Some(right)] = reference_plans {

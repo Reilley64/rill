@@ -1,10 +1,12 @@
 //! Concrete Result-use for one fresh canonical result beside a scalar job.
 use super::*;
 
-pub(super) struct FreshChild<'g> {
+pub(super) struct FreshPlan<'g> {
     pub(super) expression: NodeId,
-    pub(super) output: Vec<Located<'g>>,
     pub(super) construction: Option<Site<'g>>,
+    variant: Option<&'g DeclarationId>,
+    capture: Option<&'g DeclarationId>,
+    depth: usize,
 }
 
 impl<'a, 'g> Check<'a, 'g> {
@@ -78,15 +80,14 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
-    pub(super) fn fresh_pair_child(
+    pub(super) fn fresh_pair_plan(
         &mut self,
         arrow_node: NodeId,
         arrow: &crate::analysis::generics::callables::ArrowFacts<'g>,
         (stored, slot): (&[Located<'g>], ResultComponent<'g>),
-        caller: &Residence<'g>,
         returns_result: bool,
         depth: usize,
-    ) -> Work<Option<FreshChild<'g>>> {
+    ) -> Work<Option<FreshPlan<'g>>> {
         let nodes = &self.module.syntax.nodes;
         let body = nodes[arrow_node].children[1];
         let (node, expression_depth) = self.value_root_at(body, depth + 1)?;
@@ -99,8 +100,7 @@ impl<'a, 'g> Check<'a, 'g> {
         if !facts.flow.normal || value.ordinary_context.is_some() || arrow.mode.is_none() {
             return Ok(None);
         }
-        let mut environment = Residence::default();
-        let variant = if returns_result {
+        let (variant, capture) = if returns_result {
             if !arrow.captures.is_empty() {
                 return Ok(None);
             }
@@ -134,7 +134,7 @@ impl<'a, 'g> Check<'a, 'g> {
             {
                 return Ok(None);
             }
-            Some(variant)
+            (Some(variant), None)
         } else {
             let scalar = match arrow.captures.as_slice() {
                 [] => nodes[node].kind == NodeKind::Literal,
@@ -159,32 +159,49 @@ impl<'a, 'g> Check<'a, 'g> {
             {
                 return Ok(None);
             }
-            if let [capture] = arrow.captures.as_slice() {
-                // The two arrows are immediate arguments and neither acquisition
-                // writes this scalar. The child reads the captured value, not a
-                // fresh unconstrained bool (which could invent a discard path).
-                let root = Root::Local(capture.path.root);
-                let source = self.captured_flag_source(capture.path.root)?;
-                if let Some(truth) =
-                    caller.test(source, &[], &Constructor::Boolean(true), self.budget)?
-                {
-                    self.record_boolean(&mut environment, root, &[], truth)?;
-                }
-            }
-            None
+            (
+                None,
+                arrow.captures.first().map(|capture| capture.path.root),
+            )
         };
         if !self.pair_environment(arrow_node, (stored, slot), None)? {
             return Ok(None);
         }
+        self.budget.reserve(1)?;
+        Ok(Some(FreshPlan {
+            expression: body,
+            construction: variant.map(|_| self.site(node)),
+            variant,
+            capture,
+            depth: depth + 1,
+        }))
+    }
+
+    pub(super) fn prove_fresh_pair_plan(
+        &mut self,
+        plan: FreshPlan<'g>,
+        caller: &Residence<'g>,
+    ) -> Work<Option<Vec<Located<'g>>>> {
+        let mut environment = Residence::default();
+        if let Some(capture) = plan.capture {
+            // Neither acquisition writes this scalar. Read the captured value,
+            // not a fresh unconstrained bool that could invent a discard path.
+            let source = self.captured_flag_source(capture)?;
+            if let Some(truth) =
+                caller.test(source, &[], &Constructor::Boolean(true), self.budget)?
+            {
+                self.record_boolean(&mut environment, Root::Local(capture), &[], truth)?;
+            }
+        }
         // Reuse the expression's own construction and outcome tag. Seeding
         // from the return type would invent a new occurrence at the join.
         let mut proof = self.callable_check(self.module)?;
-        let mut alternatives = proof.expression(body, environment, depth + 1)?;
+        let mut alternatives = proof.expression(plan.expression, environment, plan.depth)?;
         let [state] = alternatives.as_mut_slice() else {
             return Ok(None);
         };
-        let root = Root::Temporary(body);
-        if let Some(variant) = variant
+        let root = Root::Temporary(plan.expression);
+        if let Some(variant) = plan.variant
             && state.test(root, &[], &Constructor::Variant(variant), proof.budget)? != Some(true)
         {
             return Ok(None);
@@ -198,8 +215,9 @@ impl<'a, 'g> Check<'a, 'g> {
             proof.budget.step(1)?;
             match &entry.content {
                 Content::Result(value)
-                    if variant.is_some()
-                        && value.origin == node
+                    if plan
+                        .construction
+                        .is_some_and(|site| value.origin == site.node)
                         && entry.component.is_empty()
                         && value.component.is_empty() =>
                 {
@@ -209,17 +227,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 _ => return Ok(None),
             }
         }
-        if occurrences != usize::from(returns_result) {
-            return Ok(None);
-        }
-        if returns_result {
-            proof.budget.reserve(1)?;
-        }
-        Ok(Some(FreshChild {
-            expression: body,
-            output,
-            construction: variant.map(|_| self.site(node)),
-        }))
+        Ok((occurrences == usize::from(plan.construction.is_some())).then_some(output))
     }
 }
 

@@ -135,6 +135,126 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
     }
 
+    // This is the newly admitted ordinary output of the scoped Result pair,
+    // not a proof that the children can transfer their Result residences.
+    fn scoped_result_goal<'a>(&self, call: &'a OrdinaryCall<'g>) -> Option<&'a GoalId> {
+        let role = self.ordinary_scope.as_ref()?.routine()?;
+        let HypotheticalOutcome::Winner(winner) = call.outcome? else {
+            return None;
+        };
+        if !role.needs_scoped_evidence(call.family, Some(winner)) {
+            return None;
+        }
+        let result = self.result.filter(|role| role.representation.is_some())?;
+        let TypeTerm::Tuple(outputs) = call.selected_result.as_deref()? else {
+            return None;
+        };
+        let [left, right] = outputs.as_slice() else {
+            return None;
+        };
+        let canonical_result = |ty: &Type<'g>| {
+            matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if *declaration == &result.declaration.id
+                && matches!(arguments.as_slice(), [ok, err]
+                    if primitive_name(ok) == Some("bool") && primitive_name(err) == Some("i32")))
+        };
+        if !(canonical_result(left) && primitive_name(right) == Some("bool")
+            || canonical_result(right) && primitive_name(left) == Some("bool"))
+        {
+            return None;
+        }
+        call.goal.as_ref()
+    }
+
+    fn retain_scoped_result_call(&mut self, inference: &Inference<'g>, node: NodeId) -> Work<bool> {
+        let Some(prior) = self.ordinary_calls.get(&(&inference.module.key, node)) else {
+            return Ok(false);
+        };
+        let Some(id) = self.scoped_result_goal(prior) else {
+            return Ok(false);
+        };
+        let goal = self.evidence.get(id).unwrap();
+        let Some(output) = &goal.output else {
+            return Ok(false);
+        };
+        let call = &inference.calls[&node];
+        let slot = &inference.slots[&node];
+        if call.fact.callee != prior.family
+            || call.fact.pipe_input.is_some()
+            || !call.fact.substitution.is_empty()
+            || !prior.defaults.is_empty()
+            || prior.instantiation.is_some()
+            || prior.premise.is_some()
+            || slot.ordinary_context.is_some()
+            || self.arrow_premise.is_some()
+            || slot.blocked
+            || match &slot.ty {
+                Some(ty) => !prior.checked || !Arc::ptr_eq(ty, &output.result),
+                None => prior.checked,
+            }
+            || !matches!(prior.output_agreement, OutputAgreement::Agrees)
+            || !matches!(
+                goal.state,
+                GoalState::Proved | GoalState::Unresolved(GoalBlocker::CallableEnvironment)
+            )
+        {
+            return Ok(false);
+        }
+        let ([argument], [formal], [Some(input)]) = (
+            call.fact.arguments.as_slice(),
+            call.parameters.as_slice(),
+            prior.inputs.as_slice(),
+        ) else {
+            return Ok(false);
+        };
+        self.elab.step(1 + goal.assumptions.len())?;
+        let actual = &inference.slots[argument];
+        if !self.evidence.uses_current_assumptions(goal)
+            || actual.blocked
+            || actual.ordinary_context.is_some()
+            || !actual.ty.as_ref().is_some_and(|ty| Arc::ptr_eq(ty, input))
+        {
+            return Ok(false);
+        }
+        // Stable input identity and unchanged written filters fix ranking. The
+        // proof also depends on the actual slot origins, not just their types.
+        let origins = goal.argument_pair.clone();
+        let result = output.result.clone();
+        let tuple = self.source_leaf(inference.module, *argument)?;
+        let tuple_syntax = &inference.module.syntax.nodes[tuple];
+        if tuple_syntax.kind != NodeKind::Bracket {
+            return Ok(false);
+        }
+        for &element in &tuple_syntax.children {
+            let leaf = self.source_leaf(inference.module, element)?;
+            self.elab.step(1)?;
+            let slot = &inference.slots[&leaf];
+            if slot.blocked || slot.ordinary_context.is_some() || slot.ty.is_none() {
+                return Ok(false);
+            }
+        }
+        let Some(current) = self.direct_argument_pair(inference, call, formal)? else {
+            return Ok(false);
+        };
+        self.elab.step(current.len())?;
+        if !origins.is_some_and(|origins| {
+            origins
+                .iter()
+                .zip(&current)
+                .all(|(old, new)| match (old, new) {
+                    (Some(old), Some(new)) => Arc::ptr_eq(old, new),
+                    (None, None) => true,
+                    _ => false,
+                })
+        }) {
+            return Ok(false);
+        }
+        // An expected type can arrive after the independent determination.
+        slot.expected
+            .as_ref()
+            .map_or(Ok(true), |expected| self.same(expected, &result))
+    }
+
     pub(in crate::analysis::scalars) fn ordinary_call_step(
         &mut self,
         inference: &mut Inference<'g>,
@@ -145,6 +265,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             inference.slots[&node].installed_operation,
             Some(data::DataExpression::NativeOwnership(_) | data::DataExpression::CallableCopy(_))
         ) {
+            return Ok(false);
+        }
+        if !default_step && self.retain_scoped_result_call(inference, node)? {
             return Ok(false);
         }
         let mut call = inference.calls.remove(&node).unwrap();
@@ -1004,6 +1127,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         let goal = if let Some(id) = self
             .ordinary_calls
             .get(&(&module.key, node))
+            // A scoped Result determination that missed the retention check
+            // must establish its current selection and argument evidence anew.
+            .filter(|call| self.scoped_result_goal(call).is_none())
             .and_then(|call| call.goal.as_ref())
         {
             id.clone()
