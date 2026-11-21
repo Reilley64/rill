@@ -88,6 +88,21 @@ impl<'a, 'g> Check<'a, 'g> {
         let previous = std::mem::replace(&mut self.current_parameters, parameters);
         self.budget.step(1)?;
         let checked = self.checked.contains(&signature.declaration.id);
+        let previous_once = self.once_return.take();
+        if checked
+            && signature.declaration.id.kind == DeclarationKind::Function
+            && signature.declaration.scope.is_none()
+            && signature.binders.is_empty()
+            && let Some(&statement) = self.module.syntax.nodes[body].children.last()
+            && self.module.syntax.nodes[statement].kind == NodeKind::Return
+        {
+            // Exclude detached lexical arrow bodies and all other nested call
+            // contexts. This route starts at a checked caller's direct return.
+            self.once_return = self.module.syntax.nodes[statement]
+                .children
+                .first()
+                .copied();
+        }
         let nested_write_body = (signature.declaration.id.kind == DeclarationKind::Function
             && signature.binders.is_empty()
             && checked)
@@ -164,6 +179,7 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         self.current_parameters = previous;
         self.nested_write_body = previous_body;
+        self.once_return = previous_once;
         Ok(())
     }
 
@@ -265,6 +281,23 @@ impl<'a, 'g> Check<'a, 'g> {
     ) -> Work<bool> {
         let values = state.contents(address.0, &address.1, self.budget)?;
         self.prove_actual(values, mode, depth)
+    }
+
+    pub(super) fn prove_once_arrow(
+        &mut self,
+        state: &Residence<'g>,
+        argument: NodeId,
+        depth: usize,
+    ) -> Work<bool> {
+        let values = state.contents(Root::Temporary(argument), &[], self.budget)?;
+        // This route admits only the direct pair: don't substitute an empty
+        // entry for an unknown, borrowed, or Result-bearing residence.
+        if !matches!(values.as_slice(), [value] if value.component.is_empty()
+            && value.content == Content::Callable(argument))
+        {
+            return Ok(false);
+        }
+        self.prove_actual(values, InvocationMode::Once, depth)
     }
 
     pub(super) fn prove_actual(
