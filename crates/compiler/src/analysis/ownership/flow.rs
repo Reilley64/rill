@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
+pub(super) mod forwarding;
 pub(super) mod scoped_join;
 
 // Retain distinct continuing states at a join. Every feasible incoming state
@@ -1320,11 +1321,17 @@ pub(super) struct EnabledRetainingCall<'a, 'g> {
     entry: &'a [State],
     node: NodeId,
     stages: [Place<'g>; 3],
+    gate_parameter: Slot,
     destination: Slot,
     suspended: Vec<State>,
 }
 
 impl<'g> EnabledRetainingCall<'_, 'g> {
+    pub(super) fn forwarded_parameter(&self) -> Option<Place<'g>> {
+        (self.frame.params == [self.gate_parameter])
+            .then(|| self.frame.slots[self.gate_parameter].place(self.frame.module))
+    }
+
     pub(super) fn finish(
         self,
         trace: CancellationTrace<'_, 'g>,
@@ -1504,13 +1511,12 @@ impl<'g> CancellationTrace<'_, 'g> {
                 return Ok(None);
             }
         }
-        if facts.pipe_input.is_some()
-            || self
-                .branch_parameter(self.slots[gate].node, budget)?
-                .is_none()
-        {
+        if facts.pipe_input.is_some() {
             return Ok(None);
         }
+        let Some(gate_parameter) = self.branch_parameter(self.slots[gate].node, budget)? else {
+            return Ok(None);
+        };
         let state = self.known.input(block);
         let old = initialized(&state[target], node)?;
         let source = initialized(&state[input], node)?;
@@ -1559,6 +1565,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             block,
             node,
             stages: [access, input, gate].map(|slot| self.slots[slot].place(self.module)),
+            gate_parameter,
             destination: target,
             suspended,
         }))

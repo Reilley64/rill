@@ -433,6 +433,11 @@ fn installed_retaining_call_cancellation_checks_the_reached_body() {
     probe_with_typed(
         "cancellation::installed_retaining_call_cancellation_checks_the_reached_body",
         r#"
+function nestedGoodWithOwner(enter: bool): void {
+    let outerText = "outer";
+    goodWithOwner(enter);
+    let outerSuffix = "only on normal return";
+}
 function safeBody(slot: &mut &bool, input: &bool, enter: bool): void {
     let flag = true;
     *slot = &flag;
@@ -480,8 +485,28 @@ function goodWithOwner(enter: bool): bool {
 function nestedCaller(enter: bool): void { bad(enter); }
 import std::core::dispose as release;
 type Owner = { enter: bool; text: string; }
-implement release(value: Owner): void { bad(value.enter); }
+implement release(value: Owner): void { nestedCaller(value.enter); }
 function maskedCaller(value: Owner): void { dispose(value); }
+function constantOuter(enter: bool): void { bad(false); }
+function guardedOuter(enter: bool): void { if (enter) {} else { bad(enter); } }
+function alwaysOuter(enter: bool): void { if (true) { bad(enter); } }
+function skippedOuter(enter: bool): void { if (false) { bad(enter); } }
+function unknownOuter(enter: bool): void { let gate = enter; bad(gate); }
+function recurse(enter: bool): void { recurse(enter); }
+function deeper(enter: bool): void { nestedCaller(enter); }
+function infeasibleLeaf(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    if (enter) {} else { while (enter) { continue; } }
+    *slot = input;
+}
+function infeasibleMiddle(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    infeasibleLeaf(&mut slot, &input, enter);
+}
+function infeasibleOuter(enter: bool): void { infeasibleMiddle(enter); }
 function constantCaller(): void {
     let prior = false;
     let input = true;
@@ -494,6 +519,7 @@ function guardedCaller(enter: bool): void {
     let mut slot = &prior;
     if (enter) {} else { unsafeBody(&mut slot, &input, enter); }
 }
+function guardedMiddleOuter(enter: bool): void { guardedCaller(enter); }
 function leaf(): void {}
 function unsafeWithNested(slot: &mut &bool, input: &bool, enter: bool): void {
     let flag = true;
@@ -539,9 +565,42 @@ function callerOfNestedBody(enter: bool): void {
                 assert_eq!((actual.module, actual.node), (&module.key, node));
                 assert_eq!(actual.span.bytes(), bytes);
             }
+            let nested = query(receipt, module, "nestedCaller");
+            assert_eq!(nested.completion(), Completion::SourceRejected);
+            let [nested_finding] = nested.findings() else {
+                panic!("missing nested cancellation escape: {nested:?}");
+            };
+            assert_eq!(nested_finding.code(), finding.code());
+            assert_eq!(nested_finding.site.node, finding.site.node);
+            assert_eq!(nested_finding.related.node, finding.related.node);
+            assert_eq!(
+                nested_finding.cancellation_delivery.unwrap().node,
+                finding.cancellation_delivery.unwrap().node
+            );
+            let [outer, retaining] = nested.rejected_forwarding_calls().unwrap();
+            for (name, site, spelling) in [
+                ("nestedCaller", outer, b"bad(enter)".as_slice()),
+                ("bad", retaining, b"unsafeBody(&mut slot, &input, enter)"),
+            ] {
+                let function = &nodes[declaration(module, name).node];
+                assert_eq!(site.module, &module.key);
+                assert_eq!(site.span.bytes(), spelling);
+                assert!(
+                    function.span.start() <= site.span.start()
+                        && site.span.end() <= function.span.end()
+                );
+            }
+            assert_forwarded_cleanup(receipt, module, request.test_mode);
             for name in [
-                "nestedCaller",
                 "maskedCaller",
+                "constantOuter",
+                "guardedOuter",
+                "guardedMiddleOuter",
+                "alwaysOuter",
+                "unknownOuter",
+                "recurse",
+                "deeper",
+                "infeasibleOuter",
                 "constantCaller",
                 "guardedCaller",
                 "callerOfNestedBody",
@@ -553,7 +612,15 @@ function callerOfNestedBody(enter: bool): void {
                     "{name}: {report:?}"
                 );
                 assert!(report.mir().unwrap().cancellation().is_none(), "{name}");
+                assert!(report.rejected_forwarding_calls().is_none(), "{name}");
             }
+            let skipped = query(receipt, module, "skippedOuter");
+            let skipped_mir = skipped.mir().unwrap();
+            let entry_only = skipped_mir.cancellation().unwrap();
+            assert!(
+                (0..skipped_mir.blocks.len()).all(|block| entry_only.successor(block).is_none())
+            );
+            assert!(skipped.rejected_forwarding_calls().is_none());
             for (name, callee) in [("good", "safeBody"), ("goodWithOwner", "safeWithOwner")] {
                 let good = query(receipt, module, name);
                 assert_eq!(good.completion(), Completion::Checked, "{name}: {good:?}");
@@ -744,6 +811,147 @@ function callerOfNestedBody(enter: bool): void {
             }
         },
     );
+}
+
+fn assert_forwarded_cleanup(
+    receipt: &TypedReceipt<'_, '_>,
+    module: &loader::Module,
+    test_mode: bool,
+) {
+    let outer = declaration(module, "nestedGoodWithOwner");
+    let run = |limits| lower_body(receipt, module, &outer.id, limits).unwrap();
+    let report = run(AnalysisLimits::default());
+    let mir = report.mir().unwrap();
+    let proof = mir.cancellation().unwrap();
+    let [(_, CancellationSuccessor::ForwardedRetainingCall(call))] = (0..mir.blocks.len())
+        .filter_map(|i| proof.successor(i).map(|edge| (i, edge)))
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("expected one link, not an extra call-site checkpoint");
+    };
+    let middle = declaration(module, "goodWithOwner");
+    assert_eq!(call.callee, &middle.id);
+    let middle_mir = &call.body;
+    let middle_proof = middle_mir.cancellation().unwrap();
+    let [CancellationSuccessor::RetainingCall(call_leaf)] = (0..middle_mir.blocks.len())
+        .filter_map(|i| middle_proof.successor(i))
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("missing middle retaining context");
+    };
+    let leaf = declaration(module, "safeWithOwner");
+    assert_eq!(call_leaf.callee, &leaf.id);
+    let leaf_proof = call_leaf.body.cancellation().unwrap();
+    let [(check, CancellationSuccessor::LoopBackedge { on_delivery })] =
+        (0..call_leaf.body.blocks.len())
+            .filter_map(|i| {
+                leaf_proof
+                    .successor(i)
+                    .map(|edge| (&call_leaf.body.blocks[i], edge))
+            })
+            .collect::<Vec<_>>()[..]
+    else {
+        panic!("missing actual leaf delivery");
+    };
+    assert_eq!(
+        (call.leaf_checkpoint.module, call.leaf_checkpoint.node),
+        (&module.key, check.site.node)
+    );
+    let nodes = &module.syntax.nodes;
+    for (decl, entry) in [
+        (outer, proof.entry_site),
+        (middle, middle_proof.entry_site),
+        (leaf, leaf_proof.entry_site),
+    ] {
+        assert_eq!(
+            (entry.module, entry.node),
+            (&module.key, nodes[decl.node].children[1])
+        );
+    }
+    let parameter = call.suspended.argument.parameter;
+    assert_eq!(parameter.root.span.bytes(), b"enter: bool");
+    assert_eq!(call.suspended.argument.staged.root.span.bytes(), b"enter");
+    assert!(matches!(
+        middle_proof.on_entry_delivery.cleanup.as_slice(),
+        [MirCleanup::EndStorage(place)] if place.root.node == parameter.root.node
+    ));
+    let unwind = on_delivery
+        .cleanup
+        .iter()
+        .chain(&call_leaf.caller_cleanup)
+        .chain(&call.suspended.caller_cleanup)
+        .map(|action| match action {
+            MirCleanup::EndStorage(place) => (false, place.root.span.bytes()),
+            MirCleanup::Drop(place) => (true, place.root.span.bytes()),
+            _ => panic!("unexpected delivered cleanup: {action:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        unwind,
+        [
+            (false, b"flag".as_slice()),
+            (true, b"calleeText"),
+            (false, b"enter: bool"),
+            (false, b"input: &bool"),
+            (false, b"slot: &mut &bool"),
+            (false, b"slot"),
+            (false, b"input"),
+            (false, b"prior"),
+            (false, b"initial"),
+            (true, b"callerText"),
+            (false, b"enter: bool"),
+            (true, b"outerText"),
+            (false, b"enter: bool"),
+        ]
+    );
+
+    for (decl, completion) in [
+        (outer, Completion::Checked),
+        (
+            declaration(module, "nestedCaller"),
+            Completion::SourceRejected,
+        ),
+    ] {
+        let run = |limits| lower_body(receipt, module, &decl.id, limits).unwrap();
+        let stats = run(AnalysisLimits::default()).statistics();
+        eprintln!("targeted forwarding {completion:?}, test_mode={test_mode}: {stats:?}");
+        let exact = AnalysisLimits {
+            max_work: stats.work,
+            max_entries: stats.entries,
+            max_depth: stats.max_depth,
+        };
+        let at = run(exact);
+        assert_eq!(at.completion(), completion);
+        assert_eq!(at.statistics(), stats);
+        if completion == Completion::SourceRejected {
+            assert!(at.rejected_forwarding_calls().is_some());
+        } else {
+            assert!(at.mir().and_then(|mir| mir.cancellation()).is_some());
+        }
+        for short in [
+            AnalysisLimits {
+                max_work: exact.max_work - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_entries: exact.max_entries - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_depth: exact.max_depth - 1,
+                ..exact
+            },
+        ] {
+            let exhausted = run(short);
+            assert_eq!(
+                exhausted.completion(),
+                Completion::ResourceLimit,
+                "{short:?}"
+            );
+            assert!(exhausted.mir().is_none() && exhausted.findings().is_empty());
+            assert!(exhausted.rejected_forwarding_calls().is_none());
+        }
+    }
 }
 
 #[test]

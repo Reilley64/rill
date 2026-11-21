@@ -1,9 +1,14 @@
 use super::*;
-use compiler::analysis::ownership::CancellationSuccessor;
+use compiler::analysis::ownership::{CancellationSuccessor, lower_root};
 
 // The positive #69 cases also run alone so resource exhaustion cannot be
 // mistaken for withholding MIR because of a known rejection.
 const SAFE: &str = r#"
+function nestedGoodWithOwner(enter: bool): void {
+    let outerText = "outer";
+    goodWithOwner(enter);
+    let outerSuffix = "only on normal return";
+}
 function safeBody(slot: &mut &bool, input: &bool, enter: bool): void {
     let flag = true;
     *slot = &flag;
@@ -54,8 +59,28 @@ function bad(enter: bool): void {
 function nestedCaller(enter: bool): void { bad(enter); }
 import std::core::dispose as release;
 type Owner = { enter: bool; text: string; }
-implement release(value: Owner): void { bad(value.enter); }
+implement release(value: Owner): void { nestedCaller(value.enter); }
 function maskedCaller(value: Owner): void { dispose(value); }
+function constantOuter(enter: bool): void { bad(false); }
+function guardedOuter(enter: bool): void { if (enter) {} else { bad(enter); } }
+function alwaysOuter(enter: bool): void { if (true) { bad(enter); } }
+function skippedOuter(enter: bool): void { if (false) { bad(enter); } }
+function unknownOuter(enter: bool): void { let gate = enter; bad(gate); }
+function recurse(enter: bool): void { recurse(enter); }
+function deeper(enter: bool): void { nestedCaller(enter); }
+function infeasibleLeaf(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    if (enter) {} else { while (enter) { continue; } }
+    *slot = input;
+}
+function infeasibleMiddle(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    infeasibleLeaf(&mut slot, &input, enter);
+}
+function infeasibleOuter(enter: bool): void { infeasibleMiddle(enter); }
 function constantCaller(): void {
     let prior = false;
     let input = true;
@@ -68,6 +93,7 @@ function guardedCaller(enter: bool): void {
     let mut slot = &prior;
     if (enter) {} else { unsafeBody(&mut slot, &input, enter); }
 }
+function guardedMiddleOuter(enter: bool): void { guardedCaller(enter); }
 function leaf(): void {}
 function unsafeWithNested(slot: &mut &bool, input: &bool, enter: bool): void {
     let flag = true;
@@ -154,19 +180,54 @@ fn installed_selected_delivery_and_unresolved_contexts() {
                 );
             }
             let bad = named("bad");
-            assert!(matches!(
-                bad.selected_call(),
-                Delivery::Rejected {
-                    finding_id: 0,
-                    via_call: Some(_)
-                }
-            ));
+            let Delivery::Rejected {
+                finding_id: 0,
+                via_call: Some(retaining),
+            } = bad.selected_call()
+            else {
+                panic!("missing validated retaining rejection");
+            };
+            assert_eq!(
+                retaining.site.span.bytes(),
+                b"unsafeBody(&mut slot, &input, enter)"
+            );
+            assert_eq!(
+                report.roots()[retaining.callee_root].owner(),
+                named("unsafeBody").owner()
+            );
             assert_eq!(bad.completion(), Completion::SourceRejected);
             assert_eq!(bad.ordinary_completion(), Completion::Checked);
             assert!(bad.mir().is_none() && bad.ordinary_mir().is_some());
+            let nested = named("nestedCaller");
+            assert_eq!(nested.completion(), Completion::SourceRejected);
+            assert_eq!(nested.ordinary_completion(), Completion::Checked);
+            assert!(nested.ordinary_mir().is_some() && nested.mir().is_none());
+            assert!(matches!(nested.enabled_frame(), Delivery::Unresolved));
+            assert!(matches!(nested.selected_call(), Delivery::Unresolved));
+            let Delivery::Rejected {
+                finding_id: 0,
+                via_call: Some(forwarding),
+            } = nested.forwarded_call()
+            else {
+                panic!("missing forwarding rejection");
+            };
+            let block = &nested.ordinary_mir().unwrap().blocks[forwarding.block];
+            assert_eq!(forwarding.site.node, block.site.node);
+            assert_eq!(forwarding.site.span.bytes(), b"bad(enter)");
+            assert_eq!(report.roots()[forwarding.callee_root].owner(), bad.owner());
+            assert!(
+                matches!(block.operation, Operation::Call(callee) if bad.owner() == BodyOwner::Declaration(callee))
+            );
             for name in [
-                "nestedCaller",
                 "maskedCaller",
+                "constantOuter",
+                "guardedOuter",
+                "guardedMiddleOuter",
+                "alwaysOuter",
+                "unknownOuter",
+                "recurse",
+                "deeper",
+                "infeasibleOuter",
                 "constantCaller",
                 "guardedCaller",
                 "callerOfNestedBody",
@@ -182,7 +243,18 @@ fn installed_selected_delivery_and_unresolved_contexts() {
                     matches!(caller.selected_call(), Delivery::Unresolved),
                     "{name}"
                 );
+                assert!(
+                    matches!(caller.forwarded_call(), Delivery::Unresolved),
+                    "{name}"
+                );
             }
+            let skipped = named("skippedOuter");
+            assert!(skipped.dependencies().is_empty());
+            assert!(matches!(skipped.forwarded_call(), Delivery::Unresolved));
+            assert!(matches!(
+                named("infeasibleMiddle").selected_call(),
+                Delivery::Proved(_)
+            ));
             let implementation = root(&report, b"implement release(");
             assert_eq!(implementation.completion(), Completion::Incomplete);
             let [active] = report.active_disposers() else {
@@ -193,6 +265,7 @@ fn installed_selected_delivery_and_unresolved_contexts() {
             for nonfun in [implementation, active, &report.roots()[0]] {
                 assert!(matches!(nonfun.enabled_frame(), Delivery::Unresolved));
                 assert!(matches!(nonfun.selected_call(), Delivery::Unresolved));
+                assert!(matches!(nonfun.forwarded_call(), Delivery::Unresolved));
             }
             let breaks = named("breakOnly");
             let Delivery::Proved(proof) = breaks.enabled_frame() else {
@@ -203,6 +276,7 @@ fn installed_selected_delivery_and_unresolved_contexts() {
                     .all(|block| proof.successor(block).is_none())
             );
             assert_good_proofs(&report, module);
+            assert_forwarded_proof(&report, module);
             check_limits(request.test_mode, receipt, &report);
         },
     );
@@ -288,8 +362,166 @@ fn good_only_graph_needs_the_complete_work_entry_and_depth_budget() {
             assert_eq!(report.completion(), GraphCompletion::Incomplete);
             assert!(report.findings().is_empty());
             assert_good_proofs(&report, module);
+            assert_forwarded_proof(&report, module);
             check_limits(request.test_mode, receipt, &report);
         },
+    );
+}
+
+#[test]
+fn forwarded_call_uses_the_selected_module_not_the_function_spelling() {
+    let unsafe_middle = format!("{}\n", OTHER.split("function nestedCaller").next().unwrap())
+        .replace("function bad(", "export function bad(");
+    probe_report_with_modules(
+        "graph::delivery::forwarded_call_uses_the_selected_module_not_the_function_spelling",
+        r#"
+import left::bad as unsafeMiddle;
+import right::{bad as otherMiddle, unavailable};
+function rejected(enter: bool): void { unsafeMiddle(enter); }
+function other(enter: bool): void { otherMiddle(enter); }
+function blocked(enter: bool): void { unavailable(enter); }
+"#,
+        &[
+            ("left.rill", &unsafe_middle),
+            (
+                "right.rill",
+                r#"
+export function bad(enter: bool): void { let text = "ordinary"; }
+export function unavailable(enter: bool): void { let values = [13i32, 29i32]; }
+"#,
+            ),
+        ],
+        |_, module, typed| {
+            let receipt = typed.receipt().unwrap();
+            let report = analyze_ownership(&receipt, AnalysisLimits::default());
+            let [finding] = report.findings() else {
+                panic!("expected one canonical leaf finding");
+            };
+            assert_eq!(finding.site.module.path, "left.rill");
+            let rejected = root(&report, b"function rejected(");
+            let Delivery::Rejected {
+                finding_id: 0,
+                via_call: Some(call),
+            } = rejected.forwarded_call()
+            else {
+                panic!("missing qualified rejection");
+            };
+            assert_eq!(call.site.span.bytes(), b"unsafeMiddle(enter)");
+            assert_eq!(
+                report.roots()[call.callee_root].site().module.path,
+                "left.rill"
+            );
+            let target = lower_root(
+                &receipt,
+                module,
+                rejected.owner(),
+                AnalysisLimits::default(),
+            )
+            .unwrap();
+            assert_eq!(target.completion(), Completion::SourceRejected);
+            assert_eq!(target.findings()[0].site.module.path, "left.rill");
+            let chain = target.rejected_forwarding_calls().unwrap();
+            assert_eq!(
+                chain.map(|site| site.module.path.as_str()),
+                ["main.rill", "left.rill"]
+            );
+
+            let other = root(&report, b"function other(");
+            assert!(matches!(other.forwarded_call(), Delivery::Unresolved));
+            let [dependency] = other.dependencies() else {
+                panic!("missing other ordinary edge")
+            };
+            assert_eq!(dependency.declaration.module.path, "right.rill");
+            let target =
+                lower_root(&receipt, module, other.owner(), AnalysisLimits::default()).unwrap();
+            assert!(target.mir().unwrap().cancellation().is_none());
+            assert!(target.rejected_forwarding_calls().is_none());
+
+            let blocked = root(&report, b"function blocked(");
+            assert_eq!(blocked.ordinary_completion(), Completion::Incomplete);
+            assert!(matches!(blocked.forwarded_call(), Delivery::Unresolved));
+            let target =
+                lower_root(&receipt, module, blocked.owner(), AnalysisLimits::default()).unwrap();
+            assert_eq!(target.completion(), Completion::Incomplete);
+            assert!(target.rejected_forwarding_calls().is_none());
+        },
+    );
+}
+
+fn assert_forwarded_proof(report: &GraphReport<'_>, module: &loader::Module) {
+    let outer = root(report, b"function nestedGoodWithOwner(");
+    let Delivery::Proved(forwarding) = outer.forwarded_call() else {
+        panic!("missing forwarding proof");
+    };
+    assert!(matches!(outer.enabled_frame(), Delivery::Unresolved));
+    assert!(matches!(outer.selected_call(), Delivery::Unresolved));
+    let mir = outer.mir().unwrap();
+    let block = &mir.blocks[forwarding.call.block];
+    let middle = &report.roots()[forwarding.call.callee_root];
+    assert!(
+        matches!(block.operation, Operation::Call(callee) if middle.owner() == BodyOwner::Declaration(callee))
+    );
+    assert_eq!(forwarding.call.site.node, block.site.node);
+    assert_eq!(forwarding.call.site.span.bytes(), b"goodWithOwner(enter)");
+    let Delivery::Proved(retaining) = middle.selected_call() else {
+        panic!("missing middle retaining context");
+    };
+    let leaf = &report.roots()[retaining.call.callee_root];
+    let Delivery::Proved(enabled) = leaf.enabled_frame() else {
+        panic!("missing leaf proof");
+    };
+    let leaf_mir = leaf.ordinary_mir().unwrap();
+    let checkpoint = (0..leaf_mir.blocks.len())
+        .find(|&index| {
+            matches!(
+                enabled.successor(index),
+                Some(CancellationSuccessor::LoopBackedge { .. })
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        forwarding.leaf_checkpoint.node,
+        leaf_mir.blocks[checkpoint].site.node
+    );
+    assert_eq!(
+        forwarding.leaf_checkpoint.span.bytes(),
+        b"while (enter) { continue; }"
+    );
+    assert_eq!(
+        forwarding.suspended.argument.staged.root.span.bytes(),
+        b"enter"
+    );
+    assert_eq!(
+        forwarding.suspended.argument.parameter.root.span.bytes(),
+        b"enter: bool"
+    );
+    for (body, at_entry) in [
+        (outer, forwarding.caller_entry_site),
+        (middle, retaining.caller_entry_site),
+        (leaf, enabled.entry_site),
+    ] {
+        assert_eq!(
+            (at_entry.module, at_entry.node),
+            (
+                &module.key,
+                module.syntax.nodes[body.site().node].children[1]
+            )
+        );
+    }
+    assert_eq!(
+        cleanup_names(&forwarding.on_caller_entry_delivery.cleanup),
+        [(false, b"enter: bool".as_slice())]
+    );
+    assert_eq!(
+        cleanup_names(&forwarding.suspended.caller_cleanup),
+        [(true, b"outerText".as_slice()), (false, b"enter: bool")]
+    );
+    let Terminator::Goto(next) = block.terminator else {
+        panic!("missing normal suffix")
+    };
+    assert_eq!(
+        cleanup_names(&path_drops(mir, next)),
+        [(true, b"outerSuffix".as_slice()), (true, b"outerText")]
     );
 }
 
@@ -465,6 +697,10 @@ fn check_limits(test_mode: bool, receipt: &TypedReceipt<'_, '_>, report: &GraphR
         root(&at, b"function goodWithOwner(").selected_call(),
         Delivery::Proved(_)
     ));
+    assert!(matches!(
+        root(&at, b"function nestedGoodWithOwner(").forwarded_call(),
+        Delivery::Proved(_)
+    ));
     for short in [
         AnalysisLimits {
             max_work: exact.max_work - 1,
@@ -496,6 +732,7 @@ fn check_limits(test_mode: bool, receipt: &TypedReceipt<'_, '_>, report: &GraphR
                         && root.ordinary_mir().is_none()
                         && !matches!(root.enabled_frame(), Delivery::Proved(_))
                         && !matches!(root.selected_call(), Delivery::Proved(_))
+                        && !matches!(root.forwarded_call(), Delivery::Proved(_))
                 })
         );
         if short.max_depth == exact.max_depth {
@@ -505,6 +742,13 @@ fn check_limits(test_mode: bool, receipt: &TypedReceipt<'_, '_>, report: &GraphR
                 "late exhaustion lost a finding"
             );
             if !report.findings().is_empty() {
+                assert!(matches!(
+                    root(&exhausted, b"function nestedCaller(").forwarded_call(),
+                    Delivery::Rejected {
+                        finding_id: 0,
+                        via_call: Some(_)
+                    }
+                ));
                 assert!(matches!(
                     root(&exhausted, b"function bad(").selected_call(),
                     Delivery::Rejected {

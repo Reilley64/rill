@@ -6,6 +6,7 @@ use crate::loader::{GraphId, ModuleKey, Origin};
 use std::collections::BTreeSet;
 
 mod closed_release;
+mod forwarding;
 
 /// Whole-capture disposition. This increment has no complete state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -133,6 +134,19 @@ pub struct GraphRetainingCall<'g> {
     pub suspended: SuspendedRetainingFrame<'g>,
 }
 
+/// A straight ordinary call forwarding one stable Bool into a checked retaining
+/// call. The middle frame's `selected_call` identifies its entry, the leaf frame,
+/// and its own suspended cleanup. Run leaf cleanup, then middle cleanup, then
+/// `suspended.caller_cleanup`; neither call instruction is a checkpoint.
+#[derive(Debug)]
+pub struct GraphForwardedRetainingCall<'g> {
+    pub call: RetainingCallSite<'g>,
+    pub caller_entry_site: Site<'g>,
+    pub on_caller_entry_delivery: CancellationExit<'g>,
+    pub leaf_checkpoint: Site<'g>,
+    pub suspended: SuspendedForwardingFrame<'g>,
+}
+
 #[derive(Debug)]
 pub struct RootReport<'g> {
     site: Site<'g>,
@@ -142,6 +156,7 @@ pub struct RootReport<'g> {
     ordinary_mir: Option<Mir<'g>>,
     enabled_frame: Delivery<'g, Cancellation<'g>>,
     selected_call: Delivery<'g, Box<GraphRetainingCall<'g>>>,
+    forwarded_call: Delivery<'g, Box<GraphForwardedRetainingCall<'g>>>,
     replacement: Delivery<'g, Box<ReplacementCancellation<'g>>>,
     dependencies: Vec<Dependency<'g>>,
 }
@@ -158,6 +173,7 @@ impl<'g> RootReport<'g> {
     pub fn completion(&self) -> Completion {
         if matches!(self.enabled_frame, Delivery::Rejected { .. })
             || matches!(self.selected_call, Delivery::Rejected { .. })
+            || matches!(self.forwarded_call, Delivery::Rejected { .. })
         {
             return Completion::SourceRejected;
         }
@@ -177,6 +193,12 @@ impl<'g> RootReport<'g> {
     /// and leaf-callee premises checked. Ordinary parents do not inherit it.
     pub fn selected_call(&self) -> &Delivery<'g, Box<GraphRetainingCall<'g>>> {
         &self.selected_call
+    }
+    /// A bounded ordinary forwarding context, not general call propagation.
+    /// For a rejection, follow `via_call` to the middle root's `selected_call`,
+    /// then to the canonical leaf finding and its actual delivery site.
+    pub fn forwarded_call(&self) -> &Delivery<'g, Box<GraphForwardedRetainingCall<'g>>> {
+        &self.forwarded_call
     }
     /// The checked disposal-through-install interval, separate from an
     /// enabled-frame judgment. Resolve its body in `GraphReport::active_disposers`.
@@ -329,6 +351,8 @@ struct WorkItem<'a, 'g> {
     enabled_proof: Option<Cancellation<'g>>,
     retaining_parameters: Option<[Place<'g>; 3]>,
     selected_proof: Option<Box<GraphRetainingCall<'g>>>,
+    selected_gate: Option<Place<'g>>,
+    forwarded_proof: Option<Box<GraphForwardedRetainingCall<'g>>>,
 }
 
 type FindingIndex = BTreeMap<(usize, NodeId, NodeId, Conflict), usize>;
@@ -413,6 +437,7 @@ fn push_body<'a, 'g>(
         ordinary_mir: None,
         enabled_frame: Delivery::Unresolved,
         selected_call: Delivery::Unresolved,
+        forwarded_call: Delivery::Unresolved,
         replacement: Delivery::Unresolved,
         dependencies: Vec::new(),
     });
@@ -434,6 +459,8 @@ fn push_body<'a, 'g>(
         enabled_proof: None,
         retaining_parameters: None,
         selected_proof: None,
+        selected_gate: None,
+        forwarded_proof: None,
     });
     Ok(index)
 }
@@ -743,6 +770,9 @@ fn analyze<'g>(
         if let Some(proof) = item.selected_proof {
             root.selected_call = Delivery::Proved(proof);
         }
+        if let Some(proof) = item.forwarded_proof {
+            root.forwarded_call = Delivery::Proved(proof);
+        }
         if let Some(proof) = item.replacement_proof {
             root.replacement = Delivery::Proved(proof);
         }
@@ -859,6 +889,7 @@ fn check_selected_calls<'g>(
     report: &mut GraphReport<'g>,
     budget: &mut Budget,
 ) -> Result<(), ()> {
+    let mut forwarding_candidates = Vec::new();
     for index in 0..report.source_roots {
         budget.step(1)?;
         let Some(trace) = work[index].trace.take() else {
@@ -870,10 +901,21 @@ fn check_selected_calls<'g>(
         let Some(&callee_root) = item.call_targets.get(&block) else {
             continue;
         };
+        let mir = item.ordinary.as_ref().unwrap();
         let Some(parameters) = work[callee_root].retaining_parameters else {
+            if callee_root != index
+                && work[callee_root].ordinary_completion == Completion::Checked
+                && let Some((_, callee)) = trace.forwarding_call(mir)
+                && work[callee_root]
+                    .declaration
+                    .is_some_and(|declaration| std::ptr::eq(&declaration.id, callee))
+            {
+                budget.reserve(1)?;
+                forwarding_candidates.push((index, block, callee_root));
+                work[index].trace = Some(trace);
+            }
             continue;
         };
-        let mir = item.ordinary.as_ref().unwrap();
         let call = match trace.prepare_retaining_call(mir, budget) {
             Ok(Some(call)) => call,
             Err(Stop::Limit) => return Err(()),
@@ -884,10 +926,11 @@ fn check_selected_calls<'g>(
             site: mir.blocks[block].site,
             callee_root,
         };
-        // Only this exact context can reuse the enabled result. In particular,
-        // neither an ordinary caller nor a second nested call inherits it.
+        // Only the admitted retaining transfer can reuse the enabled result.
+        let gate = call.forwarded_parameter();
         if let Delivery::Rejected { finding_id, .. } = report.bodies[callee_root].enabled_frame {
             budget.reserve(1)?;
+            work[index].selected_gate = gate;
             report.bodies[index].selected_call = Delivery::Rejected {
                 finding_id,
                 via_call: Some(site),
@@ -896,6 +939,7 @@ fn check_selected_calls<'g>(
         }
         match call.finish_caller(parameters, budget) {
             Ok(Some((entry, suspended))) => {
+                work[index].selected_gate = gate;
                 work[index].selected_proof = Some(Box::new(GraphRetainingCall {
                     call: site,
                     caller_entry_site: entry.entry_site,
@@ -907,7 +951,7 @@ fn check_selected_calls<'g>(
             Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => {}
         }
     }
-    Ok(())
+    forwarding::check(work, report, forwarding_candidates, budget)
 }
 
 fn lower_indexed<'a, 'g>(

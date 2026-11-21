@@ -21,8 +21,9 @@ mod rigid;
 mod scalar;
 
 pub use graph::{
-    Delivery, Dependency, DependencyContract, GraphCompletion, GraphObligation, GraphReport,
-    GraphRetainingCall, RetainingCallSite, RootReport, analyze_ownership,
+    Delivery, Dependency, DependencyContract, GraphCompletion, GraphForwardedRetainingCall,
+    GraphObligation, GraphReport, GraphRetainingCall, RetainingCallSite, RootReport,
+    analyze_ownership,
 };
 pub use join::{
     JoinChildState, JoinDelivery, JoinEntry, JoinEvent, JoinNext, JoinWait, ScopedJoinFrame,
@@ -72,6 +73,7 @@ impl Finding<'_> {
 pub struct Report<'g> {
     completion: Completion,
     findings: Vec<Finding<'g>>,
+    rejected_forwarding_calls: Option<[Site<'g>; 2]>,
     blocked_at: Option<Site<'g>>,
     mir: Option<Mir<'g>>,
     statistics: Statistics,
@@ -83,6 +85,11 @@ impl<'g> Report<'g> {
     }
     pub fn findings(&self) -> &[Finding<'g>] {
         &self.findings
+    }
+    /// For a rejected forwarding context, the outer call and the retaining
+    /// call, in that order. The finding identifies the actual leaf checkpoint.
+    pub fn rejected_forwarding_calls(&self) -> Option<[Site<'g>; 2]> {
+        self.rejected_forwarding_calls
     }
     pub fn blocked_at(&self) -> Option<Site<'g>> {
         self.blocked_at
@@ -119,7 +126,7 @@ impl<'g> Mir<'g> {
     }
 
     /// Intrinsic cancellation proof for a supported flat frame, including
-    /// its suspended state at an admitted retaining call into a second frame.
+    /// suspended state at an admitted retaining call or exact Bool forwarding call.
     /// `None` means unknown, not that cancellation is impossible. `Some` does
     /// not certify enclosing callers, deferred regions, or graph-wide roots.
     pub fn cancellation(&self) -> Option<&Cancellation<'g>> {
@@ -278,7 +285,7 @@ pub struct Cancellation<'g> {
 impl<'g> Cancellation<'g> {
     /// The delivery proof associated with a reached ordinary MIR block.
     /// Within a known proof, absence means this block contributes no delivery edge.
-    /// A retaining call links checkpoints inside the callee; it is not itself a checkpoint.
+    /// Call links describe checkpoints inside the callee, not polls at the call instruction.
     pub fn successor(&self, block: usize) -> Option<&CancellationSuccessor<'g>> {
         self.successors.get(&block)
     }
@@ -298,6 +305,25 @@ pub enum CancellationSuccessor<'g> {
     },
     /// Delivery in a nonempty, directly called retaining frame, not at the call instruction.
     RetainingCall(Box<RetainingCallCancellation<'g>>),
+    /// Transfer a stable Bool into a callee with an admitted retaining call.
+    ForwardedRetainingCall(Box<ForwardedRetainingCallCancellation<'g>>),
+}
+
+#[derive(Debug)]
+pub struct ForwardedRetainingCallCancellation<'g> {
+    pub callee: &'g DeclarationId,
+    /// The callee's entry and its retaining call to the leaf are separate from this link.
+    pub body: Mir<'g>,
+    pub leaf_checkpoint: Site<'g>,
+    pub suspended: SuspendedForwardingFrame<'g>,
+}
+
+#[derive(Debug)]
+pub struct SuspendedForwardingFrame<'g> {
+    pub argument: CancellationArgument<'g>,
+    /// Run only after all delivered cleanup in the callee completes. This does not run
+    /// the ordinary suffix or end the stage already transferred to the callee.
+    pub caller_cleanup: Vec<Cleanup<'g>>,
 }
 
 #[derive(Debug)]
@@ -1066,13 +1092,23 @@ fn check_root<'g>(
     plan: RootPlan<'_, 'g>,
     mut budget: Budget,
 ) -> Report<'g> {
-    let mut result = checked_graph(typed, module, plan, &mut budget);
+    let mut rejected_forwarding_calls = None;
+    let mut result = checked_graph(
+        typed,
+        module,
+        plan,
+        &mut rejected_forwarding_calls,
+        &mut budget,
+    );
     if let Err((at, Stop::Rejected { .. })) = result
         && budget.reserve(1).is_err()
     {
         result = Err((at, Stop::Limit));
+        rejected_forwarding_calls = None;
     }
-    report(result, budget.statistics)
+    let mut report = report(result, budget.statistics);
+    report.rejected_forwarding_calls = rejected_forwarding_calls;
+    report
 }
 
 fn report<'g>(result: Result<Mir<'g>, (&'g Module, Stop)>, statistics: Statistics) -> Report<'g> {
@@ -1102,6 +1138,7 @@ fn report<'g>(result: Result<Mir<'g>, (&'g Module, Stop)>, statistics: Statistic
     Report {
         completion,
         findings,
+        rejected_forwarding_calls: None,
         blocked_at,
         mir,
         statistics,
@@ -1134,6 +1171,7 @@ fn checked_graph<'g>(
     typed: &TypedReport<'g>,
     module: &'g Module,
     plan: RootPlan<'_, 'g>,
+    rejected_forwarding_calls: &mut Option<[Site<'g>; 2]>,
     budget: &mut Budget,
 ) -> Result<Mir<'g>, (&'g Module, Stop)> {
     let mut scalar_module = None;
@@ -1228,6 +1266,10 @@ fn checked_graph<'g>(
             .map_err(|stop| (module, stop))?,
         None => None,
     };
+    let forwarding = trace
+        .as_ref()
+        .and_then(|trace| trace.forwarding_call(&root));
+    let mut middle: Option<flow::forwarding::ForwardingCallee<'_, 'g>> = None;
     // All direct dependencies of the root are queued before transitive ones.
     let mut direct = pending.len();
     let mut scalar_targets = None;
@@ -1238,7 +1280,15 @@ fn checked_graph<'g>(
     while let Some((target, id, is_disposer)) = pending.pop_front() {
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
         let missing = (module, Stop::Pending(root_site));
-        let enabled = !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
+        let retaining_target =
+            !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
+        let forwarding_target =
+            !is_disposer && forwarding.is_some_and(|(_, callee)| std::ptr::eq(callee, id));
+        let retaining_leaf = !is_disposer
+            && middle
+                .as_ref()
+                .is_some_and(|middle| std::ptr::eq(middle.leaf, id));
+        let enabled = retaining_target || forwarding_target || retaining_leaf;
         let ordinary_implementation = !is_disposer && id.kind == DeclarationKind::Implementation;
         let lowered = match (ordinary_implementation, target.key.origin) {
             (true, Origin::Application) => {
@@ -1319,9 +1369,21 @@ fn checked_graph<'g>(
             }
         }
         reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
-        if let Some(call) = retaining.take_if(|_| enabled) {
+        if let Some(call) = retaining.take_if(|_| retaining_target) {
             if let Some(callee_trace) = callee_trace {
                 root.cancellation = call.finish(callee_trace, mir, budget)?;
+            }
+        } else if forwarding_target {
+            middle = callee_trace
+                .and_then(|trace| flow::forwarding::ForwardingCallee::new(id, mir, trace));
+        } else if let Some(middle) = middle.take_if(|_| retaining_leaf) {
+            if let Some(leaf) = callee_trace {
+                root.cancellation = middle.finish(
+                    (trace.as_ref().unwrap(), &root, forwarding.unwrap().0),
+                    (leaf, mir),
+                    rejected_forwarding_calls,
+                    budget,
+                )?;
             }
         } else if is_disposer {
             budget.reserve(1).map_err(|()| (target, Stop::Limit))?;
