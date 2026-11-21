@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 mod iteration;
 mod list_arrows;
+mod list_source;
 mod scoped_result;
 pub(super) use scoped_result::lower_fresh_scoped_children;
 mod reference_results;
