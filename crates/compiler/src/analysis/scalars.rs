@@ -35,6 +35,8 @@ pub struct Flow {
     /// A reachable prerequisite prevents a complete control-flow judgment.
     pub pending: bool,
     pub returns: bool,
+    /// At least one feasible path evaluates a postfix `?` (including known Some).
+    pub reaches_postfix: bool,
     pub breaks: BTreeSet<NodeId>,
     pub continues: BTreeSet<NodeId>,
     pub diverges: bool,
@@ -124,9 +126,13 @@ pub use core::{
 };
 pub use formatting::FormattingCall;
 pub use iteration::Iteration;
+pub(in crate::analysis) use iteration::IterationBodyKind;
 
 #[derive(Debug)]
 pub struct CallFacts<'g> {
+    /// Closed per-slot evidence from Result-use on this exact call, not a join contract.
+    pub(in crate::analysis) list_arrows: Option<Box<super::typed::PairCall<'g>>>,
+    pub(in crate::analysis) scoped_join: Option<Box<super::typed::ScopedJoinCall<'g>>>,
     pub callee: &'g DeclarationId,
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
@@ -250,6 +256,7 @@ impl ScalarFindingKind {
 pub struct ScalarFinding<'g> {
     pub site: Site<'g>,
     pub kind: ScalarFindingKind,
+    pub related: Option<Site<'g>>,
     pub actual: Option<Type<'g>>,
     pub expected: Option<Type<'g>>,
     pub bindings: Vec<&'g Binding>,
@@ -284,6 +291,8 @@ pub struct ScalarObligation<'g> {
 }
 #[derive(Debug, Default)]
 pub struct ScalarFacts<'g> {
+    /// Pending per-formal handoffs for the integrated report, by function and position.
+    text_iteration_sources: Vec<(&'g DeclarationId, usize)>,
     pub bodies: Vec<BodyFacts<'g>>,
     pub nodes: Vec<NodeFacts<'g>>,
     pub findings: Vec<ScalarFinding<'g>>,
@@ -414,6 +423,7 @@ struct Slot<'g> {
 }
 struct ExpressionResult<'g> {
     ty: Type<'g>,
+    list_literal: Option<NodeId>,
     place: Place,
     normal: bool,
     diverges: bool,
@@ -489,6 +499,8 @@ struct Checker<'r, 'g> {
     reached_bodies: bool,
     reached_startup: bool,
     reached_expectations: bool,
+    // Accumulate the written body shape while an iteration is being checked.
+    iteration_body: iteration::IterationBody,
     data: bool,
     integrated: bool,
     option: Option<super::typed::OptionRole<'g>>,
@@ -498,7 +510,7 @@ struct Checker<'r, 'g> {
     installed_conversions: Option<&'r super::typed::ConversionCore<'g>>,
     collections: CollectionCore<'g>,
     native_ownership: &'r [super::typed::OwnershipProtection<'g>],
-    ordinary_scope: Option<super::typed::ApplicationOrdinaryScope>,
+    ordinary_scope: Option<super::typed::InstalledOrdinaryScope<'g>>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
     conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
@@ -525,6 +537,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             reached_bodies: false,
             reached_startup: false,
             reached_expectations: false,
+            iteration_body: iteration::IterationBody::default(),
             data,
             integrated: false,
             option: None,
@@ -638,6 +651,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.facts.findings.push(ScalarFinding {
                 site: Self::site(module, node),
                 kind,
+                related: None,
                 actual: None,
                 expected: None,
                 bindings: Vec::new(),
@@ -1613,6 +1627,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.defer(module, node, ScalarUnsupported::CallableInvocation)?;
             return Ok(None);
         };
+        if let Some(wrapper) = self.routine_bridge(&declaration.id)
+            && !context
+                .signature
+                .is_some_and(|signature| signature.declaration.id == wrapper.id)
+        {
+            self.deferred_declaration(
+                module,
+                node,
+                ScalarUnsupported::FamilySelection,
+                declaration,
+                bindings,
+            )?;
+            return Ok(None);
+        }
         let closed_error = self.closed_err(&declaration.id);
         let bridge = self.installed_bridge(&declaration.id)?;
         let family = declaration.id.kind == DeclarationKind::Family
@@ -1766,6 +1794,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(Some(PreparedCall {
             callee_node: callee,
             fact: CallFacts {
+                list_arrows: None,
+                scoped_join: None,
                 callee: &declaration.id,
                 bindings,
                 substitution,
@@ -1953,9 +1983,14 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         self.elab.reserve(1)?;
         let mut stack = vec![root];
+        let mut root_leaf = root;
         while let Some(node) = stack.pop() {
             self.elab.step(1)?;
             let syntax = &module.syntax.nodes[node];
+            if node == root_leaf && syntax.kind == NodeKind::Group {
+                root_leaf = syntax.children[0];
+            }
+            self.iteration_body.visit(node, syntax);
             self.elab.reserve(1)?;
             inference.slots.insert(
                 node,
@@ -2626,6 +2661,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             slot.boolean = boolean;
         }
         let mut result = None;
+        let mut list_literal = None;
         for (&node, slot) in &inference.slots {
             self.elab.step(1)?;
             if self.conversions.is_some()
@@ -2691,6 +2727,13 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else {
                     None
                 };
+                if node == root_leaf
+                    && premise.is_none()
+                    && matches!(data, Some(data::DataExpression::List { .. }))
+                {
+                    list_literal = Some(node);
+                }
+                self.iteration_expression(module, node, slot, data.as_ref(), call.as_deref())?;
                 let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),
@@ -2726,6 +2769,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if node == root {
                     result = Some(ExpressionResult {
                         ty: ty.clone(),
+                        list_literal,
                         place: slot.place,
                         normal: slot.normal,
                         diverges: slot.diverges,
@@ -2818,6 +2862,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             if flow.normal
                 && let Some(propagation) = &inference.slots[&node].propagation
             {
+                flow.reaches_postfix |= n.kind == NodeKind::Propagate;
                 flow.normal = propagation.can_continue;
                 flow.returns |= propagation.can_return;
             }
@@ -2838,6 +2883,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         a.normal |= b.normal;
         a.pending |= b.pending;
         a.returns |= b.returns;
+        a.reaches_postfix |= b.reaches_postfix;
         a.diverges |= b.diverges;
         a.breaks.extend(&b.breaks);
         a.continues.extend(&b.continues);
@@ -2885,6 +2931,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(depth);
         let n = &module.syntax.nodes[node];
+        self.iteration_body.statement(n, depth);
         let before = self.marks();
         let mut flow = Flow::normal();
         let mut kind = NodeFactKind::Statement;
@@ -2897,6 +2944,34 @@ impl<'r, 'g> Checker<'r, 'g> {
                 for &child in &n.children {
                     let obligations = self.facts.obligations.len();
                     let next = self.statement(module, child, depth + 1, context)?;
+                    if flow.normal
+                        && !flow.pending
+                        && module.syntax.nodes[child].kind == NodeKind::For
+                        && context.arrow_return.is_none()
+                        && let Some(header) = context.signature
+                        && header.declaration.id.kind == DeclarationKind::Function
+                        && module.syntax.nodes[header.declaration.node].children.get(1)
+                            == Some(&node)
+                        && let Some(NodeFacts {
+                            site,
+                            kind: NodeFactKind::Iteration(iteration),
+                            ..
+                        }) = self.facts.nodes.last()
+                        && site.node == child
+                        && let Some(source) = iteration.text_input
+                        && let DeclarationShape::Function { parameters, .. } = &header.shape
+                    {
+                        self.elab.step(parameters.len())?;
+                        if let Some(i) = parameters
+                            .iter()
+                            .position(|p| std::ptr::eq(&p.declaration.id, source))
+                        {
+                            self.elab.reserve(1)?;
+                            self.facts
+                                .text_iteration_sources
+                                .push((&header.declaration.id, i));
+                        }
+                    }
                     if flow.normal {
                         flow.normal = false;
                         flow = self.union(flow, &next)?;

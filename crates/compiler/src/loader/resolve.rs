@@ -53,11 +53,26 @@ pub(super) fn load(
         .as_deref()
         .and_then(Path::parent)
         .and_then(Path::parent);
+    let mut routine_index = None;
     match engine.run(prefix) {
         Ok((bindings, implementations, prelude, ownership_archive)) => Ok(Graph {
             id: engine.id,
             request: engine.request,
-            modules: engine.modules.into_values().collect(),
+            modules: engine
+                .modules
+                .into_values()
+                .enumerate()
+                .map(|(index, module)| {
+                    if installed.is_some()
+                        && module.key.origin == Origin::Standard
+                        && module.key.path == "routine.rill"
+                    {
+                        routine_index = Some(index);
+                    }
+                    module
+                })
+                .collect(),
+            routine_index,
             bindings,
             imports: engine.outcomes,
             implementations,

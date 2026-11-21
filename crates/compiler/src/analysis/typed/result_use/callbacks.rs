@@ -73,7 +73,7 @@ impl<'a, 'g> Check<'a, 'g> {
 
     pub(super) fn function_body(
         &mut self,
-        signature: &DeclarationFacts<'g>,
+        signature: &'a DeclarationFacts<'g>,
         depth: usize,
     ) -> Work<()> {
         self.depth(depth)?;
@@ -84,14 +84,23 @@ impl<'a, 'g> Check<'a, 'g> {
         let DeclarationShape::Function { parameters, .. } = &signature.shape else {
             return self.pending(node, ResultUseBlocker::TypedInput);
         };
+        let previous = std::mem::replace(&mut self.current_parameters, parameters);
+        self.budget.step(1)?;
+        let nested_write_body = (signature.declaration.id.kind == DeclarationKind::Function
+            && signature.binders.is_empty()
+            && self.checked.contains(&signature.declaration.id))
+        .then_some(body);
+        let previous_body = std::mem::replace(&mut self.nested_write_body, nested_write_body);
         let mut states = self.singleton(Residence::default())?;
         for parameter in parameters {
-            states = self.seed(
-                states,
-                Root::Local(&parameter.declaration.id),
-                parameter.declaration.node,
-                &parameter.ty,
-            )?;
+            let id = &parameter.declaration.id;
+            let root = Root::Local(id);
+            states = self.seed(states, root, parameter.declaration.node, &parameter.ty)?;
+            if retained_bool_contents_type(&parameter.ty).is_some() {
+                for state in &mut states {
+                    state.store(root, &[], Content::CallerBoolOrigin(id), self.budget)?;
+                }
+            }
         }
         if states.is_empty() {
             self.dead_statement(body, Residence::default(), depth + 1)?;
@@ -109,6 +118,8 @@ impl<'a, 'g> Check<'a, 'g> {
                 self.exit(state, body)?;
             }
         }
+        self.current_parameters = previous;
+        self.nested_write_body = previous_body;
         Ok(())
     }
 
@@ -212,7 +223,7 @@ impl<'a, 'g> Check<'a, 'g> {
         self.prove_actual(values, mode, depth)
     }
 
-    fn prove_actual(
+    pub(super) fn prove_actual(
         &mut self,
         values: Vec<Located<'g>>,
         mode: InvocationMode,
@@ -272,7 +283,10 @@ impl<'a, 'g> Check<'a, 'g> {
         depth: usize,
     ) -> Work<bool> {
         self.depth(depth)?;
-        if !self.checked.contains(declaration) || self.contracts.contains_key(declaration) {
+        if !self.checked.contains(declaration)
+            || self.contracts.contains_key(declaration)
+            || self.pairs.contains_key(declaration)
+        {
             return Ok(false);
         }
         let Some(signature) = self.signature(declaration) else {
@@ -303,9 +317,12 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(!proof.has_pending)
     }
 
-    fn callable_check(&mut self, module: &'g Module) -> Work<Check<'_, 'g>> {
+    pub(super) fn callable_check(&mut self, module: &'g Module) -> Work<Check<'_, 'g>> {
         let sources = Sources {
             inventory: self.inventory,
+            bodies: self.bodies,
+            pairs: self.pairs,
+            scoped: self.scoped,
             nodes: self.nodes,
             checked: self.checked,
             variants: self.variants,

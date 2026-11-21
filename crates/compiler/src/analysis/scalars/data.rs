@@ -85,6 +85,7 @@ pub enum DataExpression<'g> {
     PrimitiveShow(crate::analysis::typed::Primitive),
     PrimitiveOperation(crate::analysis::typed::PrimitiveOperation),
     CanonicalCall(generics::GoalId),
+    CallableCopy(Arc<generics::CallableCopy<'g>>),
     NumericInto(crate::analysis::typed::NumericConversion),
     NativeOwnership(Arc<crate::analysis::typed::NativeOwnershipCall<'g>>),
     Conversion(crate::analysis::typed::ConversionProvider),

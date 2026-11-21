@@ -9,8 +9,10 @@ use crate::analysis::conversions::ConversionReport;
 pub use conversion_uses::ConversionUse;
 pub(super) use evidence::ConversionWork;
 pub(in crate::analysis) use evidence::check_pair_candidates;
+mod callable_copy;
 mod ordinary_callbacks;
 mod ordinary_calls;
+pub use callable_copy::{CallableCopy, CaptureCopy, CaptureCopyAction};
 pub use ordinary_callbacks::OrdinaryCallbackContext;
 pub use ordinary_calls::{
     ConditionalFinding, OrdinaryCall, OrdinaryCandidate, OrdinaryValue, OutputAgreement,
@@ -231,6 +233,16 @@ impl<'g> GenericReport<'g> {
         &self.facts.nodes
     }
 
+    pub(in crate::analysis) fn take_text_iteration_sources(
+        &mut self,
+    ) -> Vec<(&'g DeclarationId, usize)> {
+        std::mem::take(&mut self.facts.text_iteration_sources)
+    }
+
+    pub(in crate::analysis) fn typed_node_mut(&mut self, index: usize) -> &mut NodeFacts<'g> {
+        &mut self.facts.nodes[index]
+    }
+
     pub(in crate::analysis) fn checked_bodies(&self) -> &[BodyFacts<'g>] {
         &self.facts.bodies
     }
@@ -357,7 +369,7 @@ pub(in crate::analysis) struct IntegratedInputs<'r, 'g> {
     pub conversions: Option<&'r crate::analysis::typed::ConversionCore<'g>>,
     pub collections: crate::analysis::typed::CollectionCore<'g>,
     pub native_ownership: &'r [crate::analysis::typed::OwnershipProtection<'g>],
-    pub ordinary_scope: Option<crate::analysis::typed::ApplicationOrdinaryScope>,
+    pub ordinary_scope: Option<crate::analysis::typed::InstalledOrdinaryScope<'g>>,
     pub exhausted: bool,
 }
 

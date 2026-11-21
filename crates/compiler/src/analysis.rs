@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub mod conversions;
 pub mod declarations;
 pub mod ordinary;
+pub mod ownership;
 pub mod scalars;
 pub mod typed;
 pub use scalars::{data, generics};
@@ -70,6 +71,22 @@ pub enum TypeTerm<'g> {
         result: Type<'g>,
     },
 }
+// The scoped retained-destination handoff recognizes only a caller's
+// exclusive access to a shared bool descriptor, not general nested storage.
+fn retained_bool_contents_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+    if let TypeTerm::Reference {
+        mutable: true,
+        referent,
+    } = ty
+        && matches!(referent.as_ref(), TypeTerm::Reference { mutable: false, referent: inner }
+            if matches!(inner.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+    {
+        Some(referent)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Binder<'g> {
     pub declaration: &'g Declaration,
@@ -79,6 +96,9 @@ pub struct Binder<'g> {
 pub struct MemberType<'g> {
     pub declaration: &'g Declaration,
     pub ty: Type<'g>,
+    /// Integrated body typing identified this formal as the direct source of
+    /// an ordinary named string yield. No storage/provider proof is implied.
+    pub(in crate::analysis) text_iteration_source: bool,
 }
 #[derive(Debug)]
 pub enum Payload<'g> {
@@ -942,7 +962,11 @@ impl<'g> Analyzer<'g> {
                 self.ty(module, module.syntax.nodes[member].children[1], binders, 1)?
             {
                 self.reserve(1)?;
-                members.push(MemberType { declaration, ty });
+                members.push(MemberType {
+                    declaration,
+                    ty,
+                    text_iteration_source: false,
+                });
             } else {
                 valid = false;
             }

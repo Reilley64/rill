@@ -1,5 +1,16 @@
 //! Expression evaluation retains original residences until transfer commits.
 use super::*;
+
+pub(super) fn ungroup(module: &Module, mut node: NodeId, budget: &mut Budget) -> Work<NodeId> {
+    loop {
+        budget.step(1)?;
+        let syntax = &module.syntax.nodes[node];
+        if syntax.kind != NodeKind::Group {
+            return Ok(node);
+        }
+        node = syntax.children[0];
+    }
+}
 use crate::analysis::scalars::data::Construction;
 
 pub(super) enum PlaceStorage<'g> {
@@ -30,6 +41,13 @@ impl<'a, 'g> Check<'a, 'g> {
             if let Some(alias) = state.alias(from, &component, self.budget)? {
                 state.store(root, &[], Content::Alias(alias), self.budget)?;
             } else {
+                // Track the external origin, not another ownership permission.
+                if component.is_empty()
+                    && retained_bool_contents_type(&value.ty).is_some()
+                    && let Some(parameter) = state.caller_bool_origin(from, self.budget)?
+                {
+                    state.store(root, &[], Content::CallerBoolOrigin(parameter), self.budget)?;
+                }
                 for alias in state.aliases_under(from, &component, self.budget)? {
                     state.store(root, &[], Content::PossibleAlias(alias), self.budget)?;
                 }
@@ -235,10 +253,38 @@ impl<'a, 'g> Check<'a, 'g> {
         site: NodeId,
     ) -> Work<()> {
         let affected = state.take(*root, path, self.budget)?;
-        if !affected.is_empty() {
+        // Invalidating a location can discard a hint without losing a
+        // tracked residence or handing a later store an incoming origin.
+        self.budget.step(affected.len())?;
+        if affected.iter().any(|entry| {
+            !matches!(
+                entry.content,
+                Content::CallerBoolOrigin(_) | Content::ConsumedPair
+            )
+        }) {
             self.pending(site, ResultUseBlocker::Storage)?;
         }
         Ok(())
+    }
+
+    pub(super) fn value_root_at(
+        &mut self,
+        mut node: NodeId,
+        mut depth: usize,
+    ) -> Work<(NodeId, usize)> {
+        loop {
+            self.depth(depth)?;
+            let syntax = &self.module.syntax.nodes[node];
+            if syntax.kind != NodeKind::Group {
+                return Ok((node, depth));
+            }
+            node = syntax.children[0];
+            depth += 1;
+        }
+    }
+
+    pub(super) fn ungroup_value(&mut self, node: NodeId) -> Work<NodeId> {
+        ungroup(self.module, node, self.budget)
     }
 
     pub(super) fn expression_facts(

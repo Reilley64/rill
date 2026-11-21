@@ -7,7 +7,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = "aarch64-apple-darwin"
-SOURCE_LIST = ROOT / "tests/installed/typed/stdlib-sources.txt"
+SOURCE_LISTS = [ROOT / "tests/installed/typed" / name
+                for name in ("stdlib-sources.txt", "routine-sources.txt")]
 
 
 def stage(prefix: Path) -> None:
@@ -36,8 +37,9 @@ def stage(prefix: Path) -> None:
         f"{runtime}/librill_ownership.rlib": build / "librill_ownership.rlib",
         f"{runtime}/error.rs": ROOT / "runtime/error/src/lib.rs",
     }
-    for name in SOURCE_LIST.read_text(encoding="utf-8").splitlines():
-        inputs[f"lib/rill/std/{name}"] = ROOT / "stdlib" / name
+    for source_list in SOURCE_LISTS:
+        for name in source_list.read_text(encoding="utf-8").splitlines():
+            inputs[f"lib/rill/std/{name}"] = ROOT / "stdlib" / name
     for source in inputs.values():
         if not source.is_file():
             raise ValueError(f"missing distribution input: {source}")

@@ -35,6 +35,7 @@ pub struct OrdinaryCall<'g> {
     pub site: Site<'g>,
     pub family: &'g DeclarationId,
     pub checked: bool,
+    checked_local_disposer: bool,
     /// A premise retained by the comparison or its dependent evidence.
     pub premise: Option<InputPremise>,
     pub routes: Vec<&'g Binding>,
@@ -54,6 +55,11 @@ pub struct OrdinaryCall<'g> {
     /// Type from the selected header alone, not a checked result or evidence.
     pub selected_result: Option<Type<'g>>,
     pub output_agreement: OutputAgreement<'g>,
+}
+
+pub(in crate::analysis::scalars) struct SourceSelection<'g> {
+    winner: GoalSelection<'g>,
+    argument_pair: Option<evidence::ArgumentPair<'g>>,
 }
 
 struct CallablePath {
@@ -115,14 +121,14 @@ fn parameter<'a, 'g>(candidate: &'a SourceCandidate<'_, 'g>, column: usize) -> &
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
-    pub(super) fn has_application_ordinary_scope(&self, family: &DeclarationId) -> bool {
+    pub(super) fn has_installed_ordinary_scope(&self, family: &DeclarationId) -> bool {
         self.ordinary_scope
             .as_ref()
             .is_some_and(|scope| scope.contains(family))
     }
 
     fn ordinary_use_premise(&self, family: &DeclarationId) -> Option<InputPremise> {
-        if self.has_application_ordinary_scope(family) {
+        if self.has_installed_ordinary_scope(family) {
             self.arrow_premise
         } else {
             Some(self.arrow_premise.map_or(PREMISE, |p| p.combine(PREMISE)))
@@ -137,7 +143,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<bool> {
         if matches!(
             inference.slots[&node].installed_operation,
-            Some(data::DataExpression::NativeOwnership(_))
+            Some(data::DataExpression::NativeOwnership(_) | data::DataExpression::CallableCopy(_))
         ) {
             return Ok(false);
         }
@@ -221,6 +227,14 @@ impl<'r, 'g> Checker<'r, 'g> {
             mut outcome,
             blocker,
         } = compared?;
+        if consistent
+            && viable.is_empty()
+            && self.known_callable_copy(inference, node, &mut call, &inputs)?
+        {
+            self.elab.reserve(1)?;
+            inference.calls.insert(node, call);
+            return Ok(false);
+        }
         let mut callbacks = Vec::new();
         if !consistent {
             outcome = None;
@@ -283,6 +297,37 @@ impl<'r, 'g> Checker<'r, 'g> {
             if let Some(ty) = receiving[i].clone() {
                 let argument = call.fact.arguments[i];
                 let leaf = self.source_leaf(module, argument)?;
+                // A named operand has its own type even through grouping.
+                // Do not give it the call's hypothetical receiving premise
+                // before its independent type reaches the containing group.
+                if module.syntax.nodes[leaf].kind == NodeKind::ValueReference
+                    && self.local_disposer_subject(call.fact.callee, &ty)?
+                {
+                    continue;
+                }
+                // A named borrow of a known callable does not get its type from
+                // the explicit copy argument. Let its independent type arrive.
+                if module.syntax.nodes[leaf].kind == NodeKind::Prefix("&")
+                    && matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if matches!(referent.as_ref(), TypeTerm::Callable { .. }))
+                    && self
+                        .primitives
+                        .and_then(|core| core.copy)
+                        .is_some_and(|copy| std::ptr::eq(&copy.id, call.fact.callee))
+                {
+                    let owner = self.source_leaf(module, module.syntax.nodes[leaf].children[0])?;
+                    if module.syntax.nodes[owner].kind == NodeKind::ValueReference
+                        && inference.slots[&owner].ordinary_context.is_none()
+                    {
+                        let TypeTerm::Reference { referent, .. } = ty.as_ref() else {
+                            unreachable!()
+                        };
+                        if let Some(actual) = &inference.slots[&owner].ty
+                            && self.same(actual, referent)?
+                        {
+                            continue;
+                        }
+                    }
+                }
                 if !inference.ordinary_tuples.contains(&leaf) {
                     // List get has a width context only after the receiver is
                     // known and ordinary context agreement establishes u64.
@@ -309,6 +354,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.establish(inference, node, result, false)?;
             return Ok(false);
         }
+        let eligible_local_disposer = matches!(inputs.as_slice(), [Some(subject)]
+            if self.local_disposer_subject(call.fact.callee, subject)?);
         let (output, use_premise) = if consistent {
             let prior = self.arrow_premise;
             let scope = match inputs.as_slice() {
@@ -319,7 +366,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 _ => None,
             };
             let result = (|| {
-                if self.has_application_ordinary_scope(call.fact.callee)
+                if self.has_installed_ordinary_scope(call.fact.callee)
+                    || eligible_local_disposer
                     || scope.and_then(|scope| scope.winner()).is_some()
                 {
                     // Admission of the callee cannot settle premises of its operands.
@@ -333,7 +381,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 let output =
                     self.conditional_output(inference, node, &call, &inputs, &viable, outcome)?;
-                Ok((output, self.ordinary_use_premise(call.fact.callee)))
+                let premise = if eligible_local_disposer {
+                    self.arrow_premise
+                } else {
+                    self.ordinary_use_premise(call.fact.callee)
+                };
+                Ok((output, premise))
             })();
             self.arrow_premise = prior;
             result?
@@ -364,7 +417,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     premise = Some(premise.map_or(p, |a| a.combine(p)));
                 }
             }
-            let actual_scope = self.has_application_ordinary_scope(call.fact.callee);
+            let actual_scope =
+                eligible_local_disposer || self.has_installed_ordinary_scope(call.fact.callee);
             if proof.premise.is_none() && (!actual_scope || premise.is_none()) {
                 match (proof.state, &output.agreement, &output.ty) {
                     (GoalState::Proved, OutputAgreement::Agrees, Some(ty)) => {
@@ -404,6 +458,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 site: Self::site(module, node),
                 family: call.fact.callee,
                 checked,
+                checked_local_disposer: checked && eligible_local_disposer,
                 premise,
                 routes: call.fact.bindings.clone(),
                 inputs,
@@ -505,7 +560,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<Comparison<'r, 'g>> {
         let inventory = self.input.ordinary.unwrap();
         let id = call.fact.callee;
-        let family = if self.has_application_ordinary_scope(id) {
+        let family = if self.has_installed_ordinary_scope(id) {
             source::admitted_family(inventory, id, budget)?
         } else {
             source::family(inventory, id, budget)?
@@ -955,10 +1010,21 @@ impl<'r, 'g> Checker<'r, 'g> {
         } else {
             let selection = if let Some((c, _, substitution)) = &solved {
                 self.elab.reserve(substitution.len())?;
-                Some(GoalSelection {
-                    implementation: &c.body.source.declaration,
-                    alternative: c.alternative,
-                    substitution: substitution.clone(),
+                let argument_pair = match &c.body.header.shape {
+                    DeclarationShape::Function { parameters, .. }
+                        if let [formal] = parameters.as_slice() =>
+                    {
+                        self.direct_argument_pair(inference, call, &formal.ty)?
+                    }
+                    _ => None,
+                };
+                Some(SourceSelection {
+                    winner: GoalSelection {
+                        implementation: &c.body.source.declaration,
+                        alternative: c.alternative,
+                        substitution: substitution.clone(),
+                    },
+                    argument_pair,
                 })
             } else {
                 None
@@ -1120,7 +1186,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         inputs: Vec<Type<'g>>,
         explicit: &[Substitution<'g>],
         bindings: &[&'g Binding],
-        selection: Option<GoalSelection<'g>>,
+        selection: Option<SourceSelection<'g>>,
     ) -> Work<GoalId> {
         let family = self
             .input
@@ -1143,6 +1209,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             .collect();
         let origin = self.evidence_module(&callee.module)?;
         let declaration = family.header.declaration;
+        let (winner, argument_pair) = selection.map_or((None, None), |source| {
+            (Some(source.winner), source.argument_pair)
+        });
         let goal = self.issue_determination(
             GoalJudgment::Determine {
                 family: callee,
@@ -1152,8 +1221,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             site,
             Self::site(origin, origin.syntax.nodes[declaration.node].children[0]),
             bindings,
-            selection,
+            winner,
         )?;
+        if let Some(pair) = argument_pair {
+            self.attach_argument_pair(&goal, pair)?;
+        }
         self.solve_goal(&goal)?;
         Ok(goal)
     }
@@ -1222,6 +1294,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                 None,
             )?;
             let selection = self.evidence.get(&goal).unwrap().selection.as_ref();
+            let scoped = self
+                .ordinary_scope
+                .as_ref()
+                .and_then(|scope| scope.routine())
+                .is_some_and(|role| {
+                    role.needs_scoped_evidence(
+                        written.declaration,
+                        selection.map(|s| s.implementation),
+                    )
+                });
             let selected = if let Some(selection) = selection {
                 self.elab.step(family.implementations.len())?;
                 let body = family
@@ -1247,7 +1329,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                 required,
                 None,
             )?;
-            let formed = self.has_application_ordinary_scope(written.declaration)
+            // The compiler operation needs actual argument occurrences at a
+            // direct call; ordinary winners of the same family do not.
+            let formed = self.has_installed_ordinary_scope(written.declaration)
+                && !scoped
                 && self.form_ordinary_value(inference, node, written, &goal, &output)?;
             self.elab.reserve(1)?;
             self.ordinary_values.insert(
@@ -1415,6 +1500,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             finding: ScalarFinding {
                 site: Self::site(module, node),
                 kind,
+                related: None,
                 actual: None,
                 expected: None,
                 bindings: Vec::new(),
@@ -1481,7 +1567,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             .evidence
             .get(call.instantiation.as_ref().or(call.goal.as_ref()).unwrap())
             .unwrap();
-        if self.has_application_ordinary_scope(call.family) {
+        if self.has_installed_ordinary_scope(call.family) || call.checked_local_disposer {
             self.elab.reserve(call.defaults.len())?;
             facts.defaults = call.defaults.clone();
             if let Some(selection) = &proof.selection {
@@ -1521,7 +1607,10 @@ impl<'r, 'g> Checker<'r, 'g> {
             if !call.family
                 || matches!(
                     inference.slots[&node].installed_operation,
-                    Some(data::DataExpression::NativeOwnership(_))
+                    Some(
+                        data::DataExpression::NativeOwnership(_)
+                            | data::DataExpression::CallableCopy(_)
+                    )
                 )
                 || self
                     .ordinary_calls
@@ -1534,7 +1623,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 })
                     })
                 || ((self.is_canonical_scalar_family(call.fact.callee)
-                    || self.has_application_ordinary_scope(call.fact.callee))
+                    || self.has_installed_ordinary_scope(call.fact.callee))
                     && inference.slots[&node].blocked)
             {
                 continue;

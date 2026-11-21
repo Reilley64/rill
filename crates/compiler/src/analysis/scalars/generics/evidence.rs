@@ -96,6 +96,8 @@ pub struct GoalEquality<'g> {
     pub agrees: bool,
 }
 
+pub(super) type ArgumentPair<'g> = [Option<Arc<ArrowFacts<'g>>>; 2];
+
 #[derive(Debug)]
 pub struct GoalFacts<'g> {
     pub id: GoalId,
@@ -109,6 +111,9 @@ pub struct GoalFacts<'g> {
     pub premise: Option<InputPremise>,
     /// Exact originating arrow, when the source ties this subject to one value.
     pub arrow_origin: Option<Arc<ArrowFacts<'g>>>,
+    // Direct source occurrences on a determination, or on a property goal
+    // for its written whole input. Equal substituted output types do not inherit them.
+    argument_pair: Option<ArgumentPair<'g>>,
     /// A verdict only under the retained role and protection premise.
     pub hypothetical: Option<GoalVerdict>,
     pub selection: Option<GoalSelection<'g>>,
@@ -266,7 +271,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Some(InputPremise::HypotheticalConversionRole)
             }
             RequirementTarget::Family(id)
-                if self.has_application_ordinary_scope(id)
+                if self.has_installed_ordinary_scope(id)
                     || self.ordinary_scalar_role(id).is_some() =>
             {
                 None
@@ -291,7 +296,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                             .collection_scope(id, inputs)
                             .and_then(|scope| scope.winner())
                             .is_some()
-                        || self.rigid_copy_input(id, inputs) =>
+                        || self.rigid_copy_input(id, inputs)
+                        || matches!(inputs.as_slice(), [input] if self.local_disposer_subject(id, input)?) =>
                 {
                     None
                 }
@@ -326,6 +332,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             state,
             premise,
             arrow_origin: None,
+            argument_pair: None,
             hypothetical: None,
             selection: None,
             conversion_outcome: None,
@@ -449,11 +456,15 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(substitutions) = &body.substitution else {
             return Ok(None);
         };
-        let application_ordinary = self.has_application_ordinary_scope(&source.family);
+        let installed_ordinary = self.has_installed_ordinary_scope(&source.family);
+        // The closed installed role inventory also permits checking a canonical
+        // disposer in the module that defines its monomorphic record. The
+        // typed receipt still requires the separate protection inventory.
+        let local_disposer = self.local_disposer_contract(&source.family, body)?;
         if body.placement == ordinary::Placement::OutsideOwners
             && self.conversion_family(&source.family).is_none()
         {
-            if !application_ordinary {
+            if !installed_ordinary {
                 return Ok(None);
             }
             self.finding(
@@ -462,7 +473,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 ScalarFindingKind::UnauthorizedImplementation,
             )?;
         }
-        if application_ordinary {
+        if installed_ordinary || local_disposer {
             for group in &family.duplicate_keys {
                 self.elab.step(1 + group.len())?;
                 if group.contains(&&declaration.id) {
@@ -497,14 +508,90 @@ impl<'r, 'g> Checker<'r, 'g> {
                 .all(|issue| issue.declaration != &declaration.id);
         }
         let admitted = conversion
-            || (application_ordinary
+            || (installed_ordinary
                 || self.ordinary_scalar_role(&source.family).is_some()
                 || self.is_error_display(&source.family)
                 || self.is_error_observer(&source.family)
                 || self.collections.is_iteration_family(&source.family)
-                || primitive)
+                || primitive
+                || local_disposer)
                 && body.compatibility == ordinary::Compatibility::Compatible;
         Ok(Some((&body.header, admitted)))
+    }
+
+    fn local_disposer_contract(
+        &mut self,
+        family: &DeclarationId,
+        body: &ordinary::ImplementationFacts<'g>,
+    ) -> Work<bool> {
+        Ok(
+            body.source.declaration.module.origin == crate::loader::Origin::Application
+                && body.header.binders.is_empty()
+                && matches!(&body.header.shape, DeclarationShape::Function { parameters, .. } if matches!(
+                    parameters.as_slice(), [parameter] if self.local_disposer_subject(family, &parameter.ty)?
+                        && matches!(parameter.ty.as_ref(), TypeTerm::Nominal { declaration: owner, .. }
+                            if body.placement == ordinary::Placement::ParameterOwner(owner))
+                )),
+        )
+    }
+
+    pub(super) fn local_disposer_subject(
+        &mut self,
+        family: &DeclarationId,
+        ty: &TypeTerm<'g>,
+    ) -> Work<bool> {
+        if self.ordinary_scope.is_some()
+            && self
+                .primitives
+                .and_then(|core| core.dispose)
+                .is_some_and(|role| role.id == *family)
+            && let TypeTerm::Nominal {
+                declaration,
+                arguments,
+            } = ty
+            && arguments.is_empty()
+            && declaration.module.origin == crate::loader::Origin::Application
+        {
+            self.elab.step(1)?;
+            return Ok(self
+                .input
+                .facts
+                .declarations
+                .get(declaration)
+                .is_some_and(|facts| matches!(facts.shape, DeclarationShape::Record { .. })));
+        }
+        Ok(false)
+    }
+
+    fn local_disposer_selection(
+        &mut self,
+        family: &'r ordinary::FamilyFacts<'g>,
+        inputs: &[Type<'g>],
+        filters: &[Substitution<'g>],
+    ) -> Work<Option<GoalSelection<'g>>> {
+        let id = &family.header.declaration.id;
+        if !matches!(inputs, [input] if self.local_disposer_subject(id, input)?) {
+            return Ok(None);
+        }
+        // Compare the complete family, including any competing registration.
+        // A selected contract still needs the ordinary output/evidence proof.
+        let GoalChoice::Selected(selection) =
+            self.select_goal_contract(id, inputs, filters, true)?
+        else {
+            return Ok(None);
+        };
+        self.elab.step(family.implementations.len())?;
+        let admitted = match family
+            .implementations
+            .iter()
+            .find(|body| body.source.declaration == *selection.implementation)
+        {
+            Some(body) if body.compatibility == ordinary::Compatibility::Compatible => {
+                self.local_disposer_contract(id, body)?
+            }
+            _ => false,
+        };
+        Ok(admitted.then_some(selection))
     }
 
     pub(in crate::analysis::scalars) fn nested_body(
@@ -576,6 +663,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         else {
             return Ok(true);
         };
+        let pair = match call.parameters.as_slice() {
+            [formal] => self.direct_argument_pair(inference, call, formal)?,
+            _ => None,
+        };
         let mut unresolved = false;
         let mut rejected = false;
         for requirement in &header.requirements {
@@ -595,12 +686,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 &requirement.routes,
                 false,
             )?;
-            let origin = self.arrow_subject(inference, call, requirement)?;
-            let fact = &mut self.evidence.goals[goal.index];
-            if let Some(premise) = origin.as_ref().and_then(|arrow| arrow.premise) {
-                fact.premise = Some(fact.premise.map_or(premise, |p| p.combine(premise)));
+            if let (Some(pair), [formal]) = (&pair, call.parameters.as_slice()) {
+                self.set_pair_subject(&goal, formal, pair, requirement)?;
+            } else {
+                let origin = self.arrow_subject(inference, call, requirement)?;
+                self.set_arrow_subject(&goal, origin);
             }
-            fact.arrow_origin = origin;
             match self.solve_goal(&goal)? {
                 GoalState::Proved => (),
                 _ if self.arrow_premise.is_some_and(|p| p.has_conversion())
@@ -732,17 +823,151 @@ impl<'r, 'g> Checker<'r, 'g> {
         })
     }
 
+    fn property_subject<'a>(requirement: &'a RequirementMetadata<'g>) -> Option<&'a Type<'g>> {
+        if !matches!(requirement.target, Some(RequirementTarget::Predicate(id)) if !matches!(Predicate::of(id), Predicate::Callable(_)))
+        {
+            return None;
+        }
+        match requirement.arguments.as_slice() {
+            [Some(subject)] => Some(subject),
+            _ => None,
+        }
+    }
+
+    fn set_arrow_subject(&mut self, goal: &GoalId, origin: Option<Arc<ArrowFacts<'g>>>) {
+        if let Some(premise) = origin.as_ref().and_then(|arrow| arrow.premise) {
+            self.add_goal_premise(goal, premise);
+        }
+        self.evidence.goals[goal.index].arrow_origin = origin;
+    }
+
+    pub(super) fn direct_argument_pair(
+        &mut self,
+        inference: &Inference<'g>,
+        call: &PreparedCall<'g>,
+        formal: &TypeTerm<'g>,
+    ) -> Work<Option<ArgumentPair<'g>>> {
+        let [argument] = call.fact.arguments.as_slice() else {
+            return Ok(None);
+        };
+        if call.fact.pipe_input.is_some()
+            || !(matches!(formal, TypeTerm::Tuple(fields) if fields.len() == 2)
+                || matches!(formal, TypeTerm::Parameter { .. }))
+        {
+            return Ok(None);
+        }
+        if !matches!(inference.slots[argument].ty.as_deref(), Some(TypeTerm::Tuple(fields)) if fields.len() == 2)
+        {
+            return Ok(None);
+        }
+        let leaf = self.source_leaf(inference.module, *argument)?;
+        self.elab.step(1)?;
+        let syntax = &inference.module.syntax.nodes[leaf];
+        let tuple = &inference.slots[&leaf];
+        if syntax.kind != NodeKind::Bracket || tuple.blocked {
+            return Ok(None);
+        }
+        let (Some(TypeTerm::Tuple(types)), [first, second]) =
+            (tuple.ty.as_deref(), syntax.children.as_slice())
+        else {
+            return Ok(None);
+        };
+        let [first_type, second_type] = types.as_slice() else {
+            return Ok(None);
+        };
+        let mut pair = [None, None];
+        for ((node, ty), origin) in [(first, first_type), (second, second_type)]
+            .into_iter()
+            .zip(&mut pair)
+        {
+            self.elab.step(1)?;
+            // The typed expression slot supplies the origin. Equality only
+            // validates that this expression is the corresponding tuple member.
+            let slot = &inference.slots[node];
+            if !slot.blocked
+                && matches!(ty.as_ref(), TypeTerm::Callable { .. })
+                && let (Some(actual), Some(arrow)) = (&slot.ty, &slot.arrow)
+                && self.same(ty, actual)?
+            {
+                *origin = Some(arrow.clone());
+            }
+        }
+        Ok(pair.iter().any(Option::is_some).then_some(pair))
+    }
+
+    fn mentions_pair_binder(
+        &mut self,
+        ty: &TypeTerm<'g>,
+        binder: &DeclarationId,
+        depth: usize,
+    ) -> Work<bool> {
+        self.equation_depth(depth)?;
+        if matches!(ty, TypeTerm::Parameter { declaration, .. } if std::ptr::eq(*declaration, binder))
+        {
+            return Ok(true);
+        }
+        for child in ordinary::shape(ty).1 {
+            if self.mentions_pair_binder(child, binder, depth + 1)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn set_pair_subject(
+        &mut self,
+        goal: &GoalId,
+        formal: &TypeTerm<'g>,
+        pair: &ArgumentPair<'g>,
+        requirement: &RequirementMetadata<'g>,
+    ) -> Work<()> {
+        self.elab.step(1)?;
+        let Some(TypeTerm::Parameter {
+            declaration: subject,
+            ..
+        }) = Self::property_subject(requirement).map(Arc::as_ref)
+        else {
+            return Ok(());
+        };
+        // Match the written input binder before substitution. A property of
+        // the whole tuple expands into its two members; a property of one
+        // uniquely occurring binder gets just that member's origin.
+        if matches!(formal, TypeTerm::Parameter { declaration, .. } if std::ptr::eq(*declaration,*subject))
+        {
+            self.attach_argument_pair(goal, pair.clone())?;
+        } else if let TypeTerm::Tuple(fields) = formal
+            && fields.len() == 2
+        {
+            for (i, field) in fields.iter().enumerate() {
+                self.elab.step(1)?;
+                if matches!(field.as_ref(), TypeTerm::Parameter { declaration, .. } if std::ptr::eq(*declaration,*subject))
+                    && !self.mentions_pair_binder(&fields[1 - i], subject, 1)?
+                {
+                    self.set_arrow_subject(goal, pair[i].clone());
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn attach_argument_pair(
+        &mut self,
+        goal: &GoalId,
+        pair: ArgumentPair<'g>,
+    ) -> Work<()> {
+        self.elab.reserve(pair.len())?;
+        self.evidence.goals[goal.index].argument_pair = Some(pair);
+        Ok(())
+    }
+
     fn arrow_subject(
         &mut self,
         inference: &Inference<'g>,
         call: &PreparedCall<'g>,
         requirement: &RequirementMetadata<'g>,
     ) -> Work<Option<Arc<ArrowFacts<'g>>>> {
-        if !matches!(requirement.target, Some(RequirementTarget::Predicate(id)) if !matches!(Predicate::of(id), Predicate::Callable(_)))
-        {
-            return Ok(None);
-        }
-        let [Some(subject)] = requirement.arguments.as_slice() else {
+        let Some(subject) = Self::property_subject(requirement) else {
             return Ok(None);
         };
         let mut origin: Option<Arc<ArrowFacts<'g>>> = None;
@@ -774,8 +999,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         } {
             return Ok(false);
         }
+        if !match (&l_fact.argument_pair, &r_fact.argument_pair) {
+            (None, None) => true,
+            (Some(l), Some(r)) => l.iter().zip(r).all(|(l, r)| match (l, r) {
+                (None, None) => true,
+                (Some(l), Some(r)) => Arc::ptr_eq(l, r),
+                _ => false,
+            }),
+            _ => false,
+        } {
+            return Ok(false);
+        }
         let l = &l_fact.judgment;
-        let r = &self.evidence.goals[right].judgment;
+        let r = &r_fact.judgment;
         if std::mem::discriminant(l) != std::mem::discriminant(r) {
             return Ok(false);
         }
@@ -1141,6 +1377,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                     }
                     return Ok(GoalState::Unresolved(GoalBlocker::MissingAssumption));
                 }
+                if let Some(selection) = self.local_disposer_selection(family, &inputs, &filters)? {
+                    return self.expand_selected_contract(goal, family, selection);
+                }
                 return Ok(GoalState::Unresolved(GoalBlocker::OrdinaryAdmission));
             };
             for filter in &filters {
@@ -1178,7 +1417,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             && let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)?
         {
             // The assumed contract does not prove a concrete dispatch target.
-            if self.has_application_ordinary_scope(id) {
+            if self.has_installed_ordinary_scope(id) {
                 self.evidence.goals[goal].selection = None;
             }
             return Ok(state);
@@ -1391,7 +1630,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         let selected = (|| {
             let admitted = admitted_role
-                || self.has_application_ordinary_scope(family)
+                || self.has_installed_ordinary_scope(family)
                 || self.ordinary_scalar_role(family).is_some();
             let inventory = self.input.ordinary.unwrap();
             let facts = if admitted {
@@ -1513,10 +1752,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             result,
             site: source,
         });
-        let declared =
-            self.append_header_goals(goal, site, &family.header.declaration.id, &substitutions)?;
+        let declared = self.append_header_goals(goal, site, &family.header, &substitutions)?;
         let selected =
-            self.append_header_goals(goal, site, implementation, &selected_substitutions)?;
+            self.append_header_goals(goal, site, &body.header, &selected_substitutions)?;
         Ok(join(declared, selected))
     }
 
@@ -1611,7 +1849,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             &routes,
             false,
         )?;
-        if self.has_application_ordinary_scope(family)
+        if self.has_installed_ordinary_scope(family)
             && let Some(premise) = premise
         {
             self.add_goal_premise(&id, premise);
@@ -1645,13 +1883,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         &mut self,
         goal: usize,
         site: Site<'g>,
-        owner: &DeclarationId,
+        declaration: &DeclarationFacts<'g>,
         substitutions: &[Substitution<'g>],
     ) -> Work<GoalState> {
+        let owner = &declaration.declaration.id;
         let Some(header) = self.input.ordinary.unwrap().headers().get(owner) else {
             return Ok(GoalState::Proved);
         };
         let module = self.evidence_module(&owner.module)?;
+        let argument_goal = match &self.evidence.goals[goal].judgment {
+            GoalJudgment::Instantiate { determination, .. } => determination.index,
+            _ => goal,
+        };
+        let pair = self.evidence.goals[argument_goal].argument_pair.clone();
         let mut state = GoalState::Proved;
         for requirement in &header.requirements {
             self.elab.step(1)?;
@@ -1662,9 +1906,15 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             };
             if let GoalJudgment::Instantiate { family, .. } = self.evidence.goals[goal].judgment
-                && !self.has_application_ordinary_scope(family)
+                && !self.has_installed_ordinary_scope(family)
             {
                 self.add_goal_premise(&child, InputPremise::HypotheticalOrdinaryRole);
+            }
+            if let Some(pair) = &pair
+                && let DeclarationShape::Function { parameters, .. } = &declaration.shape
+                && let [formal] = parameters.as_slice()
+            {
+                self.set_pair_subject(&child, &formal.ty, pair, requirement)?;
             }
             self.link_goal(goal, child)?;
         }
@@ -1822,13 +2072,24 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Ok(GoalState::Proved)
             }
             TypeTerm::Tuple(fields) => {
-                for field in fields {
+                let pair = self.evidence.goals[goal].argument_pair.clone();
+                for (i, field) in fields.iter().enumerate() {
                     self.property_dependency(
                         goal,
                         intrinsic,
                         field.clone(),
                         self.evidence.goals[goal].source,
                     )?;
+                    if let Some(pair) = &pair
+                        && let Some(Some(origin)) = pair.get(i)
+                    {
+                        let child = self.evidence.goals[goal]
+                            .dependencies
+                            .last()
+                            .unwrap()
+                            .clone();
+                        self.set_arrow_subject(&child, Some(origin.clone()));
+                    }
                 }
                 Ok(GoalState::Proved)
             }

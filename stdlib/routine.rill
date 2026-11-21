@@ -1,0 +1,12 @@
+export function join<W, R>(work: W): R;
+
+// Compiler operation declaration; no serial source implementation.
+function joinScopedPair<F1, F2, R1, R2>(work: [F1, F2]): [R1, R2]
+where callableOnce(F1, [], R1), sendable(F1), sendable(R1),
+      callableOnce(F2, [], R2), sendable(F2), sendable(R2);
+
+implement<F1, F2, R1, R2> join<[F1, F2], [R1, R2]>(work: [F1, F2]): [R1, R2]
+where callableOnce(F1, [], R1), sendable(F1), sendable(R1),
+      callableOnce(F2, [], R2), sendable(F2), sendable(R2) {
+    return joinScopedPair<F1, F2, R1, R2>(work);
+}

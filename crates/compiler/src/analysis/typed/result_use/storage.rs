@@ -35,8 +35,12 @@ pub(super) enum Content<'g> {
     Test(Arc<Constructor<'g>>, bool),
     Alias(Address<'g>),
     PossibleAlias(Address<'g>),
+    /// A borrowed Bool descriptor from a named function's incoming parameter.
+    CallerBoolOrigin(&'g DeclarationId),
     /// Typed source origin of the callable stored at this exact residence.
     Callable(NodeId),
+    /// An exact, Result-free local pair was consumed by a checked once call.
+    ConsumedPair,
     /// Containment is unresolved at this origin, not known empty.
     Unclassified(NodeId),
 }
@@ -54,7 +58,10 @@ impl Located<'_> {
                 Content::Result(value) => value.component.len(),
                 Content::Test(tag, _) => tag_size(tag),
                 Content::Alias((_, path)) | Content::PossibleAlias((_, path)) => path.len(),
-                Content::Callable(_) | Content::Unclassified(_) => 0,
+                Content::CallerBoolOrigin(_)
+                | Content::Callable(_)
+                | Content::ConsumedPair
+                | Content::Unclassified(_) => 0,
             }
     }
 }
@@ -77,6 +84,20 @@ impl<'g> Residence<'g> {
             budget.reserve(value.size())?;
         }
         Ok(self.clone())
+    }
+
+    pub(super) fn contains_local(
+        &self,
+        local: &'g DeclarationId,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        for (root, _) in &self.locations {
+            budget.step(1)?;
+            if matches!(root,Root::Local(id) if std::ptr::eq(*id,local)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub(super) fn may_owe_result(&self, budget: &mut Budget) -> Work<bool> {
@@ -215,6 +236,23 @@ impl<'g> Residence<'g> {
         Ok(None)
     }
 
+    pub(super) fn caller_bool_origin(
+        &self,
+        root: Root<'g>,
+        budget: &mut Budget,
+    ) -> Work<Option<&'g DeclarationId>> {
+        for (candidate, value) in &self.locations {
+            budget.step(1)?;
+            if *candidate == root
+                && value.component.is_empty()
+                && let Content::CallerBoolOrigin(parameter) = value.content
+            {
+                return Ok(Some(parameter));
+            }
+        }
+        Ok(None)
+    }
+
     pub(super) fn aliases_under(
         &self,
         root: Root<'g>,
@@ -307,6 +345,11 @@ impl<'g> Residence<'g> {
         budget: &mut Budget,
     ) -> Work<()> {
         for mut value in values {
+            if matches!(value.content, Content::ConsumedPair) {
+                // Consumption describes the storage version, not a value in it.
+                budget.step(1)?;
+                continue;
+            }
             budget.reserve(1 + component.len())?;
             // Rebase only the current location, not the diagnostic's origin path.
             if !component.is_empty() {

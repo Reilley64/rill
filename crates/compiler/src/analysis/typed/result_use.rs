@@ -8,7 +8,7 @@ use crate::analysis::scalars::{
 };
 use crate::analysis::{
     Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
-    Type, TypeTerm,
+    Type, TypeTerm, retained_bool_contents_type,
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
@@ -20,8 +20,10 @@ mod callbacks;
 mod calls;
 mod control;
 mod loops;
+mod pairs;
 mod patterns;
 mod releases;
+mod retained;
 mod shape;
 mod storage;
 mod values;
@@ -71,12 +73,42 @@ pub struct PendingResultUse<'g> {
     pub blocker: ResultUseBlocker,
 }
 
+pub(in crate::analysis) use pairs::{PairCall, PairChild};
+pub use pairs::{ScopedJoinCall, ScopedJoinReference, ScopedJoinSlot};
+
 #[derive(Debug, Default)]
 pub struct ResultUseReport<'g> {
     discards: Vec<ResultDiscard<'g>>,
     pending: Vec<PendingResultUse<'g>>,
+    // Temporary until the integrated analysis attaches each proof directly to
+    // its originating call. The key indexes this report's typed node array.
+    pair_calls: BTreeMap<usize, pairs::CheckedTransfer<'g>>,
+    routine_bound: bool,
 }
 impl<'g> ResultUseReport<'g> {
+    pub(super) fn attach_pair_calls(
+        &mut self,
+        bodies: &mut GenericReport<'g>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        budget.step(self.pair_calls.len())?;
+        for (index, proof) in std::mem::take(&mut self.pair_calls) {
+            let NodeFactKind::Expression(facts) = &mut bodies.typed_node_mut(index).kind else {
+                unreachable!("proved call expression")
+            };
+            let call = facts.call.as_mut().expect("proved call");
+            match proof {
+                pairs::CheckedTransfer::Serial(proof) => call.list_arrows = Some(proof),
+                pairs::CheckedTransfer::Scoped(proof) => call.scoped_join = Some(proof),
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn routine_bound(&self) -> bool {
+        self.routine_bound
+    }
+
     pub fn discards(&self) -> &[ResultDiscard<'g>] {
         &self.discards
     }
@@ -85,7 +117,7 @@ impl<'g> ResultUseReport<'g> {
     }
 }
 
-type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), &'a NodeFacts<'g>>;
+type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), (usize, &'a NodeFacts<'g>)>;
 type Alternatives<'g> = Vec<Residence<'g>>;
 
 #[derive(Clone, Copy)]
@@ -97,6 +129,7 @@ pub(super) struct Inputs<'a, 'g> {
     pub collections: super::CollectionCore<'g>,
     pub native: &'a super::ownership::Report<'g>,
     pub outcome_observer: Option<&'g DeclarationId>,
+    pub routine: Option<super::RoutineRole<'g>>,
 }
 
 #[derive(Clone, Copy)]
@@ -114,11 +147,11 @@ pub(super) fn check<'g>(
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
     let mut nodes = BTreeMap::new();
-    for facts in bodies.typed_nodes() {
+    for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
         nodes
             .entry((facts.site.module, facts.site.node))
-            .or_insert(facts);
+            .or_insert((index, facts));
     }
     let mut checked = BTreeSet::new();
     for body in bodies.checked_bodies() {
@@ -138,6 +171,7 @@ pub(super) fn check<'g>(
             }
         }
     }
+    let mut pairs = BTreeMap::new();
     let mut implementation_headers = BTreeMap::new();
     let mut families = BTreeSet::new();
     for source in inventory.graph().implementations() {
@@ -151,11 +185,36 @@ pub(super) fn check<'g>(
                     == crate::analysis::ordinary::Compatibility::Compatible
                 {
                     budget.reserve(1)?;
-                    implementation_headers
-                        .insert(&implementation.source.declaration, &implementation.header);
+                    let id = &implementation.source.declaration;
+                    implementation_headers.insert(id, &implementation.header);
+                    if implementation.header.binders.len() == 4
+                        && checked.contains(id)
+                        && let Some(metadata) = inventory.headers().get(id)
+                        && metadata.requirements.len() == 6
+                        && let Some(slots) = pairs::summary(
+                            inventory,
+                            &implementation.header,
+                            metadata,
+                            bodies,
+                            &nodes,
+                            budget,
+                        )?
+                    {
+                        budget.reserve(2)?;
+                        pairs.insert(id, slots);
+                    }
                 }
             }
         }
+    }
+    let mut scoped = None;
+    if let Some(role) = core.routine
+        && checked.contains(&role.implementation.id)
+        && let Some(header) = implementation_headers.get(&role.implementation.id)
+        && let Some(summary) = pairs::scoped_summary(inventory, role, header, &nodes, budget)?
+    {
+        scoped = Some((role, summary));
+        report.routine_bound = true;
     }
     let release_parameters = releases::check(
         inventory,
@@ -167,6 +226,9 @@ pub(super) fn check<'g>(
     )?;
     let sources = Sources {
         inventory,
+        bodies,
+        pairs: &pairs,
+        scoped,
         nodes: &nodes,
         checked: &checked,
         variants: &variants,
@@ -219,6 +281,9 @@ pub(super) fn check<'g>(
 #[derive(Clone, Copy)]
 struct Sources<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
+    bodies: &'a GenericReport<'g>,
+    pairs: &'a pairs::PairBodies<'g>,
+    scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
@@ -229,6 +294,9 @@ struct Sources<'a, 'g> {
 
 struct Check<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
+    bodies: &'a GenericReport<'g>,
+    pairs: &'a pairs::PairBodies<'g>,
+    scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
@@ -251,6 +319,8 @@ struct Check<'a, 'g> {
     substitution: Option<&'a Substitutions<'a, 'g>>,
     proving_callable: bool,
     has_pending: bool,
+    current_parameters: &'a [MemberType<'g>],
+    nested_write_body: Option<NodeId>,
 }
 
 impl<'a, 'g> Check<'a, 'g> {
@@ -268,6 +338,9 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         Ok(Self {
             inventory: sources.inventory,
+            bodies: sources.bodies,
+            pairs: sources.pairs,
+            scoped: sources.scoped,
             nodes: sources.nodes,
             checked: sources.checked,
             variants: sources.variants,
@@ -290,6 +363,8 @@ impl<'a, 'g> Check<'a, 'g> {
             substitution: None,
             proving_callable: false,
             has_pending: false,
+            current_parameters: &[],
+            nested_write_body: None,
         })
     }
 
@@ -312,7 +387,10 @@ impl<'a, 'g> Check<'a, 'g> {
 
     fn facts(&mut self, node: NodeId) -> Work<Option<&'a NodeFacts<'g>>> {
         self.budget.step(1)?;
-        Ok(self.nodes.get(&(&self.module.key, node)).copied())
+        Ok(self
+            .nodes
+            .get(&(&self.module.key, node))
+            .map(|&(_, fact)| fact))
     }
 
     fn pending(&mut self, node: NodeId, blocker: ResultUseBlocker) -> Work<()> {
@@ -429,6 +507,10 @@ impl<'a, 'g> Check<'a, 'g> {
             match declaration.id.kind {
                 DeclarationKind::Function | DeclarationKind::Implementation => {
                     if syntax.children.get(1).is_none()
+                        || self.pairs.contains_key(&declaration.id)
+                        || self
+                            .scoped
+                            .is_some_and(|(role, _)| role.implementation.id == declaration.id)
                         || self
                             .contracts
                             .get(&declaration.id)
@@ -610,15 +692,19 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             NodeKind::Assignment(_) => {
                 let (left, right) = (children[0], children[1]);
-                let path = self.facts(left)?.and_then(|f| match &f.kind {
-                    NodeFactKind::Expression(e) => e.path.as_ref(),
-                    _ => None,
-                });
+                let target = self.expression_facts(left)?;
+                let path = target.and_then(|expression| expression.path.as_ref());
                 let checked = self.facts(node)?.is_some();
+                let plain_dereference = path.filter(|path| {
+                    checked
+                        && syntax.kind == NodeKind::Assignment("=")
+                        && path.projections.as_slice() == [PathProjection::Dereference]
+                });
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
                     let incoming = state.take(Root::Temporary(right), &[], self.budget)?;
-                    if let Some(target @ (root, path)) = &self.address(state, path)?
+                    let storage = self.place_storage(state, path)?;
+                    if let PlaceStorage::Exact(target @ (root, path)) = &storage
                         && checked
                     {
                         let displaced = state.take(*root, path, self.budget)?;
@@ -630,9 +716,28 @@ impl<'a, 'g> Check<'a, 'g> {
                             ResultDiscardKind::Replacement,
                         )?;
                         state.install(incoming, *root, path, self.budget)?;
+                    } else if let Some(path) = plain_dereference
+                        && matches!(&storage, PlaceStorage::Indirect(locations) if locations.is_empty())
+                        && self.caller_bool_storage(state, path.root)?
+                    {
+                        // No local address or Result occurrence can reside in this
+                        // scalar descriptor. The ownership pass checks its backing.
+                        self.budget.step(incoming.len())?;
+                        if incoming.iter().any(|entry| {
+                            matches!(entry.content, Content::Result(_) | Content::Unclassified(_))
+                        }) {
+                            self.pending(node, ResultUseBlocker::Storage)?;
+                        }
+                    } else if checked
+                        && syntax.kind == NodeKind::Assignment("=")
+                        && matches!(&storage, PlaceStorage::Indirect(addresses) if addresses.is_empty())
+                        && let Some(target) = target
+                        && self.terminal_nested_bool_write(node, target, state, &incoming, depth)?
+                    {
+                        // No displaced Result-use state to update; ownership still checks the store.
                     } else {
                         self.pending(node, ResultUseBlocker::Storage)?;
-                        for address in self.place_storage(state, path)?.addresses() {
+                        for address in storage.addresses() {
                             self.forget_address(state, &address, node)?;
                         }
                     }
@@ -1041,6 +1146,28 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         Ok(normal)
+    }
+
+    fn caller_bool_storage(
+        &mut self,
+        state: &Residence<'g>,
+        root: &'g DeclarationId,
+    ) -> Work<bool> {
+        let origin = match root.kind {
+            DeclarationKind::Parameter => Some(root),
+            DeclarationKind::Binding => state.caller_bool_origin(Root::Local(root), self.budget)?,
+            _ => None,
+        };
+        let Some(origin) = origin else {
+            return Ok(false);
+        };
+        // Only the current named body may use this handoff; a captured
+        // descriptor does not turn into one of the closure's own parameters.
+        self.budget.step(self.current_parameters.len())?;
+        Ok(self.current_parameters.iter().any(|parameter| {
+            &parameter.declaration.id == origin
+                && retained_bool_contents_type(&parameter.ty).is_some()
+        }))
     }
 
     fn component(
