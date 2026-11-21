@@ -1469,6 +1469,14 @@ At `d7429fa`, the caller captures `&mut flag` and a copied `bool`, weakens the l
 
 Returning a replacement closure backed by a callee local does not establish this transfer. The standalone `forward` formal still has no concrete environment. Reversing the capture order or replacing the copied `bool` with `i32` withholds the named transfer. The `i32` control still forms and discards a local closure at its prior target cap of 2,714 work / 449 entries / depth 6. Both installed load modes agree. No callable copy, invocation, cancellation, or Rill execution follows from this judgment. [#71](https://github.com/Reilley64/rill/issues/71) remains open.
 
+## Ordinary graph edges for written text and guard release
+
+At `c668ad4`, the [installed release tests](m5/graph/closed_release.rs) check that the flow-checked operand of a written `dispose` call is the same unprojected slot as its typed source. A string call must select the pinned text implementation and `DisposeText` bridge. A `LockGuard<i32>` release must select the protected implementation with its matching native entry and storage representation. The graph verifier does not infer either proof from the name `dispose`.
+
+In normal and test mode, the graph now publishes ordinary MIR for the imported `helper.rill` startup containing `dispose(startup)`, the function containing `dispose(value)`, and the expectation that calls `consumes("expectation")`. The isolated `dispose(lock)` caller gains ordinary graph-root MIR through `mutex.rill` implementation at byte 223 and entry at byte 169. Targeted lowering already checked these roots. The duplicate disposals still report `R0200` at the second call, related to the first.
+
+Implicit guard cleanup, projected text, and the standalone provider roots remain incomplete. The implicit-only graph still gives the same pending judgment at 185,222 work / 3,993 entries / depth 3. Independent one-short limits withhold MIR. Neither the 17-source baseline nor the 18-source O16 shared graph changes its overall verdict. These are ordinary cleanup judgments, not cancellation delivery or Rill execution. [#66](https://github.com/Reilley64/rill/issues/66) remains open.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
