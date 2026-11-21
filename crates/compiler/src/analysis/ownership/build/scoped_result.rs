@@ -274,6 +274,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let capture = job
             .capture
             .map(|_| frame.slots[received].place(self.module));
+        frame.budget.reserve(1)?;
         let body = flow::run(frame, entry, vec![received], None, false, None)?.mir;
         self.budget.reserve(1)?;
         Ok(ScopedJoinFrame {
