@@ -121,6 +121,13 @@ type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), (usize, &'a NodeFacts<'g>
 type Alternatives<'g> = Vec<Residence<'g>>;
 
 #[derive(Clone, Copy)]
+enum ValueUse {
+    Used,
+    Statement,
+    Binding { pattern: NodeId, depth: usize },
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct Inputs<'a, 'g> {
     pub result: Container<'g>,
     pub option: Option<Container<'g>>,
@@ -658,7 +665,15 @@ impl<'a, 'g> Check<'a, 'g> {
             | NodeKind::Import => self.singleton(state),
             NodeKind::Binding { .. } => {
                 let source = *children.last().unwrap();
-                let alternatives = self.expression(source, state, depth + 1)?;
+                let alternatives = self.expression_with_use(
+                    source,
+                    state,
+                    depth + 1,
+                    ValueUse::Binding {
+                        pattern: children[0],
+                        depth: depth + 1,
+                    },
+                )?;
                 let facts = self.facts(node)?;
                 let mut running = Vec::new();
                 for mut state in alternatives {
@@ -744,7 +759,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 Ok(alternatives)
             }
-            NodeKind::ExpressionStatement => self.expression(children[0], state, depth + 1),
+            NodeKind::ExpressionStatement => {
+                self.expression_with_use(children[0], state, depth + 1, ValueUse::Statement)
+            }
             NodeKind::Return => {
                 let mut alternatives = if let Some(&value) = children.first() {
                     let mut alternatives = self.expression(value, state, depth + 1)?;
@@ -808,8 +825,18 @@ impl<'a, 'g> Check<'a, 'g> {
     fn expression(
         &mut self,
         node: NodeId,
+        state: Residence<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        self.expression_with_use(node, state, depth, ValueUse::Used)
+    }
+
+    fn expression_with_use(
+        &mut self,
+        node: NodeId,
         mut state: Residence<'g>,
         depth: usize,
+        usage: ValueUse,
     ) -> Work<Alternatives<'g>> {
         self.depth(depth)?;
         let Some(facts) = self.facts(node)? else {
@@ -990,7 +1017,19 @@ impl<'a, 'g> Check<'a, 'g> {
                     return self.interpolate(node, holes, state, depth + 1);
                 }
                 DataExpression::Match(matched) => {
-                    return self.match_expression(node, matched, state, depth + 1);
+                    let unused_bool = matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+                        && match usage {
+                            ValueUse::Used => false,
+                            ValueUse::Statement => true,
+                            ValueUse::Binding { pattern, depth } => {
+                                match self.module.syntax.nodes[pattern].kind {
+                                    NodeKind::Wildcard => true,
+                                    NodeKind::GroupPattern => self.wildcard_at(pattern, depth)?,
+                                    _ => false,
+                                }
+                            }
+                        };
+                    return self.match_expression(node, matched, state, depth + 1, unused_bool);
                 }
                 _ => {}
             }
@@ -999,7 +1038,14 @@ impl<'a, 'g> Check<'a, 'g> {
             NodeKind::Arrow => self.arrow(node, facts, state, depth + 1),
             NodeKind::Group => {
                 let alternatives = self.singleton(state)?;
-                self.component(alternatives, syntax.children[0], root, &[], depth + 1)
+                self.component_with_use(
+                    alternatives,
+                    syntax.children[0],
+                    root,
+                    &[],
+                    depth + 1,
+                    usage,
+                )
             }
             NodeKind::IfExpression => self.conditional(node, state, true, depth + 1),
             NodeKind::Template
@@ -1178,10 +1224,22 @@ impl<'a, 'g> Check<'a, 'g> {
         path: &[ResultComponent<'g>],
         depth: usize,
     ) -> Work<Alternatives<'g>> {
+        self.component_with_use(alternatives, child, root, path, depth, ValueUse::Used)
+    }
+
+    fn component_with_use(
+        &mut self,
+        alternatives: Alternatives<'g>,
+        child: NodeId,
+        root: Root<'g>,
+        path: &[ResultComponent<'g>],
+        depth: usize,
+        usage: ValueUse,
+    ) -> Work<Alternatives<'g>> {
         self.budget.step(1)?;
         let mut next = Vec::new();
         for state in alternatives {
-            let mut evaluated = self.expression(child, state, depth)?;
+            let mut evaluated = self.expression_with_use(child, state, depth, usage)?;
             for state in &mut evaluated {
                 self.move_value(state, Root::Temporary(child), &[], root, path)?;
             }

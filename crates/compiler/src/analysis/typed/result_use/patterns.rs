@@ -173,6 +173,7 @@ impl<'a, 'g> Check<'a, 'g> {
         matched: &Match<'g>,
         state: Residence<'g>,
         depth: usize,
+        unused_bool: bool,
     ) -> Work<Alternatives<'g>> {
         self.depth(depth)?;
         let root = Root::Temporary(matched.scrutinee);
@@ -189,7 +190,16 @@ impl<'a, 'g> Check<'a, 'g> {
             if scrutinee.is_some_and(
                 |fact| matches!(fact.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"),
             ) {
-                if self.boolean_match_preserves_state(matched, depth + 1)? {
+                // An unguarded wildcard never inspects or binds the copy. Run
+                // its body once even when that body contains more matches.
+                if let [arm] = matched.arms.as_slice()
+                    && arm.guard.is_none()
+                    && matches!(&*arm.pattern.pattern, Pattern::Wildcard)
+                    && arm.pattern.binders.is_empty()
+                {
+                    return self.match_arms(node, matched, remaining, true, depth);
+                }
+                if self.boolean_match_preserves_state(matched, depth + 1, unused_bool)? {
                     let mut remaining = remaining;
                     for state in &mut remaining {
                         self.budget.step(1)?;
@@ -218,12 +228,20 @@ impl<'a, 'g> Check<'a, 'g> {
                     self.budget.reserve(1)?;
                     snapshots.push(state);
                     let mut completed = self.match_arms(node, matched, snapshots, true, depth)?;
+                    if unused_bool {
+                        for state in &mut completed {
+                            let root = Root::Temporary(node);
+                            let output = state.take(root, &[], self.budget)?;
+                            self.discard(output, root, node, ResultDiscardKind::Expression)?;
+                        }
+                    }
                     if split
                         && let [first, second] = completed.as_mut_slice()
                         && first.join_boolean(second, &source, self.budget)?
                     {
                         completed.pop();
                     }
+                    self.budget.reserve(completed.len())?;
                     result.extend(completed);
                 }
                 return Ok(result);
@@ -241,17 +259,41 @@ impl<'a, 'g> Check<'a, 'g> {
     /// An exhaustive match whose arms all fall through without observing or
     /// changing any residence does not distinguish the two Boolean outcomes.
     /// Still evaluate the scrutinee: its own transfers and effects are real.
-    fn boolean_match_preserves_state(&mut self, matched: &Match<'g>, depth: usize) -> Work<bool> {
+    fn boolean_match_preserves_state(
+        &mut self,
+        matched: &Match<'g>,
+        depth: usize,
+        unused_bool: bool,
+    ) -> Work<bool> {
         if !matched.coverage.exhaustive() {
             return Ok(false);
         }
         for arm in &matched.arms {
             self.budget.step(1)?;
-            if arm.guard.is_some() || !self.discards_only_scalar_reads(arm.body, depth)? {
+            if arm.guard.is_some() {
+                return Ok(false);
+            }
+            if unused_bool
+                && self.module.syntax.nodes[arm.body].kind != NodeKind::Block
+                && self.pure_scalar_value(arm.body, depth)?
+            {
+                continue;
+            }
+            if !self.discards_only_scalar_reads(arm.body, depth)? {
                 return Ok(false);
             }
         }
         Ok(true)
+    }
+
+    pub(super) fn wildcard_at(&mut self, mut node: NodeId, mut depth: usize) -> Work<bool> {
+        while self.module.syntax.nodes[node].kind == NodeKind::GroupPattern {
+            self.depth(depth)?;
+            node = self.module.syntax.nodes[node].children[0];
+            depth += 1;
+        }
+        self.depth(depth)?;
+        Ok(self.module.syntax.nodes[node].kind == NodeKind::Wildcard)
     }
 
     fn discards_only_scalar_reads(&mut self, node: NodeId, depth: usize) -> Work<bool> {
@@ -267,23 +309,31 @@ impl<'a, 'g> Check<'a, 'g> {
                 Ok(true)
             }
             NodeKind::Binding { .. }
-                if self.module.syntax.nodes[syntax.children[0]].kind == NodeKind::Wildcard =>
+                if self.module.syntax.nodes[syntax.children[0]].kind == NodeKind::Wildcard
+                    || (self.module.syntax.nodes[syntax.children[0]].kind
+                        == NodeKind::GroupPattern
+                        && self.wildcard_at(syntax.children[0], depth + 1)?) =>
             {
                 let source = *syntax.children.last().unwrap();
-                // Only a typed, direct primitive read can drop no tracked
-                // value and perform no effects. In particular, exclude calls,
-                // dereferences and computed selectors.
-                Ok(self.expression_facts(source)?.is_some_and(|fact| {
-                    fact.access == Access::Owned
-                        && matches!(fact.ty.as_ref(), TypeTerm::Primitive(_))
-                        && fact
-                            .path
-                            .as_ref()
-                            .is_some_and(|place| place.projections.is_empty())
-                }))
+                self.pure_scalar_value(source, depth + 1)
             }
             _ => Ok(false),
         }
+    }
+
+    // A discarded literal or whole-local primitive read has no effect on
+    // Result residence. A projection of an effectful temporary is not a read
+    // of this form. Groups keep their written depth even on the fast path.
+    fn pure_scalar_value(&mut self, node: NodeId, depth: usize) -> Work<bool> {
+        let (leaf, _) = self.value_root_at(node, depth)?;
+        let kind = self.module.syntax.nodes[leaf].kind;
+        Ok(matches!(kind, NodeKind::Literal | NodeKind::ValueReference)
+            && self.facts(leaf)?.is_some_and(|fact| {
+                fact.flow.normal && !fact.flow.pending && matches!(&fact.kind, NodeFactKind::Expression(v)
+                    if v.ordinary_context.is_none() && v.access == Access::Owned
+                    && matches!(v.ty.as_ref(), TypeTerm::Primitive(p) if p.name() != "never")
+                    && (kind == NodeKind::Literal || v.path.as_ref().is_some_and(|p| p.projections.is_empty())))
+            }))
     }
 
     fn match_arms(

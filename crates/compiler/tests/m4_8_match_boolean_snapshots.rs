@@ -90,7 +90,87 @@ fn installed_boolean_matches() {
             .map(|i| format!("match (b{i}) {{ {arms} }}; "))
             .collect::<String>();
         let source = format!("\nfunction probe({parameters}): bool {{ {matches}return true; }}\n");
-        installed(&probe, name, &source, fixed, checked);
+        installed(
+            &probe,
+            name,
+            &source,
+            fixed.map(|(w, e)| (w, e, 12)),
+            checked,
+        );
+    }
+
+    for (name, statement, fixed) in [
+        (
+            "discarded literal result",
+            "let _ = match (b@) { true => true, false => false };",
+            (395301, 73732),
+        ),
+        (
+            "discarded binder result",
+            "let _ = match (b@) { v => v };",
+            (326406, 48590),
+        ),
+        (
+            "unused expression result",
+            "match (b@) { v => v };",
+            (326366, 48590),
+        ),
+    ] {
+        let parameters = (0..10)
+            .map(|i| format!("b{i}: bool"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let statements = (0..10)
+            .map(|i| statement.replace('@', &i.to_string()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let source = format!("\nfunction probe({parameters}): void {{ {statements} }}\n");
+        installed(&probe, name, &source, Some((fixed.0, fixed.1, 12)), checked);
+    }
+    for (n, helper, innermost, fixed) in [
+        (11, "", "", (326724, 48624, 46)),
+        (
+            10,
+            "function noop(): void {}\n",
+            "noop();",
+            (327586, 48557, 45),
+        ),
+    ] {
+        let parameters = (0..n)
+            .map(|i| format!("b{i}: bool"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let body = (0..n).rev().fold(innermost.to_owned(), |body, i| {
+            format!("match (b{i}) {{ _ => {{ {body} }} }};")
+        });
+        let source =
+            format!("\n{helper}function probe({parameters}): bool {{ {body} return true; }}\n");
+        installed(
+            &probe,
+            "nested unobserved snapshots",
+            &source,
+            Some(fixed),
+            checked,
+        );
+    }
+    for (groups, depth) in [(0, 23), (15, 38)] {
+        let source = format!(
+            "\nfunction probe(flag: bool): bool {{ match (flag) {{ v => {{ {}let _ = {}v{};{} }} }}; return true; }}\n",
+            "{".repeat(15),
+            "(".repeat(groups),
+            ")".repeat(groups),
+            "}".repeat(15)
+        );
+        installed(
+            &probe,
+            "written discarded read depth",
+            &source,
+            None,
+            |report| {
+                checked(report);
+                assert_eq!(report.statistics().max_depth, depth);
+            },
+        );
     }
 
     installed(
@@ -103,6 +183,20 @@ fn installed_boolean_matches() {
             if (!flag) { let _ = debt; }
         }
     ",
+        None,
+        checked,
+    );
+    installed(
+        &probe,
+        "used match result remains correlated",
+        r#"
+        function probe(flag: bool): void {
+            let debt = Err<bool,i32>(61i32);
+            let copy = match (flag) { true => true, false => false };
+            if (flag) { if (copy) { let _ = debt; } }
+            else { if (!copy) { let _ = debt; } }
+        }
+        "#,
         None,
         checked,
     );
@@ -224,7 +318,7 @@ fn installed(
     probe: &std::path::Path,
     name: &str,
     source: &str,
-    fixed: Option<(usize, usize)>,
+    fixed: Option<(usize, usize, usize)>,
     check: impl Fn(&TypedReport<'_>),
 ) {
     let entry = probe
@@ -253,13 +347,13 @@ fn installed(
         );
         eprintln!("{name}, test={test_mode}: {:?}", report.statistics());
         check(&report);
-        if let Some((max_work, max_entries)) = fixed {
+        if let Some((max_work, max_entries, max_depth)) = fixed {
             let fixed = analyze_typed(
                 &graph,
                 AnalysisLimits {
                     max_work,
                     max_entries,
-                    max_depth: 12,
+                    max_depth,
                 },
             );
             check(&fixed);
