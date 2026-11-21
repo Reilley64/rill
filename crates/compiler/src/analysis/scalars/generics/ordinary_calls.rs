@@ -193,46 +193,51 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<ScopedRetention> {
         // The stamp lives in the expression slot already read by the caller.
         // No other ordinary call needs to look up an earlier determination.
-        self.elab.step(3 + inference.module.key.path.len())?;
+        let levels = 1 + self.ordinary_calls.len().max(1).ilog2() as usize;
+        let lookup = levels
+            .checked_mul(1 + inference.module.key.path.len())
+            .ok_or(())?;
+        self.elab.step(lookup.checked_add(2).ok_or(())?)?;
         let prior = &self.ordinary_calls[&(&inference.module.key, node)];
         let call = &inference.calls[&node];
         let id = prior.goal.as_ref().unwrap();
         let goal = self.evidence.get(id).unwrap();
         let output = goal.output.as_ref().unwrap();
-        if !prior.defaults.is_empty()
-            || !call.fact.defaults.is_empty()
-            || prior.instantiation.is_some()
-            || prior.premise.is_some()
+        // Ordinary fallback may still reuse the prior goal to compare an
+        // expected output. It is not sufficient when the proof context changes.
+        if prior.premise.is_some()
             || slot.ordinary_context.is_some()
             || self.arrow_premise.is_some()
+            || !prior.defaults.is_empty()
+            || !call.fact.defaults.is_empty()
+            || prior.instantiation.is_some()
             || slot.blocked
             || !matches!(
                 goal.state,
                 GoalState::Proved | GoalState::Unresolved(GoalBlocker::CallableEnvironment)
             )
         {
-            return Ok(ScopedRetention::Ordinary);
+            return Ok(ScopedRetention::Refresh);
         }
         let ([argument], [formal], [Some(input)]) = (
             call.fact.arguments.as_slice(),
             call.parameters.as_slice(),
             prior.inputs.as_slice(),
         ) else {
-            return Ok(ScopedRetention::Ordinary);
+            return Ok(ScopedRetention::Refresh);
         };
         let GoalJudgment::Determine { inputs, .. } = &goal.judgment else {
             unreachable!();
         };
         let [determined_input] = inputs.as_slice() else {
-            return Ok(ScopedRetention::Ordinary);
+            return Ok(ScopedRetention::Refresh);
         };
         let written = written_arguments(call);
         self.elab.step(1 + goal.assumptions.len() + written.len())?;
         let actual = &inference.slots[argument];
-        if actual.blocked || actual.ordinary_context.is_some() {
-            return Ok(ScopedRetention::Ordinary);
-        }
-        if !self.evidence.uses_current_assumptions(goal)
+        if actual.blocked
+            || actual.ordinary_context.is_some()
+            || !self.evidence.uses_current_assumptions(goal)
             || !Arc::ptr_eq(determined_input, input)
             || !actual.ty.as_ref().is_some_and(|ty| Arc::ptr_eq(ty, input))
             || written.len() != prior.explicit.len()
@@ -254,7 +259,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         let agrees = matches!(prior.output_agreement, OutputAgreement::Agrees);
         let checked = prior.checked;
         let Some(current) = self.retained_argument_pair(inference, call, formal)? else {
-            return Ok(ScopedRetention::Ordinary);
+            // The original operand evidence is no longer independently available.
+            return Ok(ScopedRetention::Refresh);
         };
         self.elab.step(2)?;
         let same_origins = match old_origins {
