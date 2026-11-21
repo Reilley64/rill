@@ -2455,8 +2455,8 @@ struct Build<'a, 'g, 'b> {
     incoming_list_arrow: Option<(Slot, Slot, bool)>,
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
-    /// The sole written call statement in a reached, straight top-level frame.
-    forwarding_statement: Option<NodeId>,
+    /// The sole call in the straight top-level prefix, and its reached length.
+    forwarding_statement: Option<(NodeId, usize)>,
     /// A top-level empty/continue loop whose only decision reads a Bool formal.
     list_delivery_loop: Option<(NodeId, NodeId)>,
     scalar_copy_read: Option<NodeId>,

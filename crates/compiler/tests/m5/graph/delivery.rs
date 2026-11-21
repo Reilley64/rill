@@ -369,6 +369,39 @@ fn good_only_graph_needs_the_complete_work_entry_and_depth_budget() {
 }
 
 #[test]
+fn a_dead_binding_after_return_keeps_the_reached_forwarding_call() {
+    let middle_and_leaf = OTHER.split("function nestedCaller").next().unwrap();
+    let source = format!(
+        "{middle_and_leaf}\nfunction outer(enter: bool): void {{ bad(enter); return; let _ = false; }}"
+    );
+    probe(
+        "graph::delivery::a_dead_binding_after_return_keeps_the_reached_forwarding_call",
+        &source,
+        |_, module, receipt| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            let outer = root(&report, b"function outer");
+            let Delivery::Rejected {
+                finding_id,
+                via_call: Some(via),
+            } = outer.forwarded_call()
+            else {
+                panic!("missing outer call witness")
+            };
+            let target =
+                lower_root(receipt, module, outer.owner(), AnalysisLimits::default()).unwrap();
+            assert!(outer.ordinary_mir().is_some() && outer.mir().is_none());
+            assert_eq!(target.completion(), Completion::SourceRejected);
+            assert_eq!(via.site.span.bytes(), b"bad(enter)");
+            for found in [&report.findings()[*finding_id], &target.findings()[0]] {
+                assert_eq!(found.code(), "R0202");
+                assert_eq!(found.site.span.bytes(), b"*slot = &flag;");
+                assert_eq!(found.related.span.bytes(), b"&flag");
+            }
+        },
+    );
+}
+
+#[test]
 fn unsupported_forwarders_keep_the_original_frame_budgets() {
     let retaining = r#"function outer(enter: bool): void { middle(ARG); }
 function middle(enter: bool): void {

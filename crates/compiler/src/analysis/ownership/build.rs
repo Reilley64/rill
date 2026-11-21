@@ -2224,8 +2224,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         };
         let mut tail = self.cleanup_scope(exit_site, &locals, next)?;
         if node == self.body {
-            if straight && prefix == children.len() {
-                self.forwarding_statement = forwarding;
+            if straight {
+                self.forwarding_statement = forwarding.map(|call| (call, prefix));
             }
             if !locals.is_empty()
                 && let Action::EndScope(index) = self.code[tail].action
@@ -6991,7 +6991,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             let value = self.value(arg)?;
             let ty = value.ty.clone();
-            direct_bool_parameter = self.forwarding_statement == Some(node)
+            direct_bool_parameter = self
+                .forwarding_statement
+                .is_some_and(|(call, _)| call == node)
                 && call.arguments.len() == 1
                 && !piped
                 && scalar::scalar(&ty) == Some(Primitive::Bool)
@@ -7001,6 +7003,19 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 && value.path.as_ref().is_some_and(|p| {
                     p.root.kind == DeclarationKind::Parameter && p.projections.is_empty()
                 });
+            if direct_bool_parameter {
+                // The ordinary slot walk ended at a terminal statement. A dead
+                // binding has no slot and does not make an earlier call guarded.
+                let (_, prefix) = self.forwarding_statement.unwrap();
+                let suffix = &self.module.syntax.nodes[self.body].children[prefix..];
+                self.budget.step(suffix.len())?;
+                direct_bool_parameter = suffix.iter().all(|&s| {
+                    matches!(
+                        self.module.syntax.nodes[s].kind,
+                        NodeKind::ExpressionStatement | NodeKind::Binding { .. } | NodeKind::Return
+                    )
+                });
+            }
             if self.reference_option(&ty) {
                 return Err(Stop::Pending(arg));
             }
