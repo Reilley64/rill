@@ -256,11 +256,17 @@ impl<'a, 'g> Check<'a, 'g> {
         // Invalidating a location can discard a hint without losing a
         // tracked residence or handing a later store an incoming origin.
         self.budget.step(affected.len())?;
-        if affected.iter().any(|entry| {
-            !matches!(
-                entry.content,
-                Content::CallerBoolOrigin(_) | Content::ConsumedPair
-            )
+        if affected.iter().any(|entry| match &entry.content {
+            Content::CallerBoolOrigin(_) | Content::ConsumedPair => false,
+            Content::Test(tag, _) if matches!(tag.as_ref(), Constructor::Boolean(_)) => {
+                // A Boolean fact at a named field describes that scalar only.
+                // Keep the existing storage boundary for nested tuple elements.
+                !matches!(
+                    entry.component.last().or_else(|| path.last()),
+                    Some(ResultComponent::Field(_))
+                )
+            }
+            _ => true,
         }) {
             self.pending(site, ResultUseBlocker::Storage)?;
         }

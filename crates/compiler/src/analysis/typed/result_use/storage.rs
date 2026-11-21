@@ -139,6 +139,48 @@ impl<'g> Residence<'g> {
         Ok(true)
     }
 
+    /// Join two fallthrough alternatives only if their ordered residences
+    /// agree apart from complementary truth at the matched source. Different
+    /// ordering can miss a join; no Result, alias or other fact is widened.
+    pub(super) fn join_boolean(
+        &mut self,
+        other: &Self,
+        source: &Address<'g>,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        budget.step(1)?;
+        if self.locations.len() != other.locations.len() {
+            return Ok(false);
+        }
+        let mut remove = None;
+        for (i, (a, b)) in self.locations.iter().zip(&other.locations).enumerate() {
+            budget.step(a.1.size() + b.1.size())?;
+            if a == b {
+                continue;
+            }
+            budget.step(1 + source.1.len())?;
+            if remove.is_some()
+                || a.0 != source.0
+                || b.0 != source.0
+                || a.1.component != source.1
+                || b.1.component != source.1
+                || !matches!(
+                    (&a.1.content, &b.1.content),
+                    (Content::Test(a, true), Content::Test(b, true))
+                        if matches!((a.as_ref(), b.as_ref()),
+                            (Constructor::Boolean(a), Constructor::Boolean(b)) if a != b)
+                )
+            {
+                return Ok(false);
+            }
+            remove = Some(i);
+        }
+        if let Some(index) = remove {
+            self.locations.swap_remove(index);
+        }
+        Ok(true)
+    }
+
     pub(super) fn take_scope(
         &mut self,
         belongs: impl Fn(Root<'g>) -> bool,

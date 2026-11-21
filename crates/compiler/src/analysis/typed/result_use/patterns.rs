@@ -189,15 +189,24 @@ impl<'a, 'g> Check<'a, 'g> {
             if scrutinee.is_some_and(
                 |fact| matches!(fact.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"),
             ) {
-                let mut snapshots = Vec::new();
+                if self.boolean_match_preserves_state(matched, depth + 1)? {
+                    let mut remaining = remaining;
+                    for state in &mut remaining {
+                        self.budget.step(1)?;
+                        state.take(root, &[], self.budget)?;
+                    }
+                    return Ok(remaining);
+                }
+                let mut result = Vec::new();
                 for mut state in remaining {
                     // Pattern tests use the evaluated copy, not a view into
                     // the caller's storage. Refine an unknown read at this
                     // point, before any guard or body can write to the source.
-                    if state
+                    let mut snapshots = Vec::new();
+                    let split = state
                         .test(root, &[], &Constructor::Boolean(true), self.budget)?
-                        .is_none()
-                    {
+                        .is_none();
+                    if split {
                         let mut other = state.fork(self.budget)?;
                         for (branch, truth) in [(&mut other, false), (&mut state, true)] {
                             self.record_boolean(branch, root, &[], truth)?;
@@ -208,8 +217,16 @@ impl<'a, 'g> Check<'a, 'g> {
                     }
                     self.budget.reserve(1)?;
                     snapshots.push(state);
+                    let mut completed = self.match_arms(node, matched, snapshots, true, depth)?;
+                    if split
+                        && let [first, second] = completed.as_mut_slice()
+                        && first.join_boolean(second, &source, self.budget)?
+                    {
+                        completed.pop();
+                    }
+                    result.extend(completed);
                 }
-                return self.match_arms(node, matched, snapshots, true, depth);
+                return Ok(result);
             }
             self.budget.reserve(1)?;
             self.match_views.push((source, root));
@@ -218,6 +235,54 @@ impl<'a, 'g> Check<'a, 'g> {
             result
         } else {
             self.match_arms(node, matched, remaining, false, depth)
+        }
+    }
+
+    /// An exhaustive match whose arms all fall through without observing or
+    /// changing any residence does not distinguish the two Boolean outcomes.
+    /// Still evaluate the scrutinee: its own transfers and effects are real.
+    fn boolean_match_preserves_state(&mut self, matched: &Match<'g>, depth: usize) -> Work<bool> {
+        if !matched.coverage.exhaustive() {
+            return Ok(false);
+        }
+        for arm in &matched.arms {
+            self.budget.step(1)?;
+            if arm.guard.is_some() || !self.discards_only_scalar_reads(arm.body, depth)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn discards_only_scalar_reads(&mut self, node: NodeId, depth: usize) -> Work<bool> {
+        self.depth(depth)?;
+        let syntax = &self.module.syntax.nodes[node];
+        match syntax.kind {
+            NodeKind::Block => {
+                for &child in &syntax.children {
+                    if !self.discards_only_scalar_reads(child, depth + 1)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            NodeKind::Binding { .. }
+                if self.module.syntax.nodes[syntax.children[0]].kind == NodeKind::Wildcard =>
+            {
+                let source = *syntax.children.last().unwrap();
+                // Only a typed, direct primitive read can drop no tracked
+                // value and perform no effects. In particular, exclude calls,
+                // dereferences and computed selectors.
+                Ok(self.expression_facts(source)?.is_some_and(|fact| {
+                    fact.access == Access::Owned
+                        && matches!(fact.ty.as_ref(), TypeTerm::Primitive(_))
+                        && fact
+                            .path
+                            .as_ref()
+                            .is_some_and(|place| place.projections.is_empty())
+                }))
+            }
+            _ => Ok(false),
         }
     }
 
