@@ -172,6 +172,11 @@ fn unsupported_carrier_borrow_and_unopened_sibling_keep_the_source_pending() {
             24,
         ),
         (
+            "function probe(xs: List<Option<string>>, spare: List<bool>): Option<bool> { for (let item of xs) { let text = item?; let _ = &text; } return Option.Some(true); }",
+            1866,
+            24,
+        ),
+        (
             "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let _ = &item; let text = item?; let _ = &text; } return Option.Some(true); }",
             1863,
             23,
@@ -215,6 +220,59 @@ fn unsupported_carrier_borrow_and_unopened_sibling_keep_the_source_pending() {
                 );
                 assert_eq!(root.ordinary_completion(), Completion::Incomplete);
                 assert!(root.ordinary_mir().is_none() && root.dependencies().is_empty());
+            },
+        );
+    }
+}
+
+#[test]
+fn an_ordinary_option_loop_keeps_the_reached_move_finding() {
+    for (result, suffix) in [("void", ""), ("Option<bool>", "return Option.Some(true);")] {
+        let source = format!(
+            r#"function probe(xs: List<Option<string>>): {result} {{
+            for (let item of xs) {{ let s = "owned"; let moved = s; let again = s; break; }}
+            {suffix}
+        }}"#
+        );
+        probe(
+            "iteration::option_text::an_ordinary_option_loop_keeps_the_reached_move_finding",
+            &source,
+            |_, module, receipt| {
+                let f = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some("probe"))
+                    .unwrap();
+                let local = lower_body(receipt, module, &f.id, AnalysisLimits::default()).unwrap();
+                let graph = analyze_ownership(receipt, AnalysisLimits::default());
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == f.node)
+                    .unwrap();
+                assert_eq!(local.completion(), Completion::SourceRejected);
+                assert_eq!(root.ordinary_completion(), Completion::SourceRejected);
+                assert!(local.mir().is_none() && root.ordinary_mir().is_none());
+                for findings in [local.findings(), graph.findings()] {
+                    let [finding] = findings else {
+                        panic!("expected the second read")
+                    };
+                    assert_eq!(finding.code(), "R0200");
+                    for (site, text) in [
+                        (finding.site, b"again = s".as_slice()),
+                        (finding.related, b"moved = s".as_slice()),
+                    ] {
+                        let start = module
+                            .snapshot
+                            .bytes()
+                            .windows(text.len())
+                            .position(|s| s == text)
+                            .unwrap()
+                            + text.len()
+                            - 1;
+                        assert_eq!((site.span.start(), site.span.end()), (start, start + 1));
+                    }
+                }
             },
         );
     }

@@ -44,7 +44,9 @@ pub(super) enum DirectExpression {
 pub(super) enum IterationBody<'g> {
     #[default]
     Unsupported,
-    Ordinary,
+    Ordinary {
+        option_text_item: bool,
+    },
     TextOption {
         item: Option<&'g DeclarationId>,
         direct: Option<DirectExpression>,
@@ -65,7 +67,7 @@ impl IterationBody<'_> {
             } else {
                 IterationBodyKind::NamedBoolPostfix
             }),
-            Self::Ordinary
+            Self::Ordinary { .. }
             | Self::TextOption {
                 constructor: false,
                 postfix: false,
@@ -237,7 +239,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                     postfix: false,
                 }
             }
-            (Some(_), _) => IterationBody::Ordinary,
+            (Some(iteration), _) => IterationBody::Ordinary {
+                option_text_item: iteration.traversal == Some(ListTraversal::Owned)
+                    && Self::is_iteration_option(self.option, &iteration.yielded, "string"),
+            },
             _ => IterationBody::Unsupported,
         };
         let enclosing = std::mem::replace(&mut self.iteration_body, shape);
@@ -318,6 +323,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         if matches!(
             self.iteration_body,
             IterationBody::TextOption { item: Some(_), .. }
+                | IterationBody::Ordinary {
+                    option_text_item: true
+                }
         ) && matches!(syntax[node].kind, NodeKind::Prefix("&" | "&mut"))
             && matches!(slot.ty.as_deref(), Some(TypeTerm::Reference { referent, .. })
                 if Self::is_iteration_option(self.option, referent, "string"))
