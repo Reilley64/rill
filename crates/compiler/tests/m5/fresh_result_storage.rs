@@ -119,6 +119,16 @@ fn installed_fresh_result_residences() {
                 // Measured against pre-fresh 46f16a7 with this same fixture.
                 // The unchanged blocked paths must not pay for a new wrapper lookup.
                 let stats = match name {
+                    "exportErr" => Statistics {
+                        work: 3398,
+                        entries: 438,
+                        max_depth: 4,
+                    },
+                    "exportOk" => Statistics {
+                        work: 3396,
+                        entries: 438,
+                        max_depth: 4,
+                    },
                     "opaque" => Statistics {
                         work: 3264,
                         entries: 374,
@@ -167,6 +177,10 @@ fn installed_fresh_result_residences() {
                     _ => {
                         let err = name.ends_with("Err");
                         let export = name.starts_with("export");
+                        if export {
+                            assert!(target.mir().unwrap().cancellation().is_none());
+                            assert!(matches!(body.enabled_frame(), Delivery::Unresolved));
+                        }
                         let origin = residence(target.mir().unwrap(), err, export, role);
                         assert_eq!(
                             residence(body.mir().unwrap(), err, export, role).node,

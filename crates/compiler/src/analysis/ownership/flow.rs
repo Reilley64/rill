@@ -2190,6 +2190,7 @@ pub(super) fn run<'a, 'g>(
         );
     let mut flat = true;
     let mut list_backing = false;
+    let mut fresh_result = false;
     let mut loop_delivery = false;
     let mut branching = false;
     let mut calls_reached = 0;
@@ -2250,6 +2251,7 @@ pub(super) fn run<'a, 'g>(
                 replacement_candidate = false;
             }
             list_backing |= matches!(slot.cleanup, StorageCleanup::DisposeListI32(_));
+            fresh_result |= matches!(slot.cleanup, StorageCleanup::FreshBoolResult(_));
             candidate = candidate
                 && slot.projection.is_none()
                 && slot.members == 0
@@ -2428,6 +2430,16 @@ pub(super) fn run<'a, 'g>(
         // Tag reached sites during the ordinary visit without a second walk.
         if candidate {
             flat &= flat_action(action, &slots);
+            fresh_result |= matches!(
+                action,
+                Action::ConstructVariant {
+                    fresh_result_ok: true,
+                    ..
+                } | Action::ConstructResultError {
+                    fresh_storage: Some(_),
+                    ..
+                }
+            );
             loop_delivery |= matches!(action, Action::BudgetBackedge);
             branching |= matches!(edges, Edges::Branch { .. });
             if let Action::Call(index) = action {
@@ -4205,7 +4217,12 @@ pub(super) fn run<'a, 'g>(
     }
     // Add the List-backed delivery judgment only for frames with a reached
     // loop check. Entry-only List readers keep their ordinary-only contract.
-    let (trace, replacement) = if candidate && (!list_backing || (flat && loop_delivery)) {
+    // A fresh Result export needs ordinary construction evidence. Do not add
+    // an entry-only delivery proof just because this frame can now retire it.
+    let (trace, replacement) = if candidate
+        && (!list_backing || (flat && loop_delivery))
+        && (!fresh_result || loop_delivery || calls_reached != 0)
+    {
         (
             Some(CancellationTrace {
                 module,
