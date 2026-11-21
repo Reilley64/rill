@@ -157,11 +157,15 @@ impl<'a, 'g> Check<'a, 'g> {
             NodeFactKind::Iteration(iteration) => Some(iteration),
             _ => None,
         });
-        if let Some(iteration) = iteration
-            && iteration.traversal == Some(crate::analysis::typed::ListTraversal::Owned)
-            && self
-                .expression_facts(iteration.source)?
-                .is_some_and(|source| matches!(source.data, Some(DataExpression::List { .. })))
+        let source_fact = if let Some(iteration) = iteration
+            && iteration.traversal == Some(ListTraversal::Owned)
+        {
+            self.expression_facts(iteration.source)?
+        } else {
+            None
+        };
+        if source_fact
+            .is_some_and(|source| matches!(source.data, Some(DataExpression::List { .. })))
         {
             return self.owned_literal_iteration(node, state, depth);
         }
@@ -176,7 +180,9 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         if let Some(iteration) = iteration
             && facts.is_some_and(|facts| !facts.flow.pending)
-            && let Some((pattern, next)) = self.owned_option_iteration_facts(iteration, &state)?
+            && let Some(source) = source_fact
+            && let Some((pattern, next)) =
+                self.owned_option_iteration_facts(iteration, source, &state, depth)?
         {
             return self.owned_option_iteration(node, pattern, next, state, depth);
         }
@@ -238,38 +244,61 @@ impl<'a, 'g> Check<'a, 'g> {
     fn owned_option_iteration_facts(
         &mut self,
         iteration: &Iteration<'g>,
+        source: &ExpressionFacts<'g>,
         state: &Residence<'g>,
+        depth: usize,
     ) -> Work<Option<(&'a PatternFacts<'g>, &'a Type<'g>)>> {
-        let Some(option) = self.core.option else {
+        let (Some(option), Some(list)) = (self.core.option, self.core.collections.list) else {
             return Ok(None);
         };
-        // Owned traversal attests to both protected, concrete List selections.
-        // Keep other carriers on their existing paths, even if next is proved.
-        if iteration.traversal != Some(ListTraversal::Owned)
-            || !matches!(iteration.yielded.as_ref(), TypeTerm::Nominal { declaration, arguments }
-                if *declaration == option.declaration
-                    && matches!(arguments.as_slice(), [payload]
-                        if matches!(payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")))
-            || self.module.syntax.nodes[iteration.source].kind != NodeKind::ValueReference
-            || self.module.syntax.nodes[iteration.pattern].kind != NodeKind::NamePattern
-        {
-            return Ok(None);
-        }
-        let Some(source) = self.expression_facts(iteration.source)? else {
-            return Ok(None);
-        };
+        let syntax = &self.module.syntax.nodes;
         let Some(path) = source.path.as_ref().filter(|path| {
-            path.root.kind == DeclarationKind::Parameter && path.projections.is_empty()
+            path.root.kind == DeclarationKind::Parameter
+                && path.projections.is_empty()
+                && path.root.module == self.module.key
         }) else {
             return Ok(None);
         };
-        let Some(list) = self.core.collections.list else {
+        let text_option = |ty: &Type<'_>| {
+            matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                if std::ptr::eq(*declaration, option.declaration)
+                    && matches!(arguments.as_slice(), [payload]
+                        if matches!(payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")))
+        };
+        // Only this bounded shape admits both empty and nonempty cursors. The
+        // sole typed reference must be this source, in a checked callable that
+        // cannot reach the loop again on an enclosing backedge. Even a borrow
+        // of the same formal elsewhere could reveal its length or element tags.
+        if !self.current_body_checked
+            || self.dead_depth != 0
+            || !self.loops.is_empty()
+            || source.access != Access::Owned
+            || !matches!(
+                syntax[iteration.source].kind,
+                NodeKind::ValueReference | NodeKind::Group
+            )
+            || !matches!(
+                syntax[iteration.pattern].kind,
+                NodeKind::NamePattern | NodeKind::GroupPattern
+            )
+            || !text_option(&iteration.yielded)
+            || !matches!(source.ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                if std::ptr::eq(*declaration, &list.declaration.id)
+                    && matches!(arguments.as_slice(), [element] if text_option(element)))
+        {
+            return Ok(None);
+        }
+        let Some(Scope {
+            references: ParameterReferences::Sole(reference),
+            ..
+        }) = self.scopes.get(path.root).copied()
+        else {
             return Ok(None);
         };
-        if source.access != Access::Owned
-            || !matches!(source.ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
-                if *declaration == &list.declaration.id
-                    && matches!(arguments.as_slice(), [element] if *element == iteration.yielded))
+        let span = &syntax[iteration.source].span;
+        if reference != iteration.source
+            && (syntax[reference].span.start() < span.start()
+                || syntax[reference].span.end() > span.end())
         {
             return Ok(None);
         }
@@ -277,11 +306,27 @@ impl<'a, 'g> Check<'a, 'g> {
         if !self
             .current_parameters
             .iter()
-            .any(|p| &p.declaration.id == path.root)
+            .any(|p| std::ptr::eq(&p.declaration.id, path.root))
             || self.address(state, Some(path))? != Some((Root::Local(path.root), Vec::new()))
             || state.owes_under(Root::Local(path.root), self.budget)?
         {
             return Ok(None);
+        }
+        if reference != self.value_root_at(iteration.source, depth + 1)?.0 {
+            return Ok(None);
+        }
+        let mut binder = iteration.pattern;
+        let mut binder_depth = depth + 1;
+        loop {
+            self.depth(binder_depth)?;
+            match syntax[binder].kind {
+                NodeKind::NamePattern => break,
+                NodeKind::GroupPattern => {
+                    binder = syntax[binder].children[0];
+                    binder_depth += 1;
+                }
+                _ => return Ok(None),
+            }
         }
         let Some(NodeFactKind::Pattern(pattern)) = self.facts(iteration.pattern)?.map(|f| &f.kind)
         else {
@@ -432,11 +477,14 @@ impl<'a, 'g> Check<'a, 'g> {
         let range = span.start()..span.end();
         let removed = state.take_scope(
             |root| match root {
-                Root::Local(id) => self
-                    .scopes
-                    .get(id)
-                    .and_then(|scope| *scope)
-                    .is_some_and(|scope| range.contains(&scope)),
+                Root::Local(id) => {
+                    id.module == self.module.key
+                        && self
+                            .scopes
+                            .get(id)
+                            .and_then(|scope| scope.start)
+                            .is_some_and(|scope| range.contains(&scope))
+                }
                 Root::Temporary(temporary) => {
                     // The iterator itself survives continue, but staged expression
                     // operands and inner-loop storage do not survive either jump.

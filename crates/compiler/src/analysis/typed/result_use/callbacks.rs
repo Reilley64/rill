@@ -86,10 +86,12 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         let previous = std::mem::replace(&mut self.current_parameters, parameters);
         self.budget.step(1)?;
+        let checked = self.checked.contains(&signature.declaration.id);
+        let previous_checked = std::mem::replace(&mut self.current_body_checked, checked);
         let nested_write_body = (signature.declaration.id.kind == DeclarationKind::Function
             && signature.binders.is_empty()
-            && self.checked.contains(&signature.declaration.id))
-        .then_some(body);
+            && checked)
+            .then_some(body);
         let previous_body = std::mem::replace(&mut self.nested_write_body, nested_write_body);
         let mut states = self.singleton(Residence::default())?;
         for parameter in parameters {
@@ -119,6 +121,7 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         self.current_parameters = previous;
+        self.current_body_checked = previous_checked;
         self.nested_write_body = previous_body;
         Ok(())
     }
@@ -321,6 +324,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let sources = Sources {
             inventory: self.inventory,
             bodies: self.bodies,
+            scopes: self.indexed_scopes,
             pairs: self.pairs,
             scoped: self.scoped,
             nodes: self.nodes,
@@ -330,7 +334,14 @@ impl<'a, 'g> Check<'a, 'g> {
             release_parameters: self.release_parameters,
             core: self.core,
         };
-        let mut check = Check::new(sources, module, self.contracts, self.budget, self.report)?;
+        let mut check = Check::new(
+            sources,
+            module,
+            self.contracts,
+            self.budget,
+            self.report,
+            false,
+        )?;
         check.substitution = self.substitution;
         check.proving_callable = true;
         Ok(check)

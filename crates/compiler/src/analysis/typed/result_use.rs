@@ -12,6 +12,7 @@ use crate::analysis::{
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -118,6 +119,35 @@ impl<'g> ResultUseReport<'g> {
 }
 
 type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), (usize, &'a NodeFacts<'g>)>;
+type Scopes<'g> = BTreeMap<&'g DeclarationId, Scope>;
+
+#[derive(Clone, Copy)]
+struct Scope {
+    start: Option<usize>,
+    references: ParameterReferences,
+}
+
+#[derive(Clone, Copy)]
+enum ParameterReferences {
+    None,
+    Sole(NodeId),
+    Multiple,
+}
+
+fn index_scopes<'g>(module: &'g Module, scopes: &mut Scopes<'g>, budget: &mut Budget) -> Work<()> {
+    for declaration in &module.declarations {
+        budget.reserve(1)?;
+        scopes.insert(
+            &declaration.id,
+            Scope {
+                start: declaration.scope,
+                references: ParameterReferences::None,
+            },
+        );
+    }
+    Ok(())
+}
+
 type Alternatives<'g> = Vec<Residence<'g>>;
 
 #[derive(Clone, Copy)]
@@ -153,12 +183,34 @@ pub(super) fn check<'g>(
     budget: &mut Budget,
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
+    // Index each root frame's lexical scopes before the typed-node pass so
+    // that the same charged pass can summarize resolved parameter references.
+    let mut scopes = BTreeMap::new();
+    for module in inventory.graph().modules() {
+        budget.step(1)?;
+        index_scopes(module, &mut scopes, budget)?;
+    }
     let mut nodes = BTreeMap::new();
     for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
         nodes
             .entry((facts.site.module, facts.site.node))
             .or_insert((index, facts));
+        // The binding on a value reference identifies the declaration even if
+        // the expression is inside a borrow, an arrow, or a skipped branch.
+        if let NodeFactKind::Expression(value) = &facts.kind
+            && let Some(id) = value.binding
+            && id.kind == DeclarationKind::Parameter
+            && facts.site.module == &id.module
+            && let Some(scope) = scopes.get_mut(id)
+        {
+            let node = facts.site.node;
+            scope.references = match scope.references {
+                ParameterReferences::None => ParameterReferences::Sole(node),
+                ParameterReferences::Sole(old) if old == node => scope.references,
+                _ => ParameterReferences::Multiple,
+            };
+        }
     }
     let mut checked = BTreeSet::new();
     for body in bodies.checked_bodies() {
@@ -234,6 +286,7 @@ pub(super) fn check<'g>(
     let sources = Sources {
         inventory,
         bodies,
+        scopes: &scopes,
         pairs: &pairs,
         scoped,
         nodes: &nodes,
@@ -264,7 +317,7 @@ pub(super) fn check<'g>(
         else {
             continue;
         };
-        let mut check = Check::new(sources, module, &contracts, budget, report)?;
+        let mut check = Check::new(sources, module, &contracts, budget, report, false)?;
         if checked.contains(id) {
             check.parametric = Some(*entry);
             check.proving_callable = true;
@@ -279,8 +332,7 @@ pub(super) fn check<'g>(
         contracts.get_mut(id).unwrap().1 = Some(summary);
     }
     for module in inventory.graph().modules() {
-        budget.step(1)?;
-        Check::new(sources, module, &contracts, budget, report)?.roots()?;
+        Check::new(sources, module, &contracts, budget, report, true)?.roots()?;
     }
     Ok(())
 }
@@ -289,6 +341,7 @@ pub(super) fn check<'g>(
 struct Sources<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
     bodies: &'a GenericReport<'g>,
+    scopes: &'a Scopes<'g>,
     pairs: &'a pairs::PairBodies<'g>,
     scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
@@ -310,7 +363,8 @@ struct Check<'a, 'g> {
     implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
     release_parameters: &'a releases::Parameters<'g>,
     module: &'g Module,
-    scopes: BTreeMap<&'g DeclarationId, Option<usize>>,
+    scopes: Cow<'a, Scopes<'g>>,
+    indexed_scopes: &'a Scopes<'g>,
     core: Inputs<'a, 'g>,
     budget: &'a mut Budget,
     report: &'a mut ResultUseReport<'g>,
@@ -327,6 +381,7 @@ struct Check<'a, 'g> {
     proving_callable: bool,
     has_pending: bool,
     current_parameters: &'a [MemberType<'g>],
+    current_body_checked: bool,
     nested_write_body: Option<NodeId>,
 }
 
@@ -337,12 +392,18 @@ impl<'a, 'g> Check<'a, 'g> {
         contracts: &'a CallbackContract<'g>,
         budget: &'a mut Budget,
         report: &'a mut ResultUseReport<'g>,
+        root: bool,
     ) -> Work<Self> {
-        let mut scopes = BTreeMap::new();
-        for declaration in &module.declarations {
-            budget.reserve(1)?;
-            scopes.insert(&declaration.id, declaration.scope);
-        }
+        let scopes = if root {
+            Cow::Borrowed(sources.scopes)
+        } else {
+            let mut local = BTreeMap::new();
+            for declaration in &module.declarations {
+                budget.reserve(1)?;
+                local.insert(&declaration.id, sources.scopes[&declaration.id]);
+            }
+            Cow::Owned(local)
+        };
         Ok(Self {
             inventory: sources.inventory,
             bodies: sources.bodies,
@@ -356,6 +417,7 @@ impl<'a, 'g> Check<'a, 'g> {
             core: sources.core,
             module,
             scopes,
+            indexed_scopes: sources.scopes,
             budget,
             report,
             loops: Vec::new(),
@@ -371,6 +433,7 @@ impl<'a, 'g> Check<'a, 'g> {
             proving_callable: false,
             has_pending: false,
             current_parameters: &[],
+            current_body_checked: false,
             nested_write_body: None,
         })
     }
@@ -581,7 +644,7 @@ impl<'a, 'g> Check<'a, 'g> {
     }
 
     fn exit_scope(&mut self, state: &mut Residence<'g>, scope: usize, site: NodeId) -> Work<()> {
-        for (root, value) in state.take_scope(|root| matches!(root, Root::Local(id) if self.scopes.get(id).is_some_and(|s| *s == Some(scope))), self.budget)? {
+        for (root, value) in state.take_scope(|root| matches!(root, Root::Local(id) if id.module == self.module.key && self.scopes.get(id).is_some_and(|s| s.start == Some(scope))), self.budget)? {
             self.budget.reserve(1)?;
             self.discard(vec![value], root, site, ResultDiscardKind::ScopeExit)?;
         }

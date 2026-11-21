@@ -3,7 +3,8 @@ use compiler::analysis::generics::{GoalJudgment, GoalState};
 use compiler::analysis::ownership::{GraphCompletion, analyze_ownership};
 use compiler::analysis::scalars::{NodeFactKind, PropagationTarget, data::DataExpression};
 use compiler::analysis::typed::{
-    CollectionOperation, ListTraversal, OwnershipCoverage, ResultDiscardKind, TypedCompletion,
+    CollectionOperation, ListTraversal, OwnershipCoverage, ResultDiscardKind, ResultUseBlocker,
+    TypedCompletion,
 };
 use compiler::analysis::{Stage, TypeTerm};
 use compiler::parser::NodeKind;
@@ -289,6 +290,99 @@ fn current_item_success_can_change_a_residence_seen_after_continue_or_break() {
                     "{discards:?}"
                 );
             }
+        },
+    );
+}
+
+#[test]
+fn grouped_fresh_item_keeps_the_inner_none_exit() {
+    probe_report(
+        "iteration_result_use::grouped_fresh_item_keeps_the_inner_none_exit",
+        r#"
+        import std::collection::first;
+        function probe(xs: List<Option<string>>, other: List<Option<string>>): Option<bool> {
+            {
+                let xs = other;
+                guard let head = first(&xs) else { return Option.Some(false); }
+                let _ = head;
+            }
+            let debt = Err<bool,i32>(53i32);
+            for (let ((item)) of ((xs))) { let t = item?; let _ = &t; }
+            let _ = debt;
+            return Option.Some(true);
+        }
+        "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::SourceRejected);
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty());
+            let [discard] = uses.discards() else {
+                panic!("{uses:?}")
+            };
+            assert_eq!(discard.origin.span.bytes(), b"Err<bool,i32>(53i32)");
+            assert_eq!(discard.discard.span.bytes(), b"item?");
+        },
+    );
+}
+
+#[test]
+fn constrained_or_revisited_sources_do_not_create_iterator_exits() {
+    probe_report(
+        "iteration_result_use::constrained_or_revisited_sources_do_not_create_iterator_exits",
+        r#"
+        import std::collection::first;
+        function empty(xs: List<Option<string>>): Option<bool> {
+            guard let head = first(&xs) else {
+                let debt = Err<bool,i32>(49i32);
+                for (let item of xs) { let t = item?; let _ = &t; }
+                let _ = debt;
+                return Option.Some(false);
+            }
+            let _ = head;
+            return Option.Some(true);
+        }
+        function nonempty(xs: List<Option<string>>): Option<bool> {
+            guard let head = first(&xs) else { return Option.Some(false); }
+            let _ = head;
+            let debt = Err<bool,i32>(50i32);
+            for (let item of xs) { let _ = &item; let _ = debt; break; }
+            return Option.Some(true);
+        }
+        function repeat(xs: List<Option<string>>): Option<bool> {
+            for (let item of xs) { let _ = &item; }
+            let debt = Err<bool,i32>(51i32);
+            for (let item of xs) { let t = item?; let _ = &t; }
+            let _ = debt;
+            let independent = Err<bool,i32>(72i32);
+            return Option.Some(false);
+        }
+        function revisit(xs: List<Option<string>>): Option<bool> {
+            let mut again = false;
+            while (true) {
+                let debt = Err<bool,i32>(61i32);
+                for (let item of xs) { if (again) { let t = item?; let _ = &t; } }
+                let _ = debt;
+                if (again) { break; }
+                again = true;
+            }
+            return Option.Some(true);
+        }
+        "#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            let [discard] = uses.discards() else {
+                panic!("only the independent obligation should be reported: {uses:?}")
+            };
+            assert_eq!(discard.origin.span.bytes(), b"Err<bool,i32>(72i32)");
+            assert_eq!(discard.discard.span.bytes(), b"return Option.Some(false);");
+            assert_eq!(uses.pending().len(), 5, "{uses:?}");
+            assert!(
+                uses.pending()
+                    .iter()
+                    .all(|p| p.blocker == ResultUseBlocker::Storage)
+            );
         },
     );
 }
