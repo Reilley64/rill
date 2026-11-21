@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 mod iteration;
 mod list_arrows;
+mod list_source;
 mod reference_results;
 pub(super) use list_arrows::{ArrowBody, ListArrowPair, reached_exclusive_pair};
 pub(super) use reference_results::{check_scoped_reference_results, lower_reference_child};

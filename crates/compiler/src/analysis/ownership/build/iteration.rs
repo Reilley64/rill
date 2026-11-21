@@ -49,27 +49,48 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         {
             return Err(pending());
         }
-        // Computed sources have no admitted storage transfer in this slice.
-        if self.value(source).map_err(|_| pending())?.path.is_none() {
-            return Err(pending());
-        }
-        let (name, _) = self.ungroup_expression_at(source, depth + 1)?;
-        let (named, path) = self.named_owned_place(name)?.ok_or_else(pending)?;
-        let actual = self.normal_value(source)?;
-        let admitted_source = if text {
-            self.is_list_text(&named.ty)
+        let actual = self.value(source).map_err(|_| pending())?;
+        let (name, source_slot, staged, actual) = if actual.path.is_none() {
+            if !text {
+                return Err(pending());
+            }
+            let literal = iteration.list_literal.ok_or_else(pending)?;
+            let staged =
+                self.checked_list_text_source(node, (source, literal), actual, exits, depth + 1)?;
+            let element = self.text_element_disposal(node)?;
+            if !staged.can_commit() {
+                return self.stage_list_text_source(staged, None);
+            }
+            let disposal = TextListDisposal {
+                list: self.list_disposal(node)?,
+                element,
+            };
+            let slot = self.allocate_slot(
+                staged.literal,
+                true,
+                StorageCleanup::DisposeListText(disposal),
+                None,
+            )?;
+            (staged.literal, slot, Some(staged), actual)
         } else {
-            self.is_list_i32(&named.ty)
+            let (name, _) = self.ungroup_expression_at(source, depth + 1)?;
+            let (named, path) = self.named_owned_place(name)?.ok_or_else(pending)?;
+            let actual = self.normal_value(source)?;
+            let admitted_source = if text {
+                self.is_list_text(&named.ty)
+            } else {
+                self.is_list_i32(&named.ty)
+            };
+            if !admitted_source
+                || actual.ty != named.ty
+                || actual.access != Access::Owned
+                || !matches!(&actual.path, Some(p) if std::ptr::eq(p.root, path.root) && p.projections.is_empty())
+                || !named.binding.is_some_and(|id| std::ptr::eq(id, path.root))
+            {
+                return Err(pending());
+            }
+            (name, self.resolve_place(name, path)?, None, actual)
         };
-        if !admitted_source
-            || actual.ty != named.ty
-            || actual.access != Access::Owned
-            || !matches!(&actual.path, Some(p) if std::ptr::eq(p.root, path.root) && p.projections.is_empty())
-            || !named.binding.is_some_and(|id| std::ptr::eq(id, path.root))
-        {
-            return Err(pending());
-        }
-        let source_slot = self.resolve_place(name, path)?;
         let text_disposal = match (text, self.slots[source_slot].cleanup) {
             (false, StorageCleanup::DisposeListI32(_)) => None,
             (true, StorageCleanup::DisposeListText(disposal)) => Some(disposal),
@@ -128,6 +149,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             .is_some_and(|id| std::ptr::eq(id, &dispose.family.id))
             || !advance.artifact.same_link(open.artifact)
             || !release.artifact.same_link(open.artifact)
+            || staged
+                .as_ref()
+                .is_some_and(|source| !source.provider.same_link(open.artifact))
         {
             return Err(pending());
         }
@@ -202,7 +226,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             depth + 1,
         )?;
         self.code[head].edges = Edges::Branch { yes, no: retire };
-        self.emit(
+        let entry = self.emit(
             name,
             Action::OpenOwnedList {
                 source: source_slot,
@@ -212,7 +236,15 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 provider: open,
             },
             Edges::Next(head),
-        )
+        )?;
+        if let Some(staged) = staged {
+            self.stage_list_text_source(
+                staged,
+                Some((source_slot, text_source_backing.ok_or_else(pending)?, entry)),
+            )
+        } else {
+            Ok(entry)
+        }
     }
 
     fn iteration_scope(

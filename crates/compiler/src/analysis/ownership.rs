@@ -413,6 +413,14 @@ pub enum Operation<'g> {
         from: Place<'g>,
         into: Option<Place<'g>>,
     },
+    /// Move the initialized string stages in written order into a new backing
+    /// using the linked `List::from_elements`. No partial List is published.
+    CommitListText {
+        elements: Vec<Place<'g>>,
+        into: Place<'g>,
+        backing: CollectionRepresentation<'g>,
+        provider: CollectionArtifact<'g>,
+    },
     /// Consume the List and initialize the sole owner of its unyielded slots.
     OpenOwnedListI32 {
         source: Place<'g>,
@@ -1972,6 +1980,13 @@ enum Action<'g> {
     None,
     BudgetBackedge,
     Init(Slot),
+    CommitListText {
+        first: Slot,
+        count: usize,
+        into: Slot,
+        backing: CollectionRepresentation<'g>,
+        provider: CollectionArtifact<'g>,
+    },
     OpenOwnedList {
         source: Slot,
         cursor: Slot,

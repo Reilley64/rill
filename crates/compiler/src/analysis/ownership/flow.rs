@@ -172,6 +172,7 @@ fn liveness(
             | Action::CheckRetained => use_one(None, None),
             Action::CheckScopedReferenceResults { entries, .. } => (entries.map(Some), None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
+            Action::CommitListText { into, .. } => use_one(None, Some(into)),
             Action::OpenOwnedList { source, cursor, .. } => use_one(Some(source), Some(cursor)),
             Action::AdvanceOwnedList { cursor, into, .. } => use_one(Some(cursor), into),
             Action::Read { from, into }
@@ -287,12 +288,17 @@ fn liveness(
             Action::Call(index) => calls[index].args.as_slice(),
             _ => &[],
         };
+        let stages = match instruction.action {
+            Action::CommitListText { first, count, .. } => first..first + count,
+            _ => 0..0,
+        };
         // Caller storage can still expose its installed value until a write
         // commits, even if normal local liveness would kill that version.
         for slot in used
             .into_iter()
             .flatten()
             .chain(args.iter().copied())
+            .chain(stages)
             .chain(retained.values().map(|contents| contents.slot()))
         {
             for member in slots[slot].storage(slot) {
@@ -2389,6 +2395,34 @@ pub(super) fn run<'a, 'g>(
                     }
                     state[slot] = State::Initialized(empty.clone());
                     Operation::Initialize(local(slot))
+                }
+                Action::CommitListText {
+                    first,
+                    count,
+                    into,
+                    backing,
+                    provider,
+                } => {
+                    // Only this builder's private, borrow-free string stages
+                    // can reach commitment. The destination has no live owner.
+                    if matches!(state[into], State::Initialized(_)) {
+                        return Err(Stop::Pending(node));
+                    }
+                    budget.step(count)?;
+                    budget.reserve(count)?;
+                    let mut elements = Vec::with_capacity(count);
+                    for (index, stage) in state[first..first + count].iter_mut().enumerate() {
+                        initialized(stage, node)?;
+                        *stage = State::Moved(node);
+                        elements.push(local(first + index));
+                    }
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::CommitListText {
+                        elements,
+                        into: local(into),
+                        backing,
+                        provider,
+                    }
                 }
                 Action::OpenOwnedList {
                     source,

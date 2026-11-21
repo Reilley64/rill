@@ -7,6 +7,8 @@ use crate::analysis::typed::{CollectionOperation, ListTraversal};
 #[derive(Debug)]
 pub struct Iteration<'g> {
     pub source: NodeId,
+    /// The typed List literal under transparent groups, not a computed List.
+    pub(in crate::analysis) list_literal: Option<NodeId>,
     pub pattern: NodeId,
     pub iterate: generics::GoalId,
     pub next: generics::GoalId,
@@ -207,6 +209,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let mut body = body?;
         if let Some(iteration) = &mut handoff {
             iteration.body = shape.finish(body.reaches_postfix);
+            iteration.list_literal = source.as_ref().and_then(|value| value.list_literal);
         }
         if context.scopes.last().is_some_and(|scope| scope.len() == 1)
             && let (Some(iteration), Some(value)) = (&mut handoff, &source)
@@ -439,6 +442,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.reserve(2)?;
         Ok(Some(Iteration {
             source: *source,
+            list_literal: None,
             pattern: *pattern,
             iterate,
             next,

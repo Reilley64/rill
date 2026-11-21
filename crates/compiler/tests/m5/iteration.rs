@@ -11,6 +11,8 @@ use compiler::analysis::typed::{
 use compiler::analysis::{Statistics, TypeTerm};
 use compiler::parser::NodeKind;
 
+#[path = "iteration_source.rs"]
+mod source;
 #[path = "iteration_text.rs"]
 mod text;
 
