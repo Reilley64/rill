@@ -8,6 +8,9 @@ use compiler::analysis::{
     typed::ResultUseBlocker,
 };
 
+#[path = "captures/borrowed_invocation.rs"]
+mod borrowed_invocation;
+
 #[test]
 fn canonical_copy_keeps_the_scalar_environment_owner_available() {
     probe_with_typed(

@@ -520,6 +520,21 @@ fn initialized(state: &State, site: NodeId) -> ResultOf<&Held> {
     }
 }
 
+fn shared_pair_owner(held: &Held, node: NodeId, budget: &mut Budget) -> ResultOf<Slot> {
+    budget.step(held.loans.len())?;
+    // Contents loans describe the closure's stored references, not the
+    // descriptor's access to the closure itself. Only one shared backing
+    // loan can identify the actual receiver on this path.
+    let mut backing = held
+        .loans
+        .iter()
+        .filter(|loan| loan.kind == LoanKind::Backing);
+    match (backing.next(), backing.next()) {
+        (Some(loan), None) if !loan.exclusive => Ok(loan.source),
+        _ => Err(Stop::Pending(node)),
+    }
+}
+
 fn exact_target(
     state: &[State],
     descriptor: Slot,
@@ -3743,7 +3758,29 @@ pub(super) fn run<'a, 'g>(
                     into,
                     call,
                 } => {
-                    let held = initialized(&state[receiver], node)?;
+                    let descriptor = initialized(&state[receiver], node)?;
+                    let owner = if descriptor.pair_origin.is_some() {
+                        receiver
+                    } else if matches!(call, PairCall::ReadOnly { .. })
+                        && descriptor.callable_owner.is_none()
+                        && !descriptor.loans.is_empty()
+                    {
+                        budget
+                            .step(facts.nodes().len().checked_ilog2().unwrap_or(0) as usize + 1)?;
+                        let invocation = facts
+                            .nodes()
+                            .get(&node)
+                            .and_then(|fact| fact.callable.as_ref()?.invocation.as_deref())
+                            .ok_or(Stop::Pending(node))?;
+                        if invocation.access != crate::analysis::scalars::data::Access::ReadOnly {
+                            return Err(Stop::Pending(node));
+                        }
+                        shared_pair_owner(descriptor, node, budget)?
+                    } else {
+                        return Err(Stop::Pending(node));
+                    };
+                    let held = initialized(&state[owner], node)?;
+                    // A transport layout is not a locally checked body.
                     let (origin, mode) = held.pair_origin.ok_or(Stop::Pending(node))?;
                     let (kind, access) = if let PairCall::ReadOnly { typed_origin } = call {
                         if mode != InvocationMode::ReadOnly
@@ -3766,18 +3803,29 @@ pub(super) fn run<'a, 'g>(
                         access,
                         budget,
                     )?;
+                    if owner != receiver {
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            owner,
+                            (node, Conflict::Access),
+                            Access::Observe,
+                            budget,
+                        )?;
+                    }
                     let storage = slots[into].storage(into);
                     budget.step(storage.len())?;
                     state[storage].fill(State::Initialized(empty.clone()));
-                    // Reference members consult the conservative carried sources
-                    // at the tuple root. They are not borrows of the receiver slot.
+                    // Reference members consult the environment's carried sources
+                    // at the tuple root, not the access loan to the environment.
                     state[into] = State::Initialized(Held {
                         loans,
                         ..Held::default()
                     });
                     if matches!(call, PairCall::ReadOnly { .. }) {
                         Operation::InvokeReadOnlyClosurePair {
-                            receiver: local(receiver),
+                            receiver: local(owner),
                             origin: site_at(module, origin),
                             into: local(into),
                         }
