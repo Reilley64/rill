@@ -845,43 +845,61 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.evidence.goals[goal.index].arrow_origin = origin;
     }
 
-    // Revalidate the original occurrences, including operand premises. A
-    // named tuple or erased callable has no direct arrow to contribute.
-    pub(super) fn retained_argument_pair(
+    // A delayed group can carry a premise before its parent sees it. Read
+    // every group slot and the leaf, both when issuing a goal and on reuse.
+    fn scoped_operand_leaf(
+        &mut self,
+        inference: &Inference<'g>,
+        mut node: NodeId,
+        mut depth: usize,
+        premise: &mut Option<InputPremise>,
+        settled: &mut bool,
+    ) -> Work<(NodeId, usize)> {
+        loop {
+            self.equation_depth(depth)?;
+            let slot = &inference.slots[&node];
+            if let Some(p) = slot.ordinary_context {
+                *premise = Some(premise.map_or(p, |old| old.combine(p)));
+            }
+            *settled &= !slot.blocked && slot.ty.is_some();
+            let syntax = &inference.module.syntax.nodes[node];
+            if syntax.kind != NodeKind::Group {
+                return Ok((node, depth));
+            }
+            node = syntax.children[0];
+            depth += 1;
+        }
+    }
+
+    pub(super) fn scoped_pair_context(
         &mut self,
         inference: &Inference<'g>,
         call: &PreparedCall<'g>,
-        formal: &TypeTerm<'g>,
-    ) -> Work<Option<ArgumentPair<'g>>> {
+    ) -> Work<(bool, Option<InputPremise>)> {
         let [argument] = call.fact.arguments.as_slice() else {
-            return Ok(None);
+            return Ok((false, None));
         };
-        let tuple = self.source_leaf(inference.module, *argument)?;
-        self.elab.step(1)?;
-        let slot = &inference.slots[&tuple];
-        if slot.blocked || slot.ordinary_context.is_some() || slot.ty.is_none() {
-            return Ok(None);
-        }
+        let mut settled = true;
+        let mut premise = None;
+        let (tuple, depth) =
+            self.scoped_operand_leaf(inference, *argument, 1, &mut premise, &mut settled)?;
         let syntax = &inference.module.syntax.nodes[tuple];
-        match syntax.kind {
-            NodeKind::ValueReference => return Ok(Some([None, None])),
-            NodeKind::Bracket if syntax.children.len() == 2 => (),
-            _ => return Ok(None),
-        }
-        for &element in &syntax.children {
-            let leaf = self.source_leaf(inference.module, element)?;
-            self.elab.step(2)?;
-            for occurrence in [element, leaf] {
-                let slot = &inference.slots[&occurrence];
-                if slot.blocked || slot.ordinary_context.is_some() || slot.ty.is_none() {
-                    return Ok(None);
+        match (syntax.kind, syntax.children.as_slice()) {
+            (NodeKind::ValueReference, _) => (),
+            (NodeKind::Bracket, [a, b]) => {
+                for &element in [a, b] {
+                    self.scoped_operand_leaf(
+                        inference,
+                        element,
+                        depth + 1,
+                        &mut premise,
+                        &mut settled,
+                    )?;
                 }
             }
+            _ => settled = false,
         }
-        Ok(Some(
-            self.direct_argument_pair(inference, call, formal)?
-                .unwrap_or_default(),
-        ))
+        Ok((settled, premise))
     }
 
     pub(super) fn direct_argument_pair(

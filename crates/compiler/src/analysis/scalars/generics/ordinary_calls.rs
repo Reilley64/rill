@@ -142,16 +142,15 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
     }
 
-    // Stamp only an independent determination of the installed Result pair.
-    // The ordinary ranked winner is not a proof of the scoped handoff.
-    fn scoped_result_candidate(
+    // Cheap prefilter only. Callers charge for and compare the full IDs
+    // before interpreting operand premises or stamping a determination.
+    fn possible_scoped_winner(
         &self,
         call: &PreparedCall<'g>,
         outcome: Option<HypotheticalOutcome<'g>>,
-        proof: Option<&GoalFacts<'g>>,
     ) -> Option<(&'g DeclarationId, &'g DeclarationId)> {
         let role = self.ordinary_scope.as_ref()?.routine()?;
-        let (Some(HypotheticalOutcome::Winner(winner)), Some(goal)) = (outcome, proof) else {
+        let HypotheticalOutcome::Winner(winner) = outcome? else {
             return None;
         };
         let installed = &role.implementation.id;
@@ -159,7 +158,21 @@ impl<'r, 'g> Checker<'r, 'g> {
             || winner.module.origin != installed.module.origin
             || winner.start != installed.start
             || call.fact.pipe_input.is_some()
-            || !matches!(goal.judgment, GoalJudgment::Determine { .. })
+        {
+            return None;
+        }
+        Some((winner, installed))
+    }
+
+    fn scoped_result_candidate(
+        &self,
+        call: &PreparedCall<'g>,
+        outcome: Option<HypotheticalOutcome<'g>>,
+        proof: Option<&GoalFacts<'g>>,
+    ) -> Option<(&'g DeclarationId, &'g DeclarationId)> {
+        let (winner, installed) = self.possible_scoped_winner(call, outcome)?;
+        let goal = proof?;
+        if !matches!(goal.judgment, GoalJudgment::Determine { .. })
             || !goal
                 .selection
                 .as_ref()
@@ -167,12 +180,19 @@ impl<'r, 'g> Checker<'r, 'g> {
         {
             return None;
         }
-        let result = self.result.filter(|role| role.representation.is_some())?;
         let TypeTerm::Tuple(outputs) = goal.output.as_ref()?.result.as_ref() else {
             return None;
         };
         let [left, right] = outputs.as_slice() else {
             return None;
+        };
+        self.scoped_result_outputs(left, right)
+            .then_some((winner, installed))
+    }
+
+    fn scoped_result_outputs(&self, left: &Type<'g>, right: &Type<'g>) -> bool {
+        let Some(result) = self.result.filter(|role| role.representation.is_some()) else {
+            return false;
         };
         let canonical_result = |ty: &Type<'g>| {
             matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
@@ -180,9 +200,42 @@ impl<'r, 'g> Checker<'r, 'g> {
                     && matches!(arguments.as_slice(), [ok, err]
                         if primitive_name(ok) == Some("bool") && primitive_name(err) == Some("i32")))
         };
-        (primitive_name(right) == Some("bool") && canonical_result(left)
-            || primitive_name(left) == Some("bool") && canonical_result(right))
-        .then_some((winner, installed))
+        primitive_name(right) == Some("bool") && canonical_result(left)
+            || primitive_name(left) == Some("bool") && canonical_result(right)
+    }
+
+    fn scoped_result_operand_premise(
+        &mut self,
+        inference: &Inference<'g>,
+        call: &PreparedCall<'g>,
+        inputs: &[Option<Type<'g>>],
+        outcome: Option<HypotheticalOutcome<'g>>,
+    ) -> Work<Option<InputPremise>> {
+        let Some((winner, installed)) = self.possible_scoped_winner(call, outcome) else {
+            return Ok(None);
+        };
+        let [Some(input)] = inputs else {
+            return Ok(None);
+        };
+        let TypeTerm::Tuple(jobs) = input.as_ref() else {
+            return Ok(None);
+        };
+        let [a, b] = jobs.as_slice() else {
+            return Ok(None);
+        };
+        let (TypeTerm::Callable { result: left, .. }, TypeTerm::Callable { result: right, .. }) =
+            (a.as_ref(), b.as_ref())
+        else {
+            return Ok(None);
+        };
+        if !self.scoped_result_outputs(left, right) {
+            return Ok(None);
+        }
+        self.elab.step(1 + installed.module.path.len())?;
+        if winner != installed {
+            return Ok(None);
+        }
+        Ok(self.scoped_pair_context(inference, call)?.1)
     }
 
     fn retain_scoped_result_call(
@@ -258,10 +311,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         let state = goal.state;
         let agrees = matches!(prior.output_agreement, OutputAgreement::Agrees);
         let checked = prior.checked;
-        let Some(current) = self.retained_argument_pair(inference, call, formal)? else {
-            // The original operand evidence is no longer independently available.
+        let (settled, premise) = self.scoped_pair_context(inference, call)?;
+        if !settled || premise.is_some() {
             return Ok(ScopedRetention::Refresh);
-        };
+        }
+        let current = self
+            .direct_argument_pair(inference, call, formal)?
+            .unwrap_or_default();
         self.elab.step(2)?;
         let same_origins = match old_origins {
             Some(old) => old.iter().zip(&current).all(|(old, now)| match (old, now) {
@@ -549,6 +605,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 Some(self.arrow_premise.map_or(premise, |p| p.combine(premise)));
                         }
                     }
+                }
+                if let Some(p) =
+                    self.scoped_result_operand_premise(inference, &call, &inputs, outcome)?
+                {
+                    self.arrow_premise = Some(self.arrow_premise.map_or(p, |old| old.combine(p)));
                 }
                 let output = self.conditional_output(
                     inference,
