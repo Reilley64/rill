@@ -1465,6 +1465,18 @@ For a fresh formal `xs: List<Option<string>>`, an unrelated unobserved `Err<bool
 
 The result depends on the path that reaches the source. If the selected protected `first(&xs)` takes its empty edge, the body cannot acknowledge a debt or return early. A body-only acknowledgment therefore leaves the debt unpaid at the following return. A read on only one Boolean branch leaves that branch pending when cardinality is unknown. It does not erase a real discard on the other branch. A second consuming traversal cannot invent a new yield. These cases replay in normal and test mode with 17 standard sources, at exact limits and independently one short on each applicable axis. For the fresh `item` case M4 checks at 323,786 work / 47,895 entries / depth 12; M5 still withholds both targeted and ordinary graph-root MIR at `xs`. No Rill program ran. [#76](https://github.com/Reilley64/rill/issues/76) remains open.
 
+## Moving a weakened exclusive callable through a private function
+
+At `d7429fa`, the caller captures `&mut flag` and a copied `bool`, weakens the local callable from `mut` to `once`, and moves it into a private `forward`. The [installed capture tests](m5/captures.rs) check the callee's body, not just its signature. `forward` moves its formal to the return slot, then drops an unrelated local string. The returned owner holds the same exclusive loan in the caller.
+
+| Caller action | Targeted lowering and ordinary graph root |
+| --- | --- |
+| Discard the returned closure, then write `flag` | `Checked`. Discard consumes the descriptor once and does not drop its referent. |
+| Write or read `flag` while the returned closure is live | `R0203` at the write or `R0201` at the read, related to the original `&mut flag`. No MIR. |
+| Use the callable owner moved into `forward` a second time | `R0200` at the second use. No MIR. |
+
+Returning a replacement closure backed by a callee local does not establish this transfer. The standalone `forward` formal still has no concrete environment. Reversing the capture order or replacing the copied `bool` with `i32` withholds the named transfer. The `i32` control still forms and discards a local closure at its prior target cap of 2,714 work / 449 entries / depth 6. Both installed load modes agree. No callable copy, invocation, cancellation, or Rill execution follows from this judgment. [#71](https://github.com/Reilley64/rill/issues/71) remains open.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
