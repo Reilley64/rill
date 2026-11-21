@@ -1477,6 +1477,14 @@ In normal and test mode, the graph now publishes ordinary MIR for the imported `
 
 Implicit guard cleanup, projected text, and the standalone provider roots remain incomplete. The implicit-only graph still gives the same pending judgment at 185,222 work / 3,993 entries / depth 3. Independent one-short limits withhold MIR. Neither the 17-source baseline nor the 18-source O16 shared graph changes its overall verdict. These are ordinary cleanup judgments, not cancellation delivery or Rill execution. [#66](https://github.com/Reilley64/rill/issues/66) remains open.
 
+## Invoking a known closure through its local shared descriptor
+
+At `15a055b`, `let descriptor = &f; descriptor()` checks when `f` is the initialized owner of the proved read-only Bool pair closure. The [installed invocation tests](m5/captures/borrowed_invocation.rs) follow the descriptor's shared loan to that owner. MIR invokes the owner's actual body. The returned reference keeps the closure's captured backing, not the loan from `descriptor` to `f`.
+
+Consuming `f` after the call does not free the backing of the returned reference. Writing `flag` before the result's last use gives `R0203` at the write, related to `&flag`; writing after last use checks. Replacing `f` through a live shared borrow gives `R0203` related to `&f`. Borrowing a moved-from owner gives `R0200` related to the move.
+
+The local invocation checks at 2,838 work / 384 entries / depth 5. Normal and test modes agree at the target and ordinary graph root. Independently one-short limits withhold MIR. An exclusive descriptor still stops at `descriptor()`. An erased incoming callable lacks a typed receipt, and a read-only borrow does not authorize a once invocation. This proof does not cover a named callee receiving an abstract callable or establish a scheduler operation. [#71](https://github.com/Reilley64/rill/issues/71) remains open. No Rill program ran.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
