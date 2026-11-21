@@ -221,6 +221,30 @@ fn imported_text_disposal_closes_only_the_ordinary_caller_edges() {
 }
 
 #[test]
+fn implicit_guard_does_not_pay_for_written_call_verification() {
+    probe(
+        "graph::closed_release::implicit_guard_does_not_pay_for_written_call_verification",
+        "function implicit(lock: LockGuard<i32>): void {}",
+        |_, _, receipt| {
+            // Exact graph cap before the written release verifier, in both installed modes.
+            let limits = AnalysisLimits {
+                max_work: 185222,
+                max_entries: 3993,
+                max_depth: 3,
+            };
+            let report = analyze_ownership(receipt, limits);
+            assert_eq!(report.completion(), GraphCompletion::Incomplete);
+            let implicit = root(&report, b"function implicit");
+            assert_eq!(implicit.ordinary_completion(), Completion::Incomplete);
+            assert!(implicit.ordinary_mir().is_none());
+            assert!(
+                matches!(implicit.dependencies(), [edge] if matches!(edge.contract, DependencyContract::ProtectedRelease { .. }))
+            );
+        },
+    );
+}
+
+#[test]
 fn written_guard_release_closes_only_the_ordinary_caller_edge() {
     let source = format!(
         "{MAIN}

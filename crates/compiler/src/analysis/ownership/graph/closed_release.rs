@@ -95,7 +95,10 @@ fn written_operand<'a, 'g>(
 ) -> ResultOf<Option<(&'a ExpressionFacts<'g>, &'a CallFacts<'g>, &'a Type<'g>)>> {
     // A reachable Dispose/ReleaseGuard is emitted only after flow verifies
     // initialization, ownership and conflicting loans on this exact storage.
-    if operand.projection.is_some() || !std::ptr::eq(operand.root.module, &module.key) {
+    if module.syntax.nodes[node].kind != NodeKind::Call
+        || operand.projection.is_some()
+        || !std::ptr::eq(operand.root.module, &module.key)
+    {
         return Ok(None);
     }
     budget.step(2)?;
