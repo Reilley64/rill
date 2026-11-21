@@ -213,6 +213,8 @@ fn liveness(
             } => use_one(Some(descriptor), Some(into)),
             Action::ReadListI32 { view, into, .. } => use_one(Some(view), into),
             Action::EqualI32Literal { from, into, .. } => use_one(Some(from), Some(into)),
+            Action::CheckedI32Multiply { left, into, .. } => use_one(Some(left), Some(into)),
+            Action::CheckedI32Add { left, right, into } => ([Some(left), Some(right)], Some(into)),
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
@@ -4154,6 +4156,47 @@ pub(super) fn run<'a, 'g>(
                         from: local(from),
                         literal,
                         into: local(into),
+                    }
+                }
+                Action::CheckedI32Multiply { left, into, .. }
+                | Action::CheckedI32Add { left, into, .. } => {
+                    let right = match action {
+                        Action::CheckedI32Add { right, .. } => Some(right),
+                        _ => None,
+                    };
+                    for operand in std::iter::once(left).chain(right) {
+                        require_initialized(&slots, &state, operand, node, budget)?;
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            operand,
+                            (node, Conflict::Access),
+                            Access::Observe,
+                            budget,
+                        )?;
+                    }
+                    budget.step(1)?;
+                    if !matches!(state[into], State::Vacant) {
+                        return Err(Stop::Pending(node));
+                    }
+                    // Propagate only the normal edge. The checked operation
+                    // itself terminates execution on overflow, not this frame.
+                    state[into] = State::Initialized(empty.clone());
+                    match action {
+                        Action::CheckedI32Multiply { literal, .. } => {
+                            Operation::CheckedI32Multiply {
+                                left: local(left),
+                                literal,
+                                into: local(into),
+                            }
+                        }
+                        Action::CheckedI32Add { right, .. } => Operation::CheckedI32Add {
+                            left: local(left),
+                            right: local(right),
+                            into: local(into),
+                        },
+                        _ => unreachable!(),
                     }
                 }
                 Action::CopyThrough { descriptor, into } => {

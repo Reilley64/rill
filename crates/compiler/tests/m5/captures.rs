@@ -3101,9 +3101,9 @@ fn lower_capture_root<'g>(
 }
 
 #[test]
-fn mutable_cell_receiver_checks_and_arithmetic_limit() {
+fn mutable_cell_receiver_checks() {
     probe(
-        "captures::mutable_cell_receiver_checks_and_arithmetic_limit",
+        "captures::mutable_cell_receiver_checks",
         r#"
             function lastUse(): i32 {
                 let mut seed = 4i32;
@@ -3151,14 +3151,6 @@ fn mutable_cell_receiver_checks_and_arithmetic_limit() {
                 let other: once () => i32 = job;
                 return other();
             }
-            function originalCounter(): i32 {
-                let mut initial = 0i32;
-                let mut next: mut () => i32 = () => { initial += 1i32; return initial; };
-                let first = next();
-                let second = next();
-                return first * 10i32 + second;
-            }
-            expect originalCounter() == 12i32;
         "#,
         |_, module, receipt| {
             let lower = |name| lower_capture_root(module, receipt, name);
@@ -3307,12 +3299,11 @@ fn mutable_cell_receiver_checks_and_arithmetic_limit() {
                 Operation::Move { from, into: Some(into) } if from.root.node == *source && into.root.node == destination
             )));
 
-            // M4 admits all three roots. M5 cannot invoke a ReadOnly formation
-            // as a mutable cell, lower its once interface, or lower ordinary arithmetic.
+            // M4 admits both roots. M5 cannot invoke a ReadOnly formation
+            // as a mutable cell or lower the cell's once interface.
             for (name, site) in [
                 ("lostOrigin", b"job()".as_slice()),
                 ("onceInterface", b"other()"),
-                ("originalCounter", b"first * 10i32 + second"),
             ] {
                 let report = lower(name);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");

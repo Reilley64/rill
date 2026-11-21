@@ -533,6 +533,21 @@ pub enum Operation<'g> {
         literal: i32,
         into: Place<'g>,
     },
+    /// Multiply the initialized i32 by the written literal, checked in every
+    /// build. Only success initializes `into` and reaches the normal
+    /// successor; overflow panics without unwinding or delivering a stop.
+    CheckedI32Multiply {
+        left: Place<'g>,
+        literal: i32,
+        into: Place<'g>,
+    },
+    /// Read the initialized i32 operands left-to-right and add them. As for
+    /// `CheckedI32Multiply`, overflow has no cleanup or normal successor.
+    CheckedI32Add {
+        left: Place<'g>,
+        right: Place<'g>,
+        into: Place<'g>,
+    },
     /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
@@ -2208,6 +2223,16 @@ enum Action<'g> {
     EqualI32Literal {
         from: Slot,
         literal: i32,
+        into: Slot,
+    },
+    CheckedI32Multiply {
+        left: Slot,
+        literal: i32,
+        into: Slot,
+    },
+    CheckedI32Add {
+        left: Slot,
+        right: Slot,
         into: Slot,
     },
     Call(usize),
