@@ -496,12 +496,14 @@ function text(value: string): void {{ release(value); }}
                 }
             }
             let text = root(&report, b"function text");
-            assert_pending(text);
-            assert_eq!(text.blocked_at().unwrap().span.bytes(), b"release(value)");
-            assert_eq!(
-                text.dependencies()[0].contract,
-                DependencyContract::BuiltinDispose
-            );
+            assert_eq!(text.ordinary_completion(), Completion::Checked);
+            assert!(text.ordinary_mir().is_some());
+            let [edge] = text.dependencies() else {
+                panic!("expected the aliased text disposal edge")
+            };
+            assert_eq!(edge.site.span.bytes(), b"release(value)");
+            assert_eq!(edge.contract, DependencyContract::BuiltinDispose);
+            assert_eq!(edge.declaration, &typed.dispose_role().unwrap().id);
             assert_eq!(report.findings().len(), 2);
             for (name, code, site, related) in [
                 (

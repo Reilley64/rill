@@ -5,6 +5,8 @@ use crate::analysis::{ordinary::ImplementationFacts, scalars::BodyFacts};
 use crate::loader::{GraphId, ModuleKey, Origin};
 use std::collections::BTreeSet;
 
+mod closed_release;
+
 /// Whole-capture disposition. This increment has no complete state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GraphCompletion {
@@ -587,7 +589,15 @@ fn analyze<'g>(
                             | DependencyContract::ListTextElementDisposal { .. }
                             | DependencyContract::FreshResultConstructor { .. }
                             | DependencyContract::FreshResultErrorDisposal { .. }
-                    ) {
+                    ) || closed_release::proved(
+                        typed,
+                        module,
+                        &facts[work[index].module_index].nodes,
+                        &mir.blocks[block],
+                        edge,
+                        family_count,
+                        budget,
+                    )? {
                         // Specialized evidence closes this ordinary edge,
                         // not the callee's unbound source root.
                         report.bodies[index].dependencies.push(edge);
