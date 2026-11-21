@@ -5135,7 +5135,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 );
             }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
-            NodeKind::Binary("*" | "+") => {
+            NodeKind::Binary("*" | "+") if self.admits_checked_i32_arithmetic(node, facts) => {
                 return self.checked_i32_arithmetic(node, facts, into, next, depth);
             }
             NodeKind::Index => return self.read_list_i32(node, facts, into, next, depth),

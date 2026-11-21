@@ -227,9 +227,8 @@ fn checked_arithmetic_is_not_a_counter_special_case() {
     probe(
         "o15_arithmetic::checked_arithmetic_is_not_a_counter_special_case",
         r#"
-function mix(left: i32, right: i32): i32 { return (left * 0x11i32) + right; }
+function mix(left: i32, right: i32): i32 { return (((left) * ((0x11i32)))) + ((right)); }
 function otherWidth(left: i64, right: i64): i64 { return left * 10i64 + right; }
-function computedMultiplier(left: i32, right: i32): i32 { return left * (4i32 + 6i32) + right; }
 function computedRight(left: i32, right: i32): i32 { return left + (right * 10i32); }
 "#,
         |_, module, receipt| {
@@ -254,7 +253,6 @@ function computedRight(left: i32, right: i32): i32 { return left + (right * 10i3
             }
             for (name, expected) in [
                 ("otherWidth", "left * 10i64 + right"),
-                ("computedMultiplier", "left * (4i32 + 6i32)"),
                 ("computedRight", "left + (right * 10i32)"),
             ] {
                 let target = query(name);
@@ -271,6 +269,86 @@ function computedRight(left: i32, right: i32): i32 { return left + (right * 10i3
                     assert_eq!(completion, Completion::Incomplete, "{name}");
                     assert!(mir.is_none());
                     assert_eq!(blocked.unwrap().span.bytes(), expected.as_bytes());
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn unsupported_arithmetic_keeps_pre_arithmetic_caps_and_sites() {
+    probe(
+        "o15_arithmetic::unsupported_arithmetic_keeps_pre_arithmetic_caps_and_sites",
+        r#"
+function direct(left: i32, right: i32): i32 { return left * right; }
+function computed(left: i32, right: i32): i32 { return left * (4i32 + 6i32) + right; }
+function grouped(left: i32, right: i32): i32 {
+    return (((left * (((((((((4i32 + 6i32)))))))))))) + right;
+}
+function scoped(left: i32, gate: bool): i32 {
+    if (gate) {
+        let right = 3i32;
+        return left * (4i32 + 6i32) + right;
+    }
+    return left;
+}
+function screened(xs: List<i32>, left: i32, right: i32): i32 {
+    for (let item of xs) { return left * (4i32 + 6i32) + right; }
+    return 0i32;
+}
+"#,
+        |_, module, receipt| {
+            // Exact results measured at a2d8e05, before arithmetic lowering.
+            let graph_stats = statistics(191033, 4151, 5);
+            let (exact, short) = caps(graph_stats);
+            let graph = analyze_ownership(receipt, exact);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert_eq!(graph.statistics(), graph_stats);
+            for cap in short {
+                assert_eq!(
+                    analyze_ownership(receipt, cap).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+            for (name, work, entries, depth, expected) in [
+                ("direct", 2015, 101, 3, "left * right"),
+                ("computed", 2015, 101, 3, "left * (4i32 + 6i32) + right"),
+                (
+                    "grouped",
+                    2015,
+                    101,
+                    3,
+                    "(((left * (((((((((4i32 + 6i32)))))))))))) + right",
+                ),
+                ("scoped", 2037, 113, 5, "left * (4i32 + 6i32) + right"),
+                (
+                    "screened",
+                    2042,
+                    106,
+                    3,
+                    "for (let item of xs) { return left * (4i32 + 6i32) + right; }",
+                ),
+            ] {
+                let decl = named(module, name);
+                let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
+                let stats = statistics(work, entries, depth);
+                let (exact, short) = caps(stats);
+                let target = query(exact);
+                assert_eq!(target.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(target.statistics(), stats, "{name}");
+                assert!(target.mir().is_none() && target.findings().is_empty());
+                assert_eq!(
+                    target.blocked_at().unwrap().span.bytes(),
+                    expected.as_bytes()
+                );
+                let root = graph_root(&graph, module, decl.node);
+                assert_eq!(root.ordinary_completion(), Completion::Incomplete, "{name}");
+                assert!(root.ordinary_mir().is_none());
+                assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
+                for cap in short {
+                    let limited = query(cap);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
                 }
             }
         },
@@ -385,6 +463,14 @@ function skip(owner: string): i32 {
             }
         },
     );
+}
+
+fn statistics(work: usize, entries: usize, max_depth: usize) -> Statistics {
+    Statistics {
+        work,
+        entries,
+        max_depth,
+    }
 }
 
 fn caps(stats: Statistics) -> (AnalysisLimits, [AnalysisLimits; 3]) {
