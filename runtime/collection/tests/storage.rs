@@ -63,6 +63,40 @@ fn element_operations_copy_and_dispose_only_initialized_storage() {
 }
 
 #[test]
+fn owned_option_iterator_distinguishes_empty_yields_and_retires_the_suffix_in_reverse() {
+    use std::cell::RefCell;
+    struct Owner<'a>(&'static str, &'a RefCell<Vec<&'static str>>);
+    impl Drop for Owner<'_> {
+        fn drop(&mut self) {
+            self.1.borrow_mut().push(self.0);
+        }
+    }
+    let dropped = RefCell::new(Vec::new());
+    let owned = |label| Some(Owner(label, &dropped));
+    let mut cursor =
+        List::from_elements([owned("first"), None, owned("third"), None, owned("last")])
+            .into_owned_iter();
+    let first = cursor.next().unwrap().unwrap();
+    assert!(matches!(cursor.next(), Some(None)));
+    let mut visits = Vec::new();
+    cursor.dispose_with(|element| {
+        visits.push(element.as_ref().map(|owner| owner.0));
+        if let Some(owner) = element {
+            drop(owner);
+        }
+    });
+    assert_eq!(visits, [Some("last"), None, Some("third")]);
+    assert_eq!(&*dropped.borrow(), &["last", "third"]);
+    drop(first);
+    assert_eq!(&*dropped.borrow(), &["last", "third", "first"]);
+
+    let mut cursor = List::<Option<Owner<'_>>>::from_elements([None]).into_owned_iter();
+    assert!(matches!(cursor.next(), Some(None)));
+    assert!(cursor.next().is_none());
+    cursor.dispose_with(|_| panic!("no suffix callback after exhaustion"));
+}
+
+#[test]
 fn owned_iterator_keeps_unyielded_values_until_it_is_dropped() {
     use std::cell::Cell;
     struct CountDrop<'a>(&'a Cell<u32>);

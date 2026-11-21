@@ -84,6 +84,7 @@ pub struct ResultUseReport<'g> {
     // its originating call. The key indexes this report's typed node array.
     pair_calls: BTreeMap<usize, pairs::CheckedTransfer<'g>>,
     routine_bound: bool,
+    fresh_option_iterators: Vec<(&'g DeclarationId, &'g DeclarationId, NodeId)>,
 }
 impl<'g> ResultUseReport<'g> {
     pub(super) fn attach_pair_calls(
@@ -101,6 +102,17 @@ impl<'g> ResultUseReport<'g> {
                 pairs::CheckedTransfer::Serial(proof) => call.list_arrows = Some(proof),
                 pairs::CheckedTransfer::Scoped(proof) => call.scoped_join = Some(proof),
             }
+        }
+        Ok(())
+    }
+
+    pub(super) fn attach_option_iterators(
+        &mut self,
+        inventory: &mut OrdinaryAnalysis<'g>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        for (function, formal, site) in std::mem::take(&mut self.fresh_option_iterators) {
+            inventory.mark_option_iterator(function, formal, site, budget)?;
         }
         Ok(())
     }
@@ -330,6 +342,8 @@ struct Check<'a, 'g> {
     has_pending: bool,
     current_parameters: &'a [MemberType<'g>],
     current_option_guard: Option<NodeId>,
+    // Direct top-level statement depth and the reached fresh source, if any.
+    option_iterator: Option<(usize, Option<(&'g DeclarationId, NodeId)>)>,
     nested_write_body: Option<NodeId>,
 }
 
@@ -376,6 +390,7 @@ impl<'a, 'g> Check<'a, 'g> {
             has_pending: false,
             current_parameters: &[],
             current_option_guard: None,
+            option_iterator: None,
             nested_write_body: None,
         })
     }

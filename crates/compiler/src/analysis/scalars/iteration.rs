@@ -25,6 +25,7 @@ pub struct Iteration<'g> {
 pub(in crate::analysis) enum IterationBodyKind {
     Ordinary,
     NamedBoolPostfix,
+    YieldedTextPostfix,
 }
 
 #[derive(Clone, Copy)]
@@ -40,23 +41,30 @@ pub(super) enum DirectExpression {
 }
 
 #[derive(Clone, Copy, Default)]
-pub(super) enum IterationBody {
+pub(super) enum IterationBody<'g> {
     #[default]
     Unsupported,
     Ordinary,
     TextOption {
+        item: Option<&'g DeclarationId>,
         direct: Option<DirectExpression>,
         constructor: bool,
         postfix: bool,
     },
 }
 
-impl IterationBody {
+impl IterationBody<'_> {
     fn finish(self, reached_postfix: bool) -> Option<IterationBodyKind> {
         match self {
-            Self::TextOption { postfix: true, .. } if reached_postfix => {
-                Some(IterationBodyKind::NamedBoolPostfix)
-            }
+            Self::TextOption {
+                item,
+                postfix: true,
+                ..
+            } if reached_postfix => Some(if item.is_some() {
+                IterationBodyKind::YieldedTextPostfix
+            } else {
+                IterationBodyKind::NamedBoolPostfix
+            }),
             Self::Ordinary
             | Self::TextOption {
                 constructor: false,
@@ -188,11 +196,42 @@ impl<'r, 'g> Checker<'r, 'g> {
                         .is_some_and(|(target, result)| {
                             matches!(target, PropagationTarget::Callable(_))
                                 && result.is_some_and(|ty| {
-                                    Self::is_iteration_bool_option(self.option, ty)
+                                    Self::is_iteration_option(self.option, ty, "bool")
                                 })
                         }) =>
             {
                 IterationBody::TextOption {
+                    item: None,
+                    direct: None,
+                    constructor: false,
+                    postfix: false,
+                }
+            }
+            (Some(iteration), Some(source))
+                if iteration.traversal == Some(ListTraversal::Owned)
+                    && Self::is_iteration_option(self.option, &iteration.yielded, "string")
+                    && self
+                        .propagation_target(context)
+                        .is_some_and(|(target, result)| {
+                            matches!(target, PropagationTarget::Callable(_))
+                                && result.is_some_and(|ty| {
+                                    Self::is_iteration_option(self.option, ty, "bool")
+                                })
+                        })
+                    && source.access == data::Access::Owned
+                    && source.path.as_ref().is_some_and(|p| {
+                        p.root.kind == DeclarationKind::Parameter && p.projections.is_empty()
+                    })
+                    && let Some(NodeFacts {
+                        kind: NodeFactKind::Pattern(pattern),
+                        ..
+                    }) = self.facts.nodes.last()
+                    && let [binder] = pattern.binders.as_slice()
+                    && !binder.mutable
+                    && binder.projections.is_empty() =>
+            {
+                IterationBody::TextOption {
+                    item: Some(binder.declaration),
                     direct: None,
                     constructor: false,
                     postfix: false,
@@ -236,9 +275,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok((flow, handoff))
     }
 
-    fn is_iteration_bool_option(
+    fn is_iteration_option(
         role: Option<crate::analysis::typed::OptionRole<'g>>,
         ty: &Type<'g>,
+        primitive: &str,
     ) -> bool {
         let Some(role) = role else {
             return false;
@@ -256,7 +296,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
             if std::ptr::eq(*declaration, &role.declaration.id)
-                && matches!(arguments.as_slice(), [payload] if primitive_name(payload) == Some("bool")))
+                && matches!(arguments.as_slice(), [payload] if primitive_name(payload) == Some(primitive)))
     }
 
     // Use the existing charged statement/expression visits. No second body walk
@@ -274,17 +314,23 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
         let syntax = &module.syntax.nodes;
         if let IterationBody::TextOption {
+            item,
             direct: Some(DirectExpression::Postfix { operand, named, .. }),
             ..
         } = &mut self.iteration_body
             && *operand == node
             && syntax[node].kind == NodeKind::ValueReference
             && slot.access == data::Access::Owned
-            && slot.path.as_ref().is_some_and(|p| p.projections.is_empty())
-            && slot
-                .ty
-                .as_ref()
-                .is_some_and(|ty| Self::is_iteration_bool_option(self.option, ty))
+            && slot.path.as_ref().is_some_and(|p| {
+                p.projections.is_empty()
+                    && match *item {
+                        Some(item) => std::ptr::eq(item, p.root),
+                        None => slot
+                            .ty
+                            .as_ref()
+                            .is_some_and(|ty| Self::is_iteration_option(self.option, ty, "bool")),
+                    }
+            })
         {
             *named = true;
         }
@@ -301,6 +347,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             _ => (),
         }
         let IterationBody::TextOption {
+            item,
             direct,
             mut constructor,
             mut postfix,
@@ -327,7 +374,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Some(DirectExpression::Return(root, depth)),
                 NodeKind::Call,
                 Some(data::DataExpression::Construction(value)),
-            ) if root == node && Self::is_iteration_bool_option(self.option, &value.ty) => {
+            ) if root == node && Self::is_iteration_option(self.option, &value.ty, "bool") => {
                 constructor = true;
                 depth
             }
@@ -336,11 +383,14 @@ impl<'r, 'g> Checker<'r, 'g> {
                 return Ok(());
             }
         };
-        if depth > self.elab.limits.max_depth.min(64) {
-            return Err(());
+        if item.is_none() {
+            if depth > self.elab.limits.max_depth.min(64) {
+                return Err(());
+            }
+            self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(depth);
         }
-        self.elab.statistics.max_depth = self.elab.statistics.max_depth.max(depth);
         self.iteration_body = IterationBody::TextOption {
+            item,
             direct,
             constructor,
             postfix,

@@ -3,6 +3,7 @@ use super::*;
 use crate::analysis::InvocationMode;
 use crate::analysis::scalars::CallFacts;
 use crate::analysis::scalars::generics::callables::InvocationFacts;
+use crate::loader::Origin;
 
 // Each proved entry states which input variants require a checked actual callback.
 pub(super) type CallbackContract<'g> =
@@ -92,9 +93,22 @@ impl<'a, 'g> Check<'a, 'g> {
             && checked)
             .then_some(body);
         let previous_body = std::mem::replace(&mut self.nested_write_body, nested_write_body);
+        let track_iterator = nested_write_body.is_some()
+            && self.module.key.origin == Origin::Application
+            && !self.proving_callable;
+        let previous_iterator = std::mem::replace(
+            &mut self.option_iterator,
+            // Body block, direct statement, then the `for_loop` visitor.
+            track_iterator.then_some((depth + 3, None)),
+        );
+        let (pending, discards) = (self.report.pending.len(), self.report.discards.len());
         let mut states = self.singleton(Residence::default())?;
+        let mut option_formals = 0;
         for parameter in parameters {
             let id = &parameter.declaration.id;
+            if track_iterator && self.text_option_list(&parameter.ty) {
+                option_formals += 1;
+            }
             let root = Root::Local(id);
             states = self.seed_parameter(states, parameter, checked)?;
             if retained_bool_contents_type(&parameter.ty).is_some() {
@@ -102,6 +116,9 @@ impl<'a, 'g> Check<'a, 'g> {
                     state.store(root, &[], Content::CallerBoolOrigin(id), self.budget)?;
                 }
             }
+        }
+        if option_formals != 1 {
+            self.option_iterator = None;
         }
         if states.is_empty() {
             self.dead_statement(body, Residence::default(), depth + 1)?;
@@ -118,6 +135,18 @@ impl<'a, 'g> Check<'a, 'g> {
             for state in self.statement(body, state, depth + 1)? {
                 self.exit(state, body)?;
             }
+        }
+        let iterator = std::mem::replace(&mut self.option_iterator, previous_iterator);
+        if let Some((_, Some((formal, site)))) = iterator
+            && self.report.pending.len() == pending
+            && self.report.discards.len() == discards
+        {
+            // This is a consumer of checked Result-use facts, not an extra
+            // route for Result-use eligibility.
+            self.budget.reserve(1)?;
+            self.report
+                .fresh_option_iterators
+                .push((&signature.declaration.id, formal, site));
         }
         self.current_parameters = previous;
         self.nested_write_body = previous_body;

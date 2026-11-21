@@ -1,0 +1,514 @@
+use super::*;
+use compiler::analysis::ownership::OptionTextDisposal;
+use compiler::analysis::typed::{Primitive, PrimitiveOperation, PrimitiveRole, ResultUseBlocker};
+
+const SOURCE: &str = r#"
+function onItem(xs: List<Option<string>>, outer: string): Option<bool> {
+    for (let item of xs) {
+        let owner = "before postfix";
+        let text = item?;
+        let _ = &text;
+        let suffix = "after postfix";
+        continue;
+    }
+    return Option.Some(true);
+}
+function afterMove(xs: List<Option<string>>, outer: string): Option<bool> {
+    for (let (item) of ((xs))) {
+        let text = ((item))?;
+        let moved = text;
+        let _ = &moved;
+        break;
+    }
+    return Option.Some(true);
+}
+function withCurrent(xs: List<Option<string>>, outer: string, stop: bool): Option<bool> {
+    if (stop) { return Option.Some(false); }
+    for (let item of xs) { break; }
+    return Option.Some(true);
+}
+"#;
+
+#[test]
+fn consuming_list_transfers_the_actual_option_tag() {
+    use CollectionOperation::{DisposeIterator, DisposeList, Iterate, Next};
+    use ListTraversal::Owned;
+    probe_with_typed(
+        "iteration::option_text::consuming_list_transfers_the_actual_option_tag",
+        SOURCE,
+        |_, module, receipt, typed| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let (exact, short) = limits(graph.statistics());
+            let replay = analyze_ownership(receipt, exact);
+            assert_eq!(replay.completion(), GraphCompletion::Incomplete);
+            assert_eq!(replay.statistics(), graph.statistics());
+            assert!(replay.findings().is_empty());
+            for cap in short {
+                let limited = analyze_ownership(receipt, cap);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(limited.findings().is_empty());
+                assert!(
+                    limited
+                        .roots()
+                        .iter()
+                        .all(|root| root.ordinary_mir().is_none())
+                );
+            }
+            let collection = |operation| {
+                typed
+                    .collection_protection()
+                    .find(|row| {
+                        row.operation == operation && row.coverage == OwnershipCoverage::Clear
+                    })
+                    .unwrap()
+                    .provider
+                    .unwrap()
+            };
+            let provider = typed
+                .primitive_providers()
+                .iter()
+                .find(|p| p.role == PrimitiveRole::Dispose && p.primitive == Primitive::String)
+                .unwrap();
+            let binding = provider.binding.unwrap();
+            assert_eq!(binding.operation, PrimitiveOperation::DisposeText);
+            let option = typed.option_role().unwrap();
+            let element = OptionTextDisposal {
+                some: &option.some.id,
+                none: &option.none.id,
+                payload: compiler::analysis::ownership::TextElementDisposal {
+                    implementation: &provider.implementation.id,
+                    bridge: &binding.declaration.id,
+                },
+            };
+            for name in ["onItem", "afterMove", "withCurrent"] {
+                let function = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let run = |cap| lower_body(receipt, module, &function.id, cap).unwrap();
+                let (exact, short) = limits(run(AnalysisLimits::default()).statistics());
+                for cap in short {
+                    let limited = run(cap);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.findings().is_empty() && limited.mir().is_none());
+                }
+                let report = run(exact);
+                assert_eq!(
+                    report.completion(),
+                    Completion::Checked,
+                    "{name}: {:?}",
+                    report
+                        .blocked_at()
+                        .map(|s| s.span.bytes().escape_ascii().to_string())
+                );
+                let root = replay
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == function.node)
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::Checked, "{name}");
+                assert!(matches!(root.enabled_frame(), Delivery::Unresolved));
+                assert!(matches!(
+                    root.replacement_cancellation(),
+                    Delivery::Unresolved
+                ));
+                assert!(matches!(root.selected_call(), Delivery::Unresolved));
+                for operation in [Iterate(Owned), Next(Owned), DisposeIterator(Owned)]
+                    .into_iter()
+                    .chain((name == "withCurrent").then_some(DisposeList))
+                {
+                    let provider = collection(operation);
+                    assert!(root.dependencies().iter().any(|d| {
+                        d.declaration == &provider.implementation.id
+                            && d.contract
+                                == DependencyContract::ListOptionTextCollection {
+                                    operation,
+                                    bridge: &provider.bridge.id,
+                                }
+                    }));
+                }
+                let release = collection(DisposeIterator(Owned));
+                let callback = DependencyContract::OptionTextElementDisposal {
+                    some: element.some,
+                    none: element.none,
+                    bridge: element.payload.bridge,
+                };
+                assert!(root.dependencies().iter().any(|d| {
+                    d.declaration == element.payload.implementation && d.contract == callback
+                }));
+                for mir in [report.mir().unwrap(), root.ordinary_mir().unwrap()] {
+                    assert!(
+                        mir.cancellation().is_none() && mir.replacement_cancellation().is_none()
+                    );
+                    check_paths(
+                        name,
+                        mir,
+                        element,
+                        [
+                            collection(Iterate(Owned)),
+                            collection(Next(Owned)),
+                            release,
+                            collection(DisposeList),
+                        ],
+                    );
+                }
+            }
+        },
+    );
+}
+
+const OTHER_SOURCES: &str = r#"
+function unused(xs: List<Option<string>>): void { }
+function arbitrary(xs: List<Option<string>>, gate: Option<string>): Option<bool> {
+    for (let item of xs) { let text = gate?; break; }
+    return Option.Some(true);
+}
+function sibling(xs: List<Option<string>>, spare: List<Option<string>>): Option<bool> {
+    for (let item of xs) { let text = item?; break; }
+    return Option.Some(true);
+}
+function unadmitted(xs: List<Option<string>>): Option<bool> {
+    for (let item of xs) { let text = item?; while (false) { break; } }
+    return Option.Some(true);
+}
+"#;
+
+#[test]
+fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
+    probe_with_typed(
+        "iteration::option_text::unrelated_and_unadmitted_option_lists_keep_the_first_blocker",
+        OTHER_SOURCES,
+        |_, module, receipt, typed| {
+            assert_eq!(
+                typed.statistics(),
+                Statistics {
+                    work: 331_442,
+                    entries: 48_955,
+                    max_depth: 12
+                }
+            );
+            let stats = Statistics {
+                work: 189_508,
+                entries: 4_050,
+                max_depth: 3,
+            };
+            let (exact, short) = limits(stats);
+            let graph = analyze_ownership(receipt, exact);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert_eq!(graph.statistics(), stats);
+            assert!(graph.findings().is_empty());
+            for cap in short {
+                let limited = analyze_ownership(receipt, cap);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+            }
+            for (name, work, entries) in [
+                ("unused", 1_955, 69),
+                ("arbitrary", 1_958, 70),
+                ("sibling", 1_958, 70),
+                ("unadmitted", 1_955, 69),
+            ] {
+                let function = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let stats = Statistics {
+                    work,
+                    entries,
+                    max_depth: 0,
+                };
+                let (exact, short) = limits(stats);
+                let run = |cap| lower_body(receipt, module, &function.id, cap).unwrap();
+                let report = run(exact);
+                assert_eq!(report.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(report.statistics(), stats);
+                assert!(report.mir().is_none() && report.findings().is_empty());
+                let blocker = report.blocked_at().unwrap();
+                assert_eq!(blocker.span.bytes(), b"xs: List<Option<string>>");
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == function.node)
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::Incomplete);
+                assert_eq!(root.blocked_at().unwrap().node, blocker.node);
+                assert!(root.dependencies().is_empty() && root.ordinary_mir().is_none());
+                for cap in short {
+                    let limited = run(cap);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn dead_option_loop_stays_pending_at_the_typed_boundary() {
+    probe_report(
+        "iteration::option_text::dead_option_loop_stays_pending_at_the_typed_boundary",
+        r#"
+function dead(xs: List<Option<string>>): Option<bool> {
+    return Option.Some(true);
+    for (let item of xs) { let text = item?; continue; }
+}
+"#,
+        |_, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert_eq!(
+                typed.statistics(),
+                Statistics {
+                    work: 322_591,
+                    entries: 47_670,
+                    max_depth: 12
+                }
+            );
+            assert!(typed.receipt().is_none());
+            let report = typed.result_use().unwrap();
+            let [first] = report.pending() else {
+                panic!("one typed blocker")
+            };
+            assert_eq!(first.blocker, ResultUseBlocker::Storage);
+            assert!(first.site.span.bytes().starts_with(b"for (let item of xs)"));
+            assert!(report.discards().is_empty());
+        },
+    );
+}
+
+fn check_paths<'g>(
+    name: &str,
+    mir: &Mir<'g>,
+    element: OptionTextDisposal<'g>,
+    [open, advance, release, whole]: [CollectionProvider<'g>; 4],
+) {
+    let [entry] = mir
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.operation, Operation::OpenOwnedListOptionText { .. }))
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("one source transfer")
+    };
+    let Operation::OpenOwnedListOptionText {
+        source,
+        cursor,
+        source_backing,
+        cursor_backing,
+        provider,
+    } = entry.operation
+    else {
+        unreachable!()
+    };
+    assert_eq!(source.root.span.bytes(), b"xs: List<Option<string>>");
+    assert_eq!(provider.implementation.id, open.implementation.id);
+    assert_eq!(provider.bridge.id, open.bridge.id);
+    assert_eq!(source_backing.storage, CollectionStorage::Elements);
+    assert_eq!(cursor_backing.storage, CollectionStorage::UnyieldedElements);
+    assert_eq!(
+        source_backing.artifact.context(),
+        provider.artifact.context()
+    );
+    assert_eq!(
+        cursor_backing.artifact.executable(),
+        provider.artifact.executable()
+    );
+    let Terminator::Goto(head) = entry.terminator else {
+        panic!("advance immediately after transfer")
+    };
+    let check_advance = |block: &Block<'g>| {
+        let Operation::AdvanceOwnedListOptionText {
+            cursor: from,
+            into,
+            some,
+            none,
+            provider,
+        } = block.operation
+        else {
+            panic!("missing protected next")
+        };
+        assert!(same_place(from, cursor));
+        assert_eq!((some, none), (element.some, element.none));
+        assert_eq!(provider.implementation.id, advance.implementation.id);
+        assert_eq!(provider.bridge.id, advance.bridge.id);
+        let Terminator::Branch { yes, no } = block.terminator else {
+            panic!("outer Some/None")
+        };
+        (into, yes, no)
+    };
+    let (item, yielded, exhausted) = check_advance(&mir.blocks[head]);
+    assert!(!same_place(item, cursor) && !same_place(item, source));
+    let cleanup = |path: &[&Block<'g>]| {
+        obligations(path)
+            .filter_map(|a| match a {
+                Obligation::Drop(place) => Some(place.root.span.bytes()),
+                Obligation::EndStorage(_) => None,
+                Obligation::DropYieldedOptionText {
+                    operand,
+                    element: actual,
+                } => {
+                    assert!(same_place(operand, item));
+                    assert_eq!(actual, element);
+                    Some(b"item".as_slice())
+                }
+                Obligation::DisposeOwnedListIterOptionText {
+                    cursor: operand,
+                    implementation,
+                    bridge,
+                    element: actual,
+                } => {
+                    assert!(same_place(operand, cursor));
+                    assert_eq!(
+                        (implementation, bridge, actual),
+                        (&release.implementation.id, &release.bridge.id, element)
+                    );
+                    Some(b"cursor".as_slice())
+                }
+                Obligation::DisposeListOptionText {
+                    operand,
+                    implementation,
+                    bridge,
+                    element: actual,
+                } => {
+                    assert!(same_place(operand, source));
+                    assert_eq!(
+                        (implementation, bridge, actual),
+                        (&whole.implementation.id, &whole.bridge.id, element)
+                    );
+                    Some(b"whole list".as_slice())
+                }
+                other => panic!("unexpected obligation {other:?}"),
+            })
+            .collect::<Vec<_>>()
+    };
+    let export = |path: &[&Block<'g>], variant, payload: bool| {
+        assert_eq!(path.last().unwrap().terminator, Terminator::Return);
+        assert!(path.iter().all(|b| !matches!(
+            b.operation,
+            Operation::AdvanceOwnedListOptionText { .. }
+                | Operation::OpenOwnedListOptionText { .. }
+        )));
+        let [(tag, input, output)] = path
+            .iter()
+            .filter_map(|b| match b.operation {
+                Operation::ConstructVariant {
+                    variant,
+                    payload,
+                    into,
+                } => Some((variant, payload, into)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()[..]
+        else {
+            panic!("exactly one output")
+        };
+        assert_eq!((tag, input.is_some()), (variant, payload));
+        let [(index, retired)] = path
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| match b.operation {
+                Operation::Export(place) => Some((i, place)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()[..]
+        else {
+            panic!("exactly one export")
+        };
+        assert!(same_place(output, retired));
+        index
+    };
+    let empty = straight_blocks(mir, exhausted);
+    let exported = export(&empty, element.some, true);
+    assert_eq!(cleanup(&empty[..exported]), [b"cursor".as_slice()]);
+    assert_eq!(cleanup(&empty[exported..]), [b"outer: string".as_slice()]);
+    let reached = straight_blocks(mir, yielded);
+    if name == "withCurrent" {
+        let exported = export(&reached, element.some, true);
+        assert_eq!(
+            cleanup(&reached[..exported]),
+            [b"item".as_slice(), b"cursor"]
+        );
+        let (yes, _) = branch_targets(mir);
+        let pre_open = straight_blocks(mir, yes);
+        let exported = export(&pre_open, element.some, true);
+        assert!(cleanup(&pre_open[..exported]).is_empty());
+        assert_eq!(
+            cleanup(&pre_open[exported..]),
+            [b"outer: string".as_slice(), b"whole list"]
+        );
+        return;
+    }
+    let [stage] = reached
+        .iter()
+        .filter_map(|b| match b.operation {
+            Operation::Move {
+                from,
+                into: Some(into),
+            } if same_place(item, from) => Some(into),
+            _ => None,
+        })
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("stage the whole actual item once")
+    };
+    let split = reached.last().unwrap();
+    assert!(
+        matches!(split.operation, Operation::TestVariant { operand, success }
+        if same_place(operand, stage) && success == element.some)
+    );
+    let Terminator::Branch { yes, no } = split.terminator else {
+        panic!("inner Some/None")
+    };
+    let failure = straight_blocks(mir, no);
+    assert!(
+        matches!(failure[0].operation, Operation::EndEmptyOption(operand) if same_place(operand, stage))
+    );
+    let exported = export(&failure, element.none, false);
+    assert_eq!(failure[exported].site.node, split.site.node);
+    assert!(cleanup(&failure[..exported]).is_empty());
+    assert!(!failure.iter().any(
+        |b| matches!(b.operation, Operation::TakeOptionPayload { .. })
+            || b.site.span.bytes() == b"\"after postfix\""
+    ));
+    let expected = if name == "onItem" {
+        &([b"owner".as_slice(), b"cursor", b"outer: string"])[..]
+    } else {
+        &([b"cursor".as_slice(), b"outer: string"])[..]
+    };
+    assert_eq!(cleanup(&failure[exported..]), expected);
+    let success = straight_blocks(mir, yes);
+    let [(operand, text)] = success
+        .iter()
+        .filter_map(|b| match b.operation {
+            Operation::TakeOptionPayload { operand, into } => Some((operand, into)),
+            _ => None,
+        })
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("take the actual Some payload once")
+    };
+    assert!(same_place(operand, stage));
+    assert_eq!(text.root.span.bytes(), b"text");
+    if name == "onItem" {
+        let (reinitialized, _, _) = check_advance(success.last().unwrap());
+        assert!(same_place(reinitialized, item));
+        assert_eq!(cleanup(&success), [b"suffix".as_slice(), b"text", b"owner"]);
+        assert!(
+            !success
+                .iter()
+                .any(|b| matches!(b.operation, Operation::Export(_)))
+        );
+    } else {
+        assert!(success.iter().any(
+            |b| matches!(b.operation, Operation::Move { from, into: Some(into) }
+            if same_place(from, text) && into.root.span.bytes() == b"moved")
+        ));
+        let exported = export(&success, element.some, true);
+        assert_eq!(
+            cleanup(&success[..exported]),
+            [b"moved".as_slice(), b"cursor"]
+        );
+        assert_eq!(cleanup(&success[exported..]), [b"outer: string".as_slice()]);
+    }
+}

@@ -99,6 +99,8 @@ pub struct MemberType<'g> {
     /// Integrated body typing identified this formal as the direct source of
     /// an ordinary named string yield. No storage/provider proof is implied.
     pub(in crate::analysis) text_iteration_source: bool,
+    /// The direct consuming loop reached with this whole incoming Option list fresh.
+    pub(in crate::analysis) option_iteration_source: Option<NodeId>,
 }
 #[derive(Debug)]
 pub enum Payload<'g> {
@@ -966,6 +968,7 @@ impl<'g> Analyzer<'g> {
                     declaration,
                     ty,
                     text_iteration_source: false,
+                    option_iteration_source: None,
                 });
             } else {
                 valid = false;

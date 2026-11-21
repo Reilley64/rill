@@ -1,7 +1,7 @@
 //! Loop worklist and transfer targets. A jump leaves only its target's iteration scopes.
 use super::*;
 use crate::analysis::{
-    scalars::{Iteration, data::Pattern, generics::GoalState},
+    scalars::{Iteration, IterationBodyKind, data::Pattern, generics::GoalState},
     typed::{CollectionOperation, ListTraversal},
 };
 use std::collections::VecDeque;
@@ -191,6 +191,19 @@ impl<'a, 'g> Check<'a, 'g> {
                     self.empty_option_iteration(iteration.source, body, state, depth)
                 }
                 OptionCursor::Unknown(item) => {
+                    if let Some((direct, candidate)) = &mut self.option_iterator
+                        && *direct == depth
+                        && matches!(
+                            iteration.body,
+                            Some(
+                                IterationBodyKind::Ordinary | IterationBodyKind::YieldedTextPostfix
+                            )
+                        )
+                        && let Some(path) = source.path.as_ref()
+                        && path.root.kind == DeclarationKind::Parameter
+                    {
+                        *candidate = Some((path.root, node));
+                    }
                     self.owned_option_iteration(node, item, state, depth)
                 }
             };

@@ -607,6 +607,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     pub(super) fn parameter(&mut self, parameter: &'a MemberType<'g>) -> ResultOf<Slot> {
         let node = parameter.declaration.node;
         let ty = &parameter.ty;
+        if let Some(iteration) = parameter.option_iteration_source {
+            return self.option_list_parameter(parameter, iteration);
+        }
         if self.is_list_text(ty) {
             if !parameter.text_iteration_source {
                 return Err(Stop::Pending(node));

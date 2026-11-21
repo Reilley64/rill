@@ -64,6 +64,17 @@ pub enum DependencyContract<'g> {
     ListTextElementDisposal {
         bridge: &'g DeclarationId,
     },
+    /// The checked List<Option<string>> backing operation at this use site.
+    ListOptionTextCollection {
+        operation: CollectionOperation,
+        bridge: &'g DeclarationId,
+    },
+    /// A structural Option callback; only an actual Some invokes `bridge`.
+    OptionTextElementDisposal {
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+    },
     /// A constructor outside the closed storage contract.
     ResultConstructor,
     /// Exact cause-free `Result<bool, i32>` construction in pinned storage.
@@ -587,6 +598,8 @@ fn analyze<'g>(
                             | DependencyContract::ListI32Iteration { .. }
                             | DependencyContract::ListTextCollection { .. }
                             | DependencyContract::ListTextElementDisposal { .. }
+                            | DependencyContract::ListOptionTextCollection { .. }
+                            | DependencyContract::OptionTextElementDisposal { .. }
                             | DependencyContract::FreshResultConstructor { .. }
                             | DependencyContract::FreshResultErrorDisposal { .. }
                     ) || closed_release::proved(
@@ -1051,6 +1064,22 @@ pub(super) fn visit_dependencies<'g>(
                 },
                 budget,
             )?,
+            Operation::OpenOwnedListOptionText { provider, .. }
+            | Operation::AdvanceOwnedListOptionText { provider, .. } => emit(
+                &provider.implementation.id,
+                ListOptionTextCollection {
+                    operation: if matches!(
+                        block.operation,
+                        Operation::OpenOwnedListOptionText { .. }
+                    ) {
+                        CollectionOperation::Iterate(Owned)
+                    } else {
+                        CollectionOperation::Next(Owned)
+                    },
+                    bridge: &provider.bridge.id,
+                },
+                budget,
+            )?,
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
             }
@@ -1205,6 +1234,52 @@ pub(super) fn visit_dependencies<'g>(
                                 budget,
                             )?;
                         }
+                        Cleanup::DisposeListOptionText {
+                            implementation,
+                            bridge,
+                            element,
+                            ..
+                        }
+                        | Cleanup::DisposeOwnedListIterOptionText {
+                            implementation,
+                            bridge,
+                            element,
+                            ..
+                        } => {
+                            emit(
+                                implementation,
+                                ListOptionTextCollection {
+                                    operation: if matches!(
+                                        action,
+                                        Cleanup::DisposeListOptionText { .. }
+                                    ) {
+                                        CollectionOperation::DisposeList
+                                    } else {
+                                        CollectionOperation::DisposeIterator(Owned)
+                                    },
+                                    bridge,
+                                },
+                                budget,
+                            )?;
+                            emit(
+                                element.payload.implementation,
+                                OptionTextElementDisposal {
+                                    some: element.some,
+                                    none: element.none,
+                                    bridge: element.payload.bridge,
+                                },
+                                budget,
+                            )?;
+                        }
+                        Cleanup::DropYieldedOptionText { element, .. } => emit(
+                            element.payload.implementation,
+                            OptionTextElementDisposal {
+                                some: element.some,
+                                none: element.none,
+                                bridge: element.payload.bridge,
+                            },
+                            budget,
+                        )?,
                         _ => {}
                     }
                 }

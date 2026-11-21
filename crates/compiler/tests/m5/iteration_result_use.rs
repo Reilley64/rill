@@ -1,6 +1,5 @@
 use super::*;
 use compiler::analysis::generics::{GoalJudgment, GoalState};
-use compiler::analysis::ownership::{GraphCompletion, analyze_ownership};
 use compiler::analysis::scalars::{NodeFactKind, PropagationTarget, data::DataExpression};
 use compiler::analysis::typed::{
     CollectionOperation, ListTraversal, OwnershipCoverage, ResultDiscardKind, ResultUseBlocker,
@@ -10,9 +9,9 @@ use compiler::analysis::{Stage, TypeTerm};
 use compiler::parser::NodeKind;
 
 #[test]
-fn yielded_option_propagates_but_has_no_ownership_mir() {
+fn yielded_option_propagates_through_the_checked_iterator_handoff() {
     probe_with_typed(
-        "iteration_result_use::yielded_option_propagates_but_has_no_ownership_mir",
+        "iteration_result_use::yielded_option_propagates_through_the_checked_iterator_handoff",
         r#"
         function item(xs: List<Option<string>>, outer: string): Option<bool> {
             for (let item of xs) { let text = item?; let _ = &text; continue; }
@@ -41,9 +40,6 @@ fn yielded_option_propagates_but_has_no_ownership_mir() {
             let uses = typed.result_use().unwrap();
             assert!(uses.discards().is_empty() && uses.pending().is_empty());
             let option = typed.option_role().unwrap();
-            let graph = analyze_ownership(receipt, AnalysisLimits::default());
-            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
-            assert!(graph.findings().is_empty());
             let fact = |node| typed.bodies().node(app, node).unwrap().unwrap();
             let syntax = &app.syntax.nodes;
             for name in ["item", "itemMove", "ordinary", "observed"] {
@@ -161,22 +157,6 @@ fn yielded_option_propagates_but_has_no_ownership_mir() {
                         (exit.success, exit.failure),
                         (&option.some.id, &option.none.id)
                     );
-                }
-
-                let target =
-                    lower_body(receipt, app, &function.id, AnalysisLimits::default()).unwrap();
-                assert_eq!(target.completion(), Completion::Incomplete);
-                assert!(target.mir().is_none() && target.findings().is_empty());
-                let root = graph
-                    .roots()
-                    .iter()
-                    .find(|r| r.site().module == &app.key && r.site().node == function.node)
-                    .unwrap();
-                assert_eq!(root.completion(), Completion::Incomplete);
-                assert_eq!(root.ordinary_completion(), Completion::Incomplete);
-                assert!(root.mir().is_none() && root.ordinary_mir().is_none());
-                for site in [target.blocked_at().unwrap(), root.blocked_at().unwrap()] {
-                    assert_eq!((site.module, site.node), (&app.key, parameter.node));
                 }
             }
         },

@@ -449,6 +449,23 @@ pub enum Operation<'g> {
         none: &'g DeclarationId,
         provider: CollectionProvider<'g>,
     },
+    /// Transfer the whole installed List<Option<string>> into the suffix owner.
+    OpenOwnedListOptionText {
+        source: Place<'g>,
+        cursor: Place<'g>,
+        source_backing: CollectionRepresentation<'g>,
+        cursor_backing: CollectionRepresentation<'g>,
+        provider: CollectionProvider<'g>,
+    },
+    /// Branch on outer Option<Option<string>>. Only outer Some initializes
+    /// `into`, moving the inner Option unchanged, including an inner None.
+    AdvanceOwnedListOptionText {
+        cursor: Place<'g>,
+        into: Place<'g>,
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+        provider: CollectionProvider<'g>,
+    },
     Borrow {
         source: Place<'g>,
         holder: Place<'g>,
@@ -871,6 +888,27 @@ pub enum Cleanup<'g> {
         bridge: &'g DeclarationId,
         element: TextElementDisposal<'g>,
     },
+    /// Retire a still-initialized yielded carrier according to its actual tag.
+    DropYieldedOptionText {
+        operand: Place<'g>,
+        element: OptionTextDisposal<'g>,
+    },
+    /// Release the unopened List in reverse order, checking each actual tag.
+    DisposeListOptionText {
+        operand: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+        element: OptionTextDisposal<'g>,
+    },
+    /// Retire the remaining backing in reverse position order. For each
+    /// initialized element, inspect its own tag and dispose only a Some payload.
+    /// An exhausted cursor has no elements, even if the last yield was None.
+    DisposeOwnedListIterOptionText {
+        cursor: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+        element: OptionTextDisposal<'g>,
+    },
     /// Transfer the initialized remainder to the active disposer's epilogue.
     DeferDisposerFields {
         from: Place<'g>,
@@ -883,6 +921,15 @@ pub enum Cleanup<'g> {
 pub struct TextElementDisposal<'g> {
     pub implementation: &'g DeclarationId,
     pub bridge: &'g DeclarationId,
+}
+
+/// Structural disposal after ruling out an outer or variant disposer for
+/// this exact carrier. On `none` there is no payload operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OptionTextDisposal<'g> {
+    pub some: &'g DeclarationId,
+    pub none: &'g DeclarationId,
+    pub payload: TextElementDisposal<'g>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1912,6 +1959,12 @@ enum StorageCleanup<'g> {
     DisposeOwnedListIterI32(ListDisposal<'g>),
     DisposeListText(TextListDisposal<'g>),
     DisposeOwnedListIterText(TextListDisposal<'g>),
+    DisposeListOptionText {
+        disposal: OptionTextListDisposal<'g>,
+        iteration: NodeId,
+    },
+    DisposeOwnedListIterOptionText(OptionTextListDisposal<'g>),
+    DropYieldedOptionText(OptionTextDisposal<'g>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1926,6 +1979,12 @@ struct FreshResultStorage<'g> {
 struct TextListDisposal<'g> {
     list: ListDisposal<'g>,
     element: TextElementDisposal<'g>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct OptionTextListDisposal<'g> {
+    list: ListDisposal<'g>,
+    element: OptionTextDisposal<'g>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1959,6 +2018,8 @@ impl<'g> Local<'g> {
                     | StorageCleanup::DisposeOwnedListIterI32(_)
                     | StorageCleanup::DisposeListText(_)
                     | StorageCleanup::DisposeOwnedListIterText(_)
+                    | StorageCleanup::DisposeListOptionText { .. }
+                    | StorageCleanup::DisposeOwnedListIterOptionText(_)
             )
     }
 
@@ -2021,7 +2082,7 @@ enum Action<'g> {
         source: Slot,
         cursor: Slot,
         backing: CollectionRepresentation<'g>,
-        text_source_backing: Option<CollectionRepresentation<'g>>,
+        source_backing: Option<CollectionRepresentation<'g>>,
         provider: CollectionProvider<'g>,
     },
     AdvanceOwnedList {

@@ -663,6 +663,26 @@ fn cleanup_of<'g>(
                 element: disposal.element,
             })
         }
+        StorageCleanup::DropYieldedOptionText(element) => Ok(Cleanup::DropYieldedOptionText {
+            operand: place,
+            element,
+        }),
+        StorageCleanup::DisposeListOptionText { disposal, .. } => {
+            Ok(Cleanup::DisposeListOptionText {
+                operand: place,
+                implementation: disposal.list.implementation,
+                bridge: disposal.list.bridge,
+                element: disposal.element,
+            })
+        }
+        StorageCleanup::DisposeOwnedListIterOptionText(disposal) => {
+            Ok(Cleanup::DisposeOwnedListIterOptionText {
+                cursor: place,
+                implementation: disposal.list.implementation,
+                bridge: disposal.list.bridge,
+                element: disposal.element,
+            })
+        }
         StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
 }
@@ -718,7 +738,10 @@ fn cleanup_operation<'g>(
         | Cleanup::DisposeListI32 { .. }
         | Cleanup::DisposeOwnedListIterI32 { .. }
         | Cleanup::DisposeListText { .. }
-        | Cleanup::DisposeOwnedListIterText { .. }) => {
+        | Cleanup::DisposeOwnedListIterText { .. }
+        | Cleanup::DisposeListOptionText { .. }
+        | Cleanup::DisposeOwnedListIterOptionText { .. }
+        | Cleanup::DropYieldedOptionText { .. }) => {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
         }
@@ -2245,6 +2268,8 @@ pub(super) fn run<'a, 'g>(
                     StorageCleanup::DisposeOwnedListIterI32(_)
                         | StorageCleanup::DisposeListText(_)
                         | StorageCleanup::DisposeOwnedListIterText(_)
+                        | StorageCleanup::DisposeListOptionText { .. }
+                        | StorageCleanup::DisposeOwnedListIterOptionText(_)
                 )
             {
                 candidate = false;
@@ -2496,7 +2521,7 @@ pub(super) fn run<'a, 'g>(
                     source,
                     cursor,
                     backing,
-                    text_source_backing,
+                    source_backing,
                     provider,
                 } => {
                     require_initialized(&slots, &state, source, node, budget)?;
@@ -2512,7 +2537,18 @@ pub(super) fn run<'a, 'g>(
                     state[source] = State::Moved(node);
                     retire_loans(&slots, &mut state, &[source], budget)?;
                     state[cursor] = State::Initialized(empty.clone());
-                    if let Some(source_backing) = text_source_backing {
+                    if matches!(
+                        slots[cursor].cleanup,
+                        StorageCleanup::DisposeOwnedListIterOptionText(_)
+                    ) {
+                        Operation::OpenOwnedListOptionText {
+                            source: local(source),
+                            cursor: local(cursor),
+                            source_backing: source_backing.ok_or(Stop::Pending(node))?,
+                            cursor_backing: backing,
+                            provider,
+                        }
+                    } else if let Some(source_backing) = source_backing {
                         Operation::OpenOwnedListText {
                             source: local(source),
                             cursor: local(cursor),
@@ -2541,6 +2577,17 @@ pub(super) fn run<'a, 'g>(
                         return Err(Stop::Pending(node));
                     }
                     if matches!(
+                        slots[cursor].cleanup,
+                        StorageCleanup::DisposeOwnedListIterOptionText(_)
+                    ) {
+                        Operation::AdvanceOwnedListOptionText {
+                            cursor: local(cursor),
+                            into: local(into.ok_or(Stop::Pending(node))?),
+                            some,
+                            none,
+                            provider,
+                        }
+                    } else if matches!(
                         slots[cursor].cleanup,
                         StorageCleanup::DisposeOwnedListIterText(_)
                     ) {

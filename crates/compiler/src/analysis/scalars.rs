@@ -500,7 +500,7 @@ struct Checker<'r, 'g> {
     reached_startup: bool,
     reached_expectations: bool,
     // Accumulate the written body shape while an iteration is being checked.
-    iteration_body: iteration::IterationBody,
+    iteration_body: iteration::IterationBody<'g>,
     data: bool,
     integrated: bool,
     option: Option<super::typed::OptionRole<'g>>,

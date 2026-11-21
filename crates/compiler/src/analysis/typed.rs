@@ -455,6 +455,12 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             &mut report,
         )
         .and_then(|()| report.attach_pair_calls(&mut bodies, &mut budget))
+        .and_then(|()| {
+            if report.pending().is_empty() && report.discards().is_empty() {
+                report.attach_option_iterators(&mut inventory, &mut budget)?;
+            }
+            Ok(())
+        })
         .is_err()
         {
             completion = ScalarFailureKind::ResourceLimit;
