@@ -1457,6 +1457,18 @@ The loop itself and the postfix inside it must each be reachable. Adding `gate?;
 
 Both installed modes checked the targeted `onPostfix` body at 5,413 work / 1,468 entries / depth 6 and its graph root in a graph using 203,063 / 8,239 / 6. Independently one-short limits withhold MIR. Nineteen focused M5 tests (including the Rust suffix-order control), three installed M4 tests and two M4 flow controls passed, as did scoped Clippy, formatting and the external staged replay. No cancellation poll is added at `?`, `next` or disposal. Propagating before cursor commitment, an owning yielded carrier, borrowed iteration and cancellation with live propagation state remain separate [#76](https://github.com/Reilley64/rill/issues/76) obligations. No Rill program ran.
 
+## Moving a weakened exclusive callable through a private function
+
+At `d7429fa`, the caller captures `&mut flag` and a copied `bool`, weakens the local callable from `mut` to `once`, and moves it into a private `forward`. The [installed capture tests](m5/captures.rs) check the callee's body, not just its signature. `forward` moves its formal to the return slot, then drops an unrelated local string. The returned owner holds the same exclusive loan in the caller.
+
+| Caller action | Targeted lowering and ordinary graph root |
+| --- | --- |
+| Discard the returned closure, then write `flag` | `Checked`. Discard consumes the descriptor once and does not drop its referent. |
+| Write or read `flag` while the returned closure is live | `R0203` at the write or `R0201` at the read, related to the original `&mut flag`. No MIR. |
+| Use the callable owner moved into `forward` a second time | `R0200` at the second use. No MIR. |
+
+Returning a replacement closure backed by a callee local does not establish this transfer. The standalone `forward` formal still has no concrete environment. Reversing the capture order or replacing the copied `bool` with `i32` withholds the named transfer. The `i32` control still forms and discards a local closure at its prior target cap of 2,714 work / 449 entries / depth 6. Both installed load modes agree. No callable copy, invocation, cancellation, or Rill execution follows from this judgment. [#71](https://github.com/Reilley64/rill/issues/71) remains open.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
