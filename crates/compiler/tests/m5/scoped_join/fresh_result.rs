@@ -1,6 +1,8 @@
 use super::*;
+use compiler::analysis::Statistics;
 use compiler::analysis::ownership::{
-    DependencyContract, JoinChildState, JoinEvent, JoinNext, RootReport, analyze_ownership,
+    DependencyContract, GraphCompletion, JoinChildState, JoinEvent, JoinNext, RootReport,
+    analyze_ownership,
 };
 use compiler::analysis::scalars::Site;
 use compiler::analysis::typed::ScopedJoinCall;
@@ -325,7 +327,7 @@ pub(super) fn assert_dependencies<'g>(
 
 #[test]
 fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
-    probe(
+    probe_with_typed(
         "scoped_join::fresh_result::fresh_join_checks_capture_conflicts_and_parent_cleanup",
         r#"
             import std::routine::join as scoped;
@@ -334,7 +336,7 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
             function unproved(bag: Bag): [Result<bool, i32>, bool] {
                 return scoped([(): Result<bool, i32> => Result.Ok(true), () => false]);
             }
-            function conflict(seed: bool): [Result<bool, i32>, bool] {
+            function conflict(seed: bool, bag: Bag): [Result<bool, i32>, bool] {
                 let mut flag = seed;
                 let held = &mut flag;
                 let pair = scoped([() => Err<bool, i32>(7i32), () => flag]);
@@ -353,16 +355,83 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
                 return scoped([(): Result<bool, i32> => Result.Ok(true), () => false]);
             }
         "#,
-        |_, module, receipt| {
-            let graph = analyze_ownership(receipt, AnalysisLimits::default());
-            for (name, expected) in [
-                ("unproved", Completion::Incomplete),
-                ("conflict", Completion::SourceRejected),
-                ("liveParentError", Completion::Incomplete),
-                ("retiredParentError", Completion::Checked),
+        |_, module, receipt, typed| {
+            let graph_cost = Statistics {
+                work: 228_462,
+                entries: 18_860,
+                max_depth: 8,
+            };
+            let (limit, short) = budget_caps(graph_cost);
+            let graph = analyze_ownership(receipt, limit);
+            assert_eq!(graph.statistics(), graph_cost);
+            assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
+            let [conflict] = graph.findings() else {
+                panic!("second capture conflicts")
+            };
+            assert_eq!(conflict.code(), "R0201");
+            assert_eq!(conflict.site.span.bytes(), b"flag");
+            assert_eq!(conflict.related.span.bytes(), b"&mut flag");
+            for cap in short {
+                let limited = analyze_ownership(receipt, cap);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(
+                    limited
+                        .roots()
+                        .iter()
+                        .all(|root| root.ordinary_mir().is_none())
+                );
+            }
+
+            for (name, expected, (work, entries, max_depth)) in [
+                ("unproved", Completion::Incomplete, (4_246, 561, 7)),
+                ("conflict", Completion::SourceRejected, (4_520, 693, 7)),
+                ("liveParentError", Completion::Incomplete, (4_182, 638, 7)),
+                (
+                    "retiredParentError",
+                    Completion::Checked,
+                    (25_938, 13_247, 8),
+                ),
             ] {
                 let d = &module.declarations[named(module, name)];
-                let target = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+                let body = &module.syntax.nodes[d.node].span;
+                let call = module
+                    .syntax
+                    .nodes
+                    .iter()
+                    .position(|node| {
+                        node.kind == NodeKind::Call
+                            && node.span.start() >= body.start()
+                            && node.span.end() <= body.end()
+                            && node.span.bytes().starts_with(b"scoped([")
+                    })
+                    .unwrap();
+                let transfer = receipt.scoped_join(module, call).unwrap().unwrap();
+                assert_eq!(
+                    transfer.slots[0].result_origin.unwrap().span.bytes(),
+                    if name == "conflict" {
+                        b"Err<bool, i32>(7i32)".as_slice()
+                    } else {
+                        b"Result.Ok(true)"
+                    }
+                );
+                assert!(transfer.slots[1].result_origin.is_none());
+                let stats = Statistics {
+                    work,
+                    entries,
+                    max_depth,
+                };
+                let (limit, short) = budget_caps(stats);
+                let target = lower_body(receipt, module, &d.id, limit).unwrap();
+                assert_eq!(target.statistics(), stats, "{name}");
+                for cap in short {
+                    let limited = lower_body(receipt, module, &d.id, cap).unwrap();
+                    assert_eq!(
+                        limited.completion(),
+                        Completion::ResourceLimit,
+                        "{name}: {cap:?}"
+                    );
+                    assert!(limited.mir().is_none());
+                }
                 assert_eq!(
                     target.completion(),
                     expected,
@@ -375,7 +444,13 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
                     .find(|r| r.site().module == &module.key && r.site().node == d.node)
                     .unwrap();
                 assert_eq!(root.completion(), expected);
+                assert_eq!(root.ordinary_completion(), expected);
+                assert_eq!(
+                    root.blocked_at().map(|site| site.node),
+                    target.blocked_at().map(|site| site.node)
+                );
                 if name == "retiredParentError" {
+                    let role = typed.result_role().unwrap();
                     for mir in [target.mir().unwrap(), root.mir().unwrap()] {
                         let ops = linear(mir, mir.entry);
                         let drop = ops
@@ -383,8 +458,11 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
                             .position(|op| {
                                 matches!(op,
                                     Operation::Cleanup(actions) if matches!(actions.as_slice(),
-                                        [Obligation::DropFreshResultError { origin, .. }]
+                                        [Obligation::DropFreshResultError { origin, variant, wrapper, storage_source, .. }]
                                             if origin.span.bytes() == b"Err<bool, i32>(11i32)"
+                                                && *variant == &role.err.id
+                                                && *wrapper == &role.wrapper.id
+                                                && *storage_source == role.representation.unwrap().storage_source
                                     )
                                 )
                             })
@@ -394,27 +472,34 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
                             .position(|op| matches!(op, Operation::ScopedJoin(_)))
                             .unwrap();
                         assert!(drop < joined);
+                        let [
+                            Operation::ScopedJoin(proof),
+                            Operation::Export(exported),
+                            ..,
+                        ] = &ops[joined..]
+                        else {
+                            panic!("normal parent exports the published pair")
+                        };
+                        assert_eq!(exported.root.node, proof.frames[0].result.root.node);
+                        assert!(
+                            proof.parent_exit.cleanup.is_empty(),
+                            "stop cannot retire the consumed parent Err"
+                        );
                     }
                     continue;
                 }
-                assert!(target.mir().is_none() && root.mir().is_none());
+                assert!(target.mir().is_none() && root.ordinary_mir().is_none());
                 assert!(root.dependencies().is_empty());
                 if name == "conflict" {
                     let [finding] = target.findings() else {
                         panic!("capture conflict")
                     };
-                    assert_eq!(finding.code(), "R0201");
-                    assert_eq!(finding.site.span.bytes(), b"flag");
-                    assert_eq!(finding.related.span.bytes(), b"&mut flag");
+                    assert_eq!(finding.code(), conflict.code());
+                    assert_eq!(finding.site.span, conflict.site.span);
+                    assert_eq!(finding.related.span, conflict.related.span);
                 } else {
-                    assert!(
-                        target
-                            .blocked_at()
-                            .unwrap()
-                            .span
-                            .bytes()
-                            .starts_with(b"scoped([")
-                    );
+                    assert_eq!(target.blocked_at().unwrap().node, call);
+                    assert!(target.findings().is_empty());
                 }
             }
         },

@@ -3549,35 +3549,6 @@ pub(super) fn run<'a, 'g>(
                         };
                         Ok([frame(0)?, frame(1)?])
                     };
-                    let frames = if let ScopedFrames::FreshResult { tuple_depth } = pair {
-                        // The only inputs on this route are owned environments.
-                        // Check both actual acquisitions before lowering a child.
-                        for receiver in receivers {
-                            scoped_join::check_value_receiver(
-                                &slots, &state, receiver, node, budget,
-                            )?;
-                            conflict(
-                                &slots,
-                                &state,
-                                &live[pc],
-                                receiver,
-                                (node, Conflict::Access),
-                                Access::Exclusive,
-                                budget,
-                            )?;
-                        }
-                        build::lower_fresh_scoped_children(
-                            typed,
-                            module,
-                            facts.nodes(),
-                            node,
-                            tuple_depth,
-                            std::array::from_fn(|i| (local(receivers[i]), local(into + 1 + i))),
-                            budget,
-                        )?
-                    } else {
-                        ordinary_frames()?
-                    };
                     let parent = CancellationFrame {
                         module,
                         disposer: Some(disposer),
@@ -3587,11 +3558,30 @@ pub(super) fn run<'a, 'g>(
                         retained: &retained,
                         indexed: facts.is_indexed(),
                     };
+                    let frames_and_exit = if let ScopedFrames::FreshResult { tuple_depth } = pair {
+                        // Do not lower child frames unless the actual
+                        // captures and the parent's entry-delivery exit check.
+                        let before_commit = scoped_join::before_fresh_commit(
+                            &parent, &state, receivers, &live[pc], site, budget,
+                        )?;
+                        let frames = build::lower_fresh_scoped_children(
+                            typed,
+                            module,
+                            facts.nodes(),
+                            node,
+                            tuple_depth,
+                            std::array::from_fn(|i| (local(receivers[i]), local(into + 1 + i))),
+                            budget,
+                        )?;
+                        (frames, Some(before_commit))
+                    } else {
+                        (ordinary_frames()?, None)
+                    };
                     let (proof, resume, parent_state) = scoped_join::installed::check(
                         &parent,
                         &state,
                         (receivers, into),
-                        frames,
+                        frames_and_exit,
                         (site, resume),
                         role,
                         budget,

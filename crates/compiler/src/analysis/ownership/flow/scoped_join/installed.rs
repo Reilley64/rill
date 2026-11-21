@@ -151,12 +151,20 @@ pub(in crate::analysis::ownership::flow) fn check<'g>(
     parent: &CancellationFrame<'_, 'g>,
     input: &[State],
     (receivers, into): ([Slot; 2], Slot),
-    frames: [ScopedJoinFrame<'g>; 2],
+    (frames, before_commit): ([ScopedJoinFrame<'g>; 2], Option<BeforeCommit<'g>>),
     site: (Site<'g>, Pc),
     role: RoutineRole<'g>,
     budget: &mut Budget,
 ) -> ResultOf<(Box<ScopedJoinProof<'g>>, Pc, Vec<State>)> {
-    let staged = Staged::check(parent, input, receivers, into, &frames, site, budget)?;
+    let staged = Staged::check(
+        parent,
+        input,
+        receivers,
+        into,
+        (&frames, before_commit),
+        site,
+        budget,
+    )?;
     let mut successors = Successors::default();
     let mut entries = Vec::new();
     let mut delivered = None;

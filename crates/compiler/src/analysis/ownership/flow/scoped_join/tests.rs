@@ -97,11 +97,14 @@ impl<'g> Probe<'g> {
                 .into_iter()
                 .enumerate()
                 {
-                    let (prefix, parent_exit) = checked(before_commit_exit(
+                    let BeforeCommit {
+                        environments: prefix,
+                        parent_exit,
+                    } = checked(before_commit_exit(
                         parent,
                         state,
                         receivers,
-                        &scoped,
+                        Some(&scoped),
                         site,
                         &mut budget,
                     ));
@@ -121,7 +124,7 @@ impl<'g> Probe<'g> {
                         input,
                         receivers,
                         into,
-                        &scoped,
+                        (&scoped, None),
                         (site, resume),
                         budget,
                     )

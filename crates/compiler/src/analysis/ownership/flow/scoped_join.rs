@@ -306,7 +306,7 @@ impl<'g> Child<'g> {
     }
 }
 
-pub(super) fn check_value_receiver(
+fn check_value_receiver(
     slots: &[Local<'_>],
     input: &[State],
     receiver: Slot,
@@ -334,17 +334,6 @@ fn check_receiver<'g>(
 ) -> ResultOf<()> {
     budget.step(1)?;
     let environment = parent.slots[receiver].place(parent.module);
-    if frame.value {
-        if !at_root(frame.environment, environment.root)
-            || !same_root(frame.origin, environment.root)
-            || frame.backing.is_some()
-            || frame.incoming_list_backing.is_some()
-            || frame.exclusive
-        {
-            return Err(Stop::Pending(node));
-        }
-        return check_value_receiver(parent.slots, input, receiver, node, budget);
-    }
     let backing = frame.backing.ok_or(Stop::Pending(node))?;
     let capture = frame.capture.ok_or(Stop::Pending(node))?;
     let held = initialized(&input[receiver], node)?;
@@ -422,17 +411,48 @@ fn parent_exit<'g>(
     Ok(exit)
 }
 
+pub(super) struct BeforeCommit<'g> {
+    environments: Vec<Cleanup<'g>>,
+    parent_exit: CancellationExit<'g>,
+}
+
+pub(super) fn before_fresh_commit<'g>(
+    parent: &CancellationFrame<'_, 'g>,
+    input: &[State],
+    receivers: [Slot; 2],
+    live: &BTreeSet<Slot>,
+    site: Site<'g>,
+    budget: &mut Budget,
+) -> ResultOf<BeforeCommit<'g>> {
+    // Both direct captures have formed. Check their actual transfer before
+    // testing the parent exit; a cleanup blocker must not hide a conflict.
+    for receiver in receivers {
+        check_value_receiver(parent.slots, input, receiver, site.node, budget)?;
+        conflict(
+            parent.slots,
+            input,
+            live,
+            receiver,
+            (site.node, Conflict::Access),
+            Access::Exclusive,
+            budget,
+        )?;
+    }
+    before_commit_exit(parent, input, receivers, None, site, budget)
+}
+
 /// Cleanup if control exits before commit. This projection does not add a
 /// poll between capture formations: delivery requires a separately proved
 /// enabled checkpoint, and direct capture formation is not one.
+/// Without frames, the already-checked receivers are owned fresh-join inputs.
 fn before_commit_exit<'g>(
     parent: &CancellationFrame<'_, 'g>,
     input: &[State],
     receivers: [Slot; 2],
-    frames: &[ScopedJoinFrame<'g>; 2],
+    frames: Option<&[ScopedJoinFrame<'g>; 2]>,
     site: Site<'g>,
     budget: &mut Budget,
-) -> ResultOf<(Vec<Cleanup<'g>>, CancellationExit<'g>)> {
+) -> ResultOf<BeforeCommit<'g>> {
     if !parent.retained.is_empty() || receivers[0] >= receivers[1] {
         return Err(Stop::Pending(site.node));
     }
@@ -441,7 +461,9 @@ fn before_commit_exit<'g>(
         budget.step(1)?;
         match input[r] {
             State::Initialized(_) if i == n => {
-                check_receiver(parent, input, r, &frames[i], site.node, budget)?;
+                if let Some(frames) = frames {
+                    check_receiver(parent, input, r, &frames[i], site.node, budget)?;
+                }
                 n += 1;
             }
             State::Vacant => {}
@@ -467,7 +489,10 @@ fn before_commit_exit<'g>(
         ),
         budget,
     )?;
-    Ok((prefix, parent_exit(parent, terminal, site.node, budget)?))
+    Ok(BeforeCommit {
+        environments: prefix,
+        parent_exit: parent_exit(parent, terminal, site.node, budget)?,
+    })
 }
 
 /// Both parent-owned inputs have already formed in source order. Neither can
@@ -489,7 +514,7 @@ impl<'g> Staged<'g> {
         input: &[State],
         receivers: [Slot; 2],
         into: Slot,
-        frames: &[ScopedJoinFrame<'g>; 2],
+        (frames, before_commit): (&[ScopedJoinFrame<'g>; 2], Option<BeforeCommit<'g>>),
         (site, resume): (Site<'g>, Pc),
         budget: &mut Budget,
     ) -> ResultOf<Self> {
@@ -519,6 +544,21 @@ impl<'g> Staged<'g> {
             budget.step(1)?;
             let frame = &frames[i];
             initialized(&input[receivers[i]], node)?;
+            if frame.value != before_commit.is_some() {
+                return Err(pending);
+            }
+            if frame.value {
+                budget.step(1)?;
+                let environment = parent.slots[receivers[i]].place(parent.module);
+                if !at_root(frame.environment, environment.root)
+                    || !same_root(frame.origin, environment.root)
+                    || frame.backing.is_some()
+                    || frame.incoming_list_backing.is_some()
+                    || frame.exclusive
+                {
+                    return Err(pending);
+                }
+            }
             let result = parent.slots[into + 1 + i].place(parent.module);
             let destination = parent.slots[into + 1 + i];
             if destination.members != 0
@@ -549,13 +589,18 @@ impl<'g> Staged<'g> {
         // At an entry delivery, end the staged environments before
         // parent cleanup. After commit the children, not the parent, end
         // those views; the same parent exit is then gated on both terminals.
-        let (precommit_cleanup, parent_exit) =
-            before_commit_exit(parent, input, receivers, frames, site, budget)?;
+        let BeforeCommit {
+            environments,
+            parent_exit,
+        } = match before_commit {
+            Some(checked) => checked,
+            None => before_commit_exit(parent, input, receivers, Some(frames), site, budget)?,
+        };
         budget.reserve(input.len())?;
         Ok(Self {
             children,
             parent_exit,
-            precommit_cleanup,
+            precommit_cleanup: environments,
             parent_state: input.to_vec(),
             receivers,
             into,
