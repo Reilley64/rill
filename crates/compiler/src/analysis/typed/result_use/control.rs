@@ -19,7 +19,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let [condition, yes, rest @ ..] = children.as_slice() else {
             unreachable!()
         };
-        if self.expression_facts(*condition)?.is_none() {
+        let Some(condition_value) = self.expression_facts(*condition)? else {
             self.pending(node, ResultUseBlocker::Control)?;
             for &child in &children[1..] {
                 let entry = Residence::default();
@@ -30,6 +30,17 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
             }
             return self.unsettled(node, depth + 1);
+        };
+        if !expression
+            && condition_value.boolean.unwrap_or(BooleanSet::BOTH) == BooleanSet::BOTH
+            && rest.is_empty()
+            && self.module.syntax.nodes[*yes].kind == NodeKind::Block
+            && self.module.syntax.nodes[*yes].children.is_empty()
+            && self.pure_scalar_value(*condition, depth + 1)?
+        {
+            // A primitive read and an empty block cannot change residences.
+            self.depth(depth + 1)?;
+            return self.singleton(state);
         }
         let entry = state.fork(self.budget)?;
         let mut result = Vec::new();
