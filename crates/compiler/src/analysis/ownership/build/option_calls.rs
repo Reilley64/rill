@@ -91,6 +91,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let index = self.calls.len();
         self.calls.push(Call {
             callee: &call.header.declaration.id,
+            direct_bool_parameter: false,
             args: vec![argument],
             into: Some(into),
             result: CallResult::RetainsSharedOption(call.header),
