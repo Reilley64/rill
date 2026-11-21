@@ -26,6 +26,8 @@ mod field_routes;
 mod graph;
 #[path = "m5/iteration.rs"]
 mod iteration;
+#[path = "m5/iteration_result_use.rs"]
+mod iteration_result_use;
 #[path = "m5/patterns.rs"]
 mod patterns;
 #[path = "m5/propagation.rs"]

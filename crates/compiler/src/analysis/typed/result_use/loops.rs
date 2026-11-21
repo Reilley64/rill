@@ -1,5 +1,12 @@
 //! Loop worklist and transfer targets. A jump leaves only its target's iteration scopes.
 use super::*;
+use crate::analysis::{
+    scalars::{
+        Iteration,
+        data::{Pattern, PatternFacts},
+    },
+    typed::ListTraversal,
+};
 use std::collections::VecDeque;
 
 pub(super) struct LoopExits<'g> {
@@ -145,7 +152,8 @@ impl<'a, 'g> Check<'a, 'g> {
         let &[_, source, body] = self.module.syntax.nodes[node].children.as_slice() else {
             unreachable!()
         };
-        let iteration = self.facts(node)?.and_then(|facts| match &facts.kind {
+        let facts = self.facts(node)?;
+        let iteration = facts.and_then(|facts| match &facts.kind {
             NodeFactKind::Iteration(iteration) => Some(iteration),
             _ => None,
         });
@@ -165,6 +173,12 @@ impl<'a, 'g> Check<'a, 'g> {
                 .is_some_and(|fact| matches!(fact.kind, NodeFactKind::Pattern(_)))
         {
             return self.owned_scalar_iteration(node, iteration.source, body, state, depth);
+        }
+        if let Some(iteration) = iteration
+            && facts.is_some_and(|facts| !facts.flow.pending)
+            && let Some((pattern, next)) = self.owned_option_iteration_facts(iteration, &state)?
+        {
+            return self.owned_option_iteration(node, pattern, next, state, depth);
         }
         self.pending(
             node,
@@ -217,6 +231,140 @@ impl<'a, 'g> Check<'a, 'g> {
             })?;
             queue.extend(jumped.continues);
             exits.extend(jumped.breaks);
+        }
+        Ok(exits)
+    }
+
+    fn owned_option_iteration_facts(
+        &mut self,
+        iteration: &Iteration<'g>,
+        state: &Residence<'g>,
+    ) -> Work<Option<(&'a PatternFacts<'g>, &'a Type<'g>)>> {
+        let Some(option) = self.core.option else {
+            return Ok(None);
+        };
+        // Owned traversal attests to both protected, concrete List selections.
+        // Keep other carriers on their existing paths, even if next is proved.
+        if iteration.traversal != Some(ListTraversal::Owned)
+            || !matches!(iteration.yielded.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                if *declaration == option.declaration
+                    && matches!(arguments.as_slice(), [payload]
+                        if matches!(payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")))
+            || self.module.syntax.nodes[iteration.source].kind != NodeKind::ValueReference
+            || self.module.syntax.nodes[iteration.pattern].kind != NodeKind::NamePattern
+        {
+            return Ok(None);
+        }
+        let Some(source) = self.expression_facts(iteration.source)? else {
+            return Ok(None);
+        };
+        let Some(path) = source.path.as_ref().filter(|path| {
+            path.root.kind == DeclarationKind::Parameter && path.projections.is_empty()
+        }) else {
+            return Ok(None);
+        };
+        let Some(list) = self.core.collections.list else {
+            return Ok(None);
+        };
+        if source.access != Access::Owned
+            || !matches!(source.ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                if *declaration == &list.declaration.id
+                    && matches!(arguments.as_slice(), [element] if *element == iteration.yielded))
+        {
+            return Ok(None);
+        }
+        self.budget.step(self.current_parameters.len())?;
+        if !self
+            .current_parameters
+            .iter()
+            .any(|p| &p.declaration.id == path.root)
+            || self.address(state, Some(path))? != Some((Root::Local(path.root), Vec::new()))
+            || state.owes_under(Root::Local(path.root), self.budget)?
+        {
+            return Ok(None);
+        }
+        let Some(NodeFactKind::Pattern(pattern)) = self.facts(iteration.pattern)?.map(|f| &f.kind)
+        else {
+            return Ok(None);
+        };
+        if pattern.access != Access::Owned
+            || !matches!(pattern.pattern.as_ref(), Pattern::Any)
+            || !matches!(pattern.binders.as_slice(), [binder] if binder.projections.is_empty())
+        {
+            return Ok(None);
+        }
+        self.budget.step(1)?;
+        Ok(self
+            .bodies
+            .goal(&iteration.next)
+            .ok()
+            .and_then(|goal| Some((pattern, &goal.output.as_ref()?.result))))
+    }
+
+    fn owned_option_iteration(
+        &mut self,
+        node: NodeId,
+        pattern: &PatternFacts<'g>,
+        next: &Type<'g>,
+        state: Residence<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        let [_, source, body] = self.module.syntax.nodes[node].children[..] else {
+            unreachable!()
+        };
+        let mut initial = self.expression(source, state, depth + 1)?;
+        if initial.is_empty() {
+            self.dead_statement(body, Residence::default(), depth + 1)?;
+        }
+        for state in &mut initial {
+            // Only Result-free backing reaches this worklist. Its length and
+            // element tags are not known, so forget any positional hints.
+            state.take(Root::Temporary(source), &[], self.budget)?;
+        }
+        let option = self.core.option.unwrap();
+        let next_value = Root::Temporary(node);
+        let payload = [ResultComponent::VariantPayload {
+            variant: option.success,
+            index: 0,
+        }];
+        let item = Root::Local(pattern.binders[0].declaration);
+        let mut queue = VecDeque::from(initial);
+        let mut seen = Vec::new();
+        let mut exits = Vec::new();
+        while let Some(mut state) = queue.pop_front() {
+            if !self.first_visit(&mut state, &mut seen)? {
+                continue;
+            }
+            // next produces an outer Option. Only outer Some installs a fresh
+            // item, whose inner Some and None remain separate in the body.
+            let input = self.singleton(state)?;
+            for mut state in self.seed(input, next_value, node, next)? {
+                let yielded = state.test(
+                    next_value,
+                    &[],
+                    &Constructor::Variant(option.success),
+                    self.budget,
+                )?;
+                if yielded == Some(true) {
+                    self.commit_pattern(&mut state, next_value, &payload, pattern)?;
+                    state.take(next_value, &[], self.budget)?;
+                    let jumped = self.with_loop(node, |check| {
+                        for mut state in check.statement(body, state, depth + 1)? {
+                            let remaining = state.take(item, &[], check.budget)?;
+                            check.discard(remaining, item, body, ResultDiscardKind::ScopeExit)?;
+                            queue.extend(check.singleton(state)?);
+                        }
+                        Ok(())
+                    })?;
+                    queue.extend(jumped.continues);
+                    exits.extend(jumped.breaks);
+                } else if yielded == Some(false) {
+                    state.take(next_value, &[], self.budget)?;
+                    exits.extend(self.singleton(state)?);
+                } else {
+                    self.pending(node, ResultUseBlocker::Containment)?;
+                }
+            }
         }
         Ok(exits)
     }
