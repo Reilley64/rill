@@ -12,14 +12,6 @@ use crate::analysis::{
 };
 use crate::loader::Origin;
 
-mod compare;
-pub(super) use compare::lower_i32_equality;
-
-pub(super) fn standard_module(module: &Module) -> bool {
-    module.key.origin == Origin::Standard
-        && matches!(module.key.path.as_str(), "core.rill" | "compare.rill")
-}
-
 /// Targeted callers share this index across distinct selected scalar widths.
 /// Graph queries already have module and root indexes of their own.
 #[derive(Default)]
@@ -186,9 +178,23 @@ pub(super) fn implementation_frame<'g>(
     let pending = Stop::Pending(declaration.node);
     budget.step(1)?;
     let source = implementation.source;
+    let (role, family) = if let Some(copy) = typed
+        .copy_role()
+        .filter(|family| family.id == source.family)
+    {
+        (PrimitiveRole::Copy, &copy.id)
+    } else if let Some(dispose) = typed
+        .dispose_role()
+        .filter(|family| family.id == source.family)
+    {
+        (PrimitiveRole::Dispose, &dispose.id)
+    } else {
+        return Err(pending);
+    };
     // ImplementationFacts borrows the attachment from graph.implementations().
     // Require both the canonical header and the body of that attachment.
-    if !standard_module(module)
+    if module.key.origin != Origin::Standard
+        || module.key.path != "core.rill"
         || source.declaration != declaration.id
         || declaration.scope.is_some()
         || !std::ptr::eq(implementation.header.declaration, declaration)
@@ -206,22 +212,6 @@ pub(super) fn implementation_frame<'g>(
     {
         return Err(pending);
     }
-    if module.key.path == "compare.rill" {
-        return compare::implementation_frame(typed, implementation, body, budget);
-    }
-    let (role, family) = if let Some(copy) = typed
-        .copy_role()
-        .filter(|family| family.id == source.family)
-    {
-        (PrimitiveRole::Copy, &copy.id)
-    } else if let Some(dispose) = typed
-        .dispose_role()
-        .filter(|family| family.id == source.family)
-    {
-        (PrimitiveRole::Dispose, &dispose.id)
-    } else {
-        return Err(pending);
-    };
     let DeclarationShape::Function { parameters, result } = &implementation.header.shape else {
         return Err(pending);
     };

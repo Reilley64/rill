@@ -209,7 +209,6 @@ fn liveness(
             } => use_one(Some(descriptor), Some(into)),
             Action::ReadListI32 { view, into, .. } => use_one(Some(view), into),
             Action::EqualI32Literal { from, into, .. } => use_one(Some(from), Some(into)),
-            Action::EqualI32 { left, right, into } => ([Some(left), Some(right)], Some(into)),
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
@@ -3887,22 +3886,6 @@ pub(super) fn run<'a, 'g>(
                     Operation::EqualI32Literal {
                         from: local(from),
                         literal,
-                        into: local(into),
-                    }
-                }
-                Action::EqualI32 { left, right, into } => {
-                    require_initialized(&slots, &state, left, node, budget)?;
-                    require_initialized(&slots, &state, right, node, budget)?;
-                    if !matches!(state[into], State::Vacant) {
-                        return Err(Stop::Pending(node));
-                    }
-                    // The equality body supplies fresh loan-free scalar scratch slots.
-                    state[left] = State::Vacant;
-                    state[right] = State::Vacant;
-                    state[into] = State::Initialized(empty.clone());
-                    Operation::EqualI32 {
-                        left: local(left),
-                        right: local(right),
                         into: local(into),
                     }
                 }

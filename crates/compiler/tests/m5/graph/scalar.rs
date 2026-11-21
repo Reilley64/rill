@@ -41,8 +41,6 @@ pub(super) fn assert_standard_bodies(
             assert_eq!(targeted.completion(), Completion::Checked);
             assert_dispose_body(targeted.mir().unwrap());
             dispose_lines.push(root.site().span.coordinates().unwrap().0.line + 1);
-        } else if provider.role == PrimitiveRole::Equality && provider.primitive == Primitive::I32 {
-            assert_eq!(root.ordinary_completion(), Completion::Checked);
         } else {
             assert_pending(root);
             if provider.role == PrimitiveRole::Dispose {

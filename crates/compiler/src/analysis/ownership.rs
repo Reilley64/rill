@@ -482,12 +482,6 @@ pub enum Operation<'g> {
         literal: i32,
         into: Place<'g>,
     },
-    /// Compare two initialized i32 scratch values, ending both and initializing the bool result.
-    EqualI32 {
-        left: Place<'g>,
-        right: Place<'g>,
-        into: Place<'g>,
-    },
     /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
@@ -1420,7 +1414,6 @@ enum Frame {
     CallableTransfer(CallableLayout),
     PlainImplementation { body: NodeId },
     ScalarCopy { body: NodeId },
-    ScalarI32Equality { body: NodeId },
     ActiveDisposer,
 }
 
@@ -1438,9 +1431,7 @@ fn lower<'a, 'g>(
         return Err(Stop::Pending(entry_site));
     };
     let body = match frame {
-        Frame::PlainImplementation { body }
-        | Frame::ScalarCopy { body }
-        | Frame::ScalarI32Equality { body } => body,
+        Frame::PlainImplementation { body } | Frame::ScalarCopy { body } => body,
         _ => *module.syntax.nodes[entry_site]
             .children
             .get(1)
@@ -1549,19 +1540,15 @@ fn lower<'a, 'g>(
         None => end,
     };
     let finish = build.cleanup_scope(body, &params, end)?;
-    let entry = if matches!(frame, Frame::ScalarI32Equality { .. }) {
-        scalar::lower_i32_equality(&mut build, parameters, &params, finish)?
-    } else {
-        build.statement(
-            body,
-            finish,
-            Exits {
-                returning: Some(finish),
-                looping: None,
-            },
-            1,
-        )?
-    };
+    let entry = build.statement(
+        body,
+        finish,
+        Exits {
+            returning: Some(finish),
+            looping: None,
+        },
+        1,
+    )?;
     // Only an empty application frame can contribute its entry and no other
     // delivery point. Ordinary lowering already has its body and signature.
     let empty_entry = (matches!(frame, Frame::OrdinaryFunction)
@@ -1588,7 +1575,7 @@ fn lower_implementation<'a, 'g>(
 
     let site = declaration.node;
     budget.step(1)?;
-    let standard = scalar::standard_module(module);
+    let standard = module.key.origin == Origin::Standard && module.key.path == "core.rill";
     if module.key.origin != Origin::Application && !standard {
         return Err(Stop::Pending(site));
     }
@@ -2067,11 +2054,6 @@ enum Action<'g> {
     EqualI32Literal {
         from: Slot,
         literal: i32,
-        into: Slot,
-    },
-    EqualI32 {
-        left: Slot,
-        right: Slot,
         into: Slot,
     },
     Call(usize),

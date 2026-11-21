@@ -226,11 +226,11 @@ fn implicit_guard_does_not_pay_for_written_call_verification() {
         "graph::closed_release::implicit_guard_does_not_pay_for_written_call_verification",
         "function implicit(lock: LockGuard<i32>): void {}",
         |_, _, receipt| {
-            // Pre-verifier graph cap, including the independently checked i32 equality root.
+            // Fixed graph cap before verification of written releases.
             let limits = AnalysisLimits {
-                max_work: 185551,
-                max_entries: 4127,
-                max_depth: 5,
+                max_work: 185222,
+                max_entries: 3993,
+                max_depth: 3,
             };
             let report = analyze_ownership(receipt, limits);
             assert_eq!(report.completion(), GraphCompletion::Incomplete);
