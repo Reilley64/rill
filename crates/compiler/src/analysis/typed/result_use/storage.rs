@@ -33,6 +33,11 @@ pub(super) type Address<'g> = (Root<'g>, Vec<ResultComponent<'g>>);
 pub(super) enum Content<'g> {
     Result(Occurrence<'g>),
     Test(Arc<Constructor<'g>>, bool),
+    /// A yielded canonical Option<string>, materialized on its first test.
+    OptionItem {
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+    },
     Alias(Address<'g>),
     PossibleAlias(Address<'g>),
     /// A borrowed Bool descriptor from a named function's incoming parameter.
@@ -58,7 +63,8 @@ impl Located<'_> {
                 Content::Result(value) => value.component.len(),
                 Content::Test(tag, _) => tag_size(tag),
                 Content::Alias((_, path)) | Content::PossibleAlias((_, path)) => path.len(),
-                Content::CallerBoolOrigin(_)
+                Content::OptionItem { .. }
+                | Content::CallerBoolOrigin(_)
                 | Content::Callable(_)
                 | Content::ConsumedPair
                 | Content::Unclassified(_) => 0,
@@ -73,9 +79,18 @@ fn tag_size(tag: &Constructor<'_>) -> usize {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum OptionListSource {
+    Fresh,
+    GuardInspection { guard: NodeId, borrow: NodeId },
+}
+
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub(super) struct Residence<'g> {
     locations: Vec<(Root<'g>, Located<'g>)>,
+    // Entry evidence belongs to the formal in this frame, not to the value
+    // being moved or borrowed. Never install it in a temporary or capture.
+    option_lists: Vec<(&'g DeclarationId, OptionListSource)>,
 }
 
 impl<'g> Residence<'g> {
@@ -83,7 +98,64 @@ impl<'g> Residence<'g> {
         for (_, value) in &self.locations {
             budget.reserve(value.size())?;
         }
+        budget.reserve(self.option_lists.len())?;
         Ok(self.clone())
+    }
+
+    pub(super) fn add_option_list(
+        &mut self,
+        parameter: &'g DeclarationId,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        budget.reserve(1)?;
+        self.option_lists.push((parameter, OptionListSource::Fresh));
+        Ok(())
+    }
+
+    pub(super) fn has_option_lists(&self) -> bool {
+        !self.option_lists.is_empty()
+    }
+
+    fn option_list_index(&self, id: &DeclarationId, budget: &mut Budget) -> Work<Option<usize>> {
+        if id.kind == crate::loader::DeclarationKind::Parameter {
+            for (index, (parameter, _)) in self.option_lists.iter().enumerate() {
+                budget.step(1)?;
+                if std::ptr::eq(*parameter, id) {
+                    return Ok(Some(index));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub(super) fn option_list_source(
+        &self,
+        id: &DeclarationId,
+        budget: &mut Budget,
+    ) -> Work<Option<OptionListSource>> {
+        Ok(self
+            .option_list_index(id, budget)?
+            .map(|i| self.option_lists[i].1))
+    }
+
+    pub(super) fn access_option_list(
+        &mut self,
+        id: &DeclarationId,
+        inspection: Option<OptionListSource>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        if let Some(index) = self.option_list_index(id, budget)? {
+            if let Some(inspection) = inspection
+                && self.option_lists[index].1 == OptionListSource::Fresh
+            {
+                self.option_lists[index].1 = inspection;
+            } else {
+                // Keep entry order stable for worklist comparisons.
+                budget.step(self.option_lists.len() - index - 1)?;
+                self.option_lists.remove(index);
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn contains_local(
@@ -125,9 +197,25 @@ impl<'g> Residence<'g> {
         Ok(())
     }
 
+    // Any alternative join must preserve this evidence as well as values.
+    fn same_option_lists(&self, other: &Self, budget: &mut Budget) -> Work<bool> {
+        if self.option_lists.len() != other.option_lists.len() {
+            return Ok(false);
+        }
+        for ((a, a_source), (b, b_source)) in self.option_lists.iter().zip(&other.option_lists) {
+            budget.step(1)?;
+            if !std::ptr::eq(*a, *b) || a_source != b_source {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     pub(super) fn same_as(&self, other: &Self, budget: &mut Budget) -> Work<bool> {
         budget.step(1)?;
-        if self.locations.len() != other.locations.len() {
+        if self.locations.len() != other.locations.len()
+            || !self.same_option_lists(other, budget)?
+        {
             return Ok(false);
         }
         for (a, b) in self.locations.iter().zip(&other.locations) {
@@ -149,7 +237,9 @@ impl<'g> Residence<'g> {
         budget: &mut Budget,
     ) -> Work<bool> {
         budget.step(1)?;
-        if self.locations.len() != other.locations.len() {
+        if self.locations.len() != other.locations.len()
+            || !self.same_option_lists(other, budget)?
+        {
             return Ok(false);
         }
         let mut remove = None;
@@ -235,28 +325,49 @@ impl<'g> Residence<'g> {
         tag: &Constructor<'g>,
         budget: &mut Budget,
     ) -> Work<Option<bool>> {
+        let mut excluded = None;
+        let mut complement = None;
         for (candidate, value) in &self.locations {
             budget.step(1 + component.len())?;
             if *candidate != root || value.component != component {
                 continue;
             }
-            if let Content::Test(known, positive) = &value.content {
-                budget.step(tag_size(known) + tag_size(tag))?;
-                if known.as_ref() == tag {
-                    return Ok(Some(*positive));
+            match &value.content {
+                Content::Test(known, positive) => {
+                    budget.step(tag_size(known) + tag_size(tag))?;
+                    if known.as_ref() == tag {
+                        return Ok(Some(*positive));
+                    }
+                    if *positive {
+                        return Ok(Some(false));
+                    }
+                    match (known.as_ref(), tag) {
+                        (Constructor::Boolean(_), Constructor::Boolean(_)) => {
+                            return Ok(Some(true));
+                        }
+                        (Constructor::Variant(other), Constructor::Variant(_)) => {
+                            excluded = Some(*other)
+                        }
+                        _ => {}
+                    }
                 }
-                if *positive {
-                    return Ok(Some(false));
+                Content::OptionItem { some, none } => {
+                    if let Constructor::Variant(id) = tag {
+                        complement = if std::ptr::eq(*id, *some) {
+                            Some(*none)
+                        } else if std::ptr::eq(*id, *none) {
+                            Some(*some)
+                        } else {
+                            return Ok(Some(false));
+                        };
+                    }
                 }
-                if matches!(
-                    (known.as_ref(), tag),
-                    (Constructor::Boolean(_), Constructor::Boolean(_))
-                ) {
-                    return Ok(Some(true));
-                }
+                _ => {}
             }
         }
-        Ok(None)
+        Ok(complement
+            .zip(excluded)
+            .and_then(|(a, b)| std::ptr::eq(a, b).then_some(true)))
     }
 
     pub(super) fn alias(

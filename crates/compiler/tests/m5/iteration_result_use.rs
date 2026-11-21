@@ -398,7 +398,7 @@ fn constrained_or_revisited_sources_do_not_create_iterator_exits() {
                 pending,
                 [
                     "for (let item of xs) { let _ = &item; let _ = debt; break; }",
-                    "for (let item of xs) { let _ = &item; }",
+                    // The first traversal can start; only the second lacks a source.
                     "for (let item of xs) { let t = item?; let _ = &t; }",
                     "for (let item of ((xs))) { let t = item?; let _ = &t; }",
                     "for (let item of xs) { if (again) { let t = item?; let _ = &t; } }",
@@ -416,10 +416,22 @@ fn dead_reads_and_a_proven_empty_source_keep_feasible_result_exits() {
         r#"
         import std::collection::{first as headOf};
         function deadRead(xs: List<Option<string>>): Option<bool> {
-            if (false) { let _ = &xs; }
+            if (false) { let _ = &xs; let _ = &xs; }
             let debt = Err<bool,i32>(61i32);
             for (let item of xs) { let _ = &item; }
             return Option.Some(true);
+        }
+        function groupedDeadRead(xs: List<Option<string>>): Option<bool> {
+            if (((false))) { let _ = &xs; }
+            let debt = Err<bool,i32>(62i32);
+            for (let ((item)) of ((xs))) { let _ = &item; }
+            return Option.Some(true);
+        }
+        function readAfterReturn(xs: List<Option<string>>): Option<bool> {
+            let debt = Err<bool,i32>(63i32);
+            for (let item of xs) { let _ = &item; }
+            return Option.Some(true);
+            let _ = &xs;
         }
         function empty(xs: List<Option<string>>): Option<bool> {
             guard let head = headOf(&xs) else {
@@ -440,9 +452,11 @@ fn dead_reads_and_a_proven_empty_source_keep_feasible_result_exits() {
             );
             assert!(typed.receipt().is_none());
             assert!(uses.pending().is_empty(), "{uses:?}");
-            assert_eq!(uses.discards().len(), 2, "{uses:?}");
+            assert_eq!(uses.discards().len(), 4, "{uses:?}");
             for (origin, exit) in [
                 ("Err<bool,i32>(61i32)", "return Option.Some(true);"),
+                ("Err<bool,i32>(62i32)", "return Option.Some(true);"),
+                ("Err<bool,i32>(63i32)", "return Option.Some(true);"),
                 ("Err<bool,i32>(81i32)", "return Option.Some(false);"),
             ] {
                 assert!(
@@ -455,6 +469,94 @@ fn dead_reads_and_a_proven_empty_source_keep_feasible_result_exits() {
                     "{uses:?}"
                 );
             }
+            replay_exact(request);
+        },
+    );
+}
+
+#[test]
+fn a_live_read_withholds_only_its_iteration_alternative() {
+    probe_report(
+        "iteration_result_use::a_live_read_withholds_only_its_iteration_alternative",
+        r#"
+        function read(xs: List<Option<string>>): Option<bool> {
+            let _ = &xs;
+            let debt = Err<bool,i32>(61i32);
+            for (let item of xs) { let _ = &item; }
+            return Option.Some(true);
+        }
+        function conditionalRead(xs: List<Option<string>>, inspect: bool): Option<bool> {
+            match (inspect) { true => { let _ = &xs; }, false => {} };
+            let debt = Err<bool,i32>(62i32);
+            for (let item of xs) {
+                if (inspect) { let t = item?; let _ = &t; }
+                else { let t = ((item))?; let _ = &t; }
+            }
+            let _ = debt;
+            return Option.Some(true);
+        }
+        "#,
+        |request, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert!(typed.receipt().is_none());
+            let uses = typed.result_use().unwrap();
+            let [witness] = uses.discards() else {
+                panic!("expected only the untouched alternative to prove a discard");
+            };
+            assert_eq!(witness.code(), "R0103");
+            assert_eq!(witness.kind, ResultDiscardKind::ScopeExit);
+            assert_eq!(witness.origin.span.bytes(), b"Err<bool,i32>(62i32)");
+            assert_eq!(witness.discard.span.bytes(), b"((item))?");
+            let [unconditional, conditional] = uses.pending() else {
+                panic!("expected both live reads to block their pending traversal");
+            };
+            for pending in [unconditional, conditional] {
+                assert_eq!(pending.blocker, ResultUseBlocker::Storage);
+                assert_eq!(pending.site.module.origin, Origin::Application);
+            }
+            assert_eq!(
+                unconditional.site.span.bytes(),
+                b"for (let item of xs) { let _ = &item; }"
+            );
+            assert!(
+                conditional
+                    .site
+                    .span
+                    .bytes()
+                    .starts_with(b"for (let item of xs) {\n")
+            );
+            replay_exact(request);
+        },
+    );
+}
+
+#[test]
+fn an_excluded_yielded_tag_proves_the_complement_on_a_later_test() {
+    probe_report(
+        "iteration_result_use::an_excluded_yielded_tag_proves_the_complement_on_a_later_test",
+        r#"
+        function probe(xs: List<Option<string>>): Option<bool> {
+            for (let item of xs) {
+                let debt = Err<bool,i32>(71i32);
+                match (&item) {
+                    Option.Some(_) => { let _ = debt; },
+                    _ => {
+                        match (&item) {
+                            Option.None => { let _ = debt; },
+                            _ => {},
+                        };
+                    },
+                };
+                return Option.Some(false);
+            }
+            return Option.Some(true);
+        }
+        "#,
+        |request, _, typed| {
+            let uses = typed.result_use().unwrap();
+            assert_eq!(typed.completion(), TypedCompletion::Checked, "{uses:?}");
+            assert!(typed.receipt().is_some());
+            assert!(uses.pending().is_empty() && uses.discards().is_empty());
             replay_exact(request);
         },
     );
@@ -663,12 +765,8 @@ fn assert_fixed_pending(
         TypedCompletion::Incomplete,
         "{fixture}"
     );
-    let stats = report.statistics();
-    assert_eq!(
-        (stats.work, stats.entries, stats.max_depth),
-        (work, entries, depth),
-        "{fixture}"
-    );
+    // The published limits must still produce this witness even when the
+    // Result-free entry shape takes less work and storage than before.
     assert!(report.receipt().is_none());
     let uses = report.result_use().unwrap();
     assert!(uses.discards().is_empty());
@@ -678,6 +776,7 @@ fn assert_fixed_pending(
     assert_eq!(pending.blocker, ResultUseBlocker::Storage);
     assert_eq!(pending.site.module.origin, Origin::Application);
     assert_eq!(pending.site.span.bytes(), iteration.as_bytes());
+    replay_exact(request);
 }
 
 fn child_of_kind(app: &loader::Module, parent: usize, kind: NodeKind) -> usize {

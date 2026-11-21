@@ -12,7 +12,7 @@ use crate::analysis::{
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 mod arrows;
@@ -32,7 +32,7 @@ use loops::LoopExits;
 #[cfg(test)]
 mod tests;
 pub use storage::ResultComponent;
-use storage::{Address, Content, Located, Occurrence, Residence, Root};
+use storage::{Address, Content, Located, Occurrence, OptionListSource, Residence, Root};
 use values::PlaceStorage;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,16 +154,12 @@ pub(super) fn check<'g>(
     budget: &mut Budget,
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
-    let mut option_iterations = loops::OptionIterationEvidence::default();
     let mut nodes = BTreeMap::new();
     for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
-        let first = nodes
+        nodes
             .entry((facts.site.module, facts.site.node))
-            .or_insert((index, facts))
-            .0
-            == index;
-        option_iterations.record(facts, core, first);
+            .or_insert((index, facts));
     }
     let mut checked = BTreeSet::new();
     for body in bodies.checked_bodies() {
@@ -239,7 +235,6 @@ pub(super) fn check<'g>(
     let sources = Sources {
         inventory,
         bodies,
-        option_iterations: &option_iterations,
         pairs: &pairs,
         scoped,
         nodes: &nodes,
@@ -295,7 +290,6 @@ pub(super) fn check<'g>(
 struct Sources<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
     bodies: &'a GenericReport<'g>,
-    option_iterations: &'a loops::OptionIterationEvidence<'a, 'g>,
     pairs: &'a pairs::PairBodies<'g>,
     scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
@@ -318,7 +312,6 @@ struct Check<'a, 'g> {
     release_parameters: &'a releases::Parameters<'g>,
     module: &'g Module,
     scopes: BTreeMap<&'g DeclarationId, Option<usize>>,
-    option_iterations: &'a loops::OptionIterationEvidence<'a, 'g>,
     core: Inputs<'a, 'g>,
     budget: &'a mut Budget,
     report: &'a mut ResultUseReport<'g>,
@@ -335,10 +328,7 @@ struct Check<'a, 'g> {
     proving_callable: bool,
     has_pending: bool,
     current_parameters: &'a [MemberType<'g>],
-    current_body_checked: bool,
     current_option_guard: Option<NodeId>,
-    literal_skipped_branch: Option<(NodeId, NodeId)>,
-    dead_option_references: HashSet<NodeId>,
     nested_write_body: Option<NodeId>,
 }
 
@@ -368,7 +358,6 @@ impl<'a, 'g> Check<'a, 'g> {
             core: sources.core,
             module,
             scopes,
-            option_iterations: sources.option_iterations,
             budget,
             report,
             loops: Vec::new(),
@@ -384,10 +373,7 @@ impl<'a, 'g> Check<'a, 'g> {
             proving_callable: false,
             has_pending: false,
             current_parameters: &[],
-            current_body_checked: false,
             current_option_guard: None,
-            literal_skipped_branch: None,
-            dead_option_references: HashSet::new(),
             nested_write_body: None,
         })
     }
@@ -734,6 +720,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 });
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
+                    if let Some(path) = path {
+                        state.access_option_list(path.root, None, self.budget)?;
+                    }
                     let incoming = state.take(Root::Temporary(right), &[], self.budget)?;
                     let storage = self.place_storage(state, path)?;
                     if let PlaceStorage::Exact(target @ (root, path)) = &storage
@@ -799,28 +788,8 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 Ok(Vec::new())
             }
-            NodeKind::IfStatement | NodeKind::While => {
-                let previous = self.literal_skipped_branch;
-                let [condition, body, ..] = children[..] else {
-                    unreachable!()
-                };
-                let condition_syntax = &self.module.syntax.nodes[condition];
-                if previous.is_none()
-                    && condition_syntax.kind == NodeKind::Literal
-                    && condition_syntax.span.bytes() == b"false"
-                {
-                    // This is only a candidate until a typed constant and its
-                    // skipped block are both witnessed at a parameter use.
-                    self.literal_skipped_branch = Some((condition, body));
-                }
-                let result = if syntax.kind == NodeKind::IfStatement {
-                    self.conditional(node, state, false, depth + 1)
-                } else {
-                    self.while_loop(node, state, depth + 1)
-                };
-                self.literal_skipped_branch = previous;
-                result
-            }
+            NodeKind::IfStatement => self.conditional(node, state, false, depth + 1),
+            NodeKind::While => self.while_loop(node, state, depth + 1),
             NodeKind::Guard => {
                 let previous = self.current_option_guard.replace(node);
                 let result = self.guard(node, state, depth + 1);
@@ -889,8 +858,8 @@ impl<'a, 'g> Check<'a, 'g> {
             self.pending(node, ResultUseBlocker::TypedInput)?;
             return self.unsettled(node, depth + 1);
         };
-        if self.dead_depth != 0 && self.literal_skipped_branch.is_some() {
-            self.note_dead_option_reference(node, value)?;
+        if let Some(path) = &value.path {
+            state.access_option_list(path.root, None, self.budget)?;
         }
         let syntax = &self.module.syntax.nodes[node];
         let root = Root::Temporary(node);
@@ -1080,7 +1049,17 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         match syntax.kind {
-            NodeKind::Arrow => self.arrow(node, facts, state, depth + 1),
+            NodeKind::Arrow => {
+                if state.has_option_lists()
+                    && let Some(arrow) = facts.callable.as_ref().and_then(|f| f.arrow.as_ref())
+                {
+                    for capture in &arrow.captures {
+                        self.budget.step(1)?;
+                        state.access_option_list(capture.path.root, None, self.budget)?;
+                    }
+                }
+                self.arrow(node, facts, state, depth + 1)
+            }
             NodeKind::Group => {
                 let alternatives = self.singleton(state)?;
                 self.component_with_use(
@@ -1120,14 +1099,21 @@ impl<'a, 'g> Check<'a, 'g> {
             NodeKind::Prefix("&" | "&mut") => {
                 let operand = syntax.children[0];
                 let operand_facts = self.expression_facts(operand)?;
-                if self.dead_depth != 0
-                    && self.literal_skipped_branch.is_some()
-                    && let Some(operand_facts) = operand_facts
-                {
-                    self.note_dead_option_reference(operand, operand_facts)?;
-                }
                 let path = operand_facts.and_then(|e| e.path.as_ref());
                 let place = self.place_storage(&state, path)?;
+                if state.has_option_lists()
+                    && let Some(path) = path
+                {
+                    let inspection = if syntax.kind == NodeKind::Prefix("&")
+                        && matches!(&place, PlaceStorage::Exact((Root::Local(id), component))
+                            if std::ptr::eq(*id, path.root) && component.is_empty())
+                    {
+                        self.option_list_inspection(node)
+                    } else {
+                        None
+                    };
+                    state.access_option_list(path.root, inspection, self.budget)?;
+                }
                 if let PlaceStorage::Exact(address) = place {
                     state.store(root, &[], Content::Alias(address), self.budget)?;
                     return self.singleton(state);

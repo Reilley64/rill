@@ -87,7 +87,6 @@ impl<'a, 'g> Check<'a, 'g> {
         let previous = std::mem::replace(&mut self.current_parameters, parameters);
         self.budget.step(1)?;
         let checked = self.checked.contains(&signature.declaration.id);
-        let previous_checked = std::mem::replace(&mut self.current_body_checked, checked);
         let nested_write_body = (signature.declaration.id.kind == DeclarationKind::Function
             && signature.binders.is_empty()
             && checked)
@@ -97,7 +96,7 @@ impl<'a, 'g> Check<'a, 'g> {
         for parameter in parameters {
             let id = &parameter.declaration.id;
             let root = Root::Local(id);
-            states = self.seed(states, root, parameter.declaration.node, &parameter.ty)?;
+            states = self.seed_parameter(states, parameter, checked)?;
             if retained_bool_contents_type(&parameter.ty).is_some() {
                 for state in &mut states {
                     state.store(root, &[], Content::CallerBoolOrigin(id), self.budget)?;
@@ -121,7 +120,6 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         self.current_parameters = previous;
-        self.current_body_checked = previous_checked;
         self.nested_write_body = previous_body;
         Ok(())
     }
@@ -324,7 +322,6 @@ impl<'a, 'g> Check<'a, 'g> {
         let sources = Sources {
             inventory: self.inventory,
             bodies: self.bodies,
-            option_iterations: self.option_iterations,
             pairs: self.pairs,
             scoped: self.scoped,
             nodes: self.nodes,
