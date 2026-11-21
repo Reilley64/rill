@@ -5554,6 +5554,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let local_exclusive =
             carries_exclusive(first) || second.is_some_and(|(fact, _)| carries_exclusive(fact));
         let capture = self.capture_slot(first, first_site, first_depth)?;
+        let exclusive_bool_pair = mode == InvocationMode::Mutable
+            && first.form == CaptureForm::ExplicitBorrow { mutable: true }
+            && second.is_some_and(|(fact, _)| {
+                fact.form == CaptureForm::Value
+                    && matches!(fact.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+            });
         let second = second
             .map(|(fact, (site, depth))| {
                 let slot = self.capture_slot(fact, site, depth)?;
@@ -5574,11 +5580,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .transpose()?;
         let layout = match (callable_field(&first.ty), second) {
             (Some(field), Some((site, slot, _)))
-                if field != CallableField::ExclusiveBool
-                    || (mode == InvocationMode::Mutable
-                        && first.form == CaptureForm::ExplicitBorrow { mutable: true }) =>
+                if field != CallableField::ExclusiveBool || exclusive_bool_pair =>
             {
-                self.budget.step(1)?;
+                let cost = if field == CallableField::ExclusiveBool {
+                    1 + self.facts.nodes().len().max(1).ilog2() as usize
+                } else {
+                    1
+                };
+                self.budget.step(cost)?;
                 callable_field(&self.value(site)?.ty).and_then(|second| {
                     let layout = callable_transport_layout(field, second)?;
                     let matches_cleanup = |field, slot: Slot| {

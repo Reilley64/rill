@@ -1507,6 +1507,34 @@ fn private_callable_transfer_keeps_backing_and_owns_string_cleanup() {
 }
 
 #[test]
+fn exclusive_non_bool_pair_keeps_its_local_formation_budget() {
+    probe(
+        "captures::exclusive_non_bool_pair_keeps_its_local_formation_budget",
+        r#"
+        function forward(job: once () => [&mut bool, i32]): once () => [&mut bool, i32] { return job; }
+        function joined(seed: bool, text: i32): void {
+            let mut flag = seed;
+            let job: mut () => [&mut bool, i32] = () => [&mut flag, text];
+            let held: once () => [&mut bool, i32] = job;
+            let _ = held;
+            flag = true;
+        }
+    "#,
+        |_, module, receipt| {
+            let id = &capture_declaration(module, "joined").id;
+            let fixed = AnalysisLimits {
+                max_work: 2714,
+                max_entries: 449,
+                max_depth: 6,
+            };
+            let local = lower_body(receipt, module, id, fixed).unwrap();
+            assert_eq!(local.completion(), Completion::Checked);
+            assert!(local.mir().is_some() && local.findings().is_empty());
+        },
+    );
+}
+
+#[test]
 fn private_callable_transfer_keeps_an_exclusive_capture_until_discard() {
     probe(
         "captures::private_callable_transfer_keeps_an_exclusive_capture_until_discard",
