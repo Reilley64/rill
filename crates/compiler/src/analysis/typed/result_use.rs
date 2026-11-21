@@ -12,8 +12,7 @@ use crate::analysis::{
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
-use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 mod arrows;
@@ -119,34 +118,6 @@ impl<'g> ResultUseReport<'g> {
 }
 
 type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), (usize, &'a NodeFacts<'g>)>;
-type Scopes<'g> = BTreeMap<&'g DeclarationId, Scope>;
-
-#[derive(Clone, Copy)]
-struct Scope {
-    start: Option<usize>,
-    references: ParameterReferences,
-}
-
-#[derive(Clone, Copy)]
-enum ParameterReferences {
-    None,
-    Sole(NodeId),
-    Multiple,
-}
-
-fn index_scopes<'g>(module: &'g Module, scopes: &mut Scopes<'g>, budget: &mut Budget) -> Work<()> {
-    for declaration in &module.declarations {
-        budget.reserve(1)?;
-        scopes.insert(
-            &declaration.id,
-            Scope {
-                start: declaration.scope,
-                references: ParameterReferences::None,
-            },
-        );
-    }
-    Ok(())
-}
 
 type Alternatives<'g> = Vec<Residence<'g>>;
 
@@ -183,34 +154,16 @@ pub(super) fn check<'g>(
     budget: &mut Budget,
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
-    // Index each root frame's lexical scopes before the typed-node pass so
-    // that the same charged pass can summarize resolved parameter references.
-    let mut scopes = BTreeMap::new();
-    for module in inventory.graph().modules() {
-        budget.step(1)?;
-        index_scopes(module, &mut scopes, budget)?;
-    }
+    let mut option_iterations = loops::OptionIterationEvidence::default();
     let mut nodes = BTreeMap::new();
     for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
-        nodes
+        let first = nodes
             .entry((facts.site.module, facts.site.node))
-            .or_insert((index, facts));
-        // The binding on a value reference identifies the declaration even if
-        // the expression is inside a borrow, an arrow, or a skipped branch.
-        if let NodeFactKind::Expression(value) = &facts.kind
-            && let Some(id) = value.binding
-            && id.kind == DeclarationKind::Parameter
-            && facts.site.module == &id.module
-            && let Some(scope) = scopes.get_mut(id)
-        {
-            let node = facts.site.node;
-            scope.references = match scope.references {
-                ParameterReferences::None => ParameterReferences::Sole(node),
-                ParameterReferences::Sole(old) if old == node => scope.references,
-                _ => ParameterReferences::Multiple,
-            };
-        }
+            .or_insert((index, facts))
+            .0
+            == index;
+        option_iterations.record(facts, core, first);
     }
     let mut checked = BTreeSet::new();
     for body in bodies.checked_bodies() {
@@ -286,7 +239,7 @@ pub(super) fn check<'g>(
     let sources = Sources {
         inventory,
         bodies,
-        scopes: &scopes,
+        option_iterations: &option_iterations,
         pairs: &pairs,
         scoped,
         nodes: &nodes,
@@ -317,7 +270,7 @@ pub(super) fn check<'g>(
         else {
             continue;
         };
-        let mut check = Check::new(sources, module, &contracts, budget, report, false)?;
+        let mut check = Check::new(sources, module, &contracts, budget, report)?;
         if checked.contains(id) {
             check.parametric = Some(*entry);
             check.proving_callable = true;
@@ -332,7 +285,8 @@ pub(super) fn check<'g>(
         contracts.get_mut(id).unwrap().1 = Some(summary);
     }
     for module in inventory.graph().modules() {
-        Check::new(sources, module, &contracts, budget, report, true)?.roots()?;
+        budget.step(1)?;
+        Check::new(sources, module, &contracts, budget, report)?.roots()?;
     }
     Ok(())
 }
@@ -341,7 +295,7 @@ pub(super) fn check<'g>(
 struct Sources<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
     bodies: &'a GenericReport<'g>,
-    scopes: &'a Scopes<'g>,
+    option_iterations: &'a loops::OptionIterationEvidence<'a, 'g>,
     pairs: &'a pairs::PairBodies<'g>,
     scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
@@ -363,8 +317,8 @@ struct Check<'a, 'g> {
     implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
     release_parameters: &'a releases::Parameters<'g>,
     module: &'g Module,
-    scopes: Cow<'a, Scopes<'g>>,
-    indexed_scopes: &'a Scopes<'g>,
+    scopes: BTreeMap<&'g DeclarationId, Option<usize>>,
+    option_iterations: &'a loops::OptionIterationEvidence<'a, 'g>,
     core: Inputs<'a, 'g>,
     budget: &'a mut Budget,
     report: &'a mut ResultUseReport<'g>,
@@ -382,6 +336,9 @@ struct Check<'a, 'g> {
     has_pending: bool,
     current_parameters: &'a [MemberType<'g>],
     current_body_checked: bool,
+    current_option_guard: Option<NodeId>,
+    literal_skipped_branch: Option<(NodeId, NodeId)>,
+    dead_option_references: HashSet<NodeId>,
     nested_write_body: Option<NodeId>,
 }
 
@@ -392,18 +349,12 @@ impl<'a, 'g> Check<'a, 'g> {
         contracts: &'a CallbackContract<'g>,
         budget: &'a mut Budget,
         report: &'a mut ResultUseReport<'g>,
-        root: bool,
     ) -> Work<Self> {
-        let scopes = if root {
-            Cow::Borrowed(sources.scopes)
-        } else {
-            let mut local = BTreeMap::new();
-            for declaration in &module.declarations {
-                budget.reserve(1)?;
-                local.insert(&declaration.id, sources.scopes[&declaration.id]);
-            }
-            Cow::Owned(local)
-        };
+        let mut scopes = BTreeMap::new();
+        for declaration in &module.declarations {
+            budget.reserve(1)?;
+            scopes.insert(&declaration.id, declaration.scope);
+        }
         Ok(Self {
             inventory: sources.inventory,
             bodies: sources.bodies,
@@ -417,7 +368,7 @@ impl<'a, 'g> Check<'a, 'g> {
             core: sources.core,
             module,
             scopes,
-            indexed_scopes: sources.scopes,
+            option_iterations: sources.option_iterations,
             budget,
             report,
             loops: Vec::new(),
@@ -434,6 +385,9 @@ impl<'a, 'g> Check<'a, 'g> {
             has_pending: false,
             current_parameters: &[],
             current_body_checked: false,
+            current_option_guard: None,
+            literal_skipped_branch: None,
+            dead_option_references: HashSet::new(),
             nested_write_body: None,
         })
     }
@@ -644,7 +598,7 @@ impl<'a, 'g> Check<'a, 'g> {
     }
 
     fn exit_scope(&mut self, state: &mut Residence<'g>, scope: usize, site: NodeId) -> Work<()> {
-        for (root, value) in state.take_scope(|root| matches!(root, Root::Local(id) if id.module == self.module.key && self.scopes.get(id).is_some_and(|s| s.start == Some(scope))), self.budget)? {
+        for (root, value) in state.take_scope(|root| matches!(root, Root::Local(id) if self.scopes.get(id).is_some_and(|s| *s == Some(scope))), self.budget)? {
             self.budget.reserve(1)?;
             self.discard(vec![value], root, site, ResultDiscardKind::ScopeExit)?;
         }
@@ -845,9 +799,34 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 Ok(Vec::new())
             }
-            NodeKind::IfStatement => self.conditional(node, state, false, depth + 1),
-            NodeKind::Guard => self.guard(node, state, depth + 1),
-            NodeKind::While => self.while_loop(node, state, depth + 1),
+            NodeKind::IfStatement | NodeKind::While => {
+                let previous = self.literal_skipped_branch;
+                let [condition, body, ..] = children[..] else {
+                    unreachable!()
+                };
+                let condition_syntax = &self.module.syntax.nodes[condition];
+                if previous.is_none()
+                    && condition_syntax.kind == NodeKind::Literal
+                    && condition_syntax.span.bytes() == b"false"
+                {
+                    // This is only a candidate until a typed constant and its
+                    // skipped block are both witnessed at a parameter use.
+                    self.literal_skipped_branch = Some((condition, body));
+                }
+                let result = if syntax.kind == NodeKind::IfStatement {
+                    self.conditional(node, state, false, depth + 1)
+                } else {
+                    self.while_loop(node, state, depth + 1)
+                };
+                self.literal_skipped_branch = previous;
+                result
+            }
+            NodeKind::Guard => {
+                let previous = self.current_option_guard.replace(node);
+                let result = self.guard(node, state, depth + 1);
+                self.current_option_guard = previous;
+                result
+            }
             NodeKind::For => self.for_loop(node, state, depth + 1),
             NodeKind::Break | NodeKind::Continue => self.loop_jump(node, state),
             _ => {
@@ -910,6 +889,9 @@ impl<'a, 'g> Check<'a, 'g> {
             self.pending(node, ResultUseBlocker::TypedInput)?;
             return self.unsettled(node, depth + 1);
         };
+        if self.dead_depth != 0 && self.literal_skipped_branch.is_some() {
+            self.note_dead_option_reference(node, value)?;
+        }
         let syntax = &self.module.syntax.nodes[node];
         let root = Root::Temporary(node);
         if let Some(address) = self.address(&state, value.path.as_ref())? {
@@ -1138,6 +1120,12 @@ impl<'a, 'g> Check<'a, 'g> {
             NodeKind::Prefix("&" | "&mut") => {
                 let operand = syntax.children[0];
                 let operand_facts = self.expression_facts(operand)?;
+                if self.dead_depth != 0
+                    && self.literal_skipped_branch.is_some()
+                    && let Some(operand_facts) = operand_facts
+                {
+                    self.note_dead_option_reference(operand, operand_facts)?;
+                }
                 let path = operand_facts.and_then(|e| e.path.as_ref());
                 let place = self.place_storage(&state, path)?;
                 if let PlaceStorage::Exact(address) = place {

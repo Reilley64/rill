@@ -324,7 +324,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let sources = Sources {
             inventory: self.inventory,
             bodies: self.bodies,
-            scopes: self.indexed_scopes,
+            option_iterations: self.option_iterations,
             pairs: self.pairs,
             scoped: self.scoped,
             nodes: self.nodes,
@@ -334,14 +334,7 @@ impl<'a, 'g> Check<'a, 'g> {
             release_parameters: self.release_parameters,
             core: self.core,
         };
-        let mut check = Check::new(
-            sources,
-            module,
-            self.contracts,
-            self.budget,
-            self.report,
-            false,
-        )?;
+        let mut check = Check::new(sources, module, self.contracts, self.budget, self.report)?;
         check.substitution = self.substitution;
         check.proving_callable = true;
         Ok(check)

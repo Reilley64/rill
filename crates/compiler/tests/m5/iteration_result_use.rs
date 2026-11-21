@@ -356,6 +356,14 @@ fn constrained_or_revisited_sources_do_not_create_iterator_exits() {
             let independent = Err<bool,i32>(72i32);
             return Option.Some(false);
         }
+        function captured(xs: List<Option<string>>): Option<bool> {
+            let observe = () => first(&xs);
+            let _ = observe;
+            let debt = Err<bool,i32>(82i32);
+            for (let item of ((xs))) { let t = item?; let _ = &t; }
+            let _ = debt;
+            return Option.Some(true);
+        }
         function revisit(xs: List<Option<string>>): Option<bool> {
             let mut again = false;
             while (true) {
@@ -368,7 +376,7 @@ fn constrained_or_revisited_sources_do_not_create_iterator_exits() {
             return Option.Some(true);
         }
         "#,
-        |_, _, typed| {
+        |request, _, typed| {
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             assert!(typed.receipt().is_none());
             let uses = typed.result_use().unwrap();
@@ -377,14 +385,299 @@ fn constrained_or_revisited_sources_do_not_create_iterator_exits() {
             };
             assert_eq!(discard.origin.span.bytes(), b"Err<bool,i32>(72i32)");
             assert_eq!(discard.discard.span.bytes(), b"return Option.Some(false);");
-            assert_eq!(uses.pending().len(), 5, "{uses:?}");
-            assert!(
-                uses.pending()
-                    .iter()
-                    .all(|p| p.blocker == ResultUseBlocker::Storage)
+            let pending: Vec<_> = uses
+                .pending()
+                .iter()
+                .map(|p| {
+                    assert_eq!(p.blocker, ResultUseBlocker::Storage);
+                    assert_eq!(p.site.module.origin, Origin::Application);
+                    std::str::from_utf8(p.site.span.bytes()).unwrap()
+                })
+                .collect();
+            assert_eq!(
+                pending,
+                [
+                    "for (let item of xs) { let _ = &item; let _ = debt; break; }",
+                    "for (let item of xs) { let _ = &item; }",
+                    "for (let item of xs) { let t = item?; let _ = &t; }",
+                    "for (let item of ((xs))) { let t = item?; let _ = &t; }",
+                    "for (let item of xs) { if (again) { let t = item?; let _ = &t; } }",
+                ]
             );
+            replay_exact(request);
         },
     );
+}
+
+#[test]
+fn dead_reads_and_a_proven_empty_source_keep_feasible_result_exits() {
+    probe_report(
+        "iteration_result_use::dead_reads_and_a_proven_empty_source_keep_feasible_result_exits",
+        r#"
+        import std::collection::{first as headOf};
+        function deadRead(xs: List<Option<string>>): Option<bool> {
+            if (false) { let _ = &xs; }
+            let debt = Err<bool,i32>(61i32);
+            for (let item of xs) { let _ = &item; }
+            return Option.Some(true);
+        }
+        function empty(xs: List<Option<string>>): Option<bool> {
+            guard let head = headOf(&xs) else {
+                let debt = Err<bool,i32>(81i32);
+                for (let item of xs) { let _ = &item; let _ = debt; break; }
+                return Option.Some(false);
+            }
+            let _ = head;
+            return Option.Some(true);
+        }
+        "#,
+        |request, _, typed| {
+            let uses = typed.result_use().unwrap();
+            assert_eq!(
+                typed.completion(),
+                TypedCompletion::SourceRejected,
+                "{uses:?}"
+            );
+            assert!(typed.receipt().is_none());
+            assert!(uses.pending().is_empty(), "{uses:?}");
+            assert_eq!(uses.discards().len(), 2, "{uses:?}");
+            for (origin, exit) in [
+                ("Err<bool,i32>(61i32)", "return Option.Some(true);"),
+                ("Err<bool,i32>(81i32)", "return Option.Some(false);"),
+            ] {
+                assert!(
+                    uses.discards()
+                        .iter()
+                        .any(|witness| witness.code() == "R0103"
+                            && witness.kind == ResultDiscardKind::ScopeExit
+                            && witness.origin.span.bytes() == origin.as_bytes()
+                            && witness.discard.span.bytes() == exit.as_bytes()),
+                    "{uses:?}"
+                );
+            }
+            replay_exact(request);
+        },
+    );
+}
+
+#[test]
+fn deep_source_groups_keep_the_owed_exit_at_exact_limits() {
+    let source = format!(
+        r#"
+        function probe(xs: List<Option<string>>): Option<bool> {{
+            let debt = Err<bool,i32>(42i32);
+            for (let item of {}xs{}) {{ let t = item?; let _ = &t; continue; }}
+            let _ = debt;
+            return Option.Some(true);
+        }}
+    "#,
+        "(".repeat(14),
+        ")".repeat(14)
+    );
+    probe_report(
+        "iteration_result_use::deep_source_groups_keep_the_owed_exit_at_exact_limits",
+        &source,
+        |request, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::SourceRejected);
+            assert!(typed.receipt().is_none());
+            assert!(typed.statistics().max_depth >= 17);
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty());
+            let [discard] = uses.discards() else {
+                panic!("{uses:?}")
+            };
+            assert_eq!(discard.code(), "R0103");
+            assert_eq!(discard.origin.span.bytes(), b"Err<bool,i32>(42i32)");
+            assert_eq!(discard.discard.span.bytes(), b"item?");
+            assert_eq!(discard.kind, ResultDiscardKind::ScopeExit);
+            replay_exact(request);
+        },
+    );
+}
+
+#[test]
+fn deep_binder_groups_keep_the_observed_receipt_at_exact_limits() {
+    let source = format!(
+        r#"
+        function probe(xs: List<Option<string>>): Option<bool> {{
+            let debt = Err<bool,i32>(42i32);
+            let _ = debt;
+            for (let {}item{} of xs) {{ let t = item?; let _ = &t; continue; }}
+            return Option.Some(true);
+        }}
+    "#,
+        "(".repeat(14),
+        ")".repeat(14)
+    );
+    probe_report(
+        "iteration_result_use::deep_binder_groups_keep_the_observed_receipt_at_exact_limits",
+        &source,
+        |request, _, typed| {
+            assert_eq!(typed.completion(), TypedCompletion::Checked);
+            assert!(typed.receipt().is_some());
+            assert!(typed.statistics().max_depth >= 17);
+            let uses = typed.result_use().unwrap();
+            assert!(uses.pending().is_empty() && uses.discards().is_empty());
+            replay_exact(request);
+        },
+    );
+}
+
+fn replay_exact(request: &InstalledRequest) {
+    let graph = loader::load_installed(request.clone()).unwrap();
+    let report = analyze_typed(&graph, AnalysisLimits::default());
+    let stats = report.statistics();
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let replay = analyze_typed(&graph, exact);
+    assert_eq!(replay.statistics(), stats);
+    assert_eq!(replay.completion(), report.completion());
+    assert_eq!(replay.receipt().is_some(), report.receipt().is_some());
+    let uses = report.result_use().unwrap();
+    let actual = replay.result_use().unwrap();
+    assert_eq!(actual.discards().len(), uses.discards().len());
+    assert_eq!(actual.pending().len(), uses.pending().len());
+    for (a, b) in actual.discards().iter().zip(uses.discards()) {
+        assert_eq!(a.code(), b.code());
+        assert_eq!(a.kind, b.kind);
+        assert_eq!(a.storage, b.storage);
+        assert_eq!(a.component, b.component);
+        assert_eq!(a.storage_component, b.storage_component);
+        assert_same_site(a.origin, b.origin);
+        assert_same_site(a.discard, b.discard);
+    }
+    for (a, b) in actual.pending().iter().zip(uses.pending()) {
+        assert_eq!(a.blocker, b.blocker);
+        assert_same_site(a.site, b.site);
+    }
+    for short in [
+        AnalysisLimits {
+            max_work: exact.max_work - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_entries: exact.max_entries - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_depth: exact.max_depth - 1,
+            ..exact
+        },
+    ] {
+        let limited = analyze_typed(&graph, short);
+        assert_eq!(
+            limited.completion(),
+            TypedCompletion::ResourceLimit,
+            "{short:?}"
+        );
+        assert!(limited.receipt().is_none());
+    }
+}
+
+fn assert_same_site(
+    a: compiler::analysis::scalars::Site<'_>,
+    b: compiler::analysis::scalars::Site<'_>,
+) {
+    assert_eq!((a.module, a.node), (b.module, b.node));
+    assert_eq!(
+        (a.span.start(), a.span.end()),
+        (b.span.start(), b.span.end())
+    );
+    assert_eq!(a.span.bytes(), b.span.bytes());
+}
+
+#[test]
+fn unsupported_option_binders_keep_their_published_caps() {
+    // Fixed M4 limits from before the named Option-item handoff, not limits
+    // derived from this run. Grouped wildcard patterns remain unsupported.
+    for (fixture, pattern, work, entries, depth) in [
+        ("bare_wild", "_", 322716, 47636, 12),
+        ("group_wild", "(( _ ))", 322730, 47638, 12),
+        (
+            "deep_wild",
+            "((((((((((((((_))))))))))))))",
+            322814,
+            47650,
+            17,
+        ),
+    ] {
+        let iteration = format!("for (let {pattern} of xs) {{ break; }}");
+        let source = format!(
+            "function probe(xs: List<Option<string>>, outer: string): Option<bool> {{ {iteration} return Option.Some(true); }}"
+        );
+        probe_report(
+            "iteration_result_use::unsupported_option_binders_keep_their_published_caps",
+            &source,
+            |request, _, _| {
+                assert_fixed_pending(request, fixture, &iteration, (work, entries, depth))
+            },
+        );
+    }
+}
+
+#[test]
+fn local_alias_sources_keep_their_published_caps() {
+    for (fixture, place, work, entries) in [
+        ("alias", "ys", 323027, 47750),
+        ("group_alias", "((ys))", 323113, 47775),
+        (
+            "deep_alias",
+            "((((((((((((((ys))))))))))))))",
+            325023,
+            48009,
+        ),
+    ] {
+        let iteration =
+            format!("for (let item of {place}) {{ let text = item?; let _ = &text; continue; }}");
+        let source = format!(
+            "function probe(xs: List<Option<string>>, outer: string): Option<bool> {{ let ys = xs; {iteration} return Option.Some(true); }}"
+        );
+        probe_report(
+            "iteration_result_use::local_alias_sources_keep_their_published_caps",
+            &source,
+            |request, _, _| assert_fixed_pending(request, fixture, &iteration, (work, entries, 12)),
+        );
+    }
+}
+
+fn assert_fixed_pending(
+    request: &InstalledRequest,
+    fixture: &str,
+    iteration: &str,
+    (work, entries, depth): (usize, usize, usize),
+) {
+    let graph = loader::load_installed(request.clone()).unwrap();
+    let report = analyze_typed(
+        &graph,
+        AnalysisLimits {
+            max_work: work,
+            max_entries: entries,
+            max_depth: depth,
+        },
+    );
+    assert_eq!(
+        report.completion(),
+        TypedCompletion::Incomplete,
+        "{fixture}"
+    );
+    let stats = report.statistics();
+    assert_eq!(
+        (stats.work, stats.entries, stats.max_depth),
+        (work, entries, depth),
+        "{fixture}"
+    );
+    assert!(report.receipt().is_none());
+    let uses = report.result_use().unwrap();
+    assert!(uses.discards().is_empty());
+    let [pending] = uses.pending() else {
+        panic!("{uses:?}")
+    };
+    assert_eq!(pending.blocker, ResultUseBlocker::Storage);
+    assert_eq!(pending.site.module.origin, Origin::Application);
+    assert_eq!(pending.site.span.bytes(), iteration.as_bytes());
 }
 
 fn child_of_kind(app: &loader::Module, parent: usize, kind: NodeKind) -> usize {
