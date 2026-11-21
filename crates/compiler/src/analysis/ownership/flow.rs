@@ -35,7 +35,7 @@ struct Held {
 enum CallableOwner {
     LocalCapture(NodeId),
     ListArrow(NodeId),
-    LocalExclusive,
+    LocalExclusive(Option<CallableLayout>),
     Pair(CallableLayout),
     Formal(CallableLayout),
     Returned(CallableLayout),
@@ -44,9 +44,10 @@ enum CallableOwner {
 impl CallableOwner {
     fn transport_cleanup(self) -> Option<CallableLayout> {
         match self {
-            Self::LocalCapture(_) | Self::ListArrow(_) | Self::LocalExclusive | Self::Pair(_) => {
-                None
-            }
+            Self::LocalCapture(_)
+            | Self::ListArrow(_)
+            | Self::LocalExclusive(_)
+            | Self::Pair(_) => None,
             Self::Formal(layout) | Self::Returned(layout) => Some(layout),
         }
     }
@@ -659,7 +660,7 @@ fn cleanup_operation<'g>(
             Operation::Cleanup(vec![cleanup])
         }
         cleanup @ Cleanup::EndStorage(_)
-            if held.callable_owner == Some(CallableOwner::LocalExclusive) =>
+            if matches!(held.callable_owner, Some(CallableOwner::LocalExclusive(_))) =>
         {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
@@ -2237,7 +2238,7 @@ pub(super) fn run<'a, 'g>(
             loans: Arc::from([Loan {
                 source: *formal,
                 site: slots[*formal].node,
-                exclusive: false,
+                exclusive: layout.0[0] == CallableField::ExclusiveBool,
                 kind: LoanKind::IncomingCallableBacking,
             }]),
             ..Held::default()
@@ -2891,16 +2892,25 @@ pub(super) fn run<'a, 'g>(
                         return Err(Stop::Pending(node));
                     };
                     let actual = initialized(&state[*argument], node)?;
-                    let Some(CallableOwner::Pair(layout)) = actual.callable_owner else {
-                        return Err(Stop::Pending(node));
+                    let (layout, exclusive) = match actual.callable_owner {
+                        Some(CallableOwner::Pair(layout)) => (layout, false),
+                        Some(CallableOwner::LocalExclusive(Some(layout))) => (layout, true),
+                        _ => return Err(Stop::Pending(node)),
                     };
                     budget.step(actual.loans.len())?;
-                    if actual
-                        .loans
-                        .iter()
-                        .any(|loan| loan.exclusive || loan.source == *argument)
-                        || !matches!(state[into], State::Vacant)
-                    {
+                    let backed = if exclusive {
+                        // Carry the one actual loan, not a descriptor inferred
+                        // from the parameter's or result's callable type.
+                        matches!(actual.loans.as_ref(),
+                            [Loan { source, exclusive: true, kind: LoanKind::Backing, .. }]
+                                if *source != *argument && matches!(state[*source], State::Initialized(_)))
+                    } else {
+                        !actual
+                            .loans
+                            .iter()
+                            .any(|loan| loan.exclusive || loan.source == *argument)
+                    };
+                    if !backed || !matches!(state[into], State::Vacant) {
                         return Err(Stop::Pending(node));
                     }
                     let cache = cache.as_deref_mut().ok_or(Stop::Pending(node))?;
@@ -3371,16 +3381,33 @@ pub(super) fn run<'a, 'g>(
                     } else {
                         false
                     };
+                    let callable_owner = if local_exclusive {
+                        let transport = if let (Some(layout), Some(second)) = (layout, second) {
+                            budget.step(1)?;
+                            // The exclusive backing must be in the first
+                            // descriptor, not merely somewhere in the union.
+                            (matches!(
+                                first.loans.as_ref(),
+                                [Loan {
+                                    exclusive: true,
+                                    kind: LoanKind::Backing,
+                                    ..
+                                }]
+                            ) && initialized(&state[second], node)?.loans.is_empty())
+                            .then_some(layout)
+                        } else {
+                            None
+                        };
+                        Some(CallableOwner::LocalExclusive(transport))
+                    } else if track_single {
+                        Some(CallableOwner::LocalCapture(node))
+                    } else {
+                        layout.map(CallableOwner::Pair)
+                    };
                     state[into] = State::Initialized(Held {
                         loans,
                         capture_drops: [drop_of(capture), second.and_then(drop_of)],
-                        callable_owner: if local_exclusive {
-                            Some(CallableOwner::LocalExclusive)
-                        } else if track_single {
-                            Some(CallableOwner::LocalCapture(node))
-                        } else {
-                            layout.map(CallableOwner::Pair)
-                        },
+                        callable_owner,
                         // An exclusive capture transfers locally but grants no
                         // invocation proof, even through a weakened interface.
                         pair_origin: (second.is_some() && !local_exclusive).then_some((node, mode)),
@@ -3907,7 +3934,7 @@ pub(super) fn run<'a, 'g>(
                         callable_exported = true;
                     } else if matches!(
                         owner,
-                        Some(CallableOwner::LocalExclusive | CallableOwner::Returned(_))
+                        Some(CallableOwner::LocalExclusive(_) | CallableOwner::Returned(_))
                     ) {
                         // Nothing proves a further erased output boundary.
                         return Err(Stop::Pending(node));
