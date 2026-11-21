@@ -226,7 +226,7 @@ fn implicit_guard_does_not_pay_for_written_call_verification() {
         "graph::closed_release::implicit_guard_does_not_pay_for_written_call_verification",
         "function implicit(lock: LockGuard<i32>): void {}",
         |_, _, receipt| {
-            // Fixed graph cap before verification of written releases.
+            // Exact graph cap before the written release verifier, in both installed modes.
             let limits = AnalysisLimits {
                 max_work: 185222,
                 max_entries: 3993,
