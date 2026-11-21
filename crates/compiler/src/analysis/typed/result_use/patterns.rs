@@ -176,8 +176,8 @@ impl<'a, 'g> Check<'a, 'g> {
     ) -> Work<Alternatives<'g>> {
         self.depth(depth)?;
         let root = Root::Temporary(matched.scrutinee);
-        let original = self
-            .expression_facts(matched.scrutinee)?
+        let scrutinee = self.expression_facts(matched.scrutinee)?;
+        let original = scrutinee
             .filter(|fact| {
                 fact.access == Access::Owned
                     && !matches!(fact.ty.as_ref(), TypeTerm::Reference { .. })
@@ -186,13 +186,38 @@ impl<'a, 'g> Check<'a, 'g> {
         let source = self.address(&state, original)?;
         let remaining = self.expression(matched.scrutinee, state, depth + 1)?;
         if let Some(source) = source {
+            if scrutinee.is_some_and(
+                |fact| matches!(fact.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"),
+            ) {
+                let mut snapshots = Vec::new();
+                for mut state in remaining {
+                    // Pattern tests use the evaluated copy, not a view into
+                    // the caller's storage. Refine an unknown read at this
+                    // point, before any guard or body can write to the source.
+                    if state
+                        .test(root, &[], &Constructor::Boolean(true), self.budget)?
+                        .is_none()
+                    {
+                        let mut other = state.fork(self.budget)?;
+                        for (branch, truth) in [(&mut other, false), (&mut state, true)] {
+                            self.record_boolean(branch, root, &[], truth)?;
+                            self.record_boolean(branch, source.0, &source.1, truth)?;
+                        }
+                        self.budget.reserve(1)?;
+                        snapshots.push(other);
+                    }
+                    self.budget.reserve(1)?;
+                    snapshots.push(state);
+                }
+                return self.match_arms(node, matched, snapshots, true, depth);
+            }
             self.budget.reserve(1)?;
             self.match_views.push((source, root));
-            let result = self.match_arms(node, matched, remaining, depth);
+            let result = self.match_arms(node, matched, remaining, false, depth);
             self.match_views.pop();
             result
         } else {
-            self.match_arms(node, matched, remaining, depth)
+            self.match_arms(node, matched, remaining, false, depth)
         }
     }
 
@@ -201,6 +226,7 @@ impl<'a, 'g> Check<'a, 'g> {
         node: NodeId,
         matched: &Match<'g>,
         mut remaining: Alternatives<'g>,
+        copy_bool: bool,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         let root = Root::Temporary(matched.scrutinee);
@@ -224,7 +250,21 @@ impl<'a, 'g> Check<'a, 'g> {
                 else {
                     continue;
                 };
-                self.pattern_binders(&mut state, root, &[], &arm.pattern, false)?;
+                if copy_bool {
+                    if let Some(binder) = arm.pattern.binders.first()
+                        && let Some(truth) =
+                            state.test(root, &[], &Constructor::Boolean(true), self.budget)?
+                    {
+                        self.record_boolean(
+                            &mut state,
+                            Root::Local(binder.declaration),
+                            &[],
+                            truth,
+                        )?;
+                    }
+                } else {
+                    self.pattern_binders(&mut state, root, &[], &arm.pattern, false)?;
+                }
                 let states = if let Some(guard) = arm.guard {
                     self.branch_condition(guard, state, depth + 1)?
                 } else {
@@ -233,7 +273,14 @@ impl<'a, 'g> Check<'a, 'g> {
                 };
                 for (truth, mut state) in states {
                     if !truth {
-                        self.pattern_binders(&mut state, root, &[], &arm.pattern, true)?;
+                        if copy_bool {
+                            // Drop the binder copy, not the scrutinee snapshot.
+                            if let Some(binder) = arm.pattern.binders.first() {
+                                state.take(Root::Local(binder.declaration), &[], self.budget)?;
+                            }
+                        } else {
+                            self.pattern_binders(&mut state, root, &[], &arm.pattern, true)?;
+                        }
                         failed.extend(self.singleton(state)?);
                         continue;
                     }

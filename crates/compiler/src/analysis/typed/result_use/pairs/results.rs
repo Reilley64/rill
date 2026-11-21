@@ -37,8 +37,8 @@ impl<'a, 'g> Check<'a, 'g> {
     }
 
     fn captured_flag_source(&mut self, declaration: &'g DeclarationId) -> Work<Root<'g>> {
-        // A whole-local capture has no projections. An enclosing match may
-        // hold the current value and any writes through its active view.
+        // A whole-local capture has no projections. Resolve the caller's
+        // current storage; a copyable Boolean match does not redirect it.
         let mut source = Root::Local(declaration);
         self.redirect_view(&mut source, &mut Vec::new())?;
         Ok(source)

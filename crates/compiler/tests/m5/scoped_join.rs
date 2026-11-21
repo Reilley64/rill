@@ -3271,7 +3271,7 @@ fn fresh_join_preserves_the_relation_to_an_unknown_captured_flag() {
 }
 
 #[test]
-fn fresh_join_captures_the_current_match_view() {
+fn fresh_join_captures_the_current_match_source() {
     for (declaration, write, expected) in [
         (
             "function probe(flag: bool): void {",
@@ -3292,7 +3292,7 @@ fn fresh_join_captures_the_current_match_view() {
             }}, false => {{}} }}; }}"#
         );
         probe_report(
-            "scoped_join::fresh_join_captures_the_current_match_view",
+            "scoped_join::fresh_join_captures_the_current_match_source",
             &source,
             |_, _, typed| {
                 assert_eq!(typed.completion(), expected);
@@ -3302,13 +3302,214 @@ fn fresh_join_captures_the_current_match_view() {
                     assert!(uses.discards().is_empty());
                 } else {
                     let [discard] = uses.discards() else {
-                        panic!("the false snapshot leaves the fresh Result unobserved")
+                        panic!("the written flag leaves the fresh Result unobserved")
                     };
                     assert_eq!(discard.origin.span.bytes(), b"Err<bool,i32>(7i32)");
                 }
             },
         );
     }
+}
+
+#[test]
+fn fresh_join_reads_copyable_match_sources() {
+    installed(
+        "scoped_join::fresh_join_reads_copyable_match_sources",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            let observe =
+                "let [b,r] = join([() => flag, () => Err<bool,i32>(7i32)]); if (b) { let _ = r; }";
+            let observed_after_write = observe.replace("if (b)", "if (!b)");
+            let written = "match (flag) { true => { flag = false; }, false => {} };";
+            let correlated = observe.replace(
+                "if (b) { let _ = r; }",
+                "if (flag) { if (b) { let _ = r; } } else { if (!b) { let _ = r; } }",
+            );
+            let binder_copy = observe.replace(
+                "if (b) { let _ = r; }",
+                "if (snapshot && !b && !flag) { let _ = r; }",
+            );
+            for (name, declaration, statements, exit) in [
+        (
+            "wildcard",
+            "()",
+            format!("let flag = true; match (flag) {{ _ => {{ {observe} }} }};"),
+            None,
+        ),
+        (
+            "binder",
+            "()",
+            format!("let flag = true; match (flag) {{ snapshot => {{ {observe} }} }};"),
+            None,
+        ),
+        (
+            "after write",
+            "()",
+            format!("let mut flag = true; {written} {observe}"),
+            Some("function body"),
+        ),
+        (
+            "observe after write",
+            "()",
+            format!("let mut flag = true; {written} {observed_after_write}"),
+            None,
+        ),
+        (
+            "refined grouped read",
+            "(flag: bool)",
+            format!("match (((flag))) {{ true => {{ {observe} }}, false => {{}} }};"),
+            None,
+        ),
+        (
+            "unknown binder and source agree before writes",
+            "(flag: bool)",
+            format!(
+                "match (flag) {{ snapshot => {{ {} }} }};",
+                correlated.replace("if (flag)", "if (snapshot)")
+            ),
+            None,
+        ),
+        (
+            "unknown wildcard and captured source agree",
+            "(flag: bool)",
+            format!("match (flag) {{ _ => {{ {correlated} }} }};"),
+            None,
+        ),
+        (
+            "literal refines direct reads",
+            "(flag: bool)",
+            "match (flag) { true => { let r = Err<bool,i32>(7i32); if (flag) { let _ = r; } }, false => {} };".to_owned(),
+            None,
+        ),
+        (
+            "write changes direct reads after the match",
+            "()",
+            format!("let mut flag = true; {written} let r = Err<bool,i32>(7i32); if (flag) {{ let _ = r; }}"),
+            Some("function body"),
+        ),
+        (
+            "binder is a copy, including for direct reads",
+            "()",
+            format!(
+                "let mut flag = true; match (flag) {{ snapshot => {{ flag = false; {binder_copy} }} }};"
+            ),
+            None,
+        ),
+        (
+            "after nearest break",
+            "()",
+            format!(
+                "let mut flag = true; while (true) {{ while (flag) {{ match (flag) {{ true => {{ flag = false; break; }}, false => {{}} }}; }} {observe} break; }}"
+            ),
+            Some("break;"),
+        ),
+        (
+            "after nearest continue",
+            "()",
+            format!(
+                "let mut flag = true; while (true) {{ while (flag) {{ match (flag) {{ true => {{ flag = false; continue; }}, false => {{}} }}; }} {observed_after_write} break; }}"
+            ),
+            None,
+        ),
+        (
+            "failed guard retains the snapshot, not the source refinement",
+            "()",
+            format!(
+                "let mut flag = true; match (flag) {{ snapshot if reset(&mut flag) && false => {{}}, true => {{ {observe} }}, false => {{}} }};"
+            ),
+            Some("matching arm"),
+        ),
+    ] {
+        let body = format!("{{ {statements} }}");
+        let guard_write = exit == Some("matching arm");
+        let helper = if guard_write {
+            "function reset(target: &mut bool): bool { *target = false; return false; }"
+        } else {
+            ""
+        };
+        let source = format!(
+            "{BASE}\nimport std::routine::join; {helper} function probe{declaration}: void {body}"
+        );
+        fs::write(&request.entry, source).unwrap();
+        for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                }).unwrap();
+                let module = app(&graph);
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let arm_body = format!("{{ {observe} }}");
+                let check = |report: &TypedReport<'_>| {
+                    let uses = report.result_use().unwrap();
+                    if guard_write {
+                        // The caller must invalidate the source fact, even though M4
+                        // cannot identify the callee's store through its reference formal.
+                        let [store] = uses.pending() else {
+                            panic!("{name}: expected only the unknown callee storage");
+                        };
+                        assert_eq!(store.blocker, ResultUseBlocker::Storage);
+                        assert_eq!(store.site.span.bytes(), b"*target = false;");
+                    } else {
+                        assert!(uses.pending().is_empty(), "{name}");
+                    }
+                    if let Some(exit) = exit {
+                        assert_eq!(
+                            report.completion(),
+                            if guard_write {
+                                TypedCompletion::Incomplete
+                            } else {
+                                TypedCompletion::SourceRejected
+                            },
+                            "{name}"
+                        );
+                        assert!(report.receipt().is_none());
+                        let [discard] = uses.discards() else {
+                            panic!("{name}: expected the original unobserved Result");
+                        };
+                        assert_eq!(discard.code(), "R0103");
+                        assert_eq!(discard.origin.span.bytes(), b"Err<bool,i32>(7i32)");
+                        let exit = match exit {
+                            "function body" => &body,
+                            "matching arm" => &arm_body,
+                            jump => jump,
+                        };
+                        assert_eq!(discard.discard.span.bytes(), exit.as_bytes());
+                        let text = std::str::from_utf8(module.snapshot.bytes()).unwrap();
+                        assert_eq!(discard.discard.span.start(), text.rfind(exit).unwrap());
+                    } else {
+                        assert_eq!(report.completion(), TypedCompletion::Checked, "{name}");
+                        assert!(uses.discards().is_empty(), "{name}");
+                        assert!(report.receipt().is_some(), "{name}");
+                    }
+                };
+                check(&typed);
+                if let Some(receipt) = typed.receipt()
+                    && statements.contains("join([")
+                {
+                    assert!(
+                        receipt
+                            .scoped_join(module, call_node(module, "join(["))
+                            .unwrap()
+                            .is_some()
+                    );
+                }
+                let (exact, short) = budget_caps(typed.statistics());
+                let replay = analyze_typed(&graph, exact);
+                assert_eq!(replay.statistics(), typed.statistics(), "{name}");
+                check(&replay);
+                for cap in short {
+                    let limited = analyze_typed(&graph, cap);
+                    assert_eq!(
+                        limited.completion(),
+                        TypedCompletion::ResourceLimit,
+                        "{name}"
+                    );
+                    assert!(limited.receipt().is_none(), "{name}");
+                }
+        }
+    }
+        },
+    );
 }
 
 #[test]
