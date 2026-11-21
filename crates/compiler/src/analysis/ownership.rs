@@ -355,6 +355,8 @@ pub struct Block<'g> {
     pub site: Site<'g>,
     pub operation: Operation<'g>,
     pub terminator: Terminator,
+    // Closed only for a checked fresh constructor at the exact admitted type.
+    fresh_result_storage: Option<&'g std::path::Path>,
 }
 
 /// A named or temporary storage root, optionally projected to member storage.
@@ -812,6 +814,14 @@ pub enum CaptureCopyEffect<'g> {
 pub enum Cleanup<'g> {
     EndStorage(Place<'g>),
     Drop(Place<'g>),
+    /// Drop the installed cause-free `OwnedErr<i32>`, including its original location.
+    DropFreshResultError {
+        operand: Place<'g>,
+        origin: Site<'g>,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        storage_source: &'g std::path::Path,
+    },
     /// Consume an owned `Option<string>`, dropping its string only in `some`.
     DropOptionPayload {
         operand: Place<'g>,
@@ -1883,11 +1893,19 @@ enum StorageCleanup<'g> {
     Drop,
     DropOptionPayload(&'g DeclarationId),
     Unlowered,
+    FreshBoolResult(FreshResultStorage<'g>),
     ReleaseGuard(GuardRelease<'g>),
     DisposeListI32(ListDisposal<'g>),
     DisposeOwnedListIterI32(ListDisposal<'g>),
     DisposeListText(TextListDisposal<'g>),
     DisposeOwnedListIterText(TextListDisposal<'g>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FreshResultStorage<'g> {
+    err: &'g DeclarationId,
+    wrapper: &'g DeclarationId,
+    storage_source: &'g std::path::Path,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2087,6 +2105,7 @@ enum Action<'g> {
         variant: &'g DeclarationId,
         payload: Option<Slot>,
         into: Slot,
+        fresh_result_ok: bool,
     },
     ConstructResultError {
         constructor: &'g DeclarationId,
@@ -2094,6 +2113,7 @@ enum Action<'g> {
         wrapper: &'g DeclarationId,
         payload: Slot,
         into: Slot,
+        fresh_storage: Option<&'g std::path::Path>,
     },
     TakeResultSuccess {
         operand: Slot,

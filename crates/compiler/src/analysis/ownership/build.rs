@@ -119,6 +119,16 @@ struct CheckedPropagation<'a, 'g> {
     option_take: Option<(&'a Type<'g>, OptionTakeSource)>,
 }
 
+// The caller has already proved the canonical parent and i32 error type.
+fn bool_result_success(ty: &TypeTerm<'_>) -> bool {
+    let parent = match ty {
+        TypeTerm::Variant { parent, .. } => parent.as_ref(),
+        parent => parent,
+    };
+    matches!(parent, TypeTerm::Nominal { arguments, .. }
+        if matches!(arguments.as_slice(), [success, _] if scalar::scalar(success) == Some(Primitive::Bool)))
+}
+
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(p) if p.name() == "string")
 }
@@ -822,9 +832,20 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 self.prove_no_variant_disposer(node, ty, [role.ok, role.err])?;
                 if variant == Some(&role.ok.id) {
                     (false, StorageCleanup::End)
+                } else if let Some(representation) = role.representation
+                    && bool_result_success(ty)
+                {
+                    // Only checked construction in flow permits local retirement.
+                    let _: fn(rill_error_storage::OwnedErr<i32>) = std::mem::drop;
+                    (
+                        true,
+                        StorageCleanup::FreshBoolResult(FreshResultStorage {
+                            err: &role.err.id,
+                            wrapper: &role.wrapper.id,
+                            storage_source: representation.storage_source,
+                        }),
+                    )
                 } else {
-                    // Storage may contain a sealed Err, which this slice can
-                    // transfer but cannot dispose.
                     (true, StorageCleanup::Unlowered)
                 }
             }
@@ -3839,6 +3860,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         variant: exit.failure,
                         payload: None,
                         into: output,
+                        fresh_result_ok: false,
                     },
                     Edges::Next(export),
                 )?;
@@ -4520,6 +4542,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 variant: declaration,
                 payload: payload.map(|(_, slot)| slot),
                 into,
+                fresh_result_ok: self.scalar_result_role(&data.ty).is_some_and(|(role, _)| {
+                    *declaration == &role.ok.id && bool_result_success(&data.ty)
+                }),
             },
             Edges::Next(next),
         )?;
@@ -4610,6 +4635,20 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         depth: usize,
     ) -> ResultOf<Pc> {
         let (origin_node, constructor) = self.checked_scalar_error(node, facts, data)?;
+        let fresh_storage = match self.slots[into].cleanup {
+            StorageCleanup::FreshBoolResult(storage) if bool_result_success(&data.result) => {
+                self.budget.reserve(2)?;
+                let wrapper = Arc::new(TypeTerm::Nominal {
+                    declaration: storage.wrapper,
+                    arguments: vec![data.payload.clone()],
+                });
+                if self.outer_disposer(node, &wrapper)?.is_some() {
+                    return Err(Stop::Pending(node));
+                }
+                Some(storage.storage_source)
+            }
+            _ => None,
+        };
         let payload = self.slot(data.value, &data.payload)?;
         let construct = self.emit(
             origin_node,
@@ -4619,6 +4658,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 wrapper: data.wrapper,
                 payload,
                 into,
+                fresh_storage,
             },
             Edges::Next(next),
         )?;
@@ -4632,8 +4672,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        let ty = self.value(value)?.ty.clone();
+        let facts = self.value(value)?;
+        let ty = facts.ty.clone();
         let slot = self.slot(value, &ty)?;
+        // This slice retires a moved residence, not arbitrary discarded Result expressions.
+        if matches!(self.slots[slot].cleanup, StorageCleanup::FreshBoolResult(_))
+            && facts.path.is_none()
+        {
+            self.slots[slot].cleanup = StorageCleanup::Unlowered;
+        }
         let end = if self.slots[slot].needs_boundary_cleanup() {
             self.cleanup(statement, &[slot], next)?
         } else {

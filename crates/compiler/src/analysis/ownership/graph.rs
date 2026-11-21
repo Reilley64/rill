@@ -62,7 +62,21 @@ pub enum DependencyContract<'g> {
     ListTextElementDisposal {
         bridge: &'g DeclarationId,
     },
+    /// A constructor outside the closed storage contract.
     ResultConstructor,
+    /// Exact cause-free `Result<bool, i32>` construction in pinned storage.
+    FreshResultConstructor {
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        storage_source: &'g std::path::Path,
+    },
+    /// Drop the actual sealed wrapper, not a call to an ordinary disposer.
+    FreshResultErrorDisposal {
+        /// The constructor node in the dependency site's module.
+        origin: NodeId,
+        variant: &'g DeclarationId,
+        storage_source: &'g std::path::Path,
+    },
     RetainedErrorDisplay,
 }
 
@@ -571,6 +585,8 @@ fn analyze<'g>(
                             | DependencyContract::ListI32Iteration { .. }
                             | DependencyContract::ListTextCollection { .. }
                             | DependencyContract::ListTextElementDisposal { .. }
+                            | DependencyContract::FreshResultConstructor { .. }
+                            | DependencyContract::FreshResultErrorDisposal { .. }
                     ) {
                         // Specialized evidence closes this ordinary edge,
                         // not the callee's unbound source root.
@@ -1076,9 +1092,22 @@ pub(super) fn visit_dependencies<'g>(
                 budget,
             )?,
             Operation::Dispose { callee, .. } => emit(callee, BuiltinDispose, budget)?,
-            Operation::ConstructResultError { constructor, .. } => {
-                emit(constructor, ResultConstructor, budget)?
-            }
+            Operation::ConstructResultError {
+                constructor,
+                variant,
+                wrapper,
+                ..
+            } => emit(
+                constructor,
+                block
+                    .fresh_result_storage
+                    .map_or(ResultConstructor, |storage_source| FreshResultConstructor {
+                        variant,
+                        wrapper,
+                        storage_source,
+                    }),
+                budget,
+            )?,
             Operation::WrapResultFailure { cause_display, .. } => {
                 emit(cause_display, RetainedErrorDisplay, budget)?
             }
@@ -1086,6 +1115,21 @@ pub(super) fn visit_dependencies<'g>(
                 budget.step(actions.len())?;
                 for action in actions {
                     match *action {
+                        Cleanup::DropFreshResultError {
+                            origin,
+                            variant,
+                            wrapper,
+                            storage_source,
+                            ..
+                        } => emit(
+                            wrapper,
+                            FreshResultErrorDisposal {
+                                origin: origin.node,
+                                variant,
+                                storage_source,
+                            },
+                            budget,
+                        )?,
                         Cleanup::InvokeDisposer { implementation, .. } => {
                             emit(implementation, ActiveDisposer, budget)?
                         }

@@ -26,9 +26,29 @@ struct Held {
     mutable_cell: Option<MutableCell>,
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
-    stored_at: Option<NodeId>,
+    /// Provenance accompanies the value, not the slot. Retained descriptors
+    /// and fresh Results are disjoint admitted storage shapes.
+    origin: ValueOrigin,
     /// Identity of the stored descriptor, independent of the access loans.
     exact_target: Option<ExactTarget>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ValueOrigin {
+    #[default]
+    Untracked,
+    RetainedStore(NodeId),
+    FreshResultOk,
+    FreshResultErr(NodeId),
+}
+
+impl ValueOrigin {
+    fn stored_at(self) -> Option<NodeId> {
+        match self {
+            Self::RetainedStore(node) => Some(node),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -573,10 +593,26 @@ fn forbid_custom_partial(
     Ok(())
 }
 
-fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultOf<Cleanup<'g>> {
+fn cleanup_of<'g>(
+    module: &'g Module,
+    local: Local<'g>,
+    held: &Held,
+    node: NodeId,
+) -> ResultOf<Cleanup<'g>> {
     let place = local.place(module);
     match local.cleanup {
         StorageCleanup::Unlowered => Err(Stop::Pending(node)),
+        StorageCleanup::FreshBoolResult(storage) => match held.origin {
+            ValueOrigin::FreshResultOk => Ok(Cleanup::EndStorage(place)),
+            ValueOrigin::FreshResultErr(origin) => Ok(Cleanup::DropFreshResultError {
+                operand: place,
+                origin: site_at(module, origin),
+                variant: storage.err,
+                wrapper: storage.wrapper,
+                storage_source: storage.storage_source,
+            }),
+            _ => Err(Stop::Pending(node)),
+        },
         StorageCleanup::Drop => Ok(Cleanup::Drop(place)),
         StorageCleanup::DropOptionPayload(some) => Ok(Cleanup::DropOptionPayload {
             operand: place,
@@ -649,10 +685,11 @@ fn cleanup_operation<'g>(
         }
         [None, None] => {}
     }
-    Ok(match cleanup_of(module, local, node)? {
+    Ok(match cleanup_of(module, local, &held, node)? {
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
-        cleanup @ (Cleanup::DropOptionPayload { .. }
+        cleanup @ (Cleanup::DropFreshResultError { .. }
+        | Cleanup::DropOptionPayload { .. }
         | Cleanup::DisposeListI32 { .. }
         | Cleanup::DisposeOwnedListIterI32 { .. }
         | Cleanup::DisposeListText { .. }
@@ -661,7 +698,8 @@ fn cleanup_operation<'g>(
             Operation::Cleanup(vec![cleanup])
         }
         cleanup @ Cleanup::EndStorage(_)
-            if matches!(held.callable_owner, Some(CallableOwner::LocalExclusive(_))) =>
+            if matches!(held.callable_owner, Some(CallableOwner::LocalExclusive(_)))
+                || matches!(local.cleanup, StorageCleanup::FreshBoolResult(_)) =>
         {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
@@ -973,7 +1011,7 @@ fn cleanup_boundary<'g>(
                 let drops = held.capture_drops.into_iter().flatten();
                 let count = drops.clone().count();
                 if count == 0 {
-                    actions.push(cleanup_of(module, slots[member], node)?);
+                    actions.push(cleanup_of(module, slots[member], &held, node)?);
                 } else {
                     budget.reserve(count - 1)?;
                     let closure = slots[member].place(module).root;
@@ -1049,7 +1087,7 @@ fn check_retained(
         let State::Initialized(value) = &state[contents.slot()] else {
             continue;
         };
-        let site = value.stored_at.unwrap_or(node);
+        let site = value.origin.stored_at().unwrap_or(node);
         for loan in value.loans.iter() {
             budget.step(1)?;
             if loan.kind.borrows_local_storage() {
@@ -1086,7 +1124,15 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
             operand,
             target: WrittenDisposal::Ordinary,
         } => matches!(slots[operand].cleanup, StorageCleanup::DisposeListI32(_)),
-        Action::ReadListI32 { .. }
+        Action::ConstructVariant {
+            fresh_result_ok: true,
+            ..
+        }
+        | Action::ConstructResultError {
+            fresh_storage: Some(_),
+            ..
+        }
+        | Action::ReadListI32 { .. }
         | Action::EqualI32Literal { .. }
         | Action::None
         | Action::BudgetBackedge
@@ -1687,15 +1733,24 @@ impl<'g> CancellationFrame<'_, 'g> {
             .values()
             .next()
             .map(|contents| contents.slot());
-        for (slot, held) in state.iter().enumerate() {
+        for (slot, state) in state.iter().enumerate() {
             budget.step(1)?;
-            if matches!(held, State::Initialized(_))
-                && Some(slot) != contents
-                && self.locals.binary_search(&slot).is_err()
-                && self.params.binary_search(&slot).is_err()
-            {
-                // Nested scopes and in-flight staging are not flat boundaries.
-                return Ok(false);
+            if let State::Initialized(held) = state {
+                if matches!(self.slots[slot].cleanup, StorageCleanup::FreshBoolResult(_))
+                    && !matches!(
+                        held.origin,
+                        ValueOrigin::FreshResultOk | ValueOrigin::FreshResultErr(_)
+                    )
+                {
+                    return Ok(false);
+                }
+                if Some(slot) != contents
+                    && self.locals.binary_search(&slot).is_err()
+                    && self.params.binary_search(&slot).is_err()
+                {
+                    // Nested scopes and in-flight staging are not flat boundaries.
+                    return Ok(false);
+                }
             }
         }
         // Check outward storage before ending even the first local owner.
@@ -1724,7 +1779,10 @@ impl<'g> CancellationFrame<'_, 'g> {
         let retained = outward.map(|(&parameter, contents)| RetainedAtDelivery {
             parameter: self.slots[parameter].place(self.module),
             last_store: match &state[contents.slot()] {
-                State::Initialized(held) => held.stored_at.map(|store| site_at(self.module, store)),
+                State::Initialized(held) => held
+                    .origin
+                    .stored_at()
+                    .map(|store| site_at(self.module, store)),
                 _ => None,
             },
         });
@@ -2158,7 +2216,10 @@ pub(super) fn run<'a, 'g>(
                 && slot.custom_disposer.is_none()
                 && matches!(
                     slot.cleanup,
-                    StorageCleanup::End | StorageCleanup::Drop | StorageCleanup::DisposeListI32(_)
+                    StorageCleanup::End
+                        | StorageCleanup::Drop
+                        | StorageCleanup::DisposeListI32(_)
+                        | StorageCleanup::FreshBoolResult(_)
                 );
             State::Vacant
         })
@@ -2169,6 +2230,8 @@ pub(super) fn run<'a, 'g>(
     for &slot in &params {
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
+        // Parameters do not supply a checked fresh residence at frame entry.
+        candidate &= !matches!(slots[slot].cleanup, StorageCleanup::FreshBoolResult(_));
         state[region].fill(State::Initialized(empty.clone()));
         if let Some(option @ (ReferenceOption::Shared | ReferenceOption::Exclusive)) =
             slots[slot].reference_option
@@ -2342,6 +2405,7 @@ pub(super) fn run<'a, 'g>(
             }
         }
         let mut join_resume = None;
+        let mut fresh_result_storage = None;
         let operation = (|| -> ResultOf<_> {
             if callable_frame.is_some() {
                 // A bound transfer has no proof for other calls or protected
@@ -2595,6 +2659,7 @@ pub(super) fn run<'a, 'g>(
                     variant,
                     payload,
                     into,
+                    fresh_result_ok,
                 } => {
                     state[into] = if let Some(payload) = payload {
                         initialized(&state[payload], node)?;
@@ -2610,6 +2675,9 @@ pub(super) fn run<'a, 'g>(
                     } else {
                         State::Initialized(empty.clone())
                     };
+                    if fresh_result_ok && let State::Initialized(held) = &mut state[into] {
+                        held.origin = ValueOrigin::FreshResultOk;
+                    }
                     Operation::ConstructVariant {
                         variant,
                         payload: payload.map(local),
@@ -2622,9 +2690,16 @@ pub(super) fn run<'a, 'g>(
                     wrapper,
                     payload,
                     into,
+                    fresh_storage,
                 } => {
                     initialized(&state[payload], node)?;
                     state[into] = std::mem::replace(&mut state[payload], State::Vacant);
+                    if let Some(storage) = fresh_storage
+                        && let State::Initialized(held) = &mut state[into]
+                    {
+                        held.origin = ValueOrigin::FreshResultErr(node);
+                        fresh_result_storage = Some(storage);
+                    }
                     Operation::ConstructResultError {
                         constructor,
                         variant,
@@ -2652,6 +2727,10 @@ pub(super) fn run<'a, 'g>(
                 } => {
                     initialized(&state[operand], node)?;
                     state[into] = std::mem::replace(&mut state[operand], State::Vacant);
+                    if let State::Initialized(held) = &mut state[into] {
+                        // Propagation can change the Result's success type.
+                        held.origin = ValueOrigin::Untracked;
+                    }
                     Operation::ForwardResultFailure {
                         operand: local(operand),
                         into: local(into),
@@ -2686,6 +2765,10 @@ pub(super) fn run<'a, 'g>(
                     initialized(&state[operand], node)?;
                     initialized(&state[payload], node)?;
                     state[into] = std::mem::replace(&mut state[operand], State::Vacant);
+                    if let State::Initialized(held) = &mut state[into] {
+                        // The new wrapper retains a cause, even when its operand did not.
+                        held.origin = ValueOrigin::Untracked;
+                    }
                     state[payload] = State::Vacant;
                     Operation::WrapResultFailure {
                         operand: local(operand),
@@ -3009,13 +3092,16 @@ pub(super) fn run<'a, 'g>(
                         // backing source of the very descriptor it gives access to.
                         let held = Held {
                             loans: loan_set(loans, budget)?,
-                            stored_at: matches!(
+                            origin: if matches!(
                                 target,
                                 RetainedPlace::ThroughParameter(_)
                                     | RetainedPlace::ThroughTwoHopParameter { .. }
                                     | RetainedPlace::ThroughParameterAlias { .. }
-                            )
-                            .then_some(node),
+                            ) {
+                                ValueOrigin::RetainedStore(node)
+                            } else {
+                                ValueOrigin::Untracked
+                            },
                             ..Held::default()
                         };
                         Some((target, contents, destination, held))
@@ -3873,7 +3959,11 @@ pub(super) fn run<'a, 'g>(
                         budget,
                     )?;
                     // Overwrite exact contents, not the access descriptor.
-                    value.stored_at = matches!(target, ExactTarget::Caller { .. }).then_some(node);
+                    value.origin = if matches!(target, ExactTarget::Caller { .. }) {
+                        ValueOrigin::RetainedStore(node)
+                    } else {
+                        ValueOrigin::Untracked
+                    };
                     state[target.contents_slot()] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThrough {
@@ -3894,7 +3984,7 @@ pub(super) fn run<'a, 'g>(
                         Access::Exclusive,
                         budget,
                     )?;
-                    value.stored_at = Some(node);
+                    value.origin = ValueOrigin::RetainedStore(node);
                     state[route.contents] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThroughTwoHop {
@@ -4009,6 +4099,7 @@ pub(super) fn run<'a, 'g>(
                     site,
                     operation: Operation::None,
                     terminator: Terminator::Return,
+                    fresh_result_storage: None,
                 });
                 continue;
             }
@@ -4077,6 +4168,7 @@ pub(super) fn run<'a, 'g>(
             site,
             operation,
             terminator,
+            fresh_result_storage,
         });
     }
     if let Some(node) = blocked {
