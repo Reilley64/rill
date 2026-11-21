@@ -223,6 +223,7 @@ impl<'a, 'g> Check<'a, 'g> {
                         let affected = state.take(address.0, &address.1, self.budget)?;
                         self.budget.step(affected.len())?;
                         let stale = |entry: &Located<'g>| match &entry.content {
+                            Content::BooleanCopy(_) => true,
                             Content::Test(tag, _) if boolean_storage => {
                                 matches!(tag.as_ref(), Constructor::Boolean(_))
                             }

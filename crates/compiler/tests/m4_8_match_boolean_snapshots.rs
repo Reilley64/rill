@@ -127,13 +127,21 @@ fn installed_boolean_matches() {
         let source = format!("\nfunction probe({parameters}): void {{ {statements} }}\n");
         installed(&probe, name, &source, Some((fixed.0, fixed.1, 12)), checked);
     }
-    for (n, helper, innermost, fixed) in [
-        (11, "", "", (326724, 48624, 46)),
+    for (n, pattern, helper, innermost, fixed) in [
+        (11, "_", "", "", Some((326724, 48624, 46))),
         (
             10,
+            "_",
             "function noop(): void {}\n",
             "noop();",
-            (327586, 48557, 45),
+            Some((327586, 48557, 45)),
+        ),
+        (
+            10,
+            "(snapshot)",
+            "function noop(): void {}\n",
+            "noop();",
+            None,
         ),
     ] {
         let parameters = (0..n)
@@ -141,7 +149,7 @@ fn installed_boolean_matches() {
             .collect::<Vec<_>>()
             .join(", ");
         let body = (0..n).rev().fold(innermost.to_owned(), |body, i| {
-            format!("match (b{i}) {{ _ => {{ {body} }} }};")
+            format!("match (b{i}) {{ {pattern} => {{ {body} }} }};")
         });
         let source =
             format!("\n{helper}function probe({parameters}): bool {{ {body} return true; }}\n");
@@ -149,7 +157,7 @@ fn installed_boolean_matches() {
             &probe,
             "nested unobserved snapshots",
             &source,
-            Some(fixed),
+            fixed,
             checked,
         );
     }
@@ -202,6 +210,144 @@ fn installed_boolean_matches() {
     );
     installed(
         &probe,
+        "wildcard arm result remains correlated",
+        r#"
+        function probe(flag: bool): void {
+            let debt = Err<bool,i32>(61i32);
+            let copy = match (flag) { _ => flag };
+            if (flag) { if (copy) { let _ = debt; } }
+            else { if (!copy) { let _ = debt; } }
+        }
+        "#,
+        None,
+        checked,
+    );
+    for (name, source) in [
+        (
+            "nested wildcard and guard observe the same copy",
+            "
+            function probe(flag: bool, outer: bool): void {
+                let debt = Err<bool,i32>(61i32);
+                match (outer) { _ => {
+                    match (flag) { _ => {
+                        let copy = flag;
+                        match (copy) {
+                            true if flag => { let _ = debt; },
+                            false if !flag => { let _ = debt; },
+                            _ => {}
+                        };
+                    } };
+                } };
+            }
+            ",
+        ),
+        (
+            "wildcard arm copies through a projected alias",
+            "
+            type Flags = { on: bool; };
+            function probe(value: Flags): void {
+                let view = &value;
+                let debt = Err<bool,i32>(61i32);
+                let copy = match ((*view).on) { (_) => value.on };
+                if ((*view).on) { if (copy) { let _ = debt; } }
+                else { if (!copy) { let _ = debt; } }
+            }
+            ",
+        ),
+        (
+            "wildcard copy is detached on known writeback",
+            "
+            function probe(flag: bool): void {
+                let mut current = flag;
+                let mut copy = false;
+                let debt = Err<bool,i32>(61i32);
+                match (current) { _ => { copy = current; current = !current; } };
+                if (current) { if (!copy) { let _ = debt; } }
+                else { if (copy) { let _ = debt; } }
+            }
+            ",
+        ),
+        (
+            "mutable call detaches the origin but preserves equal copies",
+            "
+            function invalidate(flag: &mut bool): void {}
+            function probe(flag: bool): void {
+                let mut current = flag;
+                let mut first = false;
+                let mut second = false;
+                let debt = Err<bool,i32>(61i32);
+                match (current) { _ => { first = current; second = current; invalidate(&mut current); } };
+                if (first) { if (second) { let _ = debt; } }
+                else { if (!second) { let _ = debt; } }
+            }
+            ",
+        ),
+        (
+            "nested loop break and continue retain the feasible copy",
+            "
+            function probe(flag: bool): void {
+                let mut current = flag;
+                let mut copy = false;
+                let debt = Err<bool,i32>(61i32);
+                while (true) {
+                    match (current) { _ => {
+                        copy = current;
+                        if (copy) { break; }
+                        current = true;
+                        continue;
+                    } };
+                }
+                if (copy) { let _ = debt; }
+            }
+            ",
+        ),
+        (
+            "loop equality ignores fresh labels but keeps distinct copied fields",
+            "
+            function unknown(flag: bool): bool { return flag; }
+            function probe(flag: bool, other: bool, stop: bool): void {
+                let mut saved: [bool,bool,bool,bool] = [false, false, false, false];
+                let debt = Err<bool,i32>(61i32);
+                while (true) {
+                    let left = unknown(flag);
+                    let right = unknown(other);
+                    match (left) { a => {
+                        match (right) { b => {
+                            saved = [left, right, a, b];
+                            if (stop) { break; }
+                            continue;
+                        } };
+                    } };
+                }
+                if (saved[0]) { if (saved[2]) { let _ = debt; } }
+                else { if (!saved[2]) { let _ = debt; } }
+            }
+            ",
+        ),
+        (
+            "grouped binder snapshot survives a failed guard that changes the source",
+            "
+            function invalidate(flag: &mut bool): bool { return false; }
+            function probe(flag: bool): void {
+                let mut current = flag;
+                let debt = Err<bool,i32>(61i32);
+                match (current) { _ => {
+                    let prior = current;
+                    match (current) {
+                        (snapshot) if invalidate(&mut current) => { let _ = debt; return; },
+                        true => { let _ = debt; },
+                        false => {}
+                    };
+                    if (!prior) { let _ = debt; }
+                } };
+            }
+            ",
+        ),
+    ] {
+        installed(&probe, name, source, None, checked);
+    }
+    installed(
+        &probe,
         "unpaid debt",
         "
         function probe(flag: bool): void {
@@ -210,19 +356,22 @@ fn installed_boolean_matches() {
         }
     ",
         None,
-        |report| {
-            assert_eq!(report.completion(), TypedCompletion::SourceRejected);
-            assert!(report.receipt().is_none());
-            let uses = report.result_use().unwrap();
-            let [discard] = uses.discards() else {
-                panic!("{:?}", uses.discards())
-            };
-            assert_eq!(
-                (discard.code(), discard.origin.span.bytes()),
-                ("R0103", b"Err<bool,i32>(61i32)".as_slice())
-            );
-            assert!(uses.pending().is_empty());
-        },
+        unpaid,
+    );
+    installed(
+        &probe,
+        "replacement does not acknowledge the old false path",
+        "
+        function probe(flag: bool): void {
+            let mut current = flag;
+            let mut copy = false;
+            let debt = Err<bool,i32>(61i32);
+            match (current) { _ => { copy = current; current = true; } };
+            if (current) { if (copy) { let _ = debt; } }
+        }
+        ",
+        None,
+        unpaid,
     );
     installed(
         &probe,
@@ -312,6 +461,20 @@ fn checked(report: &TypedReport<'_>) {
         report.result_use()
     );
     assert!(report.receipt().is_some());
+}
+
+fn unpaid(report: &TypedReport<'_>) {
+    assert_eq!(report.completion(), TypedCompletion::SourceRejected);
+    assert!(report.receipt().is_none());
+    let uses = report.result_use().unwrap();
+    let [discard] = uses.discards() else {
+        panic!("{:?}", uses.discards())
+    };
+    assert_eq!(
+        (discard.code(), discard.origin.span.bytes()),
+        ("R0103", b"Err<bool,i32>(61i32)".as_slice())
+    );
+    assert!(uses.pending().is_empty());
 }
 
 fn installed(

@@ -1,9 +1,9 @@
 //! Project committed typed patterns onto their original storage.
 use super::*;
 use crate::analysis::scalars::data::{
-    Constructor, Match, Pattern, PatternFacts, PatternProjection,
+    Arm, Constructor, Match, Pattern, PatternFacts, PatternProjection,
 };
-use storage::Address;
+use storage::{Address, BooleanValue};
 
 impl<'a, 'g> Check<'a, 'g> {
     pub(super) fn commit_pattern(
@@ -113,7 +113,19 @@ impl<'a, 'g> Check<'a, 'g> {
         let alias = state.alias(address.0, &address.1, self.budget)?;
         let (root, path) = alias.as_ref().unwrap_or(address);
         if !matches!(tag, Constructor::Record(_) | Constructor::Tuple(_)) {
-            let outcome = state.test(*root, path, tag, self.budget)?;
+            let mut copy = None;
+            let outcome = if let Constructor::Boolean(expected) = tag {
+                match state.boolean_value(*root, path, self.budget)? {
+                    Some(BooleanValue::Known(actual)) => Some(actual == *expected),
+                    Some(BooleanValue::Copy(value)) => {
+                        copy = Some((value, *expected));
+                        None
+                    }
+                    None => None,
+                }
+            } else {
+                state.test(*root, path, tag, self.budget)?
+            };
             if matches!(tag, Constructor::Variant(_)) {
                 if alias.is_none()
                     && outcome.is_none()
@@ -138,18 +150,23 @@ impl<'a, 'g> Check<'a, 'g> {
                     return Ok(None);
                 }
                 None => {
-                    self.budget.reserve(
-                        1 + match tag {
-                            Constructor::Text(t) => t.len(),
-                            _ => 0,
-                        },
-                    )?;
-                    let tag = Arc::new(tag.clone());
                     let mut no = state.fork(self.budget)?;
-                    no.store(*root, path, Content::Test(tag.clone(), false), self.budget)?;
+                    if let Some((copy, expected)) = copy {
+                        no.refine_boolean_copy(&copy, !expected, self.budget)?;
+                        state.refine_boolean_copy(&copy, expected, self.budget)?;
+                    } else {
+                        self.budget.reserve(
+                            1 + match tag {
+                                Constructor::Text(t) => t.len(),
+                                _ => 0,
+                            },
+                        )?;
+                        let tag = Arc::new(tag.clone());
+                        no.store(*root, path, Content::Test(tag.clone(), false), self.budget)?;
+                        state.store(*root, path, Content::Test(tag, true), self.budget)?;
+                    }
                     self.budget.reserve(1)?;
                     failed.push(no);
-                    state.store(*root, path, Content::Test(tag, true), self.budget)?;
                 }
             }
         }
@@ -178,82 +195,115 @@ impl<'a, 'g> Check<'a, 'g> {
         self.depth(depth)?;
         let root = Root::Temporary(matched.scrutinee);
         let scrutinee = self.expression_facts(matched.scrutinee)?;
+        let boolean = scrutinee.is_some_and(
+            |fact| matches!(fact.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"),
+        );
         let original = scrutinee
             .filter(|fact| {
-                fact.access == Access::Owned
-                    && !matches!(fact.ty.as_ref(), TypeTerm::Reference { .. })
+                boolean
+                    || (fact.access == Access::Owned
+                        && !matches!(fact.ty.as_ref(), TypeTerm::Reference { .. }))
             })
             .and_then(|fact| fact.path.as_ref());
         let source = self.address(&state, original)?;
+        if boolean {
+            return self.boolean_match(node, matched, state, source, unused_bool, depth);
+        }
         let remaining = self.expression(matched.scrutinee, state, depth + 1)?;
         if let Some(source) = source {
-            if scrutinee.is_some_and(
-                |fact| matches!(fact.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"),
-            ) {
-                // An unguarded wildcard never inspects or binds the copy. Run
-                // its body once even when that body contains more matches.
-                if let [arm] = matched.arms.as_slice()
-                    && arm.guard.is_none()
-                    && matches!(&*arm.pattern.pattern, Pattern::Wildcard)
-                    && arm.pattern.binders.is_empty()
-                {
-                    return self.match_arms(node, matched, remaining, true, depth);
-                }
-                if self.boolean_match_preserves_state(matched, depth + 1, unused_bool)? {
-                    let mut remaining = remaining;
-                    for state in &mut remaining {
-                        self.budget.step(1)?;
-                        state.take(root, &[], self.budget)?;
-                    }
-                    return Ok(remaining);
-                }
-                let mut result = Vec::new();
-                for mut state in remaining {
-                    // Pattern tests use the evaluated copy, not a view into
-                    // the caller's storage. Refine an unknown read at this
-                    // point, before any guard or body can write to the source.
-                    let mut snapshots = Vec::new();
-                    let split = state
-                        .test(root, &[], &Constructor::Boolean(true), self.budget)?
-                        .is_none();
-                    if split {
-                        let mut other = state.fork(self.budget)?;
-                        for (branch, truth) in [(&mut other, false), (&mut state, true)] {
-                            self.record_boolean(branch, root, &[], truth)?;
-                            self.record_boolean(branch, source.0, &source.1, truth)?;
-                        }
-                        self.budget.reserve(1)?;
-                        snapshots.push(other);
-                    }
-                    self.budget.reserve(1)?;
-                    snapshots.push(state);
-                    let mut completed = self.match_arms(node, matched, snapshots, true, depth)?;
-                    if unused_bool {
-                        for state in &mut completed {
-                            let root = Root::Temporary(node);
-                            let output = state.take(root, &[], self.budget)?;
-                            self.discard(output, root, node, ResultDiscardKind::Expression)?;
-                        }
-                    }
-                    if split
-                        && let [first, second] = completed.as_mut_slice()
-                        && first.join_boolean(second, &source, self.budget)?
-                    {
-                        completed.pop();
-                    }
-                    self.budget.reserve(completed.len())?;
-                    result.extend(completed);
-                }
-                return Ok(result);
-            }
             self.budget.reserve(1)?;
             self.match_views.push((source, root));
-            let result = self.match_arms(node, matched, remaining, false, depth);
+            let result = self.match_arms(node, matched, remaining, false, unused_bool, depth);
             self.match_views.pop();
             result
         } else {
-            self.match_arms(node, matched, remaining, false, depth)
+            self.match_arms(node, matched, remaining, false, unused_bool, depth)
         }
+    }
+
+    fn boolean_match(
+        &mut self,
+        node: NodeId,
+        matched: &Match<'g>,
+        state: Residence<'g>,
+        source: Option<Address<'g>>,
+        unused: bool,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        let wildcard = matches!(matched.arms.as_slice(), [arm] if arm.guard.is_none()
+                && matches!(&*arm.pattern.pattern, Pattern::Wildcard) && arm.pattern.binders.is_empty());
+        let usage = if wildcard {
+            ValueUse::Statement
+        } else {
+            ValueUse::Used
+        };
+        let mut remaining = self.expression_with_use(matched.scrutinee, state, depth + 1, usage)?;
+        if wildcard {
+            // The arm does not consume the truth of the scrutinee. Start
+            // tracking equality only if a later read copies the source.
+            if let Some(source) = source {
+                self.budget.reserve(1)?;
+                self.wildcard_sources.push(source);
+                let result = self.match_arms(node, matched, remaining, true, unused, depth);
+                self.wildcard_sources.pop();
+                return result;
+            }
+            return self.match_arms(node, matched, remaining, true, unused, depth);
+        }
+        let root = Root::Temporary(matched.scrutinee);
+        let Some(source) = source else {
+            // For a computed scrutinee, arm reachability is determined by
+            // all the outcomes of evaluating it, including no continuation.
+            for state in &mut remaining {
+                if state.boolean_value(root, &[], self.budget)?.is_none() {
+                    state.new_boolean_copy(root, &[], self.budget)?;
+                }
+            }
+            return self.match_arms(node, matched, remaining, true, unused, depth);
+        };
+        if self.boolean_match_preserves_state(matched, depth + 1, unused)? {
+            for state in &mut remaining {
+                self.budget.step(1)?;
+                state.take(root, &[], self.budget)?;
+            }
+            return Ok(remaining);
+        }
+        let mut result = Vec::new();
+        for mut state in remaining {
+            // A snapshot and its copies carry the same value identity, not
+            // aliases to the source. Branch only when truth is tested.
+            let fresh = if state.boolean_value(root, &[], self.budget)?.is_none() {
+                let copy = state.new_boolean_copy(source.0, &source.1, self.budget)?;
+                state.store(root, &[], Content::BooleanCopy(copy.clone()), self.budget)?;
+                Some(copy)
+            } else {
+                None
+            };
+            let snapshots = self.singleton(state)?;
+            let mut completed = self.match_arms(node, matched, snapshots, true, unused, depth)?;
+            for state in &mut completed {
+                if unused {
+                    let root = Root::Temporary(node);
+                    let output = state.take(root, &[], self.budget)?;
+                    self.discard(output, root, node, ResultDiscardKind::Expression)?;
+                }
+                if let Some(copy) = &fresh {
+                    state.remove_single_boolean_copy(copy, self.budget)?;
+                }
+            }
+            if let [first, second] = completed.as_mut_slice()
+                && first.join_boolean(second, &source, self.budget)?
+            {
+                completed.pop();
+            }
+            if result.is_empty() {
+                result = completed;
+            } else {
+                self.budget.reserve(completed.len())?;
+                result.extend(completed);
+            }
+        }
+        Ok(result)
     }
 
     /// An exhaustive match whose arms all fall through without observing or
@@ -342,6 +392,7 @@ impl<'a, 'g> Check<'a, 'g> {
         matched: &Match<'g>,
         mut remaining: Alternatives<'g>,
         copy_bool: bool,
+        unused_bool: bool,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         let root = Root::Temporary(matched.scrutinee);
@@ -366,19 +417,30 @@ impl<'a, 'g> Check<'a, 'g> {
                     continue;
                 };
                 if copy_bool {
-                    if let Some(binder) = arm.pattern.binders.first()
-                        && let Some(truth) =
-                            state.test(root, &[], &Constructor::Boolean(true), self.budget)?
-                    {
-                        self.record_boolean(
-                            &mut state,
-                            Root::Local(binder.declaration),
-                            &[],
-                            truth,
-                        )?;
+                    if let Some(binder) = arm.pattern.binders.first() {
+                        let local = Root::Local(binder.declaration);
+                        if arm.guard.is_none() {
+                            state.move_boolean(root, local, self.budget)?;
+                        } else if let Some(value) = state.boolean_value(root, &[], self.budget)? {
+                            self.install_boolean(&mut state, local, value)?;
+                        }
                     }
                 } else {
                     self.pattern_binders(&mut state, root, &[], &arm.pattern, false)?;
+                }
+                if copy_bool && arm.guard.is_none() {
+                    if arm.body_reachable {
+                        entered = true;
+                        result.extend(self.match_body(
+                            node,
+                            root,
+                            arm,
+                            state,
+                            unused_bool,
+                            depth,
+                        )?);
+                    }
+                    continue;
                 }
                 let states = if let Some(guard) = arm.guard {
                     self.branch_condition(guard, state, depth + 1)?
@@ -403,37 +465,7 @@ impl<'a, 'g> Check<'a, 'g> {
                         continue;
                     }
                     entered = true;
-                    if arm.pattern.access == Access::Owned {
-                        self.acknowledge_pattern(
-                            &mut state,
-                            root,
-                            &mut Vec::new(),
-                            &arm.pattern.pattern,
-                            1,
-                        )?;
-                    }
-                    let block = self.module.syntax.nodes[arm.body].kind == NodeKind::Block;
-                    let mut next = if block {
-                        self.statement(arm.body, state, depth + 1)?
-                    } else {
-                        self.expression(arm.body, state, depth + 1)?
-                    };
-                    let scope = arm.site.span.start();
-                    for state in &mut next {
-                        if !block {
-                            self.move_value(
-                                state,
-                                Root::Temporary(arm.body),
-                                &[],
-                                Root::Temporary(node),
-                                &[],
-                            )?;
-                        }
-                        let unbound = state.take(root, &[], self.budget)?;
-                        self.discard(unbound, root, arm.site.node, ResultDiscardKind::ScopeExit)?;
-                        self.exit_scope(state, scope, arm.site.node)?;
-                    }
-                    result.extend(next);
+                    result.extend(self.match_body(node, root, arm, state, unused_bool, depth)?);
                 }
             }
             if !entered {
@@ -442,6 +474,47 @@ impl<'a, 'g> Check<'a, 'g> {
             remaining = failed;
         }
         Ok(result)
+    }
+
+    fn match_body(
+        &mut self,
+        node: NodeId,
+        root: Root<'g>,
+        arm: &Arm<'g>,
+        mut state: Residence<'g>,
+        unused_bool: bool,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        if arm.pattern.access == Access::Owned {
+            self.acknowledge_pattern(&mut state, root, &mut Vec::new(), &arm.pattern.pattern, 1)?;
+        }
+        let block = self.module.syntax.nodes[arm.body].kind == NodeKind::Block;
+        let mut next = if block {
+            self.statement(arm.body, state, depth + 1)?
+        } else {
+            let usage = if unused_bool {
+                ValueUse::Statement
+            } else {
+                ValueUse::Used
+            };
+            self.expression_with_use(arm.body, state, depth + 1, usage)?
+        };
+        let scope = arm.site.span.start();
+        for state in &mut next {
+            if !block {
+                self.move_value(
+                    state,
+                    Root::Temporary(arm.body),
+                    &[],
+                    Root::Temporary(node),
+                    &[],
+                )?;
+            }
+            let unbound = state.take(root, &[], self.budget)?;
+            self.discard(unbound, root, arm.site.node, ResultDiscardKind::ScopeExit)?;
+            self.exit_scope(state, scope, arm.site.node)?;
+        }
+        Ok(next)
     }
 
     fn pattern_component(

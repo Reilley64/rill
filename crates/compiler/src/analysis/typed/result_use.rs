@@ -317,6 +317,7 @@ struct Check<'a, 'g> {
     report: &'a mut ResultUseReport<'g>,
     loops: Vec<LoopExits<'g>>,
     match_views: Vec<(Address<'g>, Root<'g>)>,
+    wildcard_sources: Vec<Address<'g>>,
     checked_arrows: BTreeSet<NodeId>,
     dead_depth: usize,
     dead_start: Option<usize>,
@@ -362,6 +363,7 @@ impl<'a, 'g> Check<'a, 'g> {
             report,
             loops: Vec::new(),
             match_views: Vec::new(),
+            wildcard_sources: Vec::new(),
             checked_arrows: BTreeSet::new(),
             dead_depth: 0,
             dead_start: None,
@@ -864,7 +866,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let syntax = &self.module.syntax.nodes[node];
         let root = Root::Temporary(node);
         if let Some(address) = self.address(&state, value.path.as_ref())? {
-            self.read_place(node, value, &mut state, address)?;
+            self.read_place(node, value, &mut state, address, usage)?;
             return self.singleton(state);
         }
         if facts
@@ -1032,17 +1034,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 DataExpression::Match(matched) => {
                     let unused_bool = matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
-                        && match usage {
-                            ValueUse::Used => false,
-                            ValueUse::Statement => true,
-                            ValueUse::Binding { pattern, depth } => {
-                                match self.module.syntax.nodes[pattern].kind {
-                                    NodeKind::Wildcard => true,
-                                    NodeKind::GroupPattern => self.wildcard_at(pattern, depth)?,
-                                    _ => false,
-                                }
-                            }
-                        };
+                        && self.discarded_value(usage)?;
                     return self.match_expression(node, matched, state, depth + 1, unused_bool);
                 }
                 _ => {}
@@ -1081,7 +1073,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 self.singleton(state)
             }
             NodeKind::Prefix("*") => {
-                self.dereference(node, syntax.children[0], value, state, depth + 1)
+                self.dereference(node, syntax.children[0], value, state, depth + 1, usage)
             }
             NodeKind::Literal | NodeKind::ValueReference => {
                 use crate::analysis::scalars::BooleanSet;
