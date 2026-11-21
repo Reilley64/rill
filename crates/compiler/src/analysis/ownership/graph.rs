@@ -329,7 +329,7 @@ struct ModuleFacts<'a, 'g> {
 struct RootFacts<'a, 'g> {
     body: Option<&'a BodyFacts<'g>>,
     header: Option<&'a DeclarationFacts<'g>>,
-    implementation: Option<(&'a ImplementationFacts<'g>, &'a DeclarationFacts<'g>)>,
+    implementation: Option<(&'a ImplementationFacts<'g>, bool)>,
 }
 
 struct WorkItem<'a, 'g> {
@@ -570,7 +570,8 @@ fn analyze<'g>(
                 if let Some(index) =
                     find_root(modules, &by_declaration, &body.source.declaration, budget)?
                 {
-                    work[index].facts.implementation = Some((body, &family.header));
+                    work[index].facts.implementation =
+                        Some((body, family.header.binders.is_empty()));
                 }
             }
         }
@@ -1008,30 +1009,25 @@ fn lower_indexed<'a, 'g>(
             (header, Frame::OrdinaryFunction, true)
         }
         DeclarationKind::Implementation if module.key.origin == Origin::Application => {
-            let (implementation, family) = facts.implementation.ok_or_else(pending)?;
+            let (implementation, closed_family) = facts.implementation.ok_or_else(pending)?;
             let source = implementation.source;
             if !std::ptr::eq(implementation.header.declaration, declaration)
                 || source.body_node != body.site.node
             {
                 return Err(pending());
             }
+            let body = concrete_implementation_body(implementation)?;
             let frame = if active {
                 // Only created by a checked, substitution-free InvokeDisposer
                 // edge. The implementation is concrete even if dispose<T> isn't.
-                let body = concrete_implementation_body(implementation)?;
                 if module.syntax.nodes[site].children.get(1) != Some(&body) {
                     return Err(pending());
                 }
                 Frame::ActiveDisposer
-            } else if source.family.module.origin == Origin::Application
+            } else if closed_family
+                && source.family.module.origin == Origin::Application
                 && source.family.kind == DeclarationKind::Family
             {
-                let body = application_implementation_body(
-                    module,
-                    family,
-                    implementation,
-                    lowering.budget,
-                )?;
                 Frame::PlainImplementation { body }
             } else {
                 return Err(pending());
