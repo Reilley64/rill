@@ -1485,6 +1485,19 @@ Consuming `f` after the call does not free the backing of the returned reference
 
 The local invocation checks at 2,838 work / 384 entries / depth 5. Normal and test modes agree at the target and ordinary graph root. Independently one-short limits withhold MIR. An exclusive descriptor still stops at `descriptor()`. An erased incoming callable lacks a typed receipt, and a read-only borrow does not authorize a once invocation. This proof does not cover a named callee receiving an abstract callable or establish a scheduler operation. [#71](https://github.com/Reilley64/rill/issues/71) remains open. No Rill program ran.
 
+## Propagation before a consuming List source commits
+
+At `91ce9cd`, [the installed source-construction tests](m5/iteration_source.rs) distinguish failure while building `[first, gate?, last]` from failure in a running loop. `first` and `last` own strings; `gate` has type `Option<string>`.
+
+| Source path | Ordinary ownership MIR |
+| --- | --- |
+| `gate?` returns `None` | Export canonical `None`, then drop only the initialized construction prefix in reverse written order. Lexical cleanup still owns `last`. There is no suffix evaluation, committed List backing, cursor, advance, or normal return on this path. |
+| `gate?` yields a string | Transfer the payload to its element slot and evaluate `last`. Commit the initialized elements once into the pinned `List<string>` backing. The selected `iterate` takes that backing, and `next` can then initialize the loop item. |
+
+The tests cover an empty prefix, two reached prefix elements, a statically empty gate, a repeated move, and an independently unobserved Result. The typed handoff identifies the actual List literal under parentheses. Wrapping `make(gate?)` in parentheses does not authorize the source construction: it remains pending at the `for` at its old target cap of 4,154 work / 464 entries / depth 4.
+
+Both installed modes checked the representative target at 5,927 work / 1,363 entries / depth 6. Its ordinary graph root has the same 23 MIR blocks. Independently one-short limits withhold MIR. This concerns the source **before** cursor commitment, not propagation from a yielded carrier, borrowed traversal, or cancellation. [#76](https://github.com/Reilley64/rill/issues/76) and the overall graph remain open. No Rill program ran.
+
 ## Priority across the nine open M5 blockers
 
 At the `50552e0` priority pass, each of the [nine #66 sub-issues](https://github.com/Reilley64/rill/issues/66) had the remaining proof below. The rows record the witnesses at that pin, not every case in each issue. A typed receipt permits an M5 query. It does not establish an ownership judgment. The [#74 cleanup witness](#normal-exit-cleanup-of-two-level-owned-records) now checks; the issues remain open.
