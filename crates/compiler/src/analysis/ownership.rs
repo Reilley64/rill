@@ -782,6 +782,7 @@ pub struct CallableLayout(pub [CallableField; 2]);
 pub enum CallableField {
     OwnedPrimitive(&'static str),
     SharedPrimitive(&'static str),
+    ExclusiveBool,
     OwnedString,
 }
 

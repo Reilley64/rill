@@ -1507,6 +1507,228 @@ fn private_callable_transfer_keeps_backing_and_owns_string_cleanup() {
 }
 
 #[test]
+fn private_callable_transfer_keeps_an_exclusive_capture_until_discard() {
+    probe(
+        "captures::private_callable_transfer_keeps_an_exclusive_capture_until_discard",
+        r#"
+            function forward(job: once () => [&mut bool, bool]): once () => [&mut bool, bool] {
+                let note = "epilogue";
+                return job;
+            }
+            function after(seed: bool, text: bool): void {
+                let mut flag = seed;
+                let job: mut () => [&mut bool, bool] = () => [&mut flag, text];
+                let held: once () => [&mut bool, bool] = job;
+                let out = forward(held);
+                let _ = out;
+                flag = true;
+            }
+            function writeLive(seed: bool, text: bool): void {
+                let mut flag = seed;
+                let job: mut () => [&mut bool, bool] = () => [&mut flag, text];
+                let held: once () => [&mut bool, bool] = job;
+                let out = forward(held);
+                flag = true;
+                let _ = out;
+            }
+            function readLive(seed: bool, text: bool): bool {
+                let mut flag = seed;
+                let job: mut () => [&mut bool, bool] = () => [&mut flag, text];
+                let held: once () => [&mut bool, bool] = job;
+                let out = forward(held);
+                let observed = flag;
+                let _ = out;
+                return observed;
+            }
+            function reuse(seed: bool, text: bool): void {
+                let mut flag = seed;
+                let job: mut () => [&mut bool, bool] = () => [&mut flag, text];
+                let held: once () => [&mut bool, bool] = job;
+                let out = forward(held);
+                let _ = held;
+                let _ = out;
+            }
+        "#,
+        |request, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            assert_eq!(graph.test_mode(), request.test_mode);
+            let after = check_local_capture_root(module, receipt, &graph, "after", None);
+            let root = capture_graph_root(module, &graph, capture_declaration(module, "after"));
+            let forward = capture_declaration(module, "forward");
+            for mir in [after.mir().unwrap(), root.mir().unwrap()] {
+                assert_exclusive_callable_transfer(mir, &forward.id);
+            }
+            for (name, code, site, related) in [
+                ("writeLive", "R0203", "flag = true;", "&mut flag"),
+                ("readLive", "R0201", "flag", "&mut flag"),
+                ("reuse", "R0200", "held", "held"),
+            ] {
+                check_local_capture_root(
+                    module,
+                    receipt,
+                    &graph,
+                    name,
+                    Some((code, site, related)),
+                );
+            }
+            assert_eq!(
+                lower_capture_root(module, receipt, "forward").completion(),
+                Completion::Incomplete
+            );
+            assert_eq!(
+                capture_graph_root(module, &graph, forward).ordinary_completion(),
+                Completion::Incomplete
+            );
+        },
+    );
+}
+
+fn assert_exclusive_callable_transfer(mir: &Mir<'_>, forward: &loader::DeclarationId) {
+    use compiler::analysis::InvocationMode;
+
+    assert!(mir.cancellation().is_none());
+    let ops = linear(mir, mir.entry);
+    let route: Vec<_> = ops
+        .iter()
+        .copied()
+        .filter(|op| {
+            matches!(
+                op,
+                Operation::Borrow { .. }
+                    | Operation::Reborrow { .. }
+                    | Operation::FormClosurePair { .. }
+                    | Operation::Move { .. }
+                    | Operation::CallCallableTransfer { .. }
+            )
+        })
+        .collect();
+    let [
+        Operation::Borrow {
+            source,
+            holder,
+            exclusive: true,
+        },
+        Operation::FormClosurePair {
+            closure,
+            captures: [reference, scalar],
+            mode: InvocationMode::Mutable,
+        },
+        Operation::Move {
+            from: job,
+            into: Some(held),
+        },
+        Operation::Move {
+            from: held_use,
+            into: Some(argument_stage),
+        },
+        Operation::CallCallableTransfer {
+            callee,
+            argument,
+            into: result,
+            layout,
+            body,
+        },
+        Operation::Move {
+            from: out_use,
+            into: Some(discard),
+        },
+    ] = route.as_slice()
+    else {
+        panic!("expected one exclusive acquisition and one owner route")
+    };
+    assert_eq!(*callee, forward);
+    assert_eq!(
+        *layout,
+        CallableLayout([
+            CallableField::ExclusiveBool,
+            CallableField::OwnedPrimitive("bool")
+        ])
+    );
+    for (from, to) in [
+        (holder.root, *reference),
+        (*closure, job.root),
+        (held.root, held_use.root),
+        (argument_stage.root, argument.root),
+        (result.root, out_use.root),
+    ] {
+        assert_eq!(from.node, to.node);
+    }
+    assert_eq!(holder.root.span.bytes(), b"&mut flag");
+    assert_eq!(scalar.span.bytes(), b"text");
+    assert_ne!(argument.root.node, result.root.node);
+
+    let callee: Vec<_> = linear(body, body.entry)
+        .into_iter()
+        .filter(|op| {
+            !matches!(op, Operation::None | Operation::Initialize(_))
+                && !matches!(op, Operation::Cleanup(actions) if actions.is_empty())
+        })
+        .collect();
+    let [
+        Operation::Move {
+            from: formal,
+            into: Some(stage),
+        },
+        Operation::Cleanup(epilogue),
+        Operation::Export(output),
+    ] = callee.as_slice()
+    else {
+        panic!("expected formal move, epilogue and export")
+    };
+    assert_eq!(
+        formal.root.span.bytes(),
+        b"job: once () => [&mut bool, bool]"
+    );
+    assert_eq!(stage.root.node, output.root.node);
+    assert!(
+        matches!(epilogue.as_slice(), [Obligation::Drop(note)] if note.root.span.bytes() == b"note")
+    );
+
+    let mut consumed = Vec::new();
+    let mut writes = Vec::new();
+    for (i, op) in ops.iter().enumerate() {
+        match op {
+            Operation::Cleanup(actions) => {
+                for action in actions {
+                    match action {
+                        Obligation::ConsumeCallableTransfer {
+                            operand,
+                            layout: bound,
+                        } => {
+                            assert_eq!(bound, layout);
+                            assert_eq!(operand.root.node, discard.root.node);
+                            consumed.push(i);
+                        }
+                        Obligation::Drop(_) | Obligation::DropCapture { .. } => {
+                            panic!("caller must not drop a referent or capture")
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Operation::Drop(_) | Operation::DropCapture { .. } => {
+                panic!("caller must not drop a referent or capture")
+            }
+            Operation::Install { target, .. } if target.root.node == source.root.node => {
+                writes.push(i)
+            }
+            Operation::Copy { from, .. } => assert!(matches!(
+                from.root.span.bytes(),
+                b"seed: bool" | b"text: bool"
+            )),
+            op => assert!(!matches!(
+                op,
+                Operation::CopyClosure { .. }
+                    | Operation::InvokeClosurePair { .. }
+                    | Operation::InvokeReadOnlyClosurePair { .. }
+                    | Operation::InvokeMutableI32Cell { .. }
+            )),
+        }
+    }
+    assert!(matches!((consumed.as_slice(), writes.as_slice()), ([end], [write]) if end < write));
+}
+
+#[test]
 fn callable_transfer_withholds_unproved_environments_and_checks_escape() {
     probe(
         "captures::callable_transfer_withholds_unproved_environments_and_checks_escape",

@@ -146,8 +146,27 @@ fn callable_field(ty: &TypeTerm<'_>) -> Option<CallableField> {
             }
             _ => None,
         },
+        TypeTerm::Reference {
+            mutable: true,
+            referent,
+        } if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool") => {
+            Some(CallableField::ExclusiveBool)
+        }
         _ => None,
     }
+}
+
+fn callable_transport_layout(
+    first: CallableField,
+    second: CallableField,
+) -> Option<CallableLayout> {
+    if matches!((first, second), (CallableField::ExclusiveBool, field)
+        if field != CallableField::OwnedPrimitive("bool"))
+        || second == CallableField::ExclusiveBool
+    {
+        return None;
+    }
+    Some(CallableLayout([first, second]))
 }
 
 fn callable_pair_result<'a, 'g>(
@@ -173,8 +192,11 @@ fn callable_pair_result<'a, 'g>(
     let [first, second] = fields.as_slice() else {
         return None;
     };
-    callable_field(first)?;
-    callable_field(second)?;
+    let first = callable_field(first)?;
+    if first == CallableField::ExclusiveBool && *mode != InvocationMode::Once {
+        return None;
+    }
+    callable_transport_layout(first, callable_field(second)?)?;
     Some(result)
 }
 
@@ -5551,9 +5573,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             })
             .transpose()?;
         let layout = match (callable_field(&first.ty), second) {
-            (Some(first), Some((site, slot, _))) => {
+            (Some(field), Some((site, slot, _)))
+                if field != CallableField::ExclusiveBool
+                    || (mode == InvocationMode::Mutable
+                        && first.form == CaptureForm::ExplicitBorrow { mutable: true }) =>
+            {
                 self.budget.step(1)?;
                 callable_field(&self.value(site)?.ty).and_then(|second| {
+                    let layout = callable_transport_layout(field, second)?;
                     let matches_cleanup = |field, slot: Slot| {
                         self.slots[slot].cleanup
                             == match field {
@@ -5561,8 +5588,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                                 _ => StorageCleanup::End,
                             }
                     };
-                    (matches_cleanup(first, capture) && matches_cleanup(second, slot))
-                        .then_some(CallableLayout([first, second]))
+                    (matches_cleanup(field, capture) && matches_cleanup(second, slot))
+                        .then_some(layout)
                 })
             }
             _ => None,
