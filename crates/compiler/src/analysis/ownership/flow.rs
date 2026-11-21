@@ -592,24 +592,49 @@ fn forbid_custom_partial(
     Ok(())
 }
 
-fn cleanup_of<'g>(
+#[derive(Clone, Copy)]
+struct CleanupContext<'a, 'g> {
     module: &'g Module,
+    disposer: Option<build::DisposerLookup<'a, 'g>>,
+}
+
+impl<'g> From<&'g Module> for CleanupContext<'_, 'g> {
+    // A cleanup path without the typed lookup cannot certify a fresh error drop.
+    fn from(module: &'g Module) -> Self {
+        Self {
+            module,
+            disposer: None,
+        }
+    }
+}
+
+fn cleanup_of<'g>(
+    context: CleanupContext<'_, 'g>,
     local: Local<'g>,
     held: &Held,
     node: NodeId,
+    budget: &mut Budget,
 ) -> ResultOf<Cleanup<'g>> {
-    let place = local.place(module);
+    let place = local.place(context.module);
     match local.cleanup {
         StorageCleanup::Unlowered => Err(Stop::Pending(node)),
         StorageCleanup::FreshBoolResult(storage) => match held.origin {
             ValueOrigin::FreshResultOk => Ok(Cleanup::EndStorage(place)),
-            ValueOrigin::FreshResultErr(origin) => Ok(Cleanup::DropFreshResultError {
-                operand: place,
-                origin: site_at(module, origin),
-                variant: storage.err,
-                wrapper: storage.wrapper,
-                storage_source: storage.storage_source,
-            }),
+            ValueOrigin::FreshResultErr(origin) => {
+                // Provenance alone permits transfer, not destruction. Both
+                // ordinary and delivery exits must select on the actual wrapper.
+                context
+                    .disposer
+                    .ok_or(Stop::Pending(node))?
+                    .prove_fresh_error_drop(storage, node, budget)?;
+                Ok(Cleanup::DropFreshResultError {
+                    operand: place,
+                    origin: site_at(context.module, origin),
+                    variant: storage.err,
+                    wrapper: storage.wrapper,
+                    storage_source: storage.storage_source,
+                })
+            }
             _ => Err(Stop::Pending(node)),
         },
         StorageCleanup::Drop => Ok(Cleanup::Drop(place)),
@@ -643,12 +668,13 @@ fn cleanup_of<'g>(
 }
 
 fn cleanup_operation<'g>(
-    module: &'g Module,
+    context: CleanupContext<'_, 'g>,
     local: Local<'g>,
     state: State,
     node: NodeId,
     budget: &mut Budget,
 ) -> ResultOf<Operation<'g>> {
+    let module = context.module;
     let State::Initialized(held) = state else {
         return Ok(Operation::None);
     };
@@ -684,7 +710,7 @@ fn cleanup_operation<'g>(
         }
         [None, None] => {}
     }
-    Ok(match cleanup_of(module, local, &held, node)? {
+    Ok(match cleanup_of(context, local, &held, node, budget)? {
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
         cleanup @ (Cleanup::DropFreshResultError { .. }
@@ -873,8 +899,8 @@ enum Boundary {
     Replacement,
 }
 
-fn cleanup_boundary<'g>(
-    module: &'g Module,
+fn cleanup_boundary<'a, 'g: 'a>(
+    context: impl Into<CleanupContext<'a, 'g>>,
     slots: &[Local<'g>],
     state: &mut [State],
     scope: &[Slot],
@@ -882,6 +908,8 @@ fn cleanup_boundary<'g>(
     (node, boundary): (NodeId, Boundary),
     budget: &mut Budget,
 ) -> ResultOf<Vec<Cleanup<'g>>> {
+    let context = context.into();
+    let module = context.module;
     budget.reserve(3 * scope.len())?;
     let mut indegrees = vec![0usize; scope.len()];
     let mut remaining = 0usize;
@@ -1010,7 +1038,7 @@ fn cleanup_boundary<'g>(
                 let drops = held.capture_drops.into_iter().flatten();
                 let count = drops.clone().count();
                 if count == 0 {
-                    actions.push(cleanup_of(module, slots[member], &held, node)?);
+                    actions.push(cleanup_of(context, slots[member], &held, node, budget)?);
                 } else {
                     budget.reserve(count - 1)?;
                     let closure = slots[member].place(module).root;
@@ -1226,6 +1254,7 @@ impl KnownStates {
 // not run a speculative walk or charge ordinary-only callers for admission.
 pub(super) struct CancellationTrace<'a, 'g> {
     module: &'g Module,
+    disposer: build::DisposerLookup<'a, 'g>,
     body: NodeId,
     slots: Vec<Local<'g>>,
     locals: Vec<Slot>,
@@ -1343,6 +1372,7 @@ impl<'g> CancellationTrace<'_, 'g> {
     fn frame(&self) -> CancellationFrame<'_, 'g> {
         CancellationFrame {
             module: self.module,
+            disposer: Some(self.disposer),
             slots: &self.slots,
             locals: &self.locals,
             params: &self.params,
@@ -1701,6 +1731,7 @@ impl<'g> CancellationTrace<'_, 'g> {
 
 struct CancellationFrame<'a, 'g> {
     module: &'g Module,
+    disposer: Option<build::DisposerLookup<'a, 'g>>,
     slots: &'a [Local<'g>],
     locals: &'a [Slot],
     params: &'a [Slot],
@@ -1804,8 +1835,12 @@ impl<'g> CancellationFrame<'_, 'g> {
                 remainder: None,
             },
         );
+        let context = CleanupContext {
+            module: self.module,
+            disposer: self.disposer,
+        };
         let mut cleanup = cleanup_boundary(
-            self.module,
+            context,
             self.slots,
             &mut abandoned,
             self.locals,
@@ -1818,7 +1853,7 @@ impl<'g> CancellationFrame<'_, 'g> {
             live.remove(parameter);
         }
         let parameters = cleanup_boundary(
-            self.module,
+            context,
             self.slots,
             &mut abandoned,
             self.params,
@@ -2055,6 +2090,7 @@ impl<'g> ReplacementCandidate<'g> {
         let known = &self.known;
         let frame = CancellationFrame {
             module: self.module,
+            disposer: None,
             slots: &self.slots,
             locals: &self.locals,
             params: &self.params,
@@ -2187,6 +2223,11 @@ pub(super) fn run<'a, 'g>(
         budget,
         ..
     } = build;
+    let disposer = build::DisposerLookup { typed, dispose };
+    let cleanup_context = CleanupContext {
+        module,
+        disposer: Some(disposer),
+    };
     let live = liveness(&slots, &code, &calls, &cleanups, &retained, budget)?;
     let empty = Held::default();
     let mut known = KnownStates::default();
@@ -3347,6 +3388,7 @@ pub(super) fn run<'a, 'g>(
                     let frames = [frame(0)?, frame(1)?];
                     let parent = CancellationFrame {
                         module,
+                        disposer: Some(disposer),
                         slots: &slots,
                         locals: body_scope.map_or(&[], |scope| &cleanups[scope]),
                         params: &params,
@@ -3763,7 +3805,7 @@ pub(super) fn run<'a, 'g>(
                             return Err(Stop::Pending(node));
                         }
                         Operation::Cleanup(cleanup_boundary(
-                            module,
+                            cleanup_context,
                             &slots,
                             &mut state,
                             &[target],
@@ -3783,7 +3825,7 @@ pub(super) fn run<'a, 'g>(
                         )?;
                         let displaced = std::mem::replace(&mut state[target], State::Vacant);
                         retire_loans(&slots, &mut state, &[target], budget)?;
-                        cleanup_operation(module, slots[target], displaced, node, budget)?
+                        cleanup_operation(cleanup_context, slots[target], displaced, node, budget)?
                     }
                 }
                 Action::Install { target, incoming } => {
@@ -4036,7 +4078,7 @@ pub(super) fn run<'a, 'g>(
                 }
                 Action::Cleanup(index) | Action::EndScope(index) => {
                     Operation::Cleanup(cleanup_boundary(
-                        module,
+                        cleanup_context,
                         &slots,
                         &mut state,
                         &cleanups[index],
@@ -4064,7 +4106,7 @@ pub(super) fn run<'a, 'g>(
                         )?;
                         let ended = std::mem::replace(&mut state[slot], State::Vacant);
                         retire_loans(&slots, &mut state, &[slot], budget)?;
-                        cleanup_operation(module, slots[slot], ended, node, budget)?
+                        cleanup_operation(cleanup_context, slots[slot], ended, node, budget)?
                     } else {
                         state[slot] = State::Vacant;
                         Operation::None
@@ -4096,6 +4138,7 @@ pub(super) fn run<'a, 'g>(
             probe.observe(
                 &CancellationFrame {
                     module,
+                    disposer: Some(disposer),
                     slots: &slots,
                     locals: body_scope.map_or(&[], |scope| &cleanups[scope]),
                     params: &params,
@@ -4166,6 +4209,7 @@ pub(super) fn run<'a, 'g>(
         (
             Some(CancellationTrace {
                 module,
+                disposer,
                 body,
                 slots,
                 locals: body_scope.map_or_else(Vec::new, |index| cleanups.swap_remove(index)),

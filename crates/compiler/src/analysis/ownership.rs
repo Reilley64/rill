@@ -1892,6 +1892,7 @@ enum StorageCleanup<'g> {
 struct FreshResultStorage<'g> {
     err: &'g DeclarationId,
     wrapper: &'g DeclarationId,
+    payload: &'g crate::loader::Intrinsic,
     storage_source: &'g std::path::Path,
 }
 

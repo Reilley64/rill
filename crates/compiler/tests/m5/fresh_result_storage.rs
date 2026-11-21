@@ -1,7 +1,7 @@
 use super::*;
 use compiler::analysis::ownership::{
-    CancellationSuccessor, Delivery, DependencyContract, GraphCompletion, GraphReport, Place,
-    RootReport, analyze_ownership,
+    CancellationSuccessor, Delivery, Dependency, DependencyContract, GraphCompletion,
+    GraphObligation, GraphReport, Place, RootReport, analyze_ownership,
 };
 use compiler::analysis::scalars::{BodyOwner, Site};
 use compiler::analysis::{Statistics, typed::ResultRole};
@@ -97,6 +97,7 @@ fn installed_fresh_result_residences() {
             let exact = analyze_ownership(receipt, cap);
             assert_eq!(exact.statistics(), report.statistics());
             assert_eq!(exact.completion(), GraphCompletion::Incomplete);
+            assert!(exact.inventory_complete());
             for short in shorts {
                 let exhausted = analyze_ownership(receipt, short);
                 assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
@@ -115,7 +116,26 @@ fn installed_fresh_result_residences() {
             ] {
                 let id = function(module, name);
                 let lower = |cap| lower_body(receipt, module, id, cap).unwrap();
-                let stats = lower(AnalysisLimits::default()).statistics();
+                // Measured against pre-fresh 46f16a7 with this same fixture.
+                // The unchanged blocked paths must not pay for a new wrapper lookup.
+                let stats = match name {
+                    "opaque" => Statistics {
+                        work: 3264,
+                        entries: 374,
+                        max_depth: 3,
+                    },
+                    "retained" => Statistics {
+                        work: 3846,
+                        entries: 685,
+                        max_depth: 4,
+                    },
+                    "retireRetained" => Statistics {
+                        work: 3231,
+                        entries: 357,
+                        max_depth: 3,
+                    },
+                    _ => lower(AnalysisLimits::default()).statistics(),
+                };
                 let (cap, shorts) = caps(stats);
                 let target = lower(cap);
                 assert_eq!(target.statistics(), stats);
@@ -134,6 +154,7 @@ fn installed_fresh_result_residences() {
                 }
                 match name {
                     "opaque" | "retireRetained" => {
+                        assert!(body.dependencies().is_empty());
                         for site in [target.blocked_at(), body.blocked_at()] {
                             assert_eq!(site.unwrap().span.bytes(), b"let _ = staged;");
                         }
@@ -142,10 +163,7 @@ fn installed_fresh_result_residences() {
                         body.dependencies()[0].contract,
                         DependencyContract::ResultConstructor
                     ),
-                    "retained" => assert_eq!(
-                        body.dependencies()[1].contract,
-                        DependencyContract::RetainedErrorDisplay
-                    ),
+                    "retained" => assert_retained(target.mir().unwrap(), body, role),
                     _ => {
                         let err = name.ends_with("Err");
                         let export = name.starts_with("export");
@@ -159,6 +177,93 @@ fn installed_fresh_result_residences() {
                 }
             }
         },
+    );
+}
+
+fn assert_retained(mir: &Mir<'_>, body: &RootReport<'_>, role: &ResultRole<'_>) {
+    let constructors: Vec<_> = mir
+        .blocks
+        .iter()
+        .filter(|block| {
+            matches!(
+                block.operation,
+                Operation::ConstructResultError { .. } | Operation::WrapResultFailure { .. }
+            )
+        })
+        .collect();
+    let [inner, outer] = constructors.as_slice() else {
+        panic!("expected the original constructor and exactly one wrap");
+    };
+    let Operation::ConstructResultError {
+        into,
+        variant,
+        wrapper,
+        ..
+    } = inner.operation
+    else {
+        panic!("the cause must be the original wrapper");
+    };
+    assert_eq!((variant, wrapper), (&role.err.id, &role.wrapper.id));
+    assert_eq!(inner.site.span.bytes(), b"fail<bool, i32>(7i32)");
+    let Operation::WrapResultFailure {
+        operand,
+        into: output,
+        origin,
+        cause_display,
+        ..
+    } = outer.operation
+    else {
+        panic!("the outer wrapper must retain the cause");
+    };
+    let same_whole = |left: Place<'_>, right: Place<'_>| {
+        left.projection.is_none()
+            && right.projection.is_none()
+            && left.root.node == right.root.node
+            && left.root.module == right.root.module
+    };
+    assert!(mir.blocks.iter().any(|block| matches!(block.operation,
+        Operation::Move { from, into: Some(to) } if same_whole(from, into) && same_whole(to, operand))));
+    assert!(mir.blocks.iter().any(|block| matches!(block.operation,
+        Operation::Export(place) if same_whole(place, output))));
+    assert_eq!(origin.snapshot(), inner.site.span.snapshot());
+    assert_eq!(origin.bytes(), b"?");
+    assert_ne!(origin.start(), inner.site.span.start());
+    assert!(mir.blocks.iter().all(|block| {
+        match &block.operation {
+            Operation::Drop(_)
+            | Operation::DropResultFailure { .. }
+            | Operation::Dispose { .. } => false,
+            Operation::Cleanup(actions) => actions
+                .iter()
+                .all(|action| matches!(action, Obligation::EndStorage(_))),
+            _ => true,
+        }
+    }));
+
+    let [constructor, display] = body.dependencies() else {
+        panic!("the ordinary edges are construction and retained display, not disposal");
+    };
+    assert_constructor(constructor, inner.site, role);
+    assert_eq!(display.contract, DependencyContract::RetainedErrorDisplay);
+    assert_eq!(display.declaration, cause_display);
+    assert_eq!(body.blocked_at().unwrap().node, display.site.node);
+    assert_eq!(display.site.span.bytes(), b"input ? (8i32)");
+}
+
+fn assert_constructor(edge: &Dependency<'_>, origin: Site<'_>, role: &ResultRole<'_>) {
+    let provider = role.providers.unwrap();
+    assert_eq!(
+        (edge.site.module, edge.site.node),
+        (origin.module, origin.node)
+    );
+    assert_eq!(edge.declaration, &provider.constructor.id);
+    assert_eq!(
+        edge.contract,
+        DependencyContract::FreshResultConstructor {
+            variant: &role.err.id,
+            wrapper: &role.wrapper.id,
+            storage_source: provider.storage_source,
+        }
     );
 }
 
@@ -176,16 +281,7 @@ fn assert_dependencies(
     }
     let provider = role.providers.unwrap();
     assert_eq!(edges.len(), if export { 1 } else { 2 });
-    assert_eq!(edges[0].site.node, origin.node);
-    assert_eq!(edges[0].declaration, &provider.constructor.id);
-    assert_eq!(
-        edges[0].contract,
-        DependencyContract::FreshResultConstructor {
-            variant: &role.err.id,
-            wrapper: &role.wrapper.id,
-            storage_source: provider.storage_source,
-        }
-    );
+    assert_constructor(&edges[0], origin, role);
     if !export {
         assert_eq!(edges[1].declaration, &role.wrapper.id);
         assert_eq!(
@@ -330,13 +426,55 @@ fn installed_fresh_result_is_retired_at_an_existing_checkpoint() {
         }
     "#,
         |_, module, receipt, typed| {
-            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let measured = analyze_ownership(receipt, AnalysisLimits::default());
+            let (cap, shorts) = caps(measured.statistics());
+            let graph = analyze_ownership(receipt, cap);
+            assert_eq!(graph.statistics(), measured.statistics());
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert!(graph.inventory_complete());
+            assert!(
+                graph
+                    .open_obligations()
+                    .contains(&GraphObligation::IntrinsicCancellation)
+            );
+            for short in shorts {
+                let exhausted = analyze_ownership(receipt, short);
+                assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
+                assert!(exhausted.roots().iter().all(
+                    |r| r.mir().is_none() && !matches!(r.enabled_frame(), Delivery::Proved(_))
+                ));
+            }
             let role = typed.result_role().unwrap();
+            let checkpoint = function(module, "checkpoint");
             for (name, err) in [("deliverErr", true), ("deliverOk", false)] {
                 let id = function(module, name);
-                let target = lower_body(receipt, module, id, AnalysisLimits::default()).unwrap();
+                let lower = |cap| lower_body(receipt, module, id, cap).unwrap();
+                let stats = lower(AnalysisLimits::default()).statistics();
+                let (cap, shorts) = caps(stats);
+                let target = lower(cap);
+                assert_eq!(target.statistics(), stats);
+                assert_eq!(target.completion(), Completion::Checked);
+                for short in shorts {
+                    let exhausted = lower(short);
+                    assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+                    assert!(exhausted.mir().is_none());
+                }
                 let mir = target.mir().unwrap();
                 let body = root(&graph, id);
+                assert_eq!(body.ordinary_completion(), Completion::Checked);
+                // Cancellation-only cleanup is proved below, not included in
+                // the ordinary dependency inventory.
+                let call = match (err, body.dependencies()) {
+                    (true, [constructor, call]) => {
+                        assert_constructor(constructor, residence(mir, err, true, role), role);
+                        call
+                    }
+                    (false, [call]) => call,
+                    (_, edges) => panic!("unexpected ordinary edges: {edges:?}"),
+                };
+                assert_eq!(call.contract, DependencyContract::OrdinaryCall);
+                assert_eq!(call.declaration, checkpoint);
+                assert_eq!(call.site.span.bytes(), b"checkpoint()");
                 let Delivery::Proved(graph_delivery) = body.enabled_frame() else {
                     panic!("no enabled-frame proof for {name}");
                 };
@@ -359,7 +497,7 @@ fn installed_fresh_result_is_retired_at_an_existing_checkpoint() {
                     else {
                         panic!("only the callee entry contributes delivery");
                     };
-                    assert_eq!(*callee, function(module, "checkpoint"));
+                    assert_eq!(*callee, checkpoint);
                     assert!(on_delivery.retained.is_none());
                     assert_eq!(
                         retired(&on_delivery.cleanup, err, origin, role)

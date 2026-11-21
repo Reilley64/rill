@@ -19,7 +19,7 @@ use crate::analysis::typed::{
     OwnershipRule, Primitive, PrimitiveCoverage, PrimitiveOperation, PrimitiveRole, ResultRole,
 };
 use crate::analysis::{MemberType, Payload};
-use crate::loader::Origin;
+use crate::loader::{Intrinsic, Origin};
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
@@ -120,13 +120,91 @@ struct CheckedPropagation<'a, 'g> {
 }
 
 // The caller has already proved the canonical parent and i32 error type.
-fn bool_result_success(ty: &TypeTerm<'_>) -> bool {
+fn bool_result_error<'g>(ty: &TypeTerm<'g>) -> Option<&'g Intrinsic> {
     let parent = match ty {
         TypeTerm::Variant { parent, .. } => parent.as_ref(),
         parent => parent,
     };
-    matches!(parent, TypeTerm::Nominal { arguments, .. }
-        if matches!(arguments.as_slice(), [success, _] if scalar::scalar(success) == Some(Primitive::Bool)))
+    let TypeTerm::Nominal { arguments, .. } = parent else {
+        return None;
+    };
+    let [success, error] = arguments.as_slice() else {
+        return None;
+    };
+    match error.as_ref() {
+        TypeTerm::Primitive(error) if scalar::scalar(success) == Some(Primitive::Bool) => {
+            Some(*error)
+        }
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DisposerLookup<'a, 'g> {
+    pub(super) typed: &'a TypedReport<'g>,
+    pub(super) dispose: Option<&'g DeclarationId>,
+}
+
+impl<'g> DisposerLookup<'_, 'g> {
+    pub(super) fn prove_fresh_error_drop(
+        self,
+        storage: FreshResultStorage<'g>,
+        node: NodeId,
+        budget: &mut Budget,
+    ) -> ResultOf<()> {
+        // This residence was checked for the canonical Result<bool, i32>.
+        // Select on its actual Err<i32> wrapper, not the Result or its payload.
+        budget.reserve(3)?;
+        let wrapper = Arc::new(TypeTerm::Nominal {
+            declaration: storage.wrapper,
+            arguments: vec![Arc::new(TypeTerm::Primitive(storage.payload))],
+        });
+        if self.select(node, &wrapper, budget)?.is_some() {
+            return Err(Stop::Pending(node));
+        }
+        Ok(())
+    }
+
+    fn select(
+        self,
+        node: NodeId,
+        ty: &Type<'g>,
+        budget: &mut Budget,
+    ) -> ResultOf<Option<&'g DeclarationId>> {
+        let inventory = self.typed.inventory();
+        let dispose = self.dispose.ok_or(Stop::Pending(node))?;
+        let family = ordinary::source::admitted_family(inventory, dispose, budget)?
+            .map_err(|_| Stop::Pending(node))?;
+        budget.reserve(1)?;
+        let viable = ordinary::source::project(family, &[Some(ty.clone())], &[], budget)?;
+        match ordinary::source::rank(family, &viable, budget)? {
+            Some(HypotheticalOutcome::NoMatch) => Ok(None),
+            Some(HypotheticalOutcome::Winner(winner)) => {
+                // A selected but conditional implementation is not proof of a
+                // custom disposer. Keep substitution/evidence-dependent cases open.
+                budget.step(viable.len())?;
+                let selected = viable
+                    .iter()
+                    .find(|choice| &choice.body.source.declaration == winner && choice.covers)
+                    .ok_or(Stop::Pending(node))?;
+                budget.step(2)?;
+                if selected.body.header.binders.is_empty()
+                    && selected.substitution.is_empty()
+                    && [dispose, winner].into_iter().all(|id| {
+                        inventory
+                            .headers()
+                            .get(id)
+                            .is_some_and(|h| h.requirements.is_empty())
+                    })
+                {
+                    Ok(Some(winner))
+                } else {
+                    Err(Stop::Pending(node))
+                }
+            }
+            _ => Err(Stop::Pending(node)),
+        }
+    }
 }
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
@@ -833,7 +911,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if variant == Some(&role.ok.id) {
                     (false, StorageCleanup::End)
                 } else if let Some(representation) = role.representation
-                    && bool_result_success(ty)
+                    && let Some(payload) = bool_result_error(ty)
                 {
                     // Only checked construction in flow permits local retirement.
                     let _: fn(rill_error_storage::OwnedErr<i32>) = std::mem::drop;
@@ -842,6 +920,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         StorageCleanup::FreshBoolResult(FreshResultStorage {
                             err: &role.err.id,
                             wrapper: &role.wrapper.id,
+                            payload,
                             storage_source: representation.storage_source,
                         }),
                     )
@@ -1407,39 +1486,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         ty: &Type<'g>,
     ) -> ResultOf<Option<&'g DeclarationId>> {
-        let inventory = self.typed.inventory();
-        let dispose = self.dispose.ok_or(Stop::Pending(node))?;
-        let family = ordinary::source::admitted_family(inventory, dispose, self.budget)?
-            .map_err(|_| Stop::Pending(node))?;
-        self.budget.reserve(1)?;
-        let viable = ordinary::source::project(family, &[Some(ty.clone())], &[], self.budget)?;
-        match ordinary::source::rank(family, &viable, self.budget)? {
-            Some(HypotheticalOutcome::NoMatch) => Ok(None),
-            Some(HypotheticalOutcome::Winner(winner)) => {
-                // A selected but conditional implementation is not proof of a
-                // custom disposer. Keep substitution/evidence-dependent cases open.
-                self.budget.step(viable.len())?;
-                let selected = viable
-                    .iter()
-                    .find(|choice| &choice.body.source.declaration == winner && choice.covers)
-                    .ok_or(Stop::Pending(node))?;
-                self.budget.step(2)?;
-                if selected.body.header.binders.is_empty()
-                    && selected.substitution.is_empty()
-                    && [dispose, winner].into_iter().all(|id| {
-                        inventory
-                            .headers()
-                            .get(id)
-                            .is_some_and(|h| h.requirements.is_empty())
-                    })
-                {
-                    Ok(Some(winner))
-                } else {
-                    Err(Stop::Pending(node))
-                }
-            }
-            _ => Err(Stop::Pending(node)),
+        DisposerLookup {
+            typed: self.typed,
+            dispose: self.dispose,
         }
+        .select(node, ty, self.budget)
     }
 
     fn value(&self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
@@ -4543,7 +4594,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 payload: payload.map(|(_, slot)| slot),
                 into,
                 fresh_result_ok: self.scalar_result_role(&data.ty).is_some_and(|(role, _)| {
-                    *declaration == &role.ok.id && bool_result_success(&data.ty)
+                    *declaration == &role.ok.id && bool_result_error(&data.ty).is_some()
                 }),
             },
             Edges::Next(next),
@@ -4636,15 +4687,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<Pc> {
         let (origin_node, constructor) = self.checked_scalar_error(node, facts, data)?;
         let fresh_storage = match self.slots[into].cleanup {
-            StorageCleanup::FreshBoolResult(storage) if bool_result_success(&data.result) => {
-                self.budget.reserve(2)?;
-                let wrapper = Arc::new(TypeTerm::Nominal {
-                    declaration: storage.wrapper,
-                    arguments: vec![data.payload.clone()],
-                });
-                if self.outer_disposer(node, &wrapper)?.is_some() {
-                    return Err(Stop::Pending(node));
-                }
+            StorageCleanup::FreshBoolResult(storage)
+                if bool_result_error(&data.result).is_some() =>
+            {
                 Some(storage.storage_source)
             }
             _ => None,

@@ -188,8 +188,9 @@ impl<'g> RootReport<'g> {
     pub fn ordinary_mir(&self) -> Option<&Mir<'g>> {
         self.ordinary_mir.as_ref()
     }
-    /// Reached edges from successful local lowering. A rejection or exhaustion
-    /// may prevent edge discovery; an empty list isn't a coverage claim.
+    /// Reached ordinary edges from successful local lowering, not a census of
+    /// delivery exits. A rejection or exhaustion may prevent edge discovery;
+    /// an empty list isn't a coverage claim.
     pub fn dependencies(&self) -> &[Dependency<'g>] {
         &self.dependencies
     }
