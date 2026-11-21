@@ -313,6 +313,18 @@ impl<'r, 'g> Checker<'r, 'g> {
             return Ok(());
         }
         let syntax = &module.syntax.nodes;
+        // The admitted view is of the extracted string, not the whole
+        // Option carrier. Reject the written borrow before granting storage.
+        if matches!(
+            self.iteration_body,
+            IterationBody::TextOption { item: Some(_), .. }
+        ) && matches!(syntax[node].kind, NodeKind::Prefix("&" | "&mut"))
+            && matches!(slot.ty.as_deref(), Some(TypeTerm::Reference { referent, .. })
+                if Self::is_iteration_option(self.option, referent, "string"))
+        {
+            self.iteration_body = IterationBody::Unsupported;
+            return Ok(());
+        }
         if let IterationBody::TextOption {
             item,
             direct: Some(DirectExpression::Postfix { operand, named, .. }),

@@ -158,6 +158,68 @@ fn consuming_list_transfers_the_actual_option_tag() {
     );
 }
 
+#[test]
+fn unsupported_carrier_borrow_and_unopened_sibling_keep_the_source_pending() {
+    for (source, work, entries) in [
+        (
+            "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let _ = &item; break; } return Option.Some(true); }",
+            1855,
+            19,
+        ),
+        (
+            "function probe(xs: List<Option<string>>, spare: List<string>): Option<bool> { for (let item of xs) { let text = item?; let _ = &text; } return Option.Some(true); }",
+            1866,
+            24,
+        ),
+        (
+            "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let _ = &item; let text = item?; let _ = &text; } return Option.Some(true); }",
+            1863,
+            23,
+        ),
+        (
+            "function probe(xs: List<Option<string>>): void { for (let item of xs) { let _ = &item; break; } }",
+            1847,
+            15,
+        ),
+    ] {
+        probe(
+            "iteration::option_text::unsupported_carrier_borrow_and_unopened_sibling_keep_the_source_pending",
+            source,
+            |_, module, receipt| {
+                let f = module
+                    .declarations
+                    .iter()
+                    .find(|f| f.name.as_deref() == Some("probe"))
+                    .unwrap();
+                let old = AnalysisLimits {
+                    max_work: work,
+                    max_entries: entries,
+                    max_depth: 0,
+                };
+                let target = lower_body(receipt, module, &f.id, old).unwrap();
+                assert_eq!(target.completion(), Completion::Incomplete);
+                assert_eq!(
+                    target.blocked_at().unwrap().span.bytes(),
+                    b"xs: List<Option<string>>"
+                );
+                assert!(target.mir().is_none() && target.findings().is_empty());
+                let graph = analyze_ownership(receipt, AnalysisLimits::default());
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == f.node)
+                    .unwrap();
+                assert_eq!(
+                    root.blocked_at().unwrap().node,
+                    target.blocked_at().unwrap().node
+                );
+                assert_eq!(root.ordinary_completion(), Completion::Incomplete);
+                assert!(root.ordinary_mir().is_none() && root.dependencies().is_empty());
+            },
+        );
+    }
+}
+
 const OTHER_SOURCES: &str = r#"
 function unused(xs: List<Option<string>>): void { }
 function arbitrary(xs: List<Option<string>>, gate: Option<string>): Option<bool> {

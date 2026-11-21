@@ -106,8 +106,19 @@ impl<'a, 'g> Check<'a, 'g> {
         let mut option_formals = 0;
         for parameter in parameters {
             let id = &parameter.declaration.id;
-            if track_iterator && self.text_option_list(&parameter.ty) {
-                option_formals += 1;
+            if track_iterator {
+                if self.text_option_list(&parameter.ty) {
+                    option_formals += 1;
+                } else if !parameter.text_iteration_source
+                    && let Some(list) = self.core.collections.list
+                    && matches!(parameter.ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                        if std::ptr::eq(*declaration, &list.declaration.id)
+                            && matches!(arguments.as_slice(), [element] if matches!(element.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")))
+                {
+                    // The function cannot open this unproved sibling backing.
+                    // Do not grant earlier Option-list formals partial admission.
+                    self.option_iterator = None;
+                }
             }
             let root = Root::Local(id);
             states = self.seed_parameter(states, parameter, checked)?;

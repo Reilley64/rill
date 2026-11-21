@@ -193,12 +193,23 @@ impl<'a, 'g> Check<'a, 'g> {
                 OptionCursor::Unknown(item) => {
                     if let Some((direct, candidate)) = &mut self.option_iterator
                         && *direct == depth
-                        && matches!(
-                            iteration.body,
-                            Some(
-                                IterationBodyKind::Ordinary | IterationBodyKind::YieldedTextPostfix
-                            )
-                        )
+                        && match iteration.body {
+                            Some(IterationBodyKind::YieldedTextPostfix) => true,
+                            // Bare loop transfers need no other M5 operation on
+                            // the owning carrier. Ordinary shape alone does not
+                            // prove that (for example) a borrow can be lowered.
+                            Some(IterationBodyKind::Ordinary) => {
+                                match self.module.syntax.nodes[body].children.as_slice() {
+                                    [] => true,
+                                    [exit] => matches!(
+                                        self.module.syntax.nodes[*exit].kind,
+                                        NodeKind::Break | NodeKind::Continue
+                                    ),
+                                    _ => false,
+                                }
+                            }
+                            _ => false,
+                        }
                         && let Some(path) = source.path.as_ref()
                         && path.root.kind == DeclarationKind::Parameter
                     {
