@@ -5993,16 +5993,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .ok_or(Stop::Pending(node))?;
         let syntax = &self.module.syntax.nodes[node];
         let path = invocation.path.as_ref().ok_or(Stop::Pending(node))?;
+        let borrowed = invocation.mode == InvocationMode::ReadOnly
+            && invocation.access == Access::ReadOnly
+            && path.projections.as_slice() == [PathProjection::Dereference];
         if syntax.kind != NodeKind::Call
             || syntax.children.as_slice() != [invocation.receiver]
             || !matches!(
                 invocation.mode,
                 InvocationMode::Once | InvocationMode::ReadOnly
             )
-            || invocation.access != Access::Owned
             || invocation.assumption.is_some()
             || path.root.kind != DeclarationKind::Binding
-            || !path.projections.is_empty()
+            || (!borrowed && (invocation.access != Access::Owned || !path.projections.is_empty()))
         {
             return Err(Stop::Pending(node));
         }
@@ -6015,11 +6017,32 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if self.module.syntax.nodes[receiver].kind != NodeKind::ValueReference {
             return Err(Stop::Pending(node));
         }
+        let value = self.value(receiver)?;
+        let (ty, path) = if borrowed {
+            self.budget.step(2)?;
+            let TypeTerm::Reference {
+                mutable: false,
+                referent,
+            } = value.ty.as_ref()
+            else {
+                return Err(Stop::Pending(node));
+            };
+            let descriptor = value.path.as_ref().ok_or(Stop::Pending(node))?;
+            if value.access != Access::Owned
+                || !std::ptr::eq(descriptor.root, path.root)
+                || !descriptor.projections.is_empty()
+            {
+                return Err(Stop::Pending(node));
+            }
+            (referent, descriptor)
+        } else {
+            (&value.ty, path)
+        };
         let TypeTerm::Callable {
             mode,
             parameters,
             result,
-        } = self.value(receiver)?.ty.as_ref()
+        } = ty.as_ref()
         else {
             return Err(Stop::Pending(node));
         };
@@ -6042,6 +6065,16 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 })
             {
                 return Err(Stop::Pending(node));
+            }
+            if borrowed {
+                self.budget.step(2)?;
+                if !matches!(elements.as_slice(), [descriptor, bit]
+                    if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                        if scalar::scalar(referent) == Some(Primitive::Bool))
+                        && scalar::scalar(bit) == Some(Primitive::Bool))
+                {
+                    return Err(Stop::Pending(node));
+                }
             }
             // A replaceable binding need not have a single typed origin. Flow
             // must still identify a checked read-only formation on each path.
