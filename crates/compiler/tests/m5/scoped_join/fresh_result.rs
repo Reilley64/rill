@@ -341,12 +341,25 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
                 let keep = *held;
                 return pair;
             }
+            function liveParentError(): [Result<bool, i32>, bool] {
+                let error = Err<bool, i32>(11i32);
+                let pair = scoped([(): Result<bool, i32> => Result.Ok(true), () => false]);
+                let _ = error;
+                return pair;
+            }
+            function retiredParentError(): [Result<bool, i32>, bool] {
+                let error = Err<bool, i32>(11i32);
+                let _ = error;
+                return scoped([(): Result<bool, i32> => Result.Ok(true), () => false]);
+            }
         "#,
         |_, module, receipt| {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, expected) in [
                 ("unproved", Completion::Incomplete),
                 ("conflict", Completion::SourceRejected),
+                ("liveParentError", Completion::Incomplete),
+                ("retiredParentError", Completion::Checked),
             ] {
                 let d = &module.declarations[named(module, name)];
                 let target = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
@@ -362,6 +375,28 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
                     .find(|r| r.site().module == &module.key && r.site().node == d.node)
                     .unwrap();
                 assert_eq!(root.completion(), expected);
+                if name == "retiredParentError" {
+                    for mir in [target.mir().unwrap(), root.mir().unwrap()] {
+                        let ops = linear(mir, mir.entry);
+                        let drop = ops
+                            .iter()
+                            .position(|op| {
+                                matches!(op,
+                                    Operation::Cleanup(actions) if matches!(actions.as_slice(),
+                                        [Obligation::DropFreshResultError { origin, .. }]
+                                            if origin.span.bytes() == b"Err<bool, i32>(11i32)"
+                                    )
+                                )
+                            })
+                            .unwrap();
+                        let joined = ops
+                            .iter()
+                            .position(|op| matches!(op, Operation::ScopedJoin(_)))
+                            .unwrap();
+                        assert!(drop < joined);
+                    }
+                    continue;
+                }
                 assert!(target.mir().is_none() && root.mir().is_none());
                 assert!(root.dependencies().is_empty());
                 if name == "conflict" {

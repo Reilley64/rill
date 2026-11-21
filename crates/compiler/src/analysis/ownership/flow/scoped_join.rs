@@ -403,7 +403,7 @@ fn parent_exit<'g>(
             .checked_mul(membership_work(parent))
             .ok_or(Stop::Limit)?,
     )?;
-    if !parent.check(&terminal, node, budget)? {
+    if !parent.check_initialized(&terminal, node, true, budget)? {
         return Err(Stop::Pending(node));
     }
     let exit = parent.exit(Cow::Owned(terminal), node, budget)?;

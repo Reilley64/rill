@@ -1807,6 +1807,16 @@ impl<'g> CancellationFrame<'_, 'g> {
     }
 
     fn check(&self, state: &[State], node: NodeId, budget: &mut Budget) -> ResultOf<bool> {
+        self.check_initialized(state, node, false, budget)
+    }
+
+    fn check_initialized(
+        &self,
+        state: &[State],
+        node: NodeId,
+        scoped_join: bool,
+        budget: &mut Budget,
+    ) -> ResultOf<bool> {
         let contents = self
             .retained
             .values()
@@ -1815,13 +1825,14 @@ impl<'g> CancellationFrame<'_, 'g> {
         for (slot, state) in state.iter().enumerate() {
             budget.step(1)?;
             if let State::Initialized(held) = state {
-                if matches!(self.slots[slot].cleanup, StorageCleanup::FreshBoolResult(_))
-                    && !matches!(
-                        held.origin,
-                        ValueOrigin::FreshResultOk | ValueOrigin::FreshResultErr(_)
-                    )
-                {
-                    return Ok(false);
+                if matches!(self.slots[slot].cleanup, StorageCleanup::FreshBoolResult(_)) {
+                    match held.origin {
+                        ValueOrigin::FreshResultOk => {}
+                        ValueOrigin::FreshResultErr(_) if !scoped_join => {}
+                        // A live parent error is outside the scoped parent
+                        // exit, separately from checked child-stage retirement.
+                        _ => return Ok(false),
+                    }
                 }
                 if Some(slot) != contents
                     && self.locals.binary_search(&slot).is_err()
