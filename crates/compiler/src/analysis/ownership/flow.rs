@@ -4280,7 +4280,13 @@ pub(super) fn run<'a, 'g>(
                         }
                         Operation::StageScopedValue {
                             from: local(slot),
-                            retirement: cleanup_of(module, slots[slot], held, node)?,
+                            retirement: cleanup_of(
+                                cleanup_context,
+                                slots[slot],
+                                held,
+                                node,
+                                budget,
+                            )?,
                         }
                     } else {
                         Operation::Export(local(slot))

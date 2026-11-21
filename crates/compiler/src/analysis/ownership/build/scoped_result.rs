@@ -25,7 +25,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Ok(None);
         };
         let result = |t: &Type<'g>| {
-            bool_result_success(t) && matches!(self.scalar_result_role(t), Some((_, None)))
+            bool_result_error(t).is_some() && matches!(self.scalar_result_role(t), Some((_, None)))
         };
         let position = match (scalar::scalar(left), scalar::scalar(right)) {
             (_, Some(Primitive::Bool)) if result(left) => 0,
@@ -188,7 +188,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             if occurrence.node != expression
                 || !std::ptr::eq(occurrence.module, &self.module.key)
                 || !arrow.captures.is_empty()
-                || !bool_result_success(&arrow.result)
+                || bool_result_error(&arrow.result).is_none()
                 || !matches!(self.scalar_result_role(&arrow.result), Some((_, None)))
             {
                 return Err(pending);
