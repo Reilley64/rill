@@ -1500,7 +1500,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(value)
     }
 
-    fn normal_value(&mut self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
+    pub(super) fn normal_value(&mut self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
         self.budget.step(1)?;
         let fact = self.fact(&node).ok_or(Stop::Pending(node))?;
         let NodeFactKind::Expression(facts) = &fact.kind else {
@@ -6840,11 +6840,24 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 return self.call_two_list_arrows(node, route, into, next, depth);
             }
         }
-        if !Self::direct_application_call(call)
-            || into.is_some_and(|slot| self.slots[slot].contains_guard())
-        {
+        if into.is_some_and(|slot| self.slots[slot].contains_guard()) {
             return Err(Stop::Pending(node));
         }
+        let callee = if Self::direct_application_call(call) {
+            call.callee
+        } else if checked_carrier.is_none()
+            && call.callee.kind == DeclarationKind::Family
+            && call.callee.module.origin == Origin::Application
+            && call.substitution.len() == 1
+            && call
+                .selection
+                .as_ref()
+                .is_some_and(|selected| selected.substitution.len() == 1)
+        {
+            rigid::call_target(self, node, call, facts)?
+        } else {
+            return Err(Stop::Pending(node));
+        };
         let result = checked_carrier.unwrap_or(&facts.ty);
         // A local cleanup or payload transfer does not establish the callee's
         // ownership of a returned backing or its caller retention contract.
@@ -6974,7 +6987,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 .transpose()?
         };
         self.calls.push(Call {
-            callee: call.callee,
+            callee,
             args,
             into,
             result: if borrows_record {

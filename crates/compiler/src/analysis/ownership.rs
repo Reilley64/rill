@@ -7,7 +7,7 @@ use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
     TypeTerm, retained_bool_contents_type,
 };
-use crate::loader::{CollectionArtifact, Declaration, DeclarationId, DeclarationKind};
+use crate::loader::{CollectionArtifact, Declaration, DeclarationId, DeclarationKind, Origin};
 use crate::source::Span;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
@@ -17,6 +17,7 @@ mod build;
 mod flow;
 mod graph;
 mod join;
+mod rigid;
 mod scalar;
 
 pub use graph::{
@@ -1105,7 +1106,9 @@ fn checked_graph<'g>(
             if seen.contains_key(callee) {
                 return Ok(());
             }
-            let scalar = !is_disposer && callee.kind == DeclarationKind::Implementation;
+            let scalar = !is_disposer
+                && callee.kind == DeclarationKind::Implementation
+                && callee.module.origin == Origin::Standard;
             let modules = match scalar_module.filter(|_| scalar) {
                 // Every admitted ordinary scalar implementation is in the
                 // same captured module, regardless of family or width.
@@ -1189,54 +1192,60 @@ fn checked_graph<'g>(
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
         let missing = (module, Stop::Pending(root_site));
         let enabled = !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
-        let lowered = if !is_disposer && id.kind == DeclarationKind::Implementation {
-            // Only selected scalar edges target ordinary implementations here.
-            // All widths share the same core module and capture index.
-            let index = match &mut scalar_targets {
-                Some(index) => index,
-                None => scalar_targets.insert(
-                    scalar::TargetIndex::new(typed, target, target.syntax.root, budget)
-                        .map_err(|stop| (target, stop))?,
-                ),
-            };
-            index
-                .lower_selected(typed, target, id, target.syntax.root, budget)
-                .map(|mir| Lowered {
-                    mir,
-                    trace: None,
-                    replacement: None,
-                    empty_entry: None,
-                })
-        } else {
-            let (selected, frame) = if is_disposer {
-                let family = typed
-                    .dispose_role()
-                    .and_then(|role| typed.inventory().captured_family(&role.id))
-                    .ok_or((module, Stop::Pending(root_site)))?;
-                budget
-                    .step(family.implementations.len())
-                    .map_err(|()| (target, Stop::Limit))?;
-                let selected = family
-                    .implementations
-                    .iter()
-                    .find(|body| body.source.declaration == *id)
-                    .map(|body| &body.header);
-                (selected, Frame::ActiveDisposer)
-            } else {
-                (
-                    typed.inventory().type_facts().declarations.get(id),
-                    Frame::OrdinaryFunction,
+        let ordinary_implementation = !is_disposer && id.kind == DeclarationKind::Implementation;
+        let lowered = match (ordinary_implementation, target.key.origin) {
+            (true, Origin::Application) => {
+                rigid::lower_selected(typed, target, id, Lowering::new(budget, &mut cache))
+            }
+            (true, _) => {
+                // All widths share the same core module and capture index.
+                let index = match &mut scalar_targets {
+                    Some(index) => index,
+                    None => scalar_targets.insert(
+                        scalar::TargetIndex::new(typed, target, target.syntax.root, budget)
+                            .map_err(|stop| (target, stop))?,
+                    ),
+                };
+                index
+                    .lower_selected(typed, target, id, target.syntax.root, budget)
+                    .map(|mir| Lowered {
+                        mir,
+                        trace: None,
+                        replacement: None,
+                        empty_entry: None,
+                    })
+            }
+            _ => {
+                let (selected, frame) = if is_disposer {
+                    let family = typed
+                        .dispose_role()
+                        .and_then(|role| typed.inventory().captured_family(&role.id))
+                        .ok_or((module, Stop::Pending(root_site)))?;
+                    budget
+                        .step(family.implementations.len())
+                        .map_err(|()| (target, Stop::Limit))?;
+                    let selected = family
+                        .implementations
+                        .iter()
+                        .find(|body| body.source.declaration == *id)
+                        .map(|body| &body.header);
+                    (selected, Frame::ActiveDisposer)
+                } else {
+                    (
+                        typed.inventory().type_facts().declarations.get(id),
+                        Frame::OrdinaryFunction,
+                    )
+                };
+                lower(
+                    typed,
+                    target,
+                    selected.ok_or(missing)?,
+                    frame,
+                    enabled,
+                    None,
+                    Lowering::new(budget, &mut cache),
                 )
-            };
-            lower(
-                typed,
-                target,
-                selected.ok_or(missing)?,
-                frame,
-                enabled,
-                None,
-                Lowering::new(budget, &mut cache),
-            )
+            }
         };
         let Lowered {
             mir,
@@ -1571,8 +1580,6 @@ fn lower_implementation<'a, 'g>(
     declaration: &'g Declaration,
     Lowering { budget, cache }: Lowering<'_, 'a, 'g>,
 ) -> ResultOf<Lowered<'a, 'g>> {
-    use crate::loader::Origin;
-
     let site = declaration.node;
     budget.step(1)?;
     let standard = module.key.origin == Origin::Standard && module.key.path == "core.rill";
@@ -1602,16 +1609,17 @@ fn lower_implementation<'a, 'g>(
     let family = inventory
         .captured_family(&source.family)
         .ok_or(Stop::Pending(site))?;
-    if !standard && !family.header.binders.is_empty() {
-        return Err(Stop::Pending(site));
-    }
     budget.step(family.implementations.len())?;
     let implementation = family
         .implementations
         .iter()
         .find(|body| std::ptr::eq(body.source, source))
         .ok_or(Stop::Pending(site))?;
-    let body = concrete_implementation_body(implementation)?;
+    let body = if standard {
+        concrete_implementation_body(implementation)?
+    } else {
+        application_implementation_body(module, &family.header, implementation, budget)?
+    };
     let facts = typed
         .bodies()
         .checked_body(module, BodyOwner::Declaration(&declaration.id), budget)?
@@ -1619,6 +1627,11 @@ fn lower_implementation<'a, 'g>(
     let frame = if standard {
         scalar::implementation_frame(typed, module, declaration, implementation, facts, budget)?
     } else {
+        if !implementation.header.binders.is_empty()
+            && (facts.flow.pending || facts.site.node != body)
+        {
+            return Err(Stop::Pending(site));
+        }
         Frame::PlainImplementation { body }
     };
     lower(
@@ -1630,6 +1643,19 @@ fn lower_implementation<'a, 'g>(
         None,
         Lowering { budget, cache },
     )
+}
+
+fn application_implementation_body(
+    module: &Module,
+    family: &DeclarationFacts<'_>,
+    implementation: &super::ordinary::ImplementationFacts<'_>,
+    budget: &mut Budget,
+) -> ResultOf<NodeId> {
+    if family.binders.is_empty() {
+        concrete_implementation_body(implementation)
+    } else {
+        rigid::source_body(module, family, implementation, budget)
+    }
 }
 
 fn concrete_implementation_body(
