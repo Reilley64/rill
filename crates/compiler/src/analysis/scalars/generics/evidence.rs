@@ -857,6 +857,8 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<(NodeId, usize)> {
         loop {
             self.equation_depth(depth)?;
+            self.elab
+                .step(1 + inference.slots.len().max(1).ilog2() as usize)?;
             let slot = &inference.slots[&node];
             if let Some(p) = slot.ordinary_context {
                 *premise = Some(premise.map_or(p, |old| old.combine(p)));
