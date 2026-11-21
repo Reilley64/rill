@@ -3141,6 +3141,49 @@ pub(super) fn run<'a, 'g>(
                     }
                 }
                 Action::Call(index)
+                    if let CallResult::RetainsSharedOption(header) = calls[index].result =>
+                {
+                    let call = &calls[index];
+                    let ([argument], Some(into)) = (call.args.as_slice(), call.into) else {
+                        return Err(Stop::Pending(node));
+                    };
+                    let argument = *argument;
+                    let actual = initialized(&state[argument], node)?;
+                    forbid_active_escape(&state[argument], node)?;
+                    if cache.is_none() {
+                        // The selected frame must check without another such handoff.
+                        return Err(Stop::Pending(node));
+                    }
+                    let body = lower(
+                        typed,
+                        module,
+                        header,
+                        Frame::OrdinaryFunction,
+                        false,
+                        Some(facts.nodes()),
+                        Lowering {
+                            budget,
+                            cache: None,
+                        },
+                    )?;
+                    graph::visit_dependencies(&body.mir, budget, |_, edge, _| {
+                        Err(Stop::Pending(edge.site.node))
+                    })?;
+                    // Some may carry every actual input loan, not the stage's
+                    // storage or a narrower set inferred from the selected body.
+                    budget.reserve(1)?;
+                    state[into] = State::Initialized(Held {
+                        loans: actual.loans.clone(),
+                        ..Held::default()
+                    });
+                    state[argument] = State::Vacant;
+                    Operation::CallIntoTemporary {
+                        callee: call.callee,
+                        arguments: vec![local(argument)],
+                        into: local(into),
+                    }
+                }
+                Action::Call(index)
                     if let CallResult::TransfersCallable(header) = calls[index].result =>
                 {
                     let call = &calls[index];

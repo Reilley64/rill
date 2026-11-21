@@ -636,7 +636,7 @@ pub enum Operation<'g> {
         argument: Place<'g>,
         into: Place<'g>,
     },
-    /// Evaluate a direct producer into the statement's owned backing storage.
+    /// Evaluate a direct producer into statement-local storage.
     CallIntoTemporary {
         callee: &'g DeclarationId,
         arguments: Vec<Place<'g>>,
@@ -2506,6 +2506,7 @@ enum CallResult<'a, 'g> {
     ScalarCopy,
     RetainsInputs,
     RetainsRecordInput,
+    RetainsSharedOption(&'a DeclarationFacts<'g>),
     TransfersCallable(&'a DeclarationFacts<'g>),
 }
 

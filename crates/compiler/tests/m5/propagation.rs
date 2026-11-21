@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "propagation/option_caller.rs"]
+mod option_caller;
+
 #[test]
 fn owned_option_postfix_preserves_shared_text_backing() {
     probe_with_typed(

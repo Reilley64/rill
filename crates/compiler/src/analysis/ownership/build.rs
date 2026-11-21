@@ -27,6 +27,7 @@ mod i32_arithmetic;
 mod iteration;
 mod list_arrows;
 mod list_source;
+mod option_calls;
 mod scoped_result;
 pub(super) use scoped_result::lower_fresh_scoped_children;
 mod reference_results;
@@ -102,9 +103,10 @@ enum OptionPayload<'t, 'g> {
 }
 
 #[derive(Clone, Copy)]
-enum OptionTakeSource {
+enum OptionTakeSource<'a, 'g> {
     Move(Slot),
     ReadReferenceCarrier(NodeId, Slot),
+    SharedCall(option_calls::SharedOptionCall<'a, 'g>),
     Constructor,
     Factory,
     PipeStep,
@@ -120,7 +122,7 @@ struct CheckedPropagation<'a, 'g> {
     source: NodeId,
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
-    option_take: Option<(&'a Type<'g>, OptionTakeSource)>,
+    option_take: Option<(&'a Type<'g>, OptionTakeSource<'a, 'g>)>,
 }
 
 // The caller has already proved the canonical parent and i32 error type.
@@ -3711,14 +3713,26 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             let take = match payload {
                 OptionPayload::Bool => None,
-                OptionPayload::Reference { ty, .. } if syntax.kind == NodeKind::Propagate => {
-                    // These loans are checked only through a named whole carrier.
-                    let (name, _) = self.ungroup_expression_at(source, depth)?;
-                    let (_, path) = self.named_owned_place(name)?.ok_or(Stop::Pending(node))?;
-                    let from = self.resolve_place(name, path)?;
-                    // Stage under the source place's own classification: an
-                    // exclusive Some or parent moves, but known None copies.
-                    Some((ty, OptionTakeSource::ReadReferenceCarrier(name, from)))
+                OptionPayload::Reference { ty, exclusive }
+                    if syntax.kind == NodeKind::Propagate =>
+                {
+                    let (name, source_depth) = self.ungroup_expression_at(source, depth)?;
+                    let source = if !exclusive
+                        && self.module.syntax.nodes[name].kind == NodeKind::Call
+                    {
+                        OptionTakeSource::SharedCall(self.check_shared_option_call(
+                            node,
+                            name,
+                            operand,
+                            source_depth,
+                        )?)
+                    } else {
+                        let (_, path) = self.named_owned_place(name)?.ok_or(Stop::Pending(node))?;
+                        let from = self.resolve_place(name, path)?;
+                        // An exclusive Some or parent moves; a known None copies.
+                        OptionTakeSource::ReadReferenceCarrier(name, from)
+                    };
+                    Some((ty, source))
                 }
                 OptionPayload::Reference { .. } => return Err(Stop::Pending(node)),
                 OptionPayload::Text(ty) => {
@@ -3758,7 +3772,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         source: NodeId,
         operand: &Type<'g>,
         facts: &'a ExpressionFacts<'g>,
-    ) -> ResultOf<OptionTakeSource> {
+    ) -> ResultOf<OptionTakeSource<'a, 'g>> {
         self.budget.step(1)?;
         if let Some(path) = facts
             .path
@@ -3985,6 +3999,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 depth,
                 Some(ExpressionProof::CallCarrier(operand)),
             )
+        } else if let Some((_, OptionTakeSource::SharedCall(call))) = option_take {
+            self.stage_shared_option_call(call, scratch, split)
         } else if let Some((_, OptionTakeSource::ReadReferenceCarrier(name, from))) = option_take {
             self.emit(
                 name,
