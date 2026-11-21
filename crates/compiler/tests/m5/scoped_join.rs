@@ -3271,6 +3271,47 @@ fn fresh_join_preserves_the_relation_to_an_unknown_captured_flag() {
 }
 
 #[test]
+fn fresh_join_captures_the_current_match_view() {
+    for (declaration, write, expected) in [
+        (
+            "function probe(flag: bool): void {",
+            "",
+            TypedCompletion::Checked,
+        ),
+        (
+            "function probe(): void { let mut flag = true;",
+            "flag = false;",
+            TypedCompletion::SourceRejected,
+        ),
+    ] {
+        let source = format!(
+            r#"import std::routine::join;
+            {declaration} match (flag) {{ true => {{ {write}
+                let [b,r] = join([() => flag, () => Err<bool,i32>(7i32)]);
+                if (b) {{ let _ = r; }}
+            }}, false => {{}} }}; }}"#
+        );
+        probe_report(
+            "scoped_join::fresh_join_captures_the_current_match_view",
+            &source,
+            |_, _, typed| {
+                assert_eq!(typed.completion(), expected);
+                let uses = typed.result_use().unwrap();
+                assert!(uses.pending().is_empty());
+                if expected == TypedCompletion::Checked {
+                    assert!(uses.discards().is_empty());
+                } else {
+                    let [discard] = uses.discards() else {
+                        panic!("the false snapshot leaves the fresh Result unobserved")
+                    };
+                    assert_eq!(discard.origin.span.bytes(), b"Err<bool,i32>(7i32)");
+                }
+            },
+        );
+    }
+}
+
+#[test]
 fn an_unproved_join_does_not_invent_a_discard() {
     probe_report(
         "scoped_join::an_unproved_join_does_not_invent_a_discard",

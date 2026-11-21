@@ -34,6 +34,14 @@ impl<'a, 'g> Check<'a, 'g> {
         }
     }
 
+    fn captured_flag_source(&mut self, declaration: &'g DeclarationId) -> Work<Root<'g>> {
+        // A whole-local capture has no projections. An enclosing match may
+        // hold the current value and any writes through its active view.
+        let mut source = Root::Local(declaration);
+        self.redirect_view(&mut source, &mut Vec::new())?;
+        Ok(source)
+    }
+
     /// On the proved immediate handoff the sibling returns the value it just
     /// captured. An unknown flag has two possible *equal* input/output values,
     /// not four independent combinations. Future writes can change either slot.
@@ -52,7 +60,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let [capture] = join.slots[slot].child.arrow.captures.as_slice() else {
             return Ok(());
         };
-        let input = Root::Local(capture.path.root);
+        let input = self.captured_flag_source(capture.path.root)?;
         if state
             .test(input, &[], &Constructor::Boolean(true), self.budget)?
             .is_none()
@@ -156,8 +164,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 // writes this scalar. The child reads the captured value, not a
                 // fresh unconstrained bool (which could invent a discard path).
                 let root = Root::Local(capture.path.root);
+                let source = self.captured_flag_source(capture.path.root)?;
                 if let Some(truth) =
-                    caller.test(root, &[], &Constructor::Boolean(true), self.budget)?
+                    caller.test(source, &[], &Constructor::Boolean(true), self.budget)?
                 {
                     self.record_boolean(&mut environment, root, &[], truth)?;
                 }

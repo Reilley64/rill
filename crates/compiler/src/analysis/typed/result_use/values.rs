@@ -162,7 +162,7 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(PlaceStorage::Exact((root, component)))
     }
 
-    fn redirect_view(
+    pub(super) fn redirect_view(
         &mut self,
         root: &mut Root<'g>,
         component: &mut Vec<ResultComponent<'g>>,
