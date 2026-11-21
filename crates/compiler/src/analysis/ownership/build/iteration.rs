@@ -117,7 +117,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             if !text {
                 return Err(pending());
             }
-            let staged = self.checked_list_text_source(node, source, actual, exits, depth + 1)?;
+            let literal = iteration.list_literal.ok_or_else(pending)?;
+            let staged =
+                self.checked_list_text_source(node, (source, literal), actual, exits, depth + 1)?;
             let element = self.text_element_disposal(node)?;
             if !staged.can_commit() {
                 return self.stage_list_text_source(staged, None);

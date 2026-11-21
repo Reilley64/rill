@@ -374,6 +374,59 @@ function computedPostfix(gate: Option<string>, a: string): Option<bool> {
 "#;
 
 #[test]
+fn grouped_computed_source_keeps_the_pre_literal_budget() {
+    let source = CONTROLS.replace("make(gate?)", "(((make(gate?))))");
+    probe(
+        "iteration::source::grouped_computed_source_keeps_the_pre_literal_budget",
+        &source,
+        |_, module, receipt| {
+            let f = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("computedPostfix"))
+                .unwrap();
+            let target = lower_body(
+                receipt,
+                module,
+                &f.id,
+                AnalysisLimits {
+                    max_work: 4154,
+                    max_entries: 464,
+                    max_depth: 4,
+                },
+            )
+            .unwrap();
+            assert_eq!(target.completion(), Completion::Incomplete);
+            assert!(target.mir().is_none() && target.findings().is_empty());
+            assert_eq!(
+                target.blocked_at().unwrap().span.bytes(),
+                b"for (let item of (((make(gate?))))) { let _ = &item; break; }"
+            );
+            let graph = analyze_ownership(
+                receipt,
+                AnalysisLimits {
+                    max_work: 192469,
+                    max_entries: 4596,
+                    max_depth: 4,
+                },
+            );
+            assert_eq!(graph.completion(), GraphCompletion::SourceRejected); // independent named-source reuse
+            let root = graph
+                .roots()
+                .iter()
+                .find(|r| r.site().module == &module.key && r.site().node == f.node)
+                .unwrap();
+            assert_eq!(root.ordinary_completion(), Completion::Incomplete);
+            assert!(root.ordinary_mir().is_none());
+            assert_eq!(
+                root.blocked_at().unwrap().node,
+                target.blocked_at().unwrap().node
+            );
+        },
+    );
+}
+
+#[test]
 fn unproved_list_sources_keep_their_old_caps() {
     probe(
         "iteration::source::unproved_list_sources_keep_their_old_caps",

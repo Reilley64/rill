@@ -424,6 +424,7 @@ struct Slot<'g> {
 }
 struct ExpressionResult<'g> {
     ty: Type<'g>,
+    list_literal: Option<NodeId>,
     place: Place,
     normal: bool,
     diverges: bool,
@@ -1983,9 +1984,13 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         self.elab.reserve(1)?;
         let mut stack = vec![root];
+        let mut root_leaf = root;
         while let Some(node) = stack.pop() {
             self.elab.step(1)?;
             let syntax = &module.syntax.nodes[node];
+            if node == root_leaf && syntax.kind == NodeKind::Group {
+                root_leaf = syntax.children[0];
+            }
             self.iteration_body.visit(node, syntax);
             self.elab.reserve(1)?;
             inference.slots.insert(
@@ -2657,6 +2662,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             slot.boolean = boolean;
         }
         let mut result = None;
+        let mut list_literal = None;
         for (&node, slot) in &inference.slots {
             self.elab.step(1)?;
             if self.conversions.is_some()
@@ -2722,6 +2728,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 } else {
                     None
                 };
+                if node == root_leaf
+                    && premise.is_none()
+                    && matches!(data, Some(data::DataExpression::List { .. }))
+                {
+                    list_literal = Some(node);
+                }
                 self.iteration_expression(module, node, slot, data.as_ref(), call.as_deref())?;
                 let facts = NodeFacts {
                     site: Self::site(module, node),
@@ -2758,6 +2770,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if node == root {
                     result = Some(ExpressionResult {
                         ty: ty.clone(),
+                        list_literal,
                         place: slot.place,
                         normal: slot.normal,
                         diverges: slot.diverges,

@@ -23,7 +23,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
     pub(super) fn checked_list_text_source(
         &mut self,
         node: NodeId,
-        source: NodeId,
+        (source, expected_literal): (NodeId, NodeId),
         actual: &ExpressionFacts<'g>,
         exits: Exits,
         depth: usize,
@@ -44,6 +44,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending());
         }
         let (literal, literal_depth) = self.ungroup_expression_at(source, depth)?;
+        if literal != expected_literal {
+            return Err(pending());
+        }
         self.budget.step(1)?;
         let bracket = self.value(literal).map_err(|_| pending())?;
         let Some(DataExpression::List {
