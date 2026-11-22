@@ -54,8 +54,18 @@ jobs:
 
       # This gate is unavailable, not successful, until native acceptance exists.
       # Do not substitute a C-API installation smoke for Rill runtime acceptance.
-      - name: "Test: Run native runtime acceptance"
-        run: mise run test:runtime
+      # The task keeps its nonzero exit. The job asserts that exit and the stub
+      # message, so a red job means the stub changed or the task broke. Replace
+      # this step with `mise run test:runtime` when native acceptance exists.
+      - name: "Test: Verify native runtime acceptance is unavailable"
+        run: |
+          status=0
+          output=$(mise run test:runtime 2>&1) || status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 2 ] || ! printf '%s\n' "$output" | grep -qF 'test:runtime is not implemented in this scaffold'; then
+            echo "::error::test:runtime no longer reports the scaffold stub (exit $status). Replace this assertion with the real acceptance run."
+            exit 1
+          fi
 
       - name: "Build and test: Verify release acceptance"
         if: github.event_name == 'workflow_dispatch'
