@@ -12,6 +12,10 @@ These reports predate later Rill decisions. Their original report-only commits a
 - [Rust-to-LLVM bindings](rust-llvm-bindings.md)
 - [References and mutation without lifetime annotations](safe-references-without-lifetimes.md)
 
+## Compiler implementation comparisons
+
+- [Rill M5 and other compiler implementations](m5-compiler-implementation-comparison.md) compares ownership, borrows, cleanup and early exits at a pinned M5 revision.
+
 ## Repository and toolchain setup
 
 - [Compiler, standard-library and LSP repository layouts](compiler-stdlib-lsp-repository-layouts.md) examines source ownership, semantic reuse, tests and releases across six language ecosystems.
