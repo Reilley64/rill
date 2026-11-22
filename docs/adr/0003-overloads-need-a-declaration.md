@@ -4,5 +4,5 @@ Rill has no traits, so overloading carries per-type behavior. To keep that check
 
 ## Considered options
 
-- **Undeclared overloads, checked per instantiation (C++ templates, Zig).** No new syntax, but a generic signature doesn't say what it needs, and errors appear inside generic bodies. #5 found that inferring the requirements is NP-hard.
-- **Run-time checks for literal overloads.** #2 first allowed `fib(n: 0)` to be chosen at run time when the value isn't known. Rejected: a call whose overload can't be fixed at compile time is now an error that points to `match`.
+- **Undeclared overloads, checked per instantiation (C++ templates, Zig).** No new syntax, but a generic signature doesn't say what it needs, and errors appear inside generic bodies. ri-2eu found that inferring the requirements is NP-hard.
+- **Run-time checks for literal overloads.** ri-vw4 first allowed `fib(n: 0)` to be chosen at run time when the value isn't known. Rejected: a call whose overload can't be fixed at compile time is now an error that points to `match`.
