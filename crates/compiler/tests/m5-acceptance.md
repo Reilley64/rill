@@ -1623,6 +1623,19 @@ The tests run in both installed load modes:
 
 The six earlier O15 tests pass with no number changed. The M4 17-source baseline was measured before and after the change: exactly 372,246/54,059/12 in both modes, with no receipt one short on any axis. No Rill program ran.
 
+## Re-pinning the O15 counter row of `m5::rfc_cases` (2026-11-23, ri-785.1)
+
+This applies the planner's decision of 2026-11-23 on `ri-2s0` and metering rule 11 to the first `rfc_cases` row that a mandated change moves. H2 (`ri-px1.2`) pinned the O15 source after A2 was built, with the pre-A2 numbers. The merge of A2 blocked on that one expectation.
+
+| Meter | Old | New |
+| --- | --- | --- |
+| `counter` targeted | 2,504 / 329 / 6 | 2,562 / 329 / 6 |
+| Whole graph (`Incomplete`) | 187,485 / 4,297 / 6 | 187,543 / 4,297 / 6 |
+
+The reason is one cause: A2 charges the reads of `first` and `second` in `first * 10i32 + second` with `charge_key`, so each read charges the 10-byte key `"main.rill"` three times in place of one step. That is 2 × (10 × 3 − 1) = 58 work, in `counter`'s targeted query and again in the whole graph. Entries and depth are unchanged, and the targeted query sets the graph's depth as before. This is the effect of review `c61a0a14`; no other cause moves either meter. The `expect` root (1,893 / 32 / 1) and the typed receipt (323,681 / 47,925 / 12) are unchanged. The numbers of the new row equal those that `m5/o15_arithmetic.rs::rfc_counter_caps_include_the_charged_local_reads` already pins.
+
+`m5::rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit` asserts, in both installed load modes, that the old caps give `ResourceLimit`: 2,504 / 329 / 6 on the `counter` query (no MIR, no findings) and 187,485 / 4,297 / 6 on the graph. No other `rfc_cases` row and no number in `o15_arithmetic.rs` changed. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
