@@ -1611,6 +1611,20 @@ Local gate results on macOS/AArch64 with an isolated Cargo target directory. `mi
 
 These runs did not replay either installed load mode, the historical captures or the fixed caps outside the test suite, and no hosted check ran. They show that the merged tree builds and that its own tests pass. They do not close any obligation below. No Rill program ran.
 
+## Fresh `Result` residence findings, 2026-11-22 (ri-785.3)
+
+This section answers the three review findings on the fresh `Result` residence lane (`d95ae9e`, `76ba5be`, `b33e056`). Each finding now has an installed test that fails when the finding is reintroduced. Both load modes are covered, with targeted and graph-root results and exact and one-short caps:
+
+| Review | Finding | Test and result |
+| --- | --- | --- |
+| `a42e3002` | `exportErr` and `exportOk` went `Checked` → `ResourceLimit` at their pre-fresh caps | [`installed_fresh_result_residences`](m5/fresh_result_storage.rs): `exportErr` checks at 3,398/438/4 and `exportOk` at 3,396/438/4, the `46f16a7` caps. One short on any axis gives `ResourceLimit`. Without the `b33e056` guard in `flow.rs`, `exportErr` is `ResourceLimit` at its cap. |
+| `23df424d` | The `retained()` root pays the inner `Err` disposer selection | The same test keeps `retained` at 3,846/685/4 and `retireRetained` at 3,231/357/3, both measured at `46f16a7`. |
+| `0bfd8df4` | A scoped-join rejection pays for wrapper selection on a live parent `Err` | [`shared_join_rejects_a_live_fresh_error_without_wrapper_selection`](m5/scoped_join/fresh_result.rs) is the installed `SHARED` join with `let staged: Result<bool, i32> = fail<bool, i32>(7i32);` before the join and `let _ = staged;` after it. `joined` is `Incomplete` at the join call: targeted 5,825/1,301/10, graph 216,846/6,179/10. Removing the scoped parent's disposer lookup gives the same numbers. The route before the `72f3d81` preflight paid 6,299/1,398/10 targeted and 217,320/6,276/10 for the graph, so the exact cap now gives `ResourceLimit` on that route. |
+
+`RootReport::dependencies()` lists only ordinary dependencies, which matches its rustdoc. A wrapper that is retired only at a delivery exit has no `FreshResultErrorDisposal` edge. For example, `deliverErr` lists the constructor and `checkpoint()` and nothing else. Its retirement is shown by the enabled-frame proof: the callee-entry successor's `DropFreshResultError` in [`installed_fresh_result_is_retired_at_an_existing_checkpoint`](m5/fresh_result_storage.rs). It is not a dependency edge, so it does not count toward graph completion.
+
+No fixed cap moved. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
