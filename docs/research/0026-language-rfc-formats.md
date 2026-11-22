@@ -6,7 +6,7 @@ The user subsequently confirmed the ri-9o5 conventions now recorded in [docs/rfc
 
 ## Rill context and limits
 
-ri-9o5 asks for organization, a shared template, linkage, example checking, and review/acceptance conventions for `docs/rfcs/`. [Repository issue-tracker guidance](../agents/issue-tracker.md#wayfinding) separates that work from ri-48g's production of the complete, consistent, review-ready feature RFC set. Ticket answers, research, prototypes, and ADRs are inputs; neither producing the set nor accepting a source-ticket design automatically accepts an RFC.
+ri-9o5 asks for organization, a shared template, linkage, example checking, and review/acceptance conventions for `docs/rfcs/`. The wayfinder map ri-kl0 separates that work from ri-48g's production of the complete, consistent, review-ready feature RFC set. Ticket answers, research, prototypes, and ADRs are inputs; neither producing the set nor accepting a source-ticket design automatically accepts an RFC.
 
 Rill has no compiler. Existing hand-checked prototypes and standalone experiments can supply evidence, but are not compiler execution or proof of the proposed language. For example, the [ri-dej experiment report](0030-backend-experiments.md) explicitly leaves support gates open and distinguishes finite mechanism/model results from unimplemented compiler/runtime obligations. Provider/backend gates can remain open while documents become review-ready; their precise effects on eventual acceptance or implementation readiness need an explicit Rill decision. ri-9o5 also identifies the confirmed ri-3t8 diagnostic/LSP artifacts as inputs, not delivered tooling or accepted feature RFCs.
 

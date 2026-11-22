@@ -4,3 +4,22 @@
 /.mise/locks/mise.local/
 __pycache__/
 *.py[cod]
+
+# Gas City
+.gc/
+.beads/*
+!.beads/identity.toml
+hooks/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*
+
+# Gas City per-bead worktrees
+/worktrees/
+
+# Gas City skill links (generated per machine)
+/.agents/
