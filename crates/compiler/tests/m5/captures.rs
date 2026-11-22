@@ -8,6 +8,8 @@ use compiler::analysis::{
     typed::ResultUseBlocker,
 };
 
+#[path = "captures/approval_controls.rs"]
+mod approval_controls;
 #[path = "captures/borrowed_invocation.rs"]
 mod borrowed_invocation;
 
