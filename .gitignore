@@ -20,3 +20,6 @@ hooks/
 
 # Gas City per-bead worktrees
 /worktrees/
+
+# Gas City skill links (generated per machine)
+/.agents/
