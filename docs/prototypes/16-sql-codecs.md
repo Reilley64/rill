@@ -1,8 +1,8 @@
-# #40 SQL/JSON codec, control and error evidence
+# ri-dka SQL/JSON codec, control and error evidence
 
 Read the source examples in [`prototypes/16-sql-codecs`](../../prototypes/16-sql-codecs).
 
-This is the human-confirmed shared-interface design, not an implementation. [The contract](../sql-contracts.md) and [ADR 0021](../adr/0021-partial-standard-sql-contract.md) integrate #33 and Q58-Q77 and replace the partial checkpoint. [Research](../research/0040-standard-sql-and-unique-errors.md) remains source input. [#43](https://github.com/Reilley64/rill/issues/43) separately gates actual embedded-provider support, not #40 design closure/RFC drafting. The [JSON](../json-contracts.md) and [time](../time-contracts.md) contracts define the value behavior used here.
+This is the human-confirmed shared-interface design, not an implementation. [The contract](../sql-contracts.md) and [ADR 0021](../adr/0021-partial-standard-sql-contract.md) integrate ri-j60 and Q58-Q77 and replace the partial checkpoint. [Research](../research/0040-standard-sql-and-unique-errors.md) remains source input. ri-3id separately gates actual embedded-provider support, not ri-dka design closure/RFC drafting. The [JSON](../json-contracts.md) and [time](../time-contracts.md) contracts define the value behavior used here.
 
 [main.rill](../../prototypes/16-sql-codecs/main.rill) has 20 intended-valid expectations and loads [domain.rill](../../prototypes/16-sql-codecs/domain.rill). [control.rill](../../prototypes/16-sql-codecs/control.rill) is a separate entry with 12 control/temporal expectations, for 32 total. Reviewers checked all of them by hand. They did not execute Rill, clocks, tokens, databases, native/WASI code or protocol/security tests. The memory argument encoder, immediate counter and cell fixtures are not SQL drivers. They do not prove PostgreSQL/SQLite integration or race/abortion behavior.
 
@@ -21,13 +21,13 @@ These tests do not check actual field/row/frame limits, metadata lookup, cardina
 
 ## Control/temporal source coverage and limits
 
-control.rill uses actual #33 types plus the explicitly approved std::time::validateInstantDomain consumer amendment. Its immediate fixture checks admission with uncontrolled, requested, expired and mismatched controls. Other cases cover copied token/clock state, all four temporal parameter variants, retained temporal constructor errors and exact-microsecond rejection.
+control.rill uses actual ri-j60 types plus the explicitly approved std::time::validateInstantDomain consumer amendment. Its immediate fixture checks admission with uncontrolled, requested, expired and mismatched controls. Other cases cover copied token/clock state, all four temporal parameter variants, retained temporal constructor errors and exact-microsecond rejection.
 
 No source code reads private clock/Instant fields. The counter only completes immediately; it does not implement pending-I/O cancellation or a timer race. Setup may read a manual clock to construct an Instant. A successful source expectation cannot prove that the domain validator avoided a read internally. That needs a private call-count harness, not a public clock-provider override.
 
 ## Two actual adapter obligations (implementation sketches only)
 
-The following roles are not implemented types or native hooks. Fixed public operation declarations are in docs/sql-contracts.md and supersede the earlier deadline-independent sketches. #33 is confirmed; its status does not permit alternate arities.
+The following roles are not implemented types or native hooks. Fixed public operation declarations are in docs/sql-contracts.md and supersede the earlier deadline-independent sketches. ri-j60 is confirmed; its status does not permit alternate arities.
 
 ### PostgreSQL-like network adapter
 
@@ -113,7 +113,7 @@ The defaults match those confirmed in docs/sql-contracts.md. Parameter and field
 | Cache eviction/old session/schema change | Validate/reprepare or error; never dereference freed native state. |
 | queryOne/queryOptional sees second row | Structured cardinality failure, finalize local cursor and preserve cleanup errors. No unlimited collection. |
 | Intrinsic cancellation while native work retains inputs | Retain every owner/loan/native registration until completion or confirmed abortion. No Result cancellation/outcome delivered to stopped code; explicit token outcomes are separate. |
-| Cleanup cannot abort / expiry selected | Keep owners and wait indefinitely if necessary; integrated #33 control does not promise a hard return bound or prove native abortion. |
+| Cleanup cannot abort / expiry selected | Keep owners and wait indefinitely if necessary; integrated ri-j60 control does not promise a hard return bound or prove native abortion. |
 
 ## Independent integrated-control and temporal cases
 
@@ -140,4 +140,4 @@ The defaults match those confirmed in docs/sql-contracts.md. Parameter and field
 
 ## Remaining implementation and validation work
 
-The explicitly confirmed design permits #40 closure. #43 tracks native embedded-provider work; this fixture does not fulfill it or supply general FFI, pinning or a working adapter. #28 still owes formal rules for checking, candidate selection, dependencies, redaction, limits, cleanup and races. #30 retains real native/Wasm retention, pointer and scheduling validation. The linked SQL and clock contracts record the validateInstantDomain consumer amendment. Return any unworkable mechanism to map #1. Design closure is not an accepted RFC or proof of runtime, provider or security behavior.
+The explicitly confirmed design permits ri-dka closure. ri-3id tracks native embedded-provider work; this fixture does not fulfill it or supply general FFI, pinning or a working adapter. ri-48g still owes formal rules for checking, candidate selection, dependencies, redaction, limits, cleanup and races. ri-dej retains real native/Wasm retention, pointer and scheduling validation. The linked SQL and clock contracts record the validateInstantDomain consumer amendment. Return any unworkable mechanism to map ri-kl0. Design closure is not an accepted RFC or proof of runtime, provider or security behavior.

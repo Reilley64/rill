@@ -2,7 +2,7 @@
 
 Rill's first scaffold establishes a private Rust workspace and development tasks. It is not a working language toolchain. `rill --help` and `rill --version` are real CLI behavior. Product commands, including checking, compilation, execution, language tests and the language server, report that they are unavailable and exit nonzero. A successful scaffold build or infrastructure check does not mean a Rill program ran.
 
-The repository and tooling decision is [ADR 0026](adr/0026-toolchain-repository-and-mise.md), approved in [#46](https://github.com/Reilley64/rill/issues/46).
+The repository and tooling decision is [ADR 0026](adr/0026-toolchain-repository-and-mise.md), approved in ri-x5n.
 
 ## Setup
 
@@ -144,4 +144,4 @@ The approved future layout is:
 
 The selected toolchain identifies compatible standard-library source, target-runtime inputs and toolchain metadata. Installed standard-library lookup must not depend on the process's working directory. Rill end users will not need Rust to use the distributed toolchain. The first scaffold does not implement this installer, metadata format or source lookup.
 
-For language and library rules, use the [contract index](README.md#contracts) rather than this guide. Production/formal backend acceptance remains [#28](https://github.com/Reilley64/rill/issues/28); complete OpenIDEA client delivery remains [#42](https://github.com/Reilley64/rill/issues/42). The scaffold neither closes those gates nor changes the existing Rill source examples or recorded evidence.
+For language and library rules, use the [contract index](README.md#contracts) rather than this guide. Production/formal backend acceptance remains ri-48g; complete OpenIDEA client delivery remains ri-bv2. The scaffold neither closes those gates nor changes the existing Rill source examples or recorded evidence.

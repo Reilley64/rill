@@ -1,6 +1,6 @@
-# #45: candidate reference-harness buffer ledger
+# ri-w0c: candidate reference-harness buffer ledger
 
-**Throwaway candidate, not an approved v0 partition or implementation/support proof.** The user approved #45 Q33–Q35: terminate/poison on post-handshake renegotiation attempts, execute a selected-source reference prototype, and use native application attempts <=16KiB, one pipeline, max fragment16KiB and no configured outbound padding. Earlier working mode choices are partial-write ON, moving-buffer OFF, AUTO_RETRY OFF. This ledger supplies an explicit hypothesis for that experiment, not another silently approved interface.
+**Throwaway candidate, not an approved v0 partition or implementation/support proof.** The user approved ri-w0c Q33–Q35: terminate/poison on post-handshake renegotiation attempts, execute a selected-source reference prototype, and use native application attempts <=16KiB, one pipeline, max fragment16KiB and no configured outbound padding. Earlier working mode choices are partial-write ON, moving-buffer OFF, AUTO_RETRY OFF. This ledger supplies an explicit hypothesis for that experiment, not another silently approved interface.
 
 Question: can a source-backed, single-owner scheduler preserve both logical directions and native retry identity with bounded BIOs, safe policy observation and visible storage accounting? Counterexample baseline must be reproduced before calling its policy handled. Four existing 65536-byte budgets remain separate; caps do not bound all OpenSSL allocations, caller/harness state, or an opaque lower implementation's private memory. All overlaps still need inventory.
 

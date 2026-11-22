@@ -1,6 +1,6 @@
 # Polymorphism without traits
 
-Research for [issue #5](https://github.com/Reilley64/rill/issues/5). Sources were read on 2026-10-21. Links to source code are pinned to the commit that was read.
+Research for issue ri-2eu. Sources were read on 2026-10-21. Links to source code are pinned to the commit that was read.
 
 ## Question
 

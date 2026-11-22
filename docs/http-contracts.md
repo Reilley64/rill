@@ -1,6 +1,6 @@
 # Standard HTTP values, HTTP/1 codec and connection drivers
 
-This document records the explicitly confirmed #39 design. It consumes the closed #45 progress contract while keeping transport composition, protocol framing, application work and implementation evidence separate. It is a public design contract, not an implemented parser, client, server, conformance suite or security proof.
+This document records the explicitly confirmed ri-n5i design. It consumes the closed ri-w0c progress contract while keeping transport composition, protocol framing, application work and implementation evidence separate. It is a public design contract, not an implemented parser, client, server, conformance suite or security proof.
 
 ## 1. Scope and modules
 
@@ -11,7 +11,7 @@ This document records the explicitly confirmed #39 design. It consumes the close
 
 HTTP/1.1 is initial. Basic HTTP/1.0 is close-only. HTTP/2, HTTP/3/QUIC, forward proxies, successful CONNECT,101/WebSocket/upgrades, automatic redirects/retries/decompression/cookies/JSON, global pools and replay are unsupported. No h2/h3 ALPN is advertised by this foundation.
 
-Shared values and the HTTP/1 codec are usable by external frameworks without the standard connection runners. The codec performs no dialing/listening/TLS, transport I/O, clock reads, channel operations or user callbacks. The runners consume one supplied concrete #45 progress driver; no ordinary blocking-I/O adapter, TLS split, raw owner recovery or hidden detached routine exists.
+Shared values and the HTTP/1 codec are usable by external frameworks without the standard connection runners. The codec performs no dialing/listening/TLS, transport I/O, clock reads, channel operations or user callbacks. The runners consume one supplied concrete ri-w0c progress driver; no ordinary blocking-I/O adapter, TLS split, raw owner recovery or hidden detached routine exists.
 
 ## 2. Errors and diagnostics
 
@@ -312,7 +312,7 @@ Defaults respectively:8192,65536,128,16384,16384,64,4096,1048576,16,65536,104857
 
 Total counts dechunked message-content bytes before any Content-Encoding interpretation, independently per message direction with checked u64. Reject excessive declared fixed length before emission/dispatch where possible; streamed excess fails at exact boundary. No successful truncation.
 
-HTTP-owned queues/staging are not lower budgets. Application chunks up to65536 segment into #45 writes up to16384. Increasing HTTP values cannot raise TLS/native caps or borrow unused layer budget. First applicable limit can fail; no global memory/CPU/security quota is claimed.
+HTTP-owned queues/staging are not lower budgets. Application chunks up to65536 segment into ri-w0c writes up to16384. Increasing HTTP values cannot raise TLS/native caps or borrow unused layer budget. First applicable limit can fail; no global memory/CPU/security quota is claimed.
 
 ## 10. Public HTTP/1 decoder
 
@@ -662,7 +662,7 @@ export function completeExchange<RE,WE,FE,CE,DE>(
 
 Lower envelopes/progress/errors stay exact; no common conversion/message parsing. TLS instantiates all lower E as TlsError; TCP as NetError; user drivers can differ. Cancellation/deadline are outcomes, not HttpError. Selected terminal and cleanup failure are independent; completely framed can remain Completed with cleanup failure and Unusable. Return may outlast deadline.
 
-Observations count content bytes, not HTTP framing: application queue admission, lower #45 acceptance, decoder parsing and app delivery remain distinct. headAccepted/handoff/messageComplete are layer-specific. Counts checked u64; no ciphertext/peer conversion. None implies peer receipt/execution/nonexecution/rollback/replay safety.
+Observations count content bytes, not HTTP framing: application queue admission, lower ri-w0c acceptance, decoder parsing and app delivery remain distinct. headAccepted/handoff/messageComplete are layer-specific. Counts checked u64; no ciphertext/peer conversion. None implies peer receipt/execution/nonexecution/rollback/replay safety.
 
 Eligible requires verified both boundaries, output handoff, no mandated close/abandon/switch/pending operation/known fault. MustClose is valid message with version/framing/Connection close. Unusable is ambiguity/incompletion/early final/failure/poison. Eligible is no future-health/pool promise.
 
@@ -830,7 +830,7 @@ Constructors require lower `admitRead`, admitWrite, admitFlush, admitClose, requ
 
 Construction consumes D; invalid limits/origin/setup has no HTTP wire effect but terminally stops/joins lower and returns typed setup+optional cleanup. No partial driver/raw recovery. It may wait indefinitely for mandatory release.
 
-Constructors do not spawn. Runner consumes sole protocol coordinator and caller explicitly runs it in scoped/owned work and joins. It coordinates #45 progress, codec, channel watches, controls/timers; invokes no app callbacks. Endpoint owns channels only. Runner returns after every exchange outcome transferred or adopted, all channels/watches/timers/registrations quiesced and lower released. `exchanges` is checked admitted count, not success count.
+Constructors do not spawn. Runner consumes sole protocol coordinator and caller explicitly runs it in scoped/owned work and joins. It coordinates ri-w0c progress, codec, channel watches, controls/timers; invokes no app callbacks. Endpoint owns channels only. Runner returns after every exchange outcome transferred or adopted, all channels/watches/timers/registrations quiesced and lower released. `exchanges` is checked admitted count, not success count.
 
 Exchange outcome has exactly one adopter. If completion alive, it owns outcome and runner terminal ExchangeEnded classification only; if gone, runner recoveredExchange owns it. Endpoint drop terminally stops, active exchange ApplicationAbandoned/Unusable. Consuming shutdown forbids new work, permits active already-selected terminal then orderly local close; drop is not orderly/graceful. Runner never returns raw lower/transport.
 
@@ -848,9 +848,9 @@ Evidence labels follow [RFC conventions](rfcs/README.md#examples-and-evidence):
 
 - RFC9110/9112/3986/9931 and OpenSSL/duplex notes in `research/0039-*` are supporting **research**, not conformance/security execution.
 - Prototype25 declarations/scenarios are **HandChecked**, not parser/compiler/runtime execution.
-- #45's OpenSSL matrix is lower-layer **ReferenceExecuted**, not HTTP evidence.
+- ri-w0c's OpenSSL matrix is lower-layer **ReferenceExecuted**, not HTTP evidence.
 - HTTP codec/runner/Rill/native/conformance/security and live target support are **NotChecked** here.
 
-[#48](https://github.com/Reilley64/rill/issues/48) owns HTTP implementation and validation. [#47](https://github.com/Reilley64/rill/issues/47) owns shared progress/TCP delivery; [#44](https://github.com/Reilley64/rill/issues/44) owns TLS delivery. #28 owns review-ready RFC drafting; neither design closure nor drafting is human RFC acceptance/software support.
+ri-19d owns HTTP implementation and validation. ri-hw5 owns shared progress/TCP delivery; ri-ei7 owns TLS delivery. ri-48g owns review-ready RFC drafting; neither design closure nor drafting is human RFC acceptance/software support.
 
 Required delivery includes split/coalesced codec inputs; all strict line/field/Host/CL/TE/chunk/trailer/version/Expect/CONNECT/upgrade cases; limits and full-queue terminal independence; partial lower effects/exact causes; cancellation/deadline/drop/cleanup races; HTTP1.0 close/noTE; plain/TLS direct client and sequential server; malformed/smuggling corpora and all supported targets. Finite cases are not a universal conformance/security proof. Contradiction returns to the human/map rather than weakening strict parsing, general streaming, ownership, bounds or typed outcomes.

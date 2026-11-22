@@ -28,7 +28,7 @@ Rill's design is recorded in the documents below. Source-ticket approval, RFC ac
 | Diagnostics and reports | [Diagnostic contracts](diagnostic-contracts.md), [code registry](diagnostic-codes.md), [report schema](diagnostic-report.schema.json) |
 | Editor integration | [LSP contracts](lsp-contracts.md) |
 
-The HTTP contract records #39's design only. [#48](https://github.com/Reilley64/rill/issues/48) retains implementation/conformance/security evidence; #47/#44 retain lower progress/TLS delivery.
+The HTTP contract records ri-n5i's design only. ri-19d retains implementation/conformance/security evidence; ri-hw5/#44 retain lower progress/TLS delivery.
 
 ## Examples and evidence
 

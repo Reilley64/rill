@@ -1,17 +1,17 @@
-# Realistic Rill batch-report prototype (#25)
+# Realistic Rill batch-report prototype (ri-2yn)
 
 Read the source examples in [`prototypes/10-batch-report`](../../prototypes/10-batch-report).
 
 This prototype asks whether the current design remains coherent in a normal application workflow and what ownership and copying costs it imposes.
 
-The user explicitly accepted it as #25 prototype evidence for the RFCs. The two Rill files are 298 physical lines combined, including 14 independent top-level expectations. Reviewers inspected this intended-valid source by hand. They did not execute an application or test suite, prove concurrency safety or validate a backend. The prototype invents no JSON/HTTP/CLI API. It uses the confirmed #23 catalogue and ADR 0015 as design inputs, not a library implementation. Publishing these design artifacts does not establish compiler or backend support.
+The user explicitly accepted it as ri-2yn prototype evidence for the RFCs. The two Rill files are 298 physical lines combined, including 14 independent top-level expectations. Reviewers inspected this intended-valid source by hand. They did not execute an application or test suite, prove concurrency safety or validate a backend. The prototype invents no JSON/HTTP/CLI API. It uses the confirmed ri-8n7 catalogue and ADR 0015 as design inputs, not a library implementation. Publishing these design artifacts does not establish compiler or backend support.
 
 - [main.rill](../../prototypes/10-batch-report/main.rill): native file/UTF-8 work, scoped concurrency, notifications, mutex metrics, error context and entry startup.
 - [records.rill](../../prototypes/10-batch-report/records.rill): application grammar, owned records, aggregation, generic rendering and pure expectations.
 - Inputs: [north.tsv](../../prototypes/10-batch-report/north.tsv) (LF, final record unterminated), [south.tsv](../../prototypes/10-batch-report/south.tsv) (CRLF, final newline).
 - [expected-report.txt](../../prototypes/10-batch-report/expected-report.txt): hand-computed successful output, not captured Rill output.
-- Published primary evidence: [complete source snapshot/findings](https://github.com/Reilley64/rill/issues/25#issuecomment-6873277247) and [explicitly accepted verdict](https://github.com/Reilley64/rill/issues/25#issuecomment-6873344066).
-- Authority: [library contracts](../standard-library-contracts.md), [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md), [ADR 0015](../adr/0015-language-required-library-contracts.md), and the confirmed [#29 errors](https://github.com/Reilley64/rill/issues/29) / [#22 stack policy](https://github.com/Reilley64/rill/issues/22). #28 formalizes/checks the design; #30 gates backend mechanisms; #31 separately designs JSON.
+- Published primary evidence: complete source snapshot/findings (ri-2yn, comment 6873277247) and explicitly accepted verdict (ri-2yn, comment 6873344066).
+- Authority: [library contracts](../standard-library-contracts.md), [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md), [ADR 0015](../adr/0015-language-required-library-contracts.md), and the confirmed ri-vtw errors / ri-636 stack policy. ri-48g formalizes/checks the design; ri-dej gates backend mechanisms; ri-1zg separately designs JSON.
 
 ## Workload and application policies
 
@@ -63,23 +63,23 @@ The ledger uses four categories:
 
 | Decision | Evidence | Category |
 | --- | --- | --- |
-| #2 functional-first syntax | Named/arrow functions, explicit returns, templates, immutable/mutable bindings, no methods/traits | exercised |
-| #7 ownership; #15 mutation | Owning Bytes/strings/rows, logical views, partial-field moves, exclusive map/formatter access, explicit copies | exercised; checking is a known gate |
-| #9/#18 primitive types | Explicit i32/i64/u64, base-range widening, Unicode byte offsets, checked arithmetic, strict numeric parsing | exercised |
-| #10/#20 polymorphism | Canonical display family, variant specialization after match, generic callableMut requirement without a group alias | exercised |
-| #11/#29 errors | Message-free error enums, three typed causal layers, unchanged forwarding, lazy wrapping and guarded cleanup | exercised/inspection-only |
-| #12 pipes | Owned line list piped into collection join | exercised |
-| #17 modules | Public records/functions, canonical display extensions, two file modules, separate startup/expectation execution | exercised/inspection-only |
-| #19/#21 nominal data | Named RawRow/Row/Counts/Totals/Summary constructors, enum variants, exhaustive nested matches | exercised |
-| #8/#16/#23 concurrency | Tuple all inside join, bounded Progress channel, sender copy, selected receive/closure/timer, failed-send recovery | exercised; scheduling/cleanup are known gates |
-| #16 guards | Two child-safe metric updates through Mutex/LockGuard, explicit releases before sends/output | exercised; native protocol is a known gate |
-| #23 collections | Consuming and borrowed map, hash lookup/update, first-seen list, scalar sum, repeated mutable callback | exercised |
-| #23 I/O | Whole-file bytes, borrowed UTF-8 validation, typed filesystem errors and borrowed output byte view | exercised; native lifetime is a known gate |
-| #22 standard stack policy | Iterative input/aggregation, finite user display dispatch, standard default cleanup/rendering obligations | inspection-only; #30 remains a known gate |
-| #27 expectations | Twelve records-module and two main-module expectations with no startup-let capture | exercised, not executed |
-| #3–#6/#13 research/backend choices | Ownership/runtime/LLVM traceability inputs, not source features that a program can prove | known gate / context |
+| ri-vw4 functional-first syntax | Named/arrow functions, explicit returns, templates, immutable/mutable bindings, no methods/traits | exercised |
+| ri-8hu ownership; ri-lql mutation | Owning Bytes/strings/rows, logical views, partial-field moves, exclusive map/formatter access, explicit copies | exercised; checking is a known gate |
+| ri-457/#18 primitive types | Explicit i32/i64/u64, base-range widening, Unicode byte offsets, checked arithmetic, strict numeric parsing | exercised |
+| ri-skb/#20 polymorphism | Canonical display family, variant specialization after match, generic callableMut requirement without a group alias | exercised |
+| ri-8hm/#29 errors | Message-free error enums, three typed causal layers, unchanged forwarding, lazy wrapping and guarded cleanup | exercised/inspection-only |
+| ri-n1j pipes | Owned line list piped into collection join | exercised |
+| ri-owe modules | Public records/functions, canonical display extensions, two file modules, separate startup/expectation execution | exercised/inspection-only |
+| ri-kty/#21 nominal data | Named RawRow/Row/Counts/Totals/Summary constructors, enum variants, exhaustive nested matches | exercised |
+| ri-j33/#16/#23 concurrency | Tuple all inside join, bounded Progress channel, sender copy, selected receive/closure/timer, failed-send recovery | exercised; scheduling/cleanup are known gates |
+| ri-40y guards | Two child-safe metric updates through Mutex/LockGuard, explicit releases before sends/output | exercised; native protocol is a known gate |
+| ri-8n7 collections | Consuming and borrowed map, hash lookup/update, first-seen list, scalar sum, repeated mutable callback | exercised |
+| ri-8n7 I/O | Whole-file bytes, borrowed UTF-8 validation, typed filesystem errors and borrowed output byte view | exercised; native lifetime is a known gate |
+| ri-636 standard stack policy | Iterative input/aggregation, finite user display dispatch, standard default cleanup/rendering obligations | inspection-only; ri-dej remains a known gate |
+| ri-di1 expectations | Twelve records-module and two main-module expectations with no startup-let capture | exercised, not executed |
+| ri-xqw–ri-opc/#13 research/backend choices | Ownership/runtime/LLVM traceability inputs, not source features that a program can prove | known gate / context |
 | Remaining feature APIs | Shared/spawn/stop/sized spawn, every work helper, custom iterator extension, explicit record rebuilding, actual proper-tail transfer | not exercised here; earlier focused fixtures remain separate evidence |
-| #31 JSON | No dependency; no parser/serializer or numeric-precision behavior is guessed | not exercised |
+| ri-1zg JSON | No dependency; no parser/serializer or numeric-precision behavior is guessed | not exercised |
 
 Using a decision does not mean testing every API it mentions. No claim of complete ownership/concurrency/stack coverage follows from this ledger.
 
@@ -133,10 +133,10 @@ The accepted verdict is that the core pipeline fits the confirmed interfaces by 
 
 - No split/lines/trim, sort, general string builder, tryMap/collectResults, CLI parser, HTTP or JSON API is invented. Local scanning is application code; an application with richer text needs may justify a separate library ticket.
 - A fallible map callback's ? would return from that callback, not parseRows. The explicit parsing loop handles early return without nonexistent Result-list flattening.
-- Historical `Ok()` convenience conflicts with #23's ordinary one-argument Ok signature. The final write yields a real void value, and run passes that expression to Ok. The prototype invents no zero-argument overload or void literal. #28 must reconcile older examples with the current signature instead of silently adding optional arguments.
+- Historical `Ok()` convenience conflicts with ri-8n7's ordinary one-argument Ok signature. The final write yields a real void value, and run passes that expression to Ok. The prototype invents no zero-argument overload or void literal. ri-48g must reconcile older examples with the current signature instead of silently adding optional arguments.
 - No recoverable aggregate-overflow helper is in the required library. The prototype deliberately retains checked i64 panic behavior; requiring a typed total-overflow error would need application prechecks or an explicitly approved extra helper.
 - A literal alias/fitting value does not change numeric conversion availability, copying or cause-retention evidence.
-- Richer line scanning, update/entry convenience for Map, and explicit checked-arithmetic helpers are not v0 language blockers. They can be evaluated separately rather than quietly enlarging #23.
+- Richer line scanning, update/entry convenience for Map, and explicit checked-arithmetic helpers are not v0 language blockers. They can be evaluated separately rather than quietly enlarging ri-8n7.
 
 Rejected or gated edits to this program:
 
@@ -147,10 +147,10 @@ Rejected or gated edits to this program:
 5. Pass the mutable formatter through &F or annotate it read-only: cannot strengthen invocation mode.
 6. Return a reference to an owned Progress callback argument in WatchEvent: local message/callback storage would be destroyed.
 7. Mix plain jobs into all or produce different error types without explicit adaptation: no return-only dispatch/inferred error union.
-8. Assume renderBlock's generic predicates, tuple inference, callee-exit/temporary cleanup or source-vs-descriptor dependencies have an implemented checker: existing #28 gate, not demonstrated acceptance.
-9. Hold a guard across send: not inherently a type error (#16 allows suspension), but an avoidable lock-lifetime/liveness risk, not something the runtime may fix by silently unlocking early.
+8. Assume renderBlock's generic predicates, tuple inference, callee-exit/temporary cleanup or source-vs-descriptor dependencies have an implemented checker: existing ri-48g gate, not demonstrated acceptance.
+9. Hold a guard across send: not inherently a type error (ri-40y allows suspension), but an avoidable lock-lifetime/liveness risk, not something the runtime may fix by silently unlocking early.
 10. Claim the 250 ms timer bounds return, losing receives are consumed, file writes are transactional, or LLVM/Wasm support is validated: contradicts the approved contracts/#30 gate.
 
 An independent read-only review found no blocking source contradiction or invented API by inspection, reproduced the counts/report/parser reasoning, and requested the explicit symbolic origins now shown above. Whitespace, local Markdown links/fences, source delimiter/numeric-width/export checks and independent sample-data arithmetic passed. Those checks do not compile or execute Rill, validate native scheduling or prove the dependency checker.
 
-The user explicitly accepted this prototype and its documented ergonomic costs as #25 input to the RFCs. This does not accept a new safety/semantic rule, the future feature RFCs, compiler execution, checker soundness or backend support. Any unavoidable rejection uncovered by the eventual checker returns to the map; #28/#30 gates remain.
+The user explicitly accepted this prototype and its documented ergonomic costs as ri-2yn input to the RFCs. This does not accept a new safety/semantic rule, the future feature RFCs, compiler execution, checker soundness or backend support. Any unavoidable rejection uncovered by the eventual checker returns to the map; ri-48g/#30 gates remain.

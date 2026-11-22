@@ -16,4 +16,4 @@ The source comments retain separate invalid examples. Reject anonymous record va
 
 General union declarations and literal-type tags remain invalid. An enum wraps a record explicitly; matching fields do not create enum membership. These cases follow [named construction](../adr/0008-records-require-named-construction.md) and the later [enum decision](../adr/0012-enums-replace-unions-and-literal-overloads.md).
 
-Expected rejections are not executable compiler tests. The [diagnostic registry](../diagnostic-codes.md) owns problem kinds, and #28 still owes formal checking and execution evidence.
+Expected rejections are not executable compiler tests. The [diagnostic registry](../diagnostic-codes.md) owns problem kinds, and ri-48g still owes formal checking and execution evidence.

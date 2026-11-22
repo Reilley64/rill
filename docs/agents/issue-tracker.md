@@ -6,7 +6,7 @@ Use `gh` for issues and specifications in `Reilley64/rill`. Read a ticket's curr
 
 ## Wayfinding
 
-The [map](https://github.com/Reilley64/rill/issues/1) owns destination and completion criteria. Its GitHub sub-issues are the work items. [RFC conventions](../rfcs/README.md) define proposal status and evidence; [#28](https://github.com/Reilley64/rill/issues/28) integrates the complete RFC set. Drafting can proceed on settled requirements while incomplete designs remain linked blockers.
+The map (ri-kl0) owns destination and completion criteria. Its GitHub sub-issues are the work items. [RFC conventions](../rfcs/README.md) define proposal status and evidence; ri-48g integrates the complete RFC set. Drafting can proceed on settled requirements while incomplete designs remain linked blockers.
 
 - Label the map `wayfinder:map` and children `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling` or `wayfinder:task`.
 - Link children with native sub-issues. If unavailable, use a map task list and `Part of #<map>` in the child.

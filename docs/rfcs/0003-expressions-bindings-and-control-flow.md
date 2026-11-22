@@ -4,9 +4,9 @@
 | --- | --- |
 | ID | 0003 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | The [Unicode identifier snapshot](#identifiers-keywords-and-ordinary-names) supplies exact membership tables. [#9 core decisions](https://github.com/Reilley64/rill/issues/9#issuecomment-6308790321), with the later refinements listed under [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The [operator clarification](https://github.com/Reilley64/rill/issues/28#issuecomment-6908782235) preserves wrap-and-propagate semantics. [Later approvals](https://github.com/Reilley64/rill/issues/28#issuecomment-6909312678) confirm precedence, evaluation order and binding initialization/scope. The [option B decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6909516496) fixes whitespace-insensitive question-mark parsing. |
-| RFC dependencies | [RFC 0001](0001-top-level-expectations.md) owns expectations. Use its [accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211), SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. [RFC 0002](0002-modules-and-program-loading.md) proposes module scope and visibility. Other [companions](#required-companion-rules) remain missing. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | The [Unicode identifier snapshot](#identifiers-keywords-and-ordinary-names) supplies exact membership tables. ri-457 core decisions (comment 6308790321), with the later refinements listed under [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The operator clarification (ri-48g, comment 6908782235) preserves wrap-and-propagate semantics. Later approvals (ri-48g, comment 6909312678) confirm precedence, evaluation order and binding initialization/scope. The option B decision (ri-48g, comment 6909516496) fixes whitespace-insensitive question-mark parsing. |
+| RFC dependencies | [RFC 0001](0001-top-level-expectations.md) owns expectations. Use its accepted snapshot (ri-48g, comment 6907867211), SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. [RFC 0002](0002-modules-and-program-loading.md) proposes module scope and visibility. Other [companions](#required-companion-rules) remain missing. |
 | Replaces / superseded by | None. This draft does not amend RFC 0001 or accept RFC 0002. |
 | Decision | Not yet decided |
 | Reviewed revision | Not yet reviewed |
@@ -67,13 +67,13 @@ The conditional expression requires `else`. A statement-form `if` instead uses b
 
 ## Syntax and reference semantics
 
-The owner [confirmed the three syntax policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
+The owner confirmed the three syntax policy groups (ri-48g, comment 6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
 
 <a id="proposed-lexical-tokens-and-trivia"></a>
 
 ### Lexical tokens and trivia
 
-The owner [confirmed these lexical policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825), not the full RFC text. Existing precedence, evaluation order and question-mark policies remain confirmed.
+The owner confirmed these lexical policy groups (ri-48g, comment 6929923825), not the full RFC text. Existing precedence, evaluation order and question-mark policies remain confirmed.
 
 RFC 0002 owns [source snapshots](0002-modules-and-program-loading.md#source-snapshots-and-lexical-input). RFC 0006 owns [literal scanning](0006-numbers-strings-and-primitive-operations.md#proposed-literal-scanning-and-token-boundaries). RFC 0010 owns [coordinate projection](0010-diagnostics-and-reporting.md#source-ranges-and-coordinate-projection). These Draft sections own the coordinated confirmed policy groups. Their full texts remain Draft.
 
@@ -229,7 +229,7 @@ Evaluate the left operand first. For `&&`, skip the right operand when the left 
 
 ### Evaluation order
 
-The project owner [approved these sequencing rules](https://github.com/Reilley64/rill/issues/28#issuecomment-6909312678). This does not accept the complete RFC.
+The project owner approved these sequencing rules (ri-48g, comment 6909312678). This does not accept the complete RFC.
 
 Evaluate an ordinary call's callee expression before its arguments. Evaluate arguments from left to right. Evaluate ordinary binary operands from left to right. Evaluate aggregate elements and explicitly supplied fields in source order. Evaluate an indexing base before its index.
 
@@ -243,9 +243,9 @@ An expression can suspend under ordinary function rules. Left-to-right evaluatio
 
 ### Precedence and question-mark parsing
 
-[#12](https://github.com/Reilley64/rill/issues/12#issuecomment-6308942432) fixes pipe precedence below ordinary arithmetic, comparison and logical operators. It also fixes left-to-right pipe grouping. [#29](../adr/0013-caused-by-errors-with-explicit-wrapping.md) adds a separate infix `?` operation.
+ri-n1j (comment 6308942432) fixes pipe precedence below ordinary arithmetic, comparison and logical operators. It also fixes left-to-right pipe grouping. [ri-vtw](../adr/0013-caused-by-errors-with-explicit-wrapping.md) adds a separate infix `?` operation.
 
-The project owner [approved this precedence table](https://github.com/Reilley64/rill/issues/28#issuecomment-6909312678) and [selected parsing option B](https://github.com/Reilley64/rill/issues/28#issuecomment-6909516496). Rows run from weakest to strongest binding.
+The project owner approved this precedence table (ri-48g, comment 6909312678) and selected parsing option B (ri-48g, comment 6909516496). Rows run from weakest to strongest binding.
 
 | Level | Forms | Grouping |
 | --- | --- | --- |
@@ -276,7 +276,7 @@ Both `read()? - 1i32` and `read() ? -1i32` therefore wrap with the error value `
 
 A right-operand start takes priority over a postfix continuation after `?`. To call or index a propagated value, use `(value?)(args)` or `(value?)[index]`. Type checking must not retry another parse after an error.
 
-The project owner [selected option B](https://github.com/Reilley64/rill/issues/28#issuecomment-6909516496) after comparing both designs. The original spacing-sensitive option A is not adopted. The shared syntax annex records the confirmed expression-start set and delimiter commitments. The lexical policy above does not choose question-mark roles.
+The project owner selected option B (ri-48g, comment 6909516496) after comparing both designs. The original spacing-sensitive option A is not adopted. The shared syntax annex records the confirmed expression-start set and delimiter commitments. The lexical policy above does not choose question-mark roles.
 
 An unparenthesized chain such as `a ? b ? c` is rejected. Parentheses must state the intended nesting. A nested right operand still follows ordinary lazy evaluation and early-return rules. It does not create an automatic multi-error chain.
 
@@ -284,7 +284,7 @@ An unparenthesized chain such as `a ? b ? c` is rejected. Parentheses must state
 
 Confirmed mutation rules distinguish `let` from `let mut`. Ordinary owned parameters and `let` bindings are immutable. `let mut` permits reassignment and permitted mutation of owned fields. It does not change copyability or grant mutable access to shared payloads.
 
-The project owner [approved initializer and scope rules](https://github.com/Reilley64/rill/issues/28#issuecomment-6909312678). The binding shape is:
+The project owner approved initializer and scope rules (ri-48g, comment 6909312678). The binding shape is:
 
 ```text
 binding = "let" ["mut"] binding-pattern [":" type] "=" expression ";"
@@ -294,7 +294,7 @@ These bindings use the value/function namespace. An initializer is required. Thi
 
 A numeric literal needs an established width. `let count = 10;` is invalid. Use `let count: i32 = 10;` or `let count = 10i32;`. A typed `i32` value does not implicitly convert to `i64` because its destination has that annotation.
 
-Later #19 removes singleton literal types. A string literal binding has type `string`, not a primitive literal subtype. Numeric literals retain their established numeric base type, not an optimizer-dependent singleton type.
+Later ri-kty removes singleton literal types. A string literal binding has type `string`, not a primitive literal subtype. Numeric literals retain their established numeric base type, not an optimizer-dependent singleton type.
 
 Names, `_` and tuple destructuring appear in current sources. Tuple destructuring requires a tuple, not an implicit List-to-tuple conversion. Payload binding through borrows follows the ownership and pattern rules below. Complete binding-pattern checking remains companion work.
 
@@ -344,7 +344,7 @@ After `=>`, a bare `{` starts a block. A named record expression uses its type n
 
 A block arm can complete normally in a `void` match. In a value-producing match, a block arm must leave the enclosing function or terminate through a `never` call. Its last expression cannot supply the arm value. Exact flow checking for nested transfers remains required authoring work.
 
-Continuing expression arms must have compatible types. #19 permits the defined variant-to-parent enum joins. Do not synthesize a structural record, general union or numeric width to join unrelated arms. A `never` path supplies no ordinary value.
+Continuing expression arms must have compatible types. ri-kty permits the defined variant-to-parent enum joins. Do not synthesize a structural record, general union or numeric width to join unrelated arms. A `never` path supplies no ordinary value.
 
 ### Guards and successful payload bindings
 
@@ -528,7 +528,7 @@ The Option form has no error binding. This is independent of the enclosing calla
 | E5 | Inner shadowing under the confirmed scope rule. | Read the outer initializer source before introducing the inner binding. | [Bindings](#bindings-and-inference). | Confirmed policy. Compiler lookup is NotChecked. |
 | E6 | Parenthesized postfix use and two equivalent wrapping spellings. | Propagate then subtract in the first example. Wrap and propagate in the other two. Spacing does not select the operation. | [Parsing](#precedence-and-question-mark-parsing), [errors](#return-propagation-and-wrapping). | Confirmed option B. Parser and error lowering remain NotChecked. |
 | E7 | An assignment appears in value context. | Reject it as invalid expression syntax, with R0001 meaning. | [Assignment](#assignment-and-replacement). | HandChecked. No emitted diagnostic. |
-| E8 | Option guard has an error binding. | Reject the unsupported binding. No specific additional code is assigned here. | [Guards](#guards-and-successful-payload-bindings). | HandChecked against #11. No compiler result. |
+| E8 | Option guard has an error binding. | Reject the unsupported binding. No specific additional code is assigned here. | [Guards](#guards-and-successful-payload-bindings). | HandChecked against ri-8hm. No compiler result. |
 | E9 | Two independent non-copying sources appear in a pipe and its argument. | Evaluate input once before the written argument. Placeholder placement does not duplicate it. | [Evaluation](#evaluation-order), [pipes](#pipes-and-placeholders). | Confirmed sequencing policy. Effect and ownership checks are NotChecked. |
 | E10 | A non-void match has a block ending in an ordinary value expression. | Reject missing value/return behavior. Do not infer an implicit arm value. | [Matching](#matching-and-patterns). | HandChecked against the explicit-return source rule. |
 | E11 | A borrowed Result failure is used for owned propagation. | Do not clone its unique envelope or erase dependencies. | [Errors](#return-propagation-and-wrapping), ownership/error companions. | Supporting boundary only. Full checking is NotChecked. |
@@ -567,21 +567,21 @@ Repository inputs use [`f33dcf4cf3f815824eeb897135775d7884f65c1a`](https://githu
 
 | Input | Disposition |
 | --- | --- |
-| [Selected parsing option B](https://github.com/Reilley64/rill/issues/28#issuecomment-6909516496) | Parse wrapping when a right operand can begin; otherwise parse postfix propagation. Whitespace, comments and error types do not select the role. The full RFC remains Draft. |
-| [Approved recommendations 2 through 4](https://github.com/Reilley64/rill/issues/28#issuecomment-6909312678) | Fix precedence, evaluation order and binding initialization/scope. The later option B decision resolves parsing. The full RFC is not accepted. |
-| [User clarification during drafting](https://github.com/Reilley64/rill/issues/28#issuecomment-6908782235) | Infix `?` with an error wraps and propagates immediately. Bare postfix `?` propagates unchanged. No parsing proposal is approved by this clarification. |
-| [#9 core decisions](https://github.com/Reilley64/rill/issues/9#issuecomment-6308790321) | Preserve local inference, explicit block returns, expression arrows, `void` and `never`. Later width, enum and construction decisions replace its older type forms. |
-| [#11 control decisions](https://github.com/Reilley64/rill/issues/11#issuecomment-6308855139) | Preserve guards, borrowed pattern inspection, loop transfers, explicit discard and fatal panic. Later cause and numeric decisions replace trace and float-trap wording. |
-| [#12 pipe decisions](https://github.com/Reilley64/rill/issues/12#issuecomment-6308942432) | Preserve left-grouped low-precedence pipes, one placeholder, step propagation and conditional forms. Later #29 adds infix wrapping. It does not restore a ternary. |
-| #15 and ADR 0007 | Preserve `let mut`, statement assignments, single-evaluation replacement and conservative dependencies. Full ownership checking remains companion scope. |
-| #16 and ADR 0009 | Preserve cancellation deferral through disposal/replacement installation and required cleanup/joins. No force kill or global join is added. |
-| #18 and ADR 0011 | Preserve explicit widths and static-invalid versus panic-if-evaluated distinctions. Keep IEEE float behavior and no optimization-dependent acceptance. |
-| #19/#21 and ADRs 0012/0008 | Use nominal enum variants and named record construction. Do not restore singleton types, general unions or anonymous record values. |
-| [#29 error decision](../adr/0013-caused-by-errors-with-explicit-wrapping.md), #23 catalogue | Preserve exact propagation, lazy error-value wrapping, origins and unique retained causes. No mapper RHS, implicit conversion or propagation trace. |
-| #23 catalogue sections 3/4 | Use canonical iterator operations, actual void-valued Ok input and the published Option/Result boundaries. Complete interfaces need companion owners. |
-| #24 diagnostic contract | Keep unused Result as a hard error. Warnings and bounded observations do not change source effects or acceptance. |
-| [Accepted RFC 0001 snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) | Preserve the expectation control boundary. No accepted rule is amended. |
-| [RFC 0002 policy decisions](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073) | Preserve confirmed module identity and ordering. Lexical binding proposals are separate. The complete module RFC remains Draft. |
+| Selected parsing option B (ri-48g, comment 6909516496) | Parse wrapping when a right operand can begin; otherwise parse postfix propagation. Whitespace, comments and error types do not select the role. The full RFC remains Draft. |
+| Approved recommendations 2 through 4 (ri-48g, comment 6909312678) | Fix precedence, evaluation order and binding initialization/scope. The later option B decision resolves parsing. The full RFC is not accepted. |
+| User clarification during drafting (ri-48g, comment 6908782235) | Infix `?` with an error wraps and propagates immediately. Bare postfix `?` propagates unchanged. No parsing proposal is approved by this clarification. |
+| ri-457 core decisions (comment 6308790321) | Preserve local inference, explicit block returns, expression arrows, `void` and `never`. Later width, enum and construction decisions replace its older type forms. |
+| ri-8hm control decisions (comment 6308855139) | Preserve guards, borrowed pattern inspection, loop transfers, explicit discard and fatal panic. Later cause and numeric decisions replace trace and float-trap wording. |
+| ri-n1j pipe decisions (comment 6308942432) | Preserve left-grouped low-precedence pipes, one placeholder, step propagation and conditional forms. Later ri-vtw adds infix wrapping. It does not restore a ternary. |
+| ri-lql and ADR 0007 | Preserve `let mut`, statement assignments, single-evaluation replacement and conservative dependencies. Full ownership checking remains companion scope. |
+| ri-40y and ADR 0009 | Preserve cancellation deferral through disposal/replacement installation and required cleanup/joins. No force kill or global join is added. |
+| ri-a2c and ADR 0011 | Preserve explicit widths and static-invalid versus panic-if-evaluated distinctions. Keep IEEE float behavior and no optimization-dependent acceptance. |
+| ri-kty/#21 and ADRs 0012/0008 | Use nominal enum variants and named record construction. Do not restore singleton types, general unions or anonymous record values. |
+| [ri-vtw error decision](../adr/0013-caused-by-errors-with-explicit-wrapping.md), ri-8n7 catalogue | Preserve exact propagation, lazy error-value wrapping, origins and unique retained causes. No mapper RHS, implicit conversion or propagation trace. |
+| ri-8n7 catalogue sections 3/4 | Use canonical iterator operations, actual void-valued Ok input and the published Option/Result boundaries. Complete interfaces need companion owners. |
+| ri-3t8 diagnostic contract | Keep unused Result as a hard error. Warnings and bounded observations do not change source effects or acceptance. |
+| Accepted RFC 0001 snapshot (ri-48g, comment 6907867211) | Preserve the expectation control boundary. No accepted rule is amended. |
+| RFC 0002 policy decisions (ri-48g, comment 6908371073) | Preserve confirmed module identity and ordering. Lexical binding proposals are separate. The complete module RFC remains Draft. |
 | Current examples and [consolidation record](../prototypes/consolidation.md) | Use current paths and preserve original source/fixture bytes. Historical comments are not new executed tests. |
 
 ## Compatibility and migration
@@ -612,7 +612,7 @@ The confirmed lexical policy pins Unicode membership to keep identifier admissio
 
 Nested comments permit commenting an existing block comment without exposing its suffix as code. Longest supported-token matching keeps lexing independent of type inference. Full parser grammar must still distinguish generic contexts and question-mark roles.
 
-Explicit returns keep block syntax independent from value production. Expression-bodied arrows remain concise. An implicit final-expression return would change the confirmed #9/#11 model and complicate statement migration.
+Explicit returns keep block syntax independent from value production. Expression-bodied arrows remain concise. An implicit final-expression return would change the confirmed ri-457/#11 model and complicate statement migration.
 
 A pipe is call syntax, not a separate Result executor. One placeholder covers a non-first parameter without repeating the input. Ordinary library combinators handle container-preserving composition.
 
@@ -620,7 +620,7 @@ The confirmed option B selects infix `?` when a right operand can begin. It avoi
 
 The earlier adjacency option A would give `value? - 1i32` and `value ? -1i32` different meanings. The owner did not select it. A new wrapping token could avoid the ambiguity but would change the confirmed `inner ? outer` notation. Type-directed parsing would couple grammar to error types and overload evidence. It is not adopted.
 
-[#29](../adr/0013-caused-by-errors-with-explicit-wrapping.md) cites Roc's infix question form as notation input. Rill evaluates a lazy error value rather than invoking a mapping handler. No other Roc semantics are imported.
+[ri-vtw](../adr/0013-caused-by-errors-with-explicit-wrapping.md) cites Roc's infix question form as notation input. Rill evaluates a lazy error value rather than invoking a mapping handler. No other Roc semantics are imported.
 
 ## Implementation implications
 
@@ -632,7 +632,7 @@ Lowering must represent normal values, early returns, loop transfers and fatal p
 
 Evaluate pipe input through one temporary, not copied source substitution. Preserve source evaluation order while checking calls against canonical family evidence. Branch/backedge state and replacement installation need the ownership model before monomorphization.
 
-If the grammar or checking rules conflict with a confirmed guarantee, return the conflict to #1 and #28. Do not silently weaken cleanup, accept type-directed parsing or treat an unimplemented rule as successful checking.
+If the grammar or checking rules conflict with a confirmed guarantee, return the conflict to ri-kl0 and ri-48g. Do not silently weaken cleanup, accept type-directed parsing or treat an unimplemented rule as successful checking.
 
 ## Evidence and checking plan
 
@@ -669,7 +669,7 @@ Cases L1 through L17 are new lexical inputs/scenarios from 2026-11-17. They rema
 
 ### Confirmed lexical policies
 
-The owner [approved all three lexical/source groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) on 2026-11-17. The pre-recording RFC 0003 SHA-256 is `ad68791cccedb4b94f86d87b4d0b13e89ca25b0a0abf319ec7f86075061e5289`. The shared record identifies the exact RFC 0002, 0006 and 0010 snapshots.
+The owner approved all three lexical/source groups (ri-48g, comment 6929923825) on 2026-11-17. The pre-recording RFC 0003 SHA-256 is `ad68791cccedb4b94f86d87b4d0b13e89ca25b0a0abf319ec7f86075061e5289`. The shared record identifies the exact RFC 0002, 0006 and 0010 snapshots.
 
 1. Names/tokens use the pinned Unicode profile, complete keyword/punctuation set, nested comments and longest supported-token matching.
 2. Literal scanning uses strict numeric candidates, literal/hole modes, exact escapes, control exclusions and specified physical line-ending content.
@@ -681,7 +681,7 @@ Complete type/flow/context/client rules and actual lexer/parser tests remain sep
 
 ### Review choices and remaining authoring work
 
-The owner confirmed precedence, evaluation order and binding initialization/scope in the [earlier decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6909312678). The owner then [selected whitespace-insensitive option B](https://github.com/Reilley64/rill/issues/28#issuecomment-6909516496). These policy questions are no longer open. The lexical/source and concrete syntax groups are confirmed. Complete type/flow checking rules remain authoring work.
+The owner confirmed precedence, evaluation order and binding initialization/scope in the earlier decision (ri-48g, comment 6909312678). The owner then selected whitespace-insensitive option B (ri-48g, comment 6909516496). These policy questions are no longer open. The lexical/source and concrete syntax groups are confirmed. Complete type/flow checking rules remain authoring work.
 
 The shared syntax annex records confirmed generic-argument, conditional-boundary and pipe-step policies. Its decision does not complete semantic checking. No parser success follows from the sketches or EBNF.
 
@@ -691,7 +691,7 @@ Complete binding-pattern coverage and refutable guard-payload behavior. Complete
 
 ### Implementation/validation gates
 
-The lexer, parser, checker, CFG, ownership model and runtime are absent. Execution, target lowering, cleanup/cancellation and snapshot tests have not passed. #28 retains formalization and backend acceptance; #42 retains actual LSP delivery.
+The lexer, parser, checker, CFG, ownership model and runtime are absent. Execution, target lowering, cleanup/cancellation and snapshot tests have not passed. ri-48g retains formalization and backend acceptance; ri-bv2 retains actual LSP delivery.
 
 ### Future/out-of-scope work
 
@@ -705,15 +705,15 @@ No canonical readiness review has occurred. Status is Draft. Source comparison a
 
 ### Human decisions and amendments
 
-On 2026-11-17, the owner requested the complete syntax grammar. The owner then [confirmed all three syntax groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
+On 2026-11-17, the owner requested the complete syntax grammar. The owner then confirmed all three syntax groups (ri-48g, comment 6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
 
-On 2026-11-17, the owner requested the lexical/source contract. The owner then [confirmed its three policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) across the four identified snapshots. This does not accept the full RFCs or validate a lexer.
+On 2026-11-17, the owner requested the lexical/source contract. The owner then confirmed its three policy groups (ri-48g, comment 6929923825) across the four identified snapshots. This does not accept the full RFCs or validate a lexer.
 
 | Date / actor | Change | Reviewed revision or snapshot | Decision / rationale |
 | --- | --- | --- | --- |
 | 2026-11-16, project owner | Requested this expression, binding and control-flow RFC. | No RFC 0003 text was accepted. | This authorizes drafting, not new syntax approval. |
-| 2026-11-16, drafting agent under #28 | Created and registered substantive RFC 0003. | Inputs use `f33dcf4cf3f815824eeb897135775d7884f65c1a` and the accepted RFC 0001 snapshot identified above. | Parsing, precedence and completion details are proposals. No implementation or formal ASD-STE100 compliance is claimed. |
-| 2026-11-16, project owner | Clarified that infix `?` with an error means wrap and propagate. It is not recovery. | Clarification of the operation, not acceptance of RFC 0003. | [Recorded clarification](https://github.com/Reilley64/rill/issues/28#issuecomment-6908782235) preserves #29 semantics. It does not approve the proposed parsing or spacing rule. |
-| 2026-11-16, project owner | Approved recommendations 2, 3 and 4. Recommendation 1 remains open pending examples. | The precedence table and evaluation/binding recommendations presented in chat. No complete RFC revision was accepted. | [Recorded approvals](https://github.com/Reilley64/rill/issues/28#issuecomment-6909312678). Status remains Draft. |
-| 2026-11-16, project owner | Selected whitespace-insensitive question-mark parsing, option B. Option A is not adopted. | The two syntax designs and examples presented in chat. No complete RFC revision was accepted. | [Recorded selection](https://github.com/Reilley64/rill/issues/28#issuecomment-6909516496). Complete grammar, readiness and implementation remain open. |
-| 2026-11-17, project owner | Approved the three coordinated lexical/source groups, including pinned identifier membership and lexical boundaries. | Pre-recording SHA-256: `ad68791cccedb4b94f86d87b4d0b13e89ca25b0a0abf319ec7f86075061e5289`. Other owner snapshots appear in the shared decision record. | [Lexical policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825). Full RFC acceptance, parser grammar, readiness and implementation remain open. |
+| 2026-11-16, drafting agent under ri-48g | Created and registered substantive RFC 0003. | Inputs use `f33dcf4cf3f815824eeb897135775d7884f65c1a` and the accepted RFC 0001 snapshot identified above. | Parsing, precedence and completion details are proposals. No implementation or formal ASD-STE100 compliance is claimed. |
+| 2026-11-16, project owner | Clarified that infix `?` with an error means wrap and propagate. It is not recovery. | Clarification of the operation, not acceptance of RFC 0003. | Recorded clarification (ri-48g, comment 6908782235) preserves ri-vtw semantics. It does not approve the proposed parsing or spacing rule. |
+| 2026-11-16, project owner | Approved recommendations 2, 3 and 4. Recommendation 1 remains open pending examples. | The precedence table and evaluation/binding recommendations presented in chat. No complete RFC revision was accepted. | Recorded approvals (ri-48g, comment 6909312678). Status remains Draft. |
+| 2026-11-16, project owner | Selected whitespace-insensitive question-mark parsing, option B. Option A is not adopted. | The two syntax designs and examples presented in chat. No complete RFC revision was accepted. | Recorded selection (ri-48g, comment 6909516496). Complete grammar, readiness and implementation remain open. |
+| 2026-11-17, project owner | Approved the three coordinated lexical/source groups, including pinned identifier membership and lexical boundaries. | Pre-recording SHA-256: `ad68791cccedb4b94f86d87b4d0b13e89ca25b0a0abf319ec7f86075061e5289`. Other owner snapshots appear in the shared decision record. | Lexical policy approval (ri-48g, comment 6929923825). Full RFC acceptance, parser grammar, readiness and implementation remain open. |
