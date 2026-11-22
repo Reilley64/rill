@@ -484,7 +484,8 @@ fn relay_caller_keeps_caps(
             "{name}"
         );
         if checked {
-            let relay = declaration(module, "relay");
+            let callee = call.trim_start_matches('(').split('(').next().unwrap();
+            let relay = declaration(module, callee);
             let [edge] = root.dependencies() else {
                 panic!("{name}: one ordinary call")
             };
@@ -534,12 +535,6 @@ fn unsupported_option_relay_siblings_keep_parent_caps() {
             (195754, 5793, 4),
         ),
         (
-            "callerExclusive",
-            "relayExclusive(input)",
-            (3089, 284, 4),
-            (195691, 5792, 4),
-        ),
-        (
             "callerMultiple",
             "choose(input, input)",
             (3091, 285, 4),
@@ -552,6 +547,9 @@ fn unsupported_option_relay_siblings_keep_parent_caps() {
 
 /// The screen admits a grouped whole carrier without walking it: direct and
 /// grouped relays keep the caps the relay was admitted at (68e4fa7).
+/// `callerExclusive` is admitted by ri-vgz.3 (gap-analysis C1), which moves the
+/// exclusive carrier into the relay; metering rule 11 re-pin, see
+/// `exclusive_relay_caller_exceeds_its_parent_caps`.
 #[test]
 fn admitted_option_relay_callers_keep_their_caps() {
     let test = "propagation::option_caller::admitted_option_relay_callers_keep_their_caps";
@@ -568,7 +566,48 @@ fn admitted_option_relay_callers_keep_their_caps() {
             (9536, 1685, 8),
             (198806, 6628, 8),
         ),
+        (
+            "callerExclusive",
+            "relayExclusive(input)",
+            (9466, 1677, 4),
+            (198521, 6624, 4),
+        ),
     ] {
         relay_caller_keeps_caps(test, name, call, Completion::Checked, target, graph);
     }
+}
+
+/// Metering rule 11: ri-vgz.3 (gap-analysis C1) admits `relayExclusive(input)?`,
+/// so `callerExclusive` moves from `Incomplete` at targeted 3,089/284/4 and
+/// graph 195,691/5,792/4 (A3, measured at cb94538f) to `Checked` at 9,466/1,677/4
+/// and 198,521/6,624/4. The old caps now give `ResourceLimit`.
+#[test]
+fn exclusive_relay_caller_exceeds_its_parent_caps() {
+    let source = format!(
+        "{RELAY_SIBLINGS}function callerExclusive(input: Option<&mut bool>): Option<&mut bool> {{\n    \
+         let view = relayExclusive(input)?;\n    return Option.Some(view);\n}}\n"
+    );
+    probe(
+        "propagation::option_caller::exclusive_relay_caller_exceeds_its_parent_caps",
+        &source,
+        |_, module, receipt| {
+            let caller = declaration(module, "callerExclusive");
+            let old = AnalysisLimits {
+                max_work: 3089,
+                max_entries: 284,
+                max_depth: 4,
+            };
+            let report = lower_body(receipt, module, &caller.id, old).unwrap();
+            assert_eq!(report.completion(), Completion::ResourceLimit);
+            assert!(report.mir().is_none() && report.findings().is_empty());
+            let old = AnalysisLimits {
+                max_work: 195691,
+                max_entries: 5792,
+                max_depth: 4,
+            };
+            let report = analyze_ownership(receipt, old);
+            assert_eq!(report.completion(), GraphCompletion::ResourceLimit);
+            assert!(report.findings().is_empty());
+        },
+    );
 }

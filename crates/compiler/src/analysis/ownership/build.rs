@@ -106,7 +106,7 @@ enum OptionPayload<'t, 'g> {
 enum OptionTakeSource<'a, 'g> {
     Move(Slot),
     ReadReferenceCarrier(NodeId, Slot),
-    SharedCall(option_calls::SharedOptionCall<'a, 'g>),
+    RelayCall(option_calls::OptionRelayCall<'a, 'g>),
     Constructor,
     Factory,
     PipeStep,
@@ -3733,14 +3733,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             let take = match payload {
                 OptionPayload::Bool => None,
-                OptionPayload::Reference { ty, exclusive }
-                    if syntax.kind == NodeKind::Propagate =>
-                {
+                OptionPayload::Reference { ty, .. } if syntax.kind == NodeKind::Propagate => {
                     let (name, source_depth) = self.ungroup_expression_at(source, depth)?;
-                    let source = if !exclusive
-                        && self.module.syntax.nodes[name].kind == NodeKind::Call
-                    {
-                        OptionTakeSource::SharedCall(self.check_shared_option_call(
+                    // A selected relay moves an exclusive carrier into the
+                    // call and copies a shared one.
+                    let source = if self.module.syntax.nodes[name].kind == NodeKind::Call {
+                        OptionTakeSource::RelayCall(self.check_option_relay_call(
                             node,
                             name,
                             operand,
@@ -4019,8 +4017,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 depth,
                 Some(ExpressionProof::CallCarrier(operand)),
             )
-        } else if let Some((_, OptionTakeSource::SharedCall(call))) = option_take {
-            self.stage_shared_option_call(call, scratch, split)
+        } else if let Some((_, OptionTakeSource::RelayCall(call))) = option_take {
+            self.stage_option_relay_call(call, scratch, split)
         } else if let Some((_, OptionTakeSource::ReadReferenceCarrier(name, from))) = option_take {
             self.emit(
                 name,
