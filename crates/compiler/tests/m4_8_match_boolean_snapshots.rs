@@ -549,6 +549,86 @@ fn installed_boolean_matches() {
             }
         });
     }
+
+    // Reviews 35776287 and f67c0458 at db944e6: a single wildcard arm that copies its
+    // source, and nested wildcard matches whose bodies copy and observe it. Verbatim,
+    // including the reviewers' `std::routine::join` import.
+    // Review e519e598 at 2ec4f36: two false R0103s that predate bd10617, pinned at
+    // their current outcome as known limitations. `pre` copies the Boolean before the
+    // match begins tracking it; `computed` matches through an alias selected by an
+    // `if` expression, which has no typed source place.
+    // Exact (work, entries, depth), the same in both load modes.
+    for (name, source, exact, check) in [
+        (
+            "review 35776287: wildcard arm copies the source",
+            "
+import std::routine::join;
+function probe(flag: bool): void {
+  let debt = Err<bool,i32>(61i32);
+  let copy = match (flag) { _ => flag };
+  if (flag) { if (copy) { let _ = debt; } }
+  else { if (!copy) { let _ = debt; } }
+}
+",
+            (426696, 48863, 12),
+            checked as fn(&TypedReport<'_>),
+        ),
+        (
+            "review 35776287: nested wildcard copy observed by guards",
+            "
+import std::routine::join;
+function probe(flag: bool, outer: bool): void {
+  let debt = Err<bool,i32>(61i32);
+  match (outer) { _ => {
+    match (flag) { _ => {
+      let copy = flag;
+      match (copy) { true if flag => { let _ = debt; }, false if !flag => { let _ = debt; }, _ => {} };
+    } };
+  } };
+}
+",
+            (427764, 49046, 16),
+            checked,
+        ),
+        (
+            "review f67c0458: nested guarded wildcard copies the source",
+            "
+import std::routine::join;
+function probe(flag: bool, gate: bool): void {
+    let debt = Err<bool,i32>(61i32);
+    let mut copy = false; match (flag) { _ => { match (gate) { _ if gate => { copy = flag; }, _ => { copy = flag; } }; } };
+    if (flag) { if (copy) { let _ = debt; } }
+    else { if (!copy) { let _ = debt; } }
+}
+",
+            (428401, 49120, 12),
+            checked,
+        ),
+        (
+            "known limitation e519e598 pre: copy taken before the match",
+            "
+import std::routine::join;
+function probe(flag: bool): void { let debt = Err<bool,i32>(61i32); let before = flag; let copy = match (flag) { _ => before }; if (flag) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } } }
+",
+            (426921, 48910, 12),
+            unpaid,
+        ),
+        (
+            "known limitation e519e598 computed: alias selected by an if expression",
+            "
+import std::routine::join;
+function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); match (*(if (gate) &flag else &flag)) { true if flag => { let _ = debt; }, false if !flag => { let _ = debt; }, _ => {} }; }
+",
+            (428253, 49198, 12),
+            unpaid,
+        ),
+    ] {
+        installed(&probe, name, source, None, |report| {
+            check(report);
+            let stats = report.statistics();
+            assert_eq!((stats.work, stats.entries, stats.max_depth), exact, "{name}");
+        });
+    }
 }
 
 fn checked(report: &TypedReport<'_>) {
