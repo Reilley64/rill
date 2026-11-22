@@ -1617,13 +1617,13 @@ For ri-785.6, the caller in `return invoke(() => [flag, seed]);` now checks when
 
 | Caller | Targeted lowering and ordinary graph root | Target cap (work / entries / depth) |
 | --- | --- | --- |
-| `flag: &bool` parameter | `Checked`, the frame above | 5,625 / 299 / 6 |
-| `flag = &local` | `R0202` at the `return`, related to `local`. No MIR. | 5,903 / 408 / 6 |
-| `flag = &local`, then `local = seed;` | `R0203` at the write, related to `&local`. No MIR. | 5,878 / 396 / 6 |
-| `dispose(seed);` before the call | `R0200` at the captured `seed`, related to `dispose(seed)`. No MIR. | 5,896 / 356 / 6 |
-| A finished sibling read of `flag` before the call | `Checked`, the same frame | 6,134 / 525 / 6 |
+| `flag: &bool` parameter | `Checked`, the frame above | 5,631 / 299 / 6 |
+| `flag = &local` | `R0202` at the `return`, related to `local`. No MIR. | 5,911 / 408 / 6 |
+| `flag = &local`, then `local = seed;` | `R0203` at the write, related to `&local`. No MIR. | 5,886 / 396 / 6 |
+| `dispose(seed);` before the call | `R0200` at the captured `seed`, related to `dispose(seed)`. No MIR. | 5,904 / 356 / 6 |
+| A finished sibling read of `flag` before the call | `Checked`, the same frame | 6,142 / 525 / 6 |
 
-The positive graph checks at 190,662 / 4,266 / 6; the graph of the four contrasts checks at 206,992 / 5,391 / 6. Independently one-short limits give `ResourceLimit` with no finding and no MIR. Both installed load modes agree. The standalone `invoke` root still stops at `job: F` with no MIR. The M4 receipt stays at 326,305 / 47,955 / 12. The erased `job: once () => [&bool, bool]` wrapper still has no receipt (324,473 / 47,678 / 12), and the local shared descriptor still checks at 2,838 / 384 / 5. This is one bounded witness, not a proof for every `F`, a public or erased callable contract, or Rill execution. ri-785 remains open.
+The positive graph checks at 190,668 / 4,266 / 6; the graph of the four contrasts checks at 207,024 / 5,391 / 6. Independently one-short limits give `ResourceLimit` with no finding and no MIR. Both installed load modes agree. The standalone `invoke` root still stops at `job: F` with no MIR. Grouping the actual, the call or the wrapper's receiver, nesting the `return` in a block or a `while`, or binding the result before returning still leaves M4 `Incomplete` at `CallBoundary`, with no receipt and the typed caps measured at `5882113b`. No ownership query reaches the frame for those shapes. The M4 receipt stays at 326,305 / 47,955 / 12. The erased `job: once () => [&bool, bool]` wrapper still has no receipt (324,473 / 47,678 / 12), and the local shared descriptor still checks at 2,838 / 384 / 5. This is one bounded witness, not a proof for every `F`, a public or erased callable contract, or Rill execution. ri-785 remains open.
 
 ## Open acceptance obligations
 

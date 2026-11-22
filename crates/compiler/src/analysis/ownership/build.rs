@@ -6842,6 +6842,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || !matches!(syntax[node].children.as_slice(), [_, written] if written == argument)
             || syntax[*argument].kind != NodeKind::Arrow
             || self.slots[into].members != 2
+            // This first witness admits only the carried shared/Bool pair.
+            || !matches!(facts.ty.as_ref(), TypeTerm::Tuple(elements)
+                if matches!(elements.as_slice(), [descriptor, bit]
+                    if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                        if scalar::scalar(referent) == Some(Primitive::Bool))
+                        && scalar::scalar(bit) == Some(Primitive::Bool)))
         {
             return Err(pending());
         }
@@ -6863,7 +6869,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let [formal] = parameters.as_slice() else {
             return Err(pending());
         };
-        // This first witness admits only the carried shared/Bool pair result.
         if header.declaration.public
             || header.declaration.scope.is_some()
             || binder.position != 0
@@ -6872,11 +6877,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || !matches!(formal.ty.as_ref(), TypeTerm::Parameter { declaration, position: 0 }
                 if std::ptr::eq(*declaration, &binder.declaration.id))
             || *result != facts.ty
-            || !matches!(result.as_ref(), TypeTerm::Tuple(elements)
-                if matches!(elements.as_slice(), [descriptor, bit]
-                    if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
-                        if scalar::scalar(referent) == Some(Primitive::Bool))
-                        && scalar::scalar(bit) == Some(Primitive::Bool)))
         {
             return Err(pending());
         }
@@ -6905,8 +6905,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(pending());
         }
+        // Four node-fact probes below, then the indexed goal.
         self.budget
-            .step(3 * (self.facts.nodes().len().checked_ilog2().unwrap_or(0) as usize + 1))?;
+            .step(4 * (self.facts.nodes().len().checked_ilog2().unwrap_or(0) as usize + 1) + 1)?;
         if !matches!(self.fact(returned).map(|fact| &fact.kind),
             Some(NodeFactKind::Return { target }) if std::ptr::eq(*target, call.callee))
         {

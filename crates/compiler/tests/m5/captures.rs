@@ -4299,7 +4299,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             assert!(open_root.mir().is_none() && open_root.ordinary_mir().is_none());
 
             let used = target.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (5_625, 299, 6));
+            assert_eq!((used.work, used.entries, used.max_depth), (5_631, 299, 6));
             let exact = AnalysisLimits {
                 max_work: used.work,
                 max_entries: used.entries,
@@ -4315,7 +4315,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (190_662, 4_266, 6)
+                (190_668, 4_266, 6)
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4372,20 +4372,20 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
                 (
                     "escape",
                     Some(("R0202", "return invoke(() => [flag, seed]);", "local")),
-                    (5_903, 408, 6),
+                    (5_911, 408, 6),
                 ),
                 (
                     "write",
                     Some(("R0203", "local = seed;", "&local")),
-                    (5_878, 396, 6),
+                    (5_886, 396, 6),
                 ),
                 (
                     "reuse",
                     Some(("R0200", "seed", "dispose(seed)")),
-                    (5_896, 356, 6),
+                    (5_904, 356, 6),
                 ),
                 // A finished sibling use of the captured descriptor is not live.
-                ("sibling", None, (6_134, 525, 6)),
+                ("sibling", None, (6_142, 525, 6)),
             ] {
                 let target = check_local_capture_root(module, receipt, &graph, name, rejection);
                 let decl = capture_declaration(module, name);
@@ -4443,7 +4443,7 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (206_992, 5_391, 6)
+                (207_024, 5_391, 6)
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4500,4 +4500,92 @@ fn declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged() {
             assert_eq!((used.work, used.entries, used.max_depth), (2_838, 384, 5));
         },
     );
+}
+
+#[test]
+fn declared_once_siblings_keep_their_parent_typed_caps() {
+    use compiler::analysis::typed::TypedCompletion;
+    let wrapper = format!("{DECLARED_ONCE}\n");
+    let caller = |body: &str| {
+        format!("function caller(flag: &bool, seed: bool): [&bool, bool] {{ {body} }}\n")
+    };
+    // Exact results measured at 5882113b, before the declared once frame.
+    // None has an M4 receipt, so no ownership query can reach the frame.
+    for (name, source, site, caps) in [
+        (
+            "grouped-actual",
+            wrapper.clone() + &caller("return invoke((() => [flag, seed]));"),
+            "job()",
+            (325_206, 47_797, 12),
+        ),
+        (
+            "grouped-call",
+            wrapper.clone() + &caller("return (invoke(() => [flag, seed]));"),
+            "job()",
+            (325_110, 47_790, 12),
+        ),
+        (
+            "grouped-receiver",
+            wrapper.replace("return job();", "return (job)();")
+                + &caller("return invoke(() => [flag, seed]);"),
+            "(job)()",
+            (325_036, 47_787, 12),
+        ),
+        (
+            "scoped",
+            wrapper.clone() + &caller("{ return invoke(() => [flag, seed]); }"),
+            "job()",
+            (325_008, 47_782, 12),
+        ),
+        (
+            "loop",
+            wrapper.clone()
+                + &caller(
+                    "while (seed) { return invoke(() => [flag, seed]); } return [flag, seed];",
+                ),
+            "job()",
+            (325_390, 47_893, 12),
+        ),
+        (
+            "bound",
+            wrapper.clone() + &caller("let out = invoke(() => [flag, seed]); return out;"),
+            "job()",
+            (324_957, 47_783, 12),
+        ),
+    ] {
+        probe_report(
+            "captures::declared_once_siblings_keep_their_parent_typed_caps",
+            &source,
+            |request, _, typed| {
+                assert_eq!(typed.completion(), TypedCompletion::Incomplete, "{name}");
+                assert!(typed.receipt().is_none(), "{name}");
+                let pending = typed.result_use().unwrap().pending();
+                assert!(
+                    matches!(pending, [only] if only.blocker == ResultUseBlocker::CallBoundary
+                        && only.site.span.bytes() == site.as_bytes()),
+                    "{name}"
+                );
+                let used = typed.statistics();
+                assert_eq!((used.work, used.entries, used.max_depth), caps, "{name}");
+                let graph = loader::load_installed(request.clone()).unwrap();
+                let exact = AnalysisLimits {
+                    max_work: used.work,
+                    max_entries: used.entries,
+                    max_depth: used.max_depth,
+                };
+                let replay = analyze_typed(&graph, exact);
+                assert_eq!(replay.completion(), TypedCompletion::Incomplete, "{name}");
+                assert_eq!(replay.statistics(), used, "{name}");
+                for short in short_capture_limits(exact) {
+                    let limited = analyze_typed(&graph, short);
+                    assert_eq!(
+                        limited.completion(),
+                        TypedCompletion::ResourceLimit,
+                        "{name}"
+                    );
+                    assert!(limited.receipt().is_none(), "{name}");
+                }
+            },
+        );
+    }
 }
