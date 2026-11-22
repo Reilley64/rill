@@ -521,6 +521,16 @@ foreign-rc	right.rill#Function:bad	root	test	Checked	2062	92	3
 foreign-rc	right.rill#Function:bad	graph-root	test	Checked/Checked	-	-	-
 foreign-rc	right.rill#Function:unavailable	root	test	Incomplete	1954	29	3
 foreign-rc	right.rill#Function:unavailable	graph-root	test	Incomplete/Incomplete	-	-	-
+# live-parent-err: re-pinned under metering rule 11, D3 (b) (ri-785.4). The d95ae9e body cap 3449/320/3 now gives ResourceLimit;
+# see m5::scoped_join::fresh_result::live_parent_error_reaches_the_join_at_its_repinned_cap and the 2026-11-23 A7 ledger section.
+live-parent-err	-	standard-modules	normal	18	-	-	-
+live-parent-err	-	typed	normal	Checked	436305	50259	12
+live-parent-err	main.rill#Function:liveParentError	body	normal	Incomplete	4024	571	7
+live-parent-err	main.rill#Function:liveParentError	graph-root	normal	Incomplete/Incomplete	-	-	-
+live-parent-err	-	standard-modules	test	18	-	-	-
+live-parent-err	-	typed	test	Checked	436305	50259	12
+live-parent-err	main.rill#Function:liveParentError	body	test	Incomplete	4024	571	7
+live-parent-err	main.rill#Function:liveParentError	graph-root	test	Incomplete/Incomplete	-	-	-
 #
 # Published at 68f3788, the parent before the forwarding proof, but not reproduced on the integration branch.
 # Not replayed, not edited; both modes agree. See the 2026-11-22 H1 section of crates/compiler/tests/m5-acceptance.md.
