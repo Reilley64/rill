@@ -17,3 +17,6 @@ hooks/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# Gas City per-bead worktrees
+/worktrees/
