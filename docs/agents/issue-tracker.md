@@ -1,30 +1,27 @@
-# GitHub issue tracker
+# Beads issue tracker
 
-Use `gh` for issues and specifications in `Reilley64/rill`. Read a ticket's current body and relevant decision comments before editing it. Preserve concurrent updates.
+Issues and specifications live as beads in this rig's store (prefix `ri-`). Use `gc bd` for all operations; pass `--rig rill` only to create and list, because bead IDs route themselves. Read a ticket's current body and relevant decision comments before editing it. Preserve concurrent updates.
+
+Beads migrated from GitHub keep their old number as `external_ref` `gh-<n>`, and each migrated comment starts with its GitHub comment ID. Recorded evidence and fixtures still cite those numbers; resolve one with `gc bd list --rig rill --status all --json | jq '.[] | select(.external_ref == "gh-<n>") | .id'`.
 
 **PRs as a request surface: no.**
 
+## Operations
+
+- Create: `gc bd create "<title>" --rig rill --body-file <file> -t <task|bug|feature>`, with `-l <labels>` and `--parent <id>` as needed.
+- Read: `gc bd show <id>`, and `gc bd comments <id>` for the discussion.
+- List: `gc bd list --rig rill --status open --json`, filtered with `--label` or `--parent`.
+- Block: `--deps blocked-by:<id>` on create, or `gc bd dep add <blocked> <blocker>`. A ticket is unblocked when every blocker is closed.
+- Comment: `gc bd comment <id> "<text>"`. Label: `gc bd label add <id> <label>` / `gc bd label remove <id> <label>`.
+- Close: post the explanation with `gc bd comment`, then `gc bd close <id> --reason "<short reason>"`.
+- Edit a body: write it to a file, then `gc bd update <id> --body-file <file>`.
+
 ## Wayfinding
 
-The map (ri-kl0) owns destination and completion criteria. Its GitHub sub-issues are the work items. [RFC conventions](../rfcs/README.md) define proposal status and evidence; ri-48g integrates the complete RFC set. Drafting can proceed on settled requirements while incomplete designs remain linked blockers.
+The map (ri-kl0) owns destination and completion criteria. Its child beads are the work items. [RFC conventions](../rfcs/README.md) define proposal status and evidence; ri-48g integrates the complete RFC set. Drafting can proceed on settled requirements while incomplete designs remain linked blockers.
 
 - Label the map `wayfinder:map` and children `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling` or `wayfinder:task`.
-- Link children with native sub-issues. If unavailable, use a map task list and `Part of #<map>` in the child.
-- Use native dependencies as the completion gate. `issue_dependencies_summary.blocked_by` counts open blockers.
-- Select an open, unassigned child with no open blocker. Follow map order unless the user gives another priority.
-- Claim it with `gh issue edit <n> --add-assignee @me` as the session's first issue write.
-- On resolution, publish the decision/evidence, close the design task and add a short linked summary to the map. Preserve separate implementation and validation gates.
-
-## Native API identifiers
-
-Dependency and sub-issue APIs need the numeric database id, not the issue number or node id:
-
-```sh
-gh api repos/Reilley64/rill/issues/<n> --jq .id
-gh api --method POST repos/Reilley64/rill/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>
-gh api --method POST repos/Reilley64/rill/issues/<map>/sub_issues -F sub_issue_id=<child-db-id>
-```
-
-If dependencies are unavailable, use `Blocked by: #<n>, #<n>` and check each referenced issue's state.
-
-GitHub shares issue and PR numbers. Resolve an ambiguous number with `gh pr view`, then `gh issue view`. For routine CRUD and label operations, use the CLI's current help rather than a copied command catalogue.
+- Create children with `--parent ri-kl0`, and use native dependencies as the completion gate.
+- Select from `gc bd ready --rig rill --parent ri-kl0 --unassigned --sort oldest`. Follow that order unless the user gives another priority.
+- Claim it with `gc bd update <id> --claim` as the session's first bead write.
+- On resolution, publish the decision/evidence as a comment, close the design task and add a short summary with the bead ID to the map's body. Preserve separate implementation and validation gates.
