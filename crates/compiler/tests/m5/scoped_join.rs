@@ -3050,6 +3050,7 @@ fn installed_result_transfer_does_not_supply_other_properties_or_error_types() {
 
 #[test]
 fn installed_join_fresh_results_keep_the_written_occurrence() {
+    use compiler::analysis::Statistics;
     use compiler::analysis::ownership::{GraphCompletion, GraphObligation, analyze_ownership};
     use compiler::analysis::scalars::data::DataExpression;
 
@@ -3072,18 +3073,49 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             }
         "#,
         |request, module, receipt, typed| {
-            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let graph_cost = Statistics {
+                work: 282_035,
+                entries: 49_331,
+                max_depth: 8,
+            };
+            let (exact, graph_short) = budget_caps(graph_cost);
+            let graph = analyze_ownership(receipt, exact);
+            assert_eq!(graph.statistics(), graph_cost);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert!(
                 graph
                     .open_obligations()
                     .contains(&GraphObligation::MaskingAndJoin)
             );
-            for (name, prefix, slot, origin) in [
-                ("success", "join([():", 0, "Result.Ok(true)"),
-                ("failure", "join([() => flag", 1, "Err<bool, i32>(7i32)"),
-                ("successSecond", "join([() => false", 1, "Result.Ok(true)"),
-                ("failureFirst", "join([() => Err", 0, "Err<bool, i32>(7i32)"),
+            for (name, prefix, slot, origin, (work, entries)) in [
+                (
+                    "success",
+                    "join([():",
+                    0,
+                    "Result.Ok(true)",
+                    (22_226, 10_127),
+                ),
+                (
+                    "failure",
+                    "join([() => flag",
+                    1,
+                    "Err<bool, i32>(7i32)",
+                    (24_588, 12_120),
+                ),
+                (
+                    "successSecond",
+                    "join([() => false",
+                    1,
+                    "Result.Ok(true)",
+                    (22_226, 10_127),
+                ),
+                (
+                    "failureFirst",
+                    "join([() => Err",
+                    0,
+                    "Err<bool, i32>(7i32)",
+                    (25_683, 13_123),
+                ),
             ] {
                 let call = call_node(module, prefix);
                 let join = receipt.scoped_join(module, call).unwrap().unwrap();
@@ -3145,7 +3177,14 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                     assert!(error.retained.is_none());
                 }
                 let d = &module.declarations[named(module, name)];
-                let local = lower_body(receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+                let body_cost = Statistics {
+                    work,
+                    entries,
+                    max_depth: 8,
+                };
+                let (exact, short) = budget_caps(body_cost);
+                let local = lower_body(receipt, module, &d.id, exact).unwrap();
+                assert_eq!(local.statistics(), body_cost);
                 let root = graph
                     .roots()
                     .iter()
@@ -3169,21 +3208,13 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                 );
                 fresh_result::assert_fresh_result_lifecycle(root.mir().unwrap(), typed, join, slot);
                 fresh_result::assert_dependencies(root, typed, join, site);
-                let (exact, short) = budget_caps(local.statistics());
-                let replay = lower_body(receipt, module, &d.id, exact).unwrap();
-                assert_eq!(replay.completion(), Completion::Checked);
-                assert_eq!(replay.statistics(), local.statistics());
                 for cap in short {
                     let limited = lower_body(receipt, module, &d.id, cap).unwrap();
                     assert_eq!(limited.completion(), Completion::ResourceLimit);
                     assert!(limited.mir().is_none());
                 }
             }
-            let (exact, short) = budget_caps(graph.statistics());
-            let replay = analyze_ownership(receipt, exact);
-            assert_eq!(replay.completion(), GraphCompletion::Incomplete);
-            assert_eq!(replay.statistics(), graph.statistics());
-            for cap in short {
+            for cap in graph_short {
                 let limited = analyze_ownership(receipt, cap);
                 assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
                 assert!(
@@ -3194,8 +3225,16 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                 );
             }
             let loaded = loader::load_installed(request.clone()).unwrap();
-            let (exact, short) = budget_caps(typed.statistics());
-            assert!(analyze_typed(&loaded, exact).receipt().is_some());
+            captured_keys(&loaded, true);
+            let typed_cost = Statistics {
+                work: 445_380,
+                entries: 51_426,
+                max_depth: 12,
+            };
+            let (exact, short) = budget_caps(typed_cost);
+            let checked = analyze_typed(&loaded, exact);
+            assert!(checked.receipt().is_some());
+            assert_eq!(checked.statistics(), typed_cost);
             for cap in short {
                 let limited = analyze_typed(&loaded, cap);
                 assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
@@ -3556,16 +3595,38 @@ fn fresh_join_reads_copyable_match_sources() {
 
 #[test]
 fn an_unproved_join_does_not_invent_a_discard() {
+    use compiler::analysis::Statistics;
+
     probe_report(
         "scoped_join::an_unproved_join_does_not_invent_a_discard",
         r#"
         import std::routine::join;
         function probe(): void { Err<bool, i32>(1i32); join([() => Err<bool, i32>(7i32), () => !false]); }
     "#,
-        |_, _, typed| {
+        |request, module, _| {
+            let loaded = loader::load_installed(request.clone()).unwrap();
+            captured_keys(&loaded, true);
+            let cost = Statistics {
+                work: 427_565,
+                entries: 49_016,
+                max_depth: 12,
+            };
+            let (exact, short) = budget_caps(cost);
+            let typed = analyze_typed(&loaded, exact);
+            assert_eq!(typed.statistics(), cost);
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             assert!(typed.receipt().is_none());
             let uses = typed.result_use().unwrap();
-            assert!(!uses.pending().is_empty());
+            let [pending] = uses.pending() else {
+                panic!("unsupported Bool sibling")
+            };
+            assert_eq!(pending.blocker, ResultUseBlocker::CallBoundary);
+            assert_eq!(pending.site.node, call_node(module, "join(["));
+            for cap in short {
+                let limited = analyze_typed(&loaded, cap);
+                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
+                assert!(limited.receipt().is_none());
+            }
             let origins = uses
                 .discards()
                 .iter()
