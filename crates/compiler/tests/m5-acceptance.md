@@ -1611,6 +1611,18 @@ Local gate results on macOS/AArch64 with an isolated Cargo target directory. `mi
 
 These runs did not replay either installed load mode, the historical captures or the fixed caps outside the test suite, and no hosted check ran. They show that the merged tree builds and that its own tests pass. They do not close any obligation below. No Rill program ran.
 
+## O15 arithmetic on a charged M4 fact (2026-11-22, ri-785.1)
+
+This answers Standards blocker `c61a0a14`. M4's flow pass now classifies each normal `i32` expression from its children's classes and publishes one fact, `bounded_i32_arithmetic`, for `local * literal` and for a local or that product plus a local. M5 admits `*` and `+` on that fact and no longer probes nodes or locals to decide admission. Each arithmetic read of a local charges its key with `charge_key`, once per probe.
+
+The tests run in both installed load modes:
+
+- `arithmetic_local_reads_charge_their_module_path` reproduces the finding. The same body in a module whose path is 48 bytes longer costs 192 more work than a control body that reads the same locals without arithmetic. Before the fix the difference was 0.
+- `rfc_counter_caps_include_the_charged_local_reads`: `counter` is `Checked` at 2,562/329/6 and `ResourceLimit` one short on each axis. The graph is `Incomplete` at 187,543/4,297/6, with `ResourceLimit` one short on each axis. The reads of `first` and `second` add 2 × (10 × 3 − 1) = 58 work to each; the 2026-11-21 replay before this change recorded 2,504 and 187,485.
+- `counter_expectation_keeps_its_incomplete_cap`: on the 17-source baseline plus the counter, `counter() == 12i32` stays `Incomplete` at 2,279/210/1, both targeted and as an ordinary graph root, with `ResourceLimit` one short on each axis.
+
+The six earlier O15 tests pass with no number changed. The M4 17-source baseline was measured before and after the change: exactly 372,246/54,059/12 in both modes, with no receipt one short on any axis. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.

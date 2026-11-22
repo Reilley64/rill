@@ -120,8 +120,9 @@ pub struct ExpressionFacts<'g> {
     pub refinement: Option<Arc<data::Refinement<'g>>>,
     pub read_only_projection: bool,
     pub access: data::Access,
-    /// Innermost candidate under a Group, recorded during the metered flow pass.
-    pub(in crate::analysis) grouped_i32_arithmetic_operand: Option<NodeId>,
+    /// The written shape is `local * literal`, or a local or that product
+    /// plus a local. M5 still resolves the actual scalar slots.
+    pub(in crate::analysis) bounded_i32_arithmetic: bool,
 }
 pub use core::{
     ErrorConstruction, Propagation, PropagationError, PropagationTarget, RetainedError, Wrapping,
@@ -420,10 +421,21 @@ struct Slot<'g> {
     read_only_projection: bool,
     access: data::Access,
     flow: Flow,
-    grouped_i32_arithmetic_operand: Option<NodeId>,
+    i32_operand: I32Operand,
     invocation: Option<Arc<InvocationFacts<'g>>>,
     function_value: Option<Arc<FunctionValueFacts<'g>>>,
     arrow: Option<Arc<ArrowFacts<'g>>>,
+}
+/// Operand shape of a normal `i32` expression, classified from its children
+/// during the flow pass so that M5 admits arithmetic without a lookup.
+#[derive(Clone, Copy, Default)]
+enum I32Operand {
+    #[default]
+    Other,
+    Local,
+    Literal,
+    Product,
+    Sum,
 }
 struct ExpressionResult<'g> {
     ty: Type<'g>,
@@ -2638,23 +2650,59 @@ impl<'r, 'g> Checker<'r, 'g> {
                 None
             };
             let flow = self.expression_flow(&inference, node, &children)?;
-            let grouped_i32_arithmetic_operand = match (kind, children.as_slice()) {
-                (NodeKind::Group, [child]) => {
-                    let slot = &inference.slots[child];
-                    match module.syntax.nodes[*child].kind {
-                        NodeKind::Group => slot.grouped_i32_arithmetic_operand,
-                        NodeKind::ValueReference | NodeKind::Literal | NodeKind::Binary("*")
-                            if slot.ty.as_ref().and_then(primitive_name) == Some("i32") =>
-                        {
-                            Some(*child)
-                        }
-                        _ => None,
+            let i32_operand = {
+                use I32Operand::*;
+                let slot = &inference.slots[&node];
+                let operand = |child: &NodeId| inference.slots[child].i32_operand;
+                let normal_i32 = slot.ty.as_ref().and_then(primitive_name) == Some("i32")
+                    && !blocked
+                    && !slot.blocked
+                    && slot.ordinary_context.is_none()
+                    && flow.normal
+                    && !flow.pending
+                    && !flow.returns
+                    && flow.breaks.is_empty()
+                    && flow.continues.is_empty();
+                match (kind, children.as_slice()) {
+                    _ if !normal_i32 => Other,
+                    (NodeKind::Group, [child]) => operand(child),
+                    (NodeKind::ValueReference, _)
+                        if slot.access == data::Access::Owned
+                            && slot.path.as_ref().is_some_and(|path| {
+                                path.projections.is_empty()
+                                    && slot.binding.is_some_and(|id| std::ptr::eq(id, path.root))
+                                    && matches!(
+                                        path.root.kind,
+                                        DeclarationKind::Parameter | DeclarationKind::Binding
+                                    )
+                            }) =>
+                    {
+                        Local
                     }
+                    (NodeKind::Literal, _)
+                        if matches!(
+                            slot.literal.map(|literal| literal.value),
+                            Some(LiteralValue::Integer { magnitude, negative: false })
+                                if i32::try_from(magnitude).is_ok()
+                        ) =>
+                    {
+                        Literal
+                    }
+                    (NodeKind::Binary("*"), [left, right])
+                        if matches!((operand(left), operand(right)), (Local, Literal)) =>
+                    {
+                        Product
+                    }
+                    (NodeKind::Binary("+"), [left, right])
+                        if matches!((operand(left), operand(right)), (Local | Product, Local)) =>
+                    {
+                        Sum
+                    }
+                    _ => Other,
                 }
-                _ => None,
             };
             let slot = inference.slots.get_mut(&node).unwrap();
-            slot.grouped_i32_arithmetic_operand = grouped_i32_arithmetic_operand;
+            slot.i32_operand = i32_operand;
             let (normal, boolean) = if matches!(
                 slot.installed_operation,
                 Some(data::DataExpression::Wrapping(_))
@@ -2773,7 +2821,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                         refinement: slot.refinement.clone(),
                         read_only_projection: slot.read_only_projection,
                         access: slot.access,
-                        grouped_i32_arithmetic_operand: slot.grouped_i32_arithmetic_operand,
+                        bounded_i32_arithmetic: matches!(
+                            slot.i32_operand,
+                            I32Operand::Product | I32Operand::Sum
+                        ),
                     }),
                 };
                 if premise.is_some_and(|p| p.has_conversion()) {
