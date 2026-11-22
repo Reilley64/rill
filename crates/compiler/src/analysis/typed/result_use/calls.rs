@@ -115,8 +115,20 @@ impl<'a, 'g> Check<'a, 'g> {
         if scoped {
             self.pending(node, ResultUseBlocker::CallBoundary)?;
         }
+        let once = if settled && !scoped && !states.is_empty() {
+            self.once_call(node, value, call)?
+        } else {
+            None
+        };
+        let mut closed_once = true;
         for state in &mut states {
-            let checked = settled && !scoped && self.ordinary_boundary(call, state, depth + 1)?;
+            let checked = if let Some((_, _, argument)) = once {
+                let proved = self.prove_once_arrow(state, argument, depth + 1)?;
+                closed_once &= proved;
+                proved
+            } else {
+                settled && !scoped && self.ordinary_boundary(call, state, depth + 1)?
+            };
             if settled && !checked && self.contracts.contains_key(call.callee) {
                 self.pending(node, ResultUseBlocker::CallBoundary)?;
             }
@@ -127,6 +139,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 call.argument_evaluation_order(),
                 (checked, observer, dispose),
             )?;
+        }
+        if let Some((route, name, _)) = once {
+            self.record_once_call(route, name, closed_once)?;
         }
         if !settled {
             self.pending(node, ResultUseBlocker::CallBoundary)?;

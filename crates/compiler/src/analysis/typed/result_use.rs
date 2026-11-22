@@ -20,6 +20,7 @@ mod callbacks;
 mod calls;
 mod control;
 mod loops;
+mod once;
 mod pairs;
 mod patterns;
 mod releases;
@@ -334,6 +335,8 @@ struct Check<'a, 'g> {
     dead_depth: usize,
     dead_start: Option<usize>,
     contracts: &'a CallbackContract<'g>,
+    once_calls: once::ClosedCalls<'g>,
+    once_return: Option<NodeId>,
     parametric: Option<CallbackEntry<'g>>,
     input_variant: Option<bool>,
     invoked_variants: [bool; 2],
@@ -382,6 +385,8 @@ impl<'a, 'g> Check<'a, 'g> {
             dead_depth: 0,
             dead_start: None,
             contracts,
+            once_calls: BTreeMap::new(),
+            once_return: None,
             parametric: None,
             input_variant: None,
             invoked_variants: [false; 2],
@@ -565,7 +570,7 @@ impl<'a, 'g> Check<'a, 'g> {
         for state in self.block(node, Residence::default(), 1)? {
             self.exit(state, node)?;
         }
-        Ok(())
+        self.finish_once_calls()
     }
 
     fn exit(&mut self, mut state: Residence<'g>, node: NodeId) -> Work<()> {
