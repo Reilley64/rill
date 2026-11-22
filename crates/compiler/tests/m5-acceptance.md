@@ -1611,6 +1611,25 @@ Local gate results on macOS/AArch64 with an isolated Cargo target directory. `mi
 
 These runs did not replay either installed load mode, the historical captures or the fixed caps outside the test suite, and no hosted check ran. They show that the merged tree builds and that its own tests pass. They do not close any obligation below. No Rill program ran.
 
+## Interrupted tuple staging and a postfix condition, 2026-11-23 (ri-vgz.6)
+
+This section closes the two witnesses of audit 4(c) (`old-partial`, `old-entangled` in `r76-audit`). [`staging.rs`](m5/propagation/staging.rs) checks them through the installed compiler in both load modes, with the targeted query and the ordinary graph root, at exact caps and one short on each axis. At the parent `37a0a99e` both were `Incomplete`: `tuple` at its bracket (4,000/625/4) and `condition` at `gate?` (3,405/439/6).
+
+A named flat tuple of primitives may now hold one `Option<bool>` postfix element, as the flat record already could. `let value: [string, string, bool, string] = [stage(first), stage(second), gate?, stage(suffix)];` has these MIR paths:
+
+| Reached edge | What owns the strings |
+| --- | --- |
+| `gate?` returns `None` | Export `None`, then drop `value.1`, `value.0` (reverse written order), then lexical cleanup. `stage(suffix)` never runs, `value` is never initialized and the unmoved `suffix` drops with the other formals. |
+| `gate?` continues | Copy the payload into `value.2`, call `stage(suffix)`, initialize `value`, then the ordinary return and cleanup. |
+
+`tuple` checks at 8,617/2,053/7 and its grouped `((gate?))` form at 8,625/2,053/9. Scoped and loop-wrapped forms drop the same reached prefix. A known `None` stops after the prefix, so a previously moved suffix source is not reached and the body checks. A moved suffix source reached on the success edge and a moved prefix source each give `R0200` at the reached read, related to the earlier move. The ordinary `checkTuple` control is unchanged.
+
+The ordinary continuation witness is `if (gate?)`. `None` exports before lexical cleanup and reaches neither branch. `Some` continues to the ordinary branch on the payload. `condition` checks at 4,072/821/6, its grouped form at 4,077/821/9, and an `else` with a move in each branch moves only that branch's formal. A known `None` reaches neither branch. `conditionRead` gives `R0200` at its second `dispose(retired)`, related to the first.
+
+Both routes are screened from typed facts before their first charge. These siblings keep the caps and blockers measured at `37a0a99e`: in a tuple, an embedded postfix (`relay(gate?)`), two postfixes, an `Option<string>` postfix and a nested tuple; in a condition, `while (gate?)`, `!(gate?)`, `relay(gate?)` and a `Result<bool, i32>` postfix. The interrupted-record route now shares its lowering with the tuple; the tests in `records.rs` and `patterns/commitment.rs` pass unchanged.
+
+No fixed cap moved. This is not general aggregate initialization, a return-constructor postfix such as `Option.Some(gate?)`, or a postfix in a loop condition. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.

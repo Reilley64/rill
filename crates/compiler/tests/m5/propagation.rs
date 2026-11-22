@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "propagation/option_caller.rs"]
 mod option_caller;
+#[path = "propagation/staging.rs"]
+mod staging;
 
 #[test]
 fn owned_option_postfix_preserves_shared_text_backing() {
