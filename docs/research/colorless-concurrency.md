@@ -1,6 +1,6 @@
 # How do languages run concurrent code without async/await?
 
-Research for [issue #4](https://github.com/Reilley64/rill/issues/4). Every Rill function can suspend and `go f(x)` starts a goroutine, with no async/await in user code. This file records how Go, Java virtual threads (Project Loom), the BEAM (Erlang and Elixir) and Rust's `may` crate do this, what an LLVM-targeting compiler would need, and what changes on WebAssembly.
+Research for issue ri-dx2. Every Rill function can suspend and `go f(x)` starts a goroutine, with no async/await in user code. This file records how Go, Java virtual threads (Project Loom), the BEAM (Erlang and Elixir) and Rust's `may` crate do this, what an LLVM-targeting compiler would need, and what changes on WebAssembly.
 
 Links to source files point at the default branch of each project as read on 2026-10-21. Statements marked "inference" are my reading of the cited material, not a claim the source makes.
 
