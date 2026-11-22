@@ -3,6 +3,7 @@ from collections import Counter
 from pathlib import Path
 import html
 import re
+import subprocess
 import sys
 from urllib.parse import unquote, urlsplit
 
@@ -43,13 +44,28 @@ def anchors(text):
     return result
 
 
-def check(root):
-    errors = []
-    count = 0
+def markdown_files(root):
+    """List the commit's Markdown files, plus untracked ones that are not ignored.
+
+    A checkout is read through git so ignored directories, such as worktrees,
+    are not scanned. A tree without `.git`, such as a `git archive` export, is walked.
+    """
+    if (root / ".git").exists():
+        listed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md"],
+            check=True, capture_output=True, text=True).stdout
+        return [root / name for name in listed.split("\0") if name and (root / name).is_file()]
     files = []
     for directory, children, names in root.walk():
         children[:] = [name for name in children if name not in {".git", ".serena", "target", ".venv"}]
         files.extend(directory / name for name in names if name.endswith(".md"))
+    return files
+
+
+def check(root):
+    errors = []
+    count = 0
+    files = markdown_files(root)
     for file in sorted(files):
         for number, line in prose_lines(file.read_text()):
             code = [(m.start(), m.end()) for m in re.finditer(r"`+[^`]*`+", line)]
