@@ -24,14 +24,29 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let [arg] = call.arguments.as_slice() else {
             return Err(pending);
         };
-        self.budget.step(1 + self.module.key.path.len())?;
-        if !Self::direct_application_call(call)
-            || call.callee.module != self.module.key
+        // Screen on facts already paid for, so an unsupported sibling keeps
+        // the caps it had before this route existed. A group carries its
+        // child's place path, so a grouped whole carrier passes unwalked.
+        let whole_carrier = self.value(*arg).is_ok_and(|input| {
+            input.access == Access::Owned
+                && input.path.as_ref().is_some_and(|path| {
+                    matches!(
+                        path.root.kind,
+                        DeclarationKind::Binding | DeclarationKind::Parameter
+                    ) && path.projections.is_empty()
+                })
+        });
+        if !whole_carrier
+            || !Self::direct_application_call(call)
             || call.pipe_input.is_some()
             || call.selection.is_some()
             || !call.defaults.is_empty()
             || !matches!(result.as_ref(), TypeTerm::Nominal { .. })
         {
+            return Err(pending);
+        }
+        self.budget.step(1 + self.module.key.path.len())?;
+        if call.callee.module != self.module.key {
             return Err(pending);
         }
         let headers = &self.typed.inventory().type_facts().declarations;
