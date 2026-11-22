@@ -23,6 +23,7 @@ Recorded 2026-11-22 from `/Users/reilley/Repositories/city/notes/m5-ownership-cl
 1. Paired independent Standards and Spec clearance of the exact commit range.
 2. Release isolation: reviewed commits only, on the published head; full M5 passes; both installed modes replayed; historical captures and fixed caps unchanged.
 3. Ledger entry in `crates/compiler/tests/m5-acceptance.md`, then `mise exec -- python tools/check_docs.py`.
+   **Superseded 2026-11-23 (10:46 AEDT), owner's decision via the city-managing session: M5 evidence goes in one file per ticket, `crates/compiler/tests/m5-acceptance/<ticket>.md`, not in sections of `m5-acceptance.md`, so ticket branches stop conflicting. The change is branch `m5-ownership-cleanup/ledger-per-ticket`, first in the rig merger's queue; not on the draft branch when this was written.**
 4. `mise run check`, `mise run build:scaffold`, `mise run check:ci`, `git diff --check <base>..HEAD` on the exact SHA.
 5. Guarded push, then PR body section, issue comment, hosted checks.
 
