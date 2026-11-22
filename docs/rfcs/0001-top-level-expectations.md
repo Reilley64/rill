@@ -4,12 +4,12 @@
 | --- | --- |
 | ID | 0001 |
 | Status | Accepted |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | Start with the [confirmed expectation decision](https://github.com/Reilley64/rill/issues/27#issuecomment-6852094134). [Source reconciliation](#source-reconciliation) lists the other inputs. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The [control-flow and preview decisions](https://github.com/Reilley64/rill/issues/28#issuecomment-6907785727) supplement those inputs. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | Start with the confirmed expectation decision (ri-di1, comment 6852094134). [Source reconciliation](#source-reconciliation) lists the other inputs. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The control-flow and preview decisions (ri-48g, comment 6907785727) supplement those inputs. |
 | RFC dependencies | Required companion RFCs are missing. See [required companion rules](#required-companion-rules). These gaps remain open after acceptance. |
 | Replaces / superseded by | None. This RFC does not replace another accepted RFC. |
-| Decision | [Accepted by the project owner on 2026-11-16](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211). |
-| Reviewed revision | Human-accepted [published snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211). SHA-256: `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. The canonical readiness review remains incomplete. |
+| Decision | Accepted by the project owner on 2026-11-16 (ri-48g, comment 6907867211). |
+| Reviewed revision | Human-accepted published snapshot (ri-48g, comment 6907867211). SHA-256: `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. The canonical readiness review remains incomplete. |
 
 ## Summary and scope
 
@@ -72,7 +72,7 @@ An expectation must produce `bool`. It does not create an implicit function that
 
 Handle fallible work explicitly within the expression or call a helper. A helper or nested closure keeps its ordinary return and propagation rules. A transfer within that callable does not exit the expectation itself.
 
-The [confirmed policy decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6907785727) fixes this boundary. Compiler lowering must preserve it. Companion rules must still define expression grammar and ordinary callable checking.
+The confirmed policy decision (ri-48g, comment 6907785727) fixes this boundary. Compiler lowering must preserve it. Companion rules must still define expression grammar and ordinary callable checking.
 
 ### Discovery and module identity
 
@@ -139,7 +139,7 @@ Count rendered preview bytes, not source characters or Unicode scalars. Text and
 
 Capture must bound work and storage before traversal. This includes metadata and cycle tracking, not only rendered text. Stop capture when a limit prevents further observation. Do not construct the full value graph and truncate it afterward.
 
-The [confirmed policy decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6907785727) establishes these limits and allocation rules. A complete bounded capture procedure remains authoring work before ReviewReady.
+The confirmed policy decision (ri-48g, comment 6907785727) establishes these limits and allocation rules. A complete bounded capture procedure remains authoring work before ReviewReady.
 
 Trusted capture can describe intrinsic scalars, text, bytes and visible record, tuple or enum data. It can also describe safe standard prefixes. It must not call source-level iterators. It must respect access at the expectation site. Private or opaque representations and resource or synchronization internals remain opaque.
 
@@ -227,7 +227,7 @@ expect checkValue();
 | E2 | Two top-level Boolean declarations. | The first fails. Normal cleanup completes. The second executes. | [Boolean outcomes](#boolean-rejected-and-fatal-outcomes). | HandChecked. No cleanup or continuation trace was observed. |
 | E3 | The expression has type `u8`. | Both modes reject it with R0101. | [Declaration/checking](#declaration-and-checking-context). | HandChecked against the code meaning. No diagnostic was emitted. |
 | E4 | `expect` appears inside a function. | The compiler rejects it with R0102. | [Declaration/checking](#declaration-and-checking-context). | HandChecked. No parser or checker executed. |
-| E5 | The expression uses a startup `let`. | The compiler rejects startup capture. This RFC assigns no additional code or message. | [Declaration/checking](#declaration-and-checking-context). | HandChecked against #17 and #27. Diagnostic cascades remain unspecified. |
+| E5 | The expression uses a startup `let`. | The compiler rejects startup capture. This RFC assigns no additional code or message. | [Declaration/checking](#declaration-and-checking-context). | HandChecked against ri-owe and ri-di1. Diagnostic cascades remain unspecified. |
 | E6 | The left operand is false. The right operand would trap. | The expectation fails. The right operand is `notEvaluated`. No division panic occurs. | [Boolean outcomes](#boolean-rejected-and-fatal-outcomes), [observations](#result-identity-and-observations). | HandChecked against numeric and short-circuit rules. The program did not execute. |
 | E7 | Execution reaches the trapping expression. | Execution ends fatally. There is no catchable false result or guaranteed report. | [Boolean outcomes](#boolean-rejected-and-fatal-outcomes). | HandChecked. Isolated execution remains planned. |
 | E8 | A helper returns Boolean. | The result is false. The report does not invent helper internals. | [Observations](#result-identity-and-observations). | HandChecked. No report was generated. |
@@ -250,7 +250,7 @@ The drafting agent hand-checked E1 through E8 on 2026-11-16 against the named so
 
 The ordinary checker applies in both modes. An invalid individual literal remains a static error in a skipped operand. A well-typed division by zero traps only if evaluated. Warnings cannot change these rules.
 
-Test-only imports can contribute implementations to canonical families. Import cleanup and executable-code elimination must preserve the checked graph. An editor cannot discard expectations or change family collection when removing an apparently unused import. This does not permit editor requests to execute tests or application code. #42 owns full LSP delivery.
+Test-only imports can contribute implementations to canonical families. Import cleanup and executable-code elimination must preserve the checked graph. An editor cannot discard expectations or change family collection when removing an apparently unused import. This does not permit editor requests to execute tests or application code. ri-bv2 owns full LSP delivery.
 
 Test mode is not a general sandbox or deterministic runtime. `std::env` must skip actual host argument and environment capture and supply empty inputs. Tests construct synthetic inputs with `fromParts`. Secure randomness retains real provider behavior. There is no automatic seed, provider replacement or guaranteed uniqueness or nonzero output. Standard-library companion RFCs must own these API rules.
 
@@ -262,13 +262,13 @@ Repository inputs use commit [`f33dcf4cf3f815824eeb897135775d7884f65c1a`](https:
 
 | Source decision/input | Disposition in this proposal |
 | --- | --- |
-| [Confirmed RFC 0001 choices](https://github.com/Reilley64/rill/issues/28#issuecomment-6907785727) | Specify the [control-flow boundary](#control-flow) and [preview allocation policy](#preview-limits-and-opacity). This approves those choices, not the complete RFC. |
-| [#27 confirmation](https://github.com/Reilley64/rill/issues/27#issuecomment-6852094134) | [Reference semantics](#syntax-and-reference-semantics) include the declaration, typing, execution and observation rules. The former `06-expect.rill` now belongs to `01-basics.rill`. |
-| [#17 confirmation](https://github.com/Reilley64/rill/issues/17#issuecomment-6866705217), ADR 0010 | Preserve discovery, separate startup and graph checking. Canonical module identity, order and resolution still need companion rules. |
-| [#18 confirmation](https://github.com/Reilley64/rill/issues/18#issuecomment-6869848603), ADR 0011 | Preserve explicit widths and the distinction between static invalidity and runtime traps. Numeric operations remain outside this RFC. |
-| [#24 confirmation](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), diagnostic contract section 5 | Preserve sequential execution, Boolean and fatal outcomes, trusted observations and preview limits. The later decision fixes root depth and shared-budget order. Bounded capture details remain authoring work. Common protocol and driver rules remain separate. |
-| [#36 confirmation](https://github.com/Reilley64/rill/issues/36#issuecomment-6887766966), catalogue section 12 | Preserve empty test inputs and no startup capture. The environment API needs a companion RFC. |
-| [#37 confirmation](https://github.com/Reilley64/rill/issues/37#issuecomment-6889691308), catalogue section 13 | Preserve real secure entropy and explicit application fakes. Provider validation remains separate. |
+| Confirmed RFC 0001 choices (ri-48g, comment 6907785727) | Specify the [control-flow boundary](#control-flow) and [preview allocation policy](#preview-limits-and-opacity). This approves those choices, not the complete RFC. |
+| ri-di1 confirmation (comment 6852094134) | [Reference semantics](#syntax-and-reference-semantics) include the declaration, typing, execution and observation rules. The former `06-expect.rill` now belongs to `01-basics.rill`. |
+| ri-owe confirmation (comment 6866705217), ADR 0010 | Preserve discovery, separate startup and graph checking. Canonical module identity, order and resolution still need companion rules. |
+| ri-a2c confirmation (comment 6869848603), ADR 0011 | Preserve explicit widths and the distinction between static invalidity and runtime traps. Numeric operations remain outside this RFC. |
+| ri-3t8 confirmation (comment 6885970775), diagnostic contract section 5 | Preserve sequential execution, Boolean and fatal outcomes, trusted observations and preview limits. The later decision fixes root depth and shared-budget order. Bounded capture details remain authoring work. Common protocol and driver rules remain separate. |
+| ri-7ap confirmation (comment 6887766966), catalogue section 12 | Preserve empty test inputs and no startup capture. The environment API needs a companion RFC. |
+| ri-w9z confirmation (comment 6889691308), catalogue section 13 | Preserve real secure entropy and explicit application fakes. Provider validation remains separate. |
 | `prototypes/01-basics.rill`, module and diagnostic groups | Preserve source and fixture bytes. The [consolidation record](../prototypes/consolidation.md) explains retired sources. [Diagnostic notes](../prototypes/21-diagnostics.md) explain historical report URIs. |
 | ADR 0005 and current cleanup/concurrency contracts | Preserve fatal behavior without unwinding and ordinary cleanup obligations. Do not restore earlier reporting or timing assumptions. Detailed rules need companion RFCs. |
 
@@ -292,7 +292,7 @@ Fatal allocation and overflow handling require compiler and runtime validation. 
 
 ## Rationale, alternatives and prior art
 
-[#27](https://github.com/Reilley64/rill/issues/27) adopts Roc-style expectation notation with Rill's required semicolon. This identifies the source of the notation. It does not import Roc's module system, testing implementation or runtime rules.
+ri-di1 adopts Roc-style expectation notation with Rill's required semicolon. This identifies the source of the notation. It does not import Roc's module system, testing implementation or runtime rules.
 
 An ordinary assertion function would use familiar call syntax. It would not establish module-only placement, test discovery or production exclusion. A test declaration specifies these rules directly. Production code can still use ordinary guards and errors.
 
@@ -306,7 +306,7 @@ The Rust workspace implements CLI help, version output and unavailable-command r
 
 The compiler must retain expectations during graph construction and checking. It must collect canonical declarations and implementations before selecting ordinary or test execution. Intermediate representations and lowering algorithms remain implementation choices. They must preserve the [confirmed control-flow boundary](#control-flow).
 
-Observation lowering must not introduce source-visible calls or ownership dependencies. It must preserve evaluation points, short-circuit control flow, cleanup and cancellation. Optimization cannot remove an evaluated trap or evaluate a skipped expression. Return an implementation conflict to #1 and #28. Do not weaken the proposed behavior.
+Observation lowering must not introduce source-visible calls or ownership dependencies. It must preserve evaluation points, short-circuit control flow, cleanup and cancellation. Optimization cannot remove an evaluated trap or evaluate a skipped expression. Return an implementation conflict to ri-kl0 and ri-48g. Do not weaken the proposed behavior.
 
 The driver needs source and reporting support. JSONL test output requires a destination other than stdout. Application I/O must remain raw. The driver/report RFC must own options, destination failures, limits, versions and statuses. An LLVM C-API smoke test does not test expectations.
 
@@ -321,7 +321,7 @@ Source inputs use revision `f33dcf4cf3f815824eeb897135775d7884f65c1a`. Structura
 | E1 through E8 in this draft | HandChecked | Placement, typing, startup context, short-circuiting, fatal behavior and helper observations. | The drafting agent compared the cases with source rules on 2026-11-16. | Expected outcomes agree with the in-scope source rules. | No Rill execution or readiness review occurred. Companion rules remain missing. |
 | Diagnostic fixtures at source revision | ToolChecked | Authored schema, data, ranges, counts and source coordinates. | `mise run check:fixtures` on macOS 27.0.1 AArch64. Python 3.13.18 and locked jsonschema 4.25.1. | The schema, six negative data cases and five illustrative reports passed. | No compiler emitted reports or executed capture. Other TLS and SQLite checks do not validate this feature. |
 | Prototype/module cases at source revision | NotChecked | Compilation, discovery, module deduplication and execution. | No relevant implementation is available. | Expected outcomes appear above. No Rill outcome was observed. | `test:language` is unavailable. |
-| Ownership-safe bounded observations | NotChecked | Source retention, cleanup, masking, budgets and unchanged program behavior. | No compiler or runtime implementation is available. | No implementation result is claimed. | Requires ownership and checker rules, then executable backend and runtime tests under #28. |
+| Ownership-safe bounded observations | NotChecked | Source retention, cleanup, masking, budgets and unchanged program behavior. | No compiler or runtime implementation is available. | No implementation result is claimed. | Requires ownership and checker rules, then executable backend and runtime tests under ri-48g. |
 
 ### Planned checks. Not executed evidence
 
@@ -341,15 +341,15 @@ Source inputs use revision `f33dcf4cf3f815824eeb897135775d7884f65c1a`. Structura
 1. Supply the required companion RFCs. Identify exact sections and revisions for joint review. Supporting contracts do not replace rule owners.
 2. Complete the bounded capture specification under the approved policy. Specify byte charging and finite metadata, cycle-tracking, work and storage bounds. Reconcile these details with the companion report rules.
 
-The user resolved the control-flow boundary, root level and shared-budget order in the [recorded decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6907785727). Those policy questions are no longer open. The remaining items are authoring work, not requests for another decision on those choices.
+The user resolved the control-flow boundary, root level and shared-budget order in the recorded decision (ri-48g, comment 6907785727). Those policy questions are no longer open. The remaining items are authoring work, not requests for another decision on those choices.
 
-These items prevent ReviewReady. A proposed change to a confirmed guarantee needs design review through #1 and #28.
+These items prevent ReviewReady. A proposed change to a confirmed guarantee needs design review through ri-kl0 and ri-48g.
 
 ### Implementation/validation gates
 
-The parser, checker, graph, ownership model, runner, trusted observation and report emitter remain unimplemented. Their execution and target tests have not passed. #28 retains formalization and production acceptance. #42 retains full applicable LSP delivery. It is not a prerequisite for drafting.
+The parser, checker, graph, ownership model, runner, trusted observation and report emitter remain unimplemented. Their execution and target tests have not passed. ri-48g retains formalization and production acceptance. ri-bv2 retains full applicable LSP delivery. It is not a prerequisite for drafting.
 
-Historical #30 mechanism experiments are supporting evidence only. They do not implement expectations or certify backend support.
+Historical ri-dej mechanism experiments are supporting evidence only. They do not implement expectations or certify backend support.
 
 ### Future/out-of-scope work
 
@@ -359,7 +359,7 @@ This RFC adds no registration API, automatic parallel testing, retries, panic-ca
 
 ### Readiness record
 
-The project owner [accepted the published snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) before completion of the readiness checklist. Status is Accepted. The drafting agent has not performed a canonical readiness review.
+The project owner accepted the published snapshot (ri-48g, comment 6907867211) before completion of the readiness checklist. Status is Accepted. The drafting agent has not performed a canonical readiness review.
 
 Source comparisons, manual case checks and structural validation do not complete that review. Missing dependencies and capture details remain open under the [canonical checklist](README.md#canonical-reviewready-checklist). Acceptance does not complete implementation or validation. Material additions require amendment review. This decision does not accept unwritten text.
 
@@ -367,9 +367,9 @@ Source comparisons, manual case checks and structural validation do not complete
 
 | Date / actor | Kind and scope of change | Reviewed revision or snapshot | Decision link / rationale |
 | --- | --- | --- | --- |
-| 2026-11-16, drafting agent under #28 | Initial substantive draft. Registered as RFC 0001. No source-rule departure or acceptance is claimed. | Inputs use `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The RFC is not yet reviewed. | The user authorized RFC drafting. Source approvals do not accept this document. |
-| 2026-11-16, drafting agent under #28 | Revised the prose to use Simplified Technical English. Preserved rules and code examples. | Editorial revision of the local draft. No readiness review or dictionary compliance audit occurred. | The user required this style for all RFCs. Formal ASD-STE100 compliance is not claimed. |
-| 2026-11-16, project owner | Approved the control-flow boundary and preview-budget policy. This does not accept the complete RFC. | The two recommendations presented in chat. No complete RFC revision was accepted. | [Recorded agreement](https://github.com/Reilley64/rill/issues/28#issuecomment-6907785727). Status remains Draft. |
-| 2026-11-16, project owner | Accepted RFC 0001 with its recorded open work. This does not complete readiness or implementation checks. | [Published pre-status-update snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211). SHA-256: `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. | The user stated: "ok I approve the rfc". Status is Accepted. Future material additions need amendment review. |
-| 2026-11-16, drafting agent under #28 | Added an editorial reference to Draft RFC 0002. No accepted semantic rule changed. | The accepted snapshot remains unchanged. RFC 0002 is a separate proposal. | Linking the module draft does not accept its rules. |
-| 2026-11-16, drafting agent under #28 | Added an editorial reference to Draft RFC 0003. No accepted semantic rule changed. | The accepted snapshot remains unchanged. RFC 0003 is a separate proposal. | Linking the expression draft does not accept its rules. |
+| 2026-11-16, drafting agent under ri-48g | Initial substantive draft. Registered as RFC 0001. No source-rule departure or acceptance is claimed. | Inputs use `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The RFC is not yet reviewed. | The user authorized RFC drafting. Source approvals do not accept this document. |
+| 2026-11-16, drafting agent under ri-48g | Revised the prose to use Simplified Technical English. Preserved rules and code examples. | Editorial revision of the local draft. No readiness review or dictionary compliance audit occurred. | The user required this style for all RFCs. Formal ASD-STE100 compliance is not claimed. |
+| 2026-11-16, project owner | Approved the control-flow boundary and preview-budget policy. This does not accept the complete RFC. | The two recommendations presented in chat. No complete RFC revision was accepted. | Recorded agreement (ri-48g, comment 6907785727). Status remains Draft. |
+| 2026-11-16, project owner | Accepted RFC 0001 with its recorded open work. This does not complete readiness or implementation checks. | Published pre-status-update snapshot (ri-48g, comment 6907867211). SHA-256: `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. | The user stated: "ok I approve the rfc". Status is Accepted. Future material additions need amendment review. |
+| 2026-11-16, drafting agent under ri-48g | Added an editorial reference to Draft RFC 0002. No accepted semantic rule changed. | The accepted snapshot remains unchanged. RFC 0002 is a separate proposal. | Linking the module draft does not accept its rules. |
+| 2026-11-16, drafting agent under ri-48g | Added an editorial reference to Draft RFC 0003. No accepted semantic rule changed. | The accepted snapshot remains unchanged. RFC 0003 is a separate proposal. | Linking the expression draft does not accept its rules. |

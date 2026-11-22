@@ -2,7 +2,7 @@
 
 Read [`prototypes/25-http.rill`](../../prototypes/25-http.rill).
 
-The human-confirmed [#39](https://github.com/Reilley64/rill/issues/39) design, [HTTP contract](../http-contracts.md) and [ADR0028](../adr/0028-strict-http1-codec-and-explicit-connection-drivers.md) are authoritative. This source contains only provider-free value/plan examples. It does not add APIs or fabricate parser, codec, channel, connection, transport or TLS resources.
+The human-confirmed ri-n5i design, [HTTP contract](../http-contracts.md) and [ADR0028](../adr/0028-strict-http1-codec-and-explicit-connection-drivers.md) are authoritative. This source contains only provider-free value/plan examples. It does not add APIs or fabricate parser, codec, channel, connection, transport or TLS resources.
 
 The source contains **13 intended-valid expectations**. They were counted and hand-reviewed only. No Rill parser/typechecker/compiler/runtime or HTTP/native provider executed them. Every codec, framing, smuggling, driver and lifecycle case below is therefore NotChecked unless explicitly identified as supporting research.
 
@@ -112,6 +112,6 @@ Best-effort automatic mappings are400 malformed/framing/Host,501 unsupported req
 
 ## Evidence and handoffs
 
-Primary standards/provider notes in `docs/research/0039-*` are research only. The [#45 OpenSSL matrix](../research/0045-progress-reference/) is ReferenceExecuted lower-layer evidence, not HTTP execution. This source and inventory are **HandChecked**. HTTP codec, Rill runner, TCP/TLS integration, conformance, smuggling/security and targets are **NotChecked**.
+Primary standards/provider notes in `docs/research/0039-*` are research only. The [ri-w0c OpenSSL matrix](../research/0045-progress-reference/) is ReferenceExecuted lower-layer evidence, not HTTP execution. This source and inventory are **HandChecked**. HTTP codec, Rill runner, TCP/TLS integration, conformance, smuggling/security and targets are **NotChecked**.
 
-[#48](https://github.com/Reilley64/rill/issues/48) owns implementation and adversarial validation. [#47](https://github.com/Reilley64/rill/issues/47) and [#44](https://github.com/Reilley64/rill/issues/44) own lower progress/TLS delivery. #28 owns review-ready RFC drafting; none of these artifacts is human RFC acceptance or software support.
+ri-19d owns implementation and adversarial validation. ri-hw5 and ri-ei7 own lower progress/TLS delivery. ri-48g owns review-ready RFC drafting; none of these artifacts is human RFC acceptance or software support.

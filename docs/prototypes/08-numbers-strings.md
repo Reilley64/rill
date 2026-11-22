@@ -2,7 +2,7 @@
 
 Read the source examples in [`prototypes/08-numbers-strings.rill`](../../prototypes/08-numbers-strings.rill).
 
-These examples follow [#18](https://github.com/Reilley64/rill/issues/18), [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) and the [published library contracts](../standard-library-contracts.md). The companion still contains 41 intended-valid expectations. They have been inspected, not executed by a compiler/runtime or a compile-fail runner. Library imports now use the published Bytes, parsing and string APIs. Different error types still require explicit adaptation, and ordinary return-only overloads remain invalid.
+These examples follow ri-a2c, [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) and the [published library contracts](../standard-library-contracts.md). The companion still contains 41 intended-valid expectations. They have been inspected, not executed by a compiler/runtime or a compile-fail runner. Library imports now use the published Bytes, parsing and string APIs. Different error types still require explicit adaptation, and ordinary return-only overloads remain invalid.
 
 [ADR 0017](../adr/0017-user-implementable-conversions.md) replaces the old closed-only conversions with user-implementable canonical families and tryInto/tryFrom. The generic fallible helper names E and requires `tryInto(To, From, E), display(E)`. It assumes neither a default error nor implicit adaptation. Family bodies use implement; declarations and standalone functions use function.
 
@@ -18,7 +18,7 @@ A primitive canonical formatter cannot implement itself by interpolating the sam
 
 ## Independent compile-rejection cases
 
-Each snippet is a separate schematic rejection case, not an active compiler test. #24 owns messages and #28 formalizes the checking rules.
+Each snippet is a separate schematic rejection case, not an active compiler test. ri-3t8 owns messages and ri-48g formalizes the checking rules.
 
 ### Widths, refinements, and conversion availability
 
@@ -126,7 +126,7 @@ Constant folding cannot move a trap before effects, reject a well-typed program 
 
 The published catalogue now defines error types, signatures and module homes for conversion, parsing, byte/scalar APIs and formatting. Its partial-generic-argument, alias, primitive-bootstrap and reference-forwarding rules are design inputs, not implementation proof. Byte APIs require real source representations. Generic bodies must retain evidence rather than rediscover it from eventual instantiations.
 
-#28 must formalize logical references, descriptor slots and backing sources. It must cover retained mutable storage, callee exits, literal-copy and widening rules, direct static literal borrows, dependency-sensitive cleanup, constant traps, numeric availability and LLVM lowering.
+ri-48g must formalize logical references, descriptor slots and backing sources. It must cover retained mutable storage, callee exits, literal-copy and widening rules, direct static literal borrows, dependency-sensitive cleanup, constant traps, numeric availability and LLVM lowering.
 
 Test boundaries near i128/u128 without lossy intermediate checks. Cover both alias names, NaN, infinity, signed zero, fmod signs, overflow and shift-count edges. Float roundtrips must include subnormals and maximum finite values. Keep fast-math, reassociation and fusion disabled unless a defined operation explicitly requests them.
 

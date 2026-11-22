@@ -1,4 +1,4 @@
-# #30 portable suspension: executed candidate and proposed direction
+# ri-dej portable suspension: executed candidate and proposed direction
 
 2026-11-15. A concrete candidate now exists; architecture adoption and the support gate remain OPEN. This follow-up preserves the earlier [negative/positive evidence](0030-backend-experiments.md). It does not change approved targets/semantics or claim an automated Rill compiler/checker/runtime.
 
@@ -68,4 +68,4 @@ Retain native LLVM fixed-stack/proper-tail work independently; AArch64 incoming-
 
 Ask the user whether to approve explicit records and an iterative dispatcher as the direction for portable Wasm lowering. That approval would leave the complete typed ABI, layout/admission policies and implementation acceptance subject to further design/validation. Keep LLVM retcon optional machinery for a later focused comparison; do not adopt JSPI/host-only fibers or a rejection-only Asyncify patch as the baseline.
 
-Until that decision, this remains a proposal. Even after directional approval, #30 remains OPEN for missing full ABI/ownership/cleanup/native/bounds evidence, and #28 cannot claim affected lowering implementation-ready merely from these probes. No replacement ADR, target change, public API change, source-rule exception or support-gate closure is made here.
+Until that decision, this remains a proposal. Even after directional approval, ri-dej remains OPEN for missing full ABI/ownership/cleanup/native/bounds evidence, and ri-48g cannot claim affected lowering implementation-ready merely from these probes. No replacement ADR, target change, public API change, source-rule exception or support-gate closure is made here.

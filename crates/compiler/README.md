@@ -2,7 +2,7 @@
 
 This crate implements M1 source snapshots/lexing and the M2 parser. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
 
-The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. [M2 ticket #52](https://github.com/Reilley64/rill/issues/52) records the baseline, acceptance evidence and limitations.
+The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. M2 ticket ri-lpw records the baseline, acceptance evidence and limitations.
 
 ## Strict parser entry points
 
