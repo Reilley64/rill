@@ -1069,7 +1069,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }))
     }
 
-    fn guard_provider(
+    pub(super) fn guard_provider(
         &mut self,
         ty: &TypeTerm<'g>,
     ) -> ResultOf<Option<&'a NativeOwnershipProvider<'g>>> {
@@ -1478,10 +1478,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(facts.binders.is_empty().then_some(fields.as_slice()))
     }
 
-    pub(super) fn guard_bearing_type(&mut self, ty: &TypeTerm<'g>) -> ResultOf<bool> {
-        if self.guard_provider(ty)?.is_some() {
-            return Ok(true);
-        }
+    /// A flat application record with a protected guard field.
+    pub(super) fn guard_wrapper(&mut self, ty: &TypeTerm<'g>) -> ResultOf<bool> {
         if let Some(fields) = self.record_fields(ty)? {
             for field in fields {
                 self.budget.step(1)?;
