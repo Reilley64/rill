@@ -1,6 +1,6 @@
-# #41 Q19: Rust conversion evidence and implementation-defined errors
+# ri-1wl Q19: Rust conversion evidence and implementation-defined errors
 
-Research input for [Rill #41](https://github.com/Reilley64/rill/issues/41), not a Rill policy decision or implementation claim. The question supplies proposed `into<To, From>(value: From): To` and `tryInto<To, From, E>(value: From): Result<To, E>`, requirements `tryInto(To, From, E)`, endpoint-based selection (not error-based), and generic/specific implementations that may choose different errors. These are interview premises, not the older closed numeric contracts in `docs/standard-library-contracts.md`.
+Research input for Rill ri-1wl, not a Rill policy decision or implementation claim. The question supplies proposed `into<To, From>(value: From): To` and `tryInto<To, From, E>(value: From): Result<To, E>`, requirements `tryInto(To, From, E)`, endpoint-based selection (not error-based), and generic/specific implementations that may choose different errors. These are interview premises, not the older closed numeric contracts in `docs/standard-library-contracts.md`.
 
 No existing research-note directory/convention was present in this checkout; this note creates `docs/research/` rather than putting research in an ADR.
 

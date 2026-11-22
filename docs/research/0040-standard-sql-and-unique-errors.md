@@ -1,10 +1,10 @@
-# #40: Standard SQL execution and column-naming unique errors
+# ri-dka: Standard SQL execution and column-naming unique errors
 
-Research input for [Rill #40](https://github.com/Reilley64/rill/issues/40), **not a placement/API decision, implementation, protocol validation, or soundness/security proof**. This note follows the numbered issue-note convention in `docs/research/`.
+Research input for Rill ri-dka, **not a placement/API decision, implementation, protocol validation, or soundness/security proof**. This note follows the numbered issue-note convention in `docs/research/`.
 
 ## Interview follow-up
 
-The user subsequently confirmed the [integrated SQL contract](../sql-contracts.md): std placement, external concrete pools, typed uniqueness with known/unavailable provenance, explicit codecs and redacted defaults. After #33 closed, Q58–Q77 confirmed owned controls, typed token outcomes distinct from intrinsic stopping, temporal mappings, fixed arities and the narrow validateInstantDomain consumer amendment. #43 separately tracks native-provider work; it is not fulfilled by design closure. The options/checklist and historical open-#33 statements below are research inputs at that time, not unresolved votes overriding later decisions or implementation evidence.
+The user subsequently confirmed the [integrated SQL contract](../sql-contracts.md): std placement, external concrete pools, typed uniqueness with known/unavailable provenance, explicit codecs and redacted defaults. After ri-j60 closed, Q58–Q77 confirmed owned controls, typed token outcomes distinct from intrinsic stopping, temporal mappings, fixed arities and the narrow validateInstantDomain consumer amendment. ri-3id separately tracks native-provider work; it is not fulfilled by design closure. The options/checklist and historical open-ri-j60 statements below are research inputs at that time, not unresolved votes overriding later decisions or implementation evidence.
 
 ## Premises and short answer
 
@@ -24,7 +24,7 @@ Read alongside these local decisions:
 - [ADR 0017](../adr/0017-user-implementable-conversions.md): `function` declarations, `implement` bodies, ordinary input-based family selection; conversions do not create automatic database mapping or expression capture.
 - [ADR 0018](../adr/0018-streaming-and-buffered-io.md): explicit progress and owning adapters; cancellation/close/disposal do not prove remote rollback or connection reuse. Its scoped `noBorrow` restrictions are not universal driver-error restrictions.
 
-At the **initial research checkpoint**, [#33](https://github.com/Reilley64/rill/issues/33) was still OPEN when inspected through `gh`, including its comments; the later integrated contract above supersedes this historical dependency state. Deadline representation, propagation, races, native-work abortion and wall-clock representation remain unresolved prerequisites. **This note chooses no timeout parameter, context/token type, clock epoch, duration unit or deadline API.** The #32 handoff comments on #40/#33 expressly leave that work open and require retaining native/buffer obligations through completion or confirmed abortion. #30's backend/native-pointer gates remain; a SQLite-like adapter is a contrasting design target, not permission to expose SQLite C handles today.
+At the **initial research checkpoint**, ri-j60 was still OPEN when inspected through `gh`, including its comments; the later integrated contract above supersedes this historical dependency state. Deadline representation, propagation, races, native-work abortion and wall-clock representation remain unresolved prerequisites. **This note chooses no timeout parameter, context/token type, clock epoch, duration unit or deadline API.** The ri-fnk handoff comments on ri-dka/#33 expressly leave that work open and require retaining native/buffer obligations through completion or confirmed abortion. ri-dej's backend/native-pointer gates remain; a SQLite-like adapter is a contrasting design target, not permission to expose SQLite C handles today.
 
 ## Why these comparisons
 
@@ -70,7 +70,7 @@ jOOQ's `DataAccessException` wraps underlying `SQLException`; preserving a nativ
 
 Options for std's minimum are (a) own small, precisely specified exact wire/value representations, or (b) standardize encoding/decoding families while external exact-decimal/calendar types supply implementations. An open codec seam is needed either way. Do not silently choose a fixed decimal width just because one backend mapping supports it: SQLx explicitly documents that `rust_decimal::Decimal` cannot represent all PostgreSQL NUMERIC values, while `BigDecimal` can exceed PostgreSQL's range. Range errors must remain errors. Infinity/NaN support also varies by representation. [R3]
 
-Distinguish date, local date-time, time-of-day, offset-bearing value and instant; PostgreSQL TIMESTAMP and TIMESTAMPTZ are not interchangeable mappings. A wall-clock timestamp is not a monotonic deadline. UUID can remain a driver/external codec type unless separately chosen for std. Typed null should retain codec/type evidence; “None” is a value state, not necessarily enough SQL type information by itself. Calendar/decimal placement and actual shared representations require explicit user decisions coordinated with #33. [X4, R2–R3, J4]
+Distinguish date, local date-time, time-of-day, offset-bearing value and instant; PostgreSQL TIMESTAMP and TIMESTAMPTZ are not interchangeable mappings. A wall-clock timestamp is not a monotonic deadline. UUID can remain a driver/external codec type unless separately chosen for std. Typed null should retain codec/type evidence; “None” is a value state, not necessarily enough SQL type information by itself. Calendar/decimal placement and actual shared representations require explicit user decisions coordinated with ri-j60. [X4, R2–R3, J4]
 
 ## Unique violations: backend evidence
 
@@ -146,7 +146,7 @@ Classification must not replace native E with a universal erased database error.
 
 **SQLite-like embedded driver:** an opaque concrete adapter owns native connection/statement obligations behind a separately approved native-provider boundary; it cannot expose raw C pointers or demand public OS-thread pinning. Bindings and row views retain native storage until completion/reset/finalization under checked ownership. Copy native error diagnostics before another operation overwrites connection error state. Extended codes classify failures, but there is no native structured column-list guarantee. A worker/native implementation may be necessary, but broad FFI and safe cancellation of blocking work are not established by this note. [S1–S5; local ADRs 0009/0018]
 
-An external generator/builder can produce backend SQL, typed binders and decoders for either target and use ordinary standard execution families. The generic helper must name the session, parameter, row/statement and error type relationships through available ordinary requirements, checked **before monomorphization**. Result-related type parameters may bind the selected implementation's outputs; they must not select an alternative driver by desired return/error type. These are requirements to validate in #28, not a claim that associated projections or reflection are already available.
+An external generator/builder can produce backend SQL, typed binders and decoders for either target and use ordinary standard execution families. The generic helper must name the session, parameter, row/statement and error type relationships through available ordinary requirements, checked **before monomorphization**. Result-related type parameters may bind the selected implementation's outputs; they must not select an alternative driver by desired return/error type. These are requirements to validate in ri-48g, not a claim that associated projections or reflection are already available.
 
 ### Required behavior questions, independent of final spelling
 
@@ -156,13 +156,13 @@ An external generator/builder can produce backend SQL, typed binders and decoder
 - Preserve the original statement/commit error if cleanup also fails; consider reporting both. Diesel's documented transaction failure handling illustrates why rollback failure and broken-state information matter. [D2]
 - No automatic replay on generic transport errors or commit-unknown errors. Go's `ErrBadConn` prohibition is a useful precedent; retrying a transaction needs a separately authorized idempotency/reconciliation policy. [G2]
 - PostgreSQL cancellation requests are race-prone: sending one does not prove the target query was canceled. Consume protocol results/reach a known state or discard; classify effects separately. pgx's native context behavior is not a Rill deadline design. [P7, X2–X3]
-- Cooperative cancellation remains outside Rill's recoverable Result. Required cleanup may suspend indefinitely; retain all borrowed/native state until completion or confirmed abortion. Unknown remote effects do not turn cancellation into a recoverable timeout value. #33 decides any public deadline/race surface.
+- Cooperative cancellation remains outside Rill's recoverable Result. Required cleanup may suspend indefinitely; retain all borrowed/native state until completion or confirmed abortion. Unknown remote effects do not turn cancellation into a recoverable timeout value. ri-j60 decides any public deadline/race surface.
 
 ### Pooling: explicit user decision reopened by the Go analogy
 
 **Keep concrete pools external (existing direction):** std owns execution/lease/reset/disposition semantics sufficient for reusable external pools; pool policy/configuration remains independent. This minimizes std concurrency/time-policy scope, but ecosystem pools need consistent connection health and cleanup contracts. A generic execution helper should accept the acquired execution target rather than require one particular pool.
 
-**Put a Go-like concrete pool in std (possible revised direction):** closer match to `sql.DB`, one operational/default pooling contract and fewer repeated lease/reset implementations; larger std surface for queueing, limits, validation, session reset, prepared caches, fairness and shutdown. It depends directly on unresolved #33 and #30 machinery. “Go-like” cannot silently imply this choice, because Go `DB` really **does** own a pool. [G1–G2]
+**Put a Go-like concrete pool in std (possible revised direction):** closer match to `sql.DB`, one operational/default pooling contract and fewer repeated lease/reset implementations; larger std surface for queueing, limits, validation, session reset, prepared caches, fairness and shutdown. It depends directly on unresolved ri-j60 and ri-dej machinery. “Go-like” cannot silently imply this choice, because Go `DB` really **does** own a pool. [G1–G2]
 
 A third placement is standard pool/lease contracts with external implementations, but that still needs a concrete ownership/evidence story, not a new interface/trait system. No choice here reopens the already rejected external placement of the **shared database execution library**.
 
@@ -172,7 +172,7 @@ A third placement is standard pool/lease contracts with external implementations
 2. Is known/unknown acceptable, or must supported operations be restricted to guarantee a complete direct-column list? What should expression keys report?
 3. Should metadata resolution be explicit external driver work, a standard enrichment operation, or omitted? Who owns schema/cache consistency and failed-resolution errors?
 4. Should category inspection borrow E, or should execution return a typed standard wrapper preserving E? What redacted default display is expected?
-5. Does the new Go-like request revise external concrete pooling, or retain it? #33 remains open either way.
+5. Does the new Go-like request revise external concrete pooling, or retain it? ri-j60 remains open either way.
 6. Which exact/null/calendar value contracts are shared, which codecs remain external, and what native-provider prerequisite permits an embedded adapter?
 
 ## Primary sources and verification boundaries
@@ -236,4 +236,4 @@ Pinned source links below refer to **inspected baselines**, not claims that thes
 - **Q3:** [Microsoft MS-TDS ERROR token](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/9805e9fa-1f8b-4cf8-8f78-8d2602228635): structured token members; no failing key-column array.
 - **Q4:** [Microsoft `sys.index_columns`](https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-index-columns-transact-sql?view=sql-server-ver17): object/index/column identity, key ordinal and included-column flag.
 
-Sources were fetched from official docs or owning repositories and inspected as text/source, including native duplicate-reporting implementations. Issue #40/#33 and comments were read via `gh`. No database server/protocol integration suite, performance comparison, Rill compiler, or security/soundness test was run. No claim of exhaustive behavior across server releases, extensions, proxies, triggers or alternate SQLite providers is made. In particular, classification and metadata possibilities are evidence-backed design inputs, not a fabricated universal column guarantee.
+Sources were fetched from official docs or owning repositories and inspected as text/source, including native duplicate-reporting implementations. Issue ri-dka/#33 and comments were read via `gh`. No database server/protocol integration suite, performance comparison, Rill compiler, or security/soundness test was run. No claim of exhaustive behavior across server releases, extensions, proxies, triggers or alternate SQLite providers is made. In particular, classification and metadata possibilities are evidence-backed design inputs, not a fabricated universal column guarantee.

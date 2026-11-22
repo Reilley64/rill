@@ -24,7 +24,7 @@ When set to `yes`, PRs run through the same labels and states as issues, using t
 - **List external PRs for triage**: `gh api --paginate 'repos/{owner}/{repo}/pulls?state=open' --jq '.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, title, author: .user.login, author_association, labels: [.labels[].name]}'`.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
 
-GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
+GitHub shares one number space across issues and PRs, so a bare `ri-bv2` may be either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
 
 ## When a skill says "publish to the issue tracker"
 
@@ -38,7 +38,7 @@ Read it as in **Read an issue** above.
 
 Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
 
-Rill's destination and completion criteria live in [map #1](https://github.com/Reilley64/rill/issues/1): review-ready language-feature RFCs in `docs/rfcs/`. #26 defines their structure and conventions; #28 writes the final set after the remaining design work. Ticket answers, research, prototypes, and ADRs are inputs to those RFCs. Producing the RFCs is separate from human acceptance and compiler implementation.
+Rill's destination and completion criteria live in map ri-kl0: review-ready language-feature RFCs in `docs/rfcs/`. ri-9o5 defines their structure and conventions; ri-48g writes the final set after the remaining design work. Ticket answers, research, prototypes, and ADRs are inputs to those RFCs. Producing the RFCs is separate from human acceptance and compiler implementation.
 
 - **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue (see **Make an issue a sub-issue of a parent**). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
