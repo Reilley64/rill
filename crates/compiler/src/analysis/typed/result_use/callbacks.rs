@@ -283,12 +283,16 @@ impl<'a, 'g> Check<'a, 'g> {
         self.prove_actual(values, mode, depth)
     }
 
-    pub(super) fn prove_once_arrow(
+    pub(super) fn prove_closed_actual(
         &mut self,
         state: &Residence<'g>,
-        argument: NodeId,
+        actual: once::Actual,
         depth: usize,
     ) -> Work<bool> {
+        let argument = match actual {
+            once::Actual::Moved(argument) => argument,
+            once::Actual::Lent(argument) => return self.prove_lent_arrow(state, argument, depth),
+        };
         let values = state.contents(Root::Temporary(argument), &[], self.budget)?;
         // This route admits only the direct pair: don't substitute an empty
         // entry for an unknown, borrowed, or Result-bearing residence.
@@ -298,6 +302,49 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(false);
         }
         self.prove_actual(values, InvocationMode::Once, depth)
+    }
+
+    /// Read the referent residence of `&local` in place. Its owner and every
+    /// capture occurrence stay with the caller.
+    fn prove_lent_arrow(
+        &mut self,
+        state: &Residence<'g>,
+        argument: NodeId,
+        depth: usize,
+    ) -> Work<bool> {
+        match self.lent_descriptor(state, argument)? {
+            Some(values) => self.prove_actual(values, InvocationMode::ReadOnly, depth),
+            None => Ok(false),
+        }
+    }
+
+    /// The bare read-only arrow behind `&local`, or `None`. A capture occurrence,
+    /// unknown content or possible alias is not an empty environment.
+    pub(super) fn lent_descriptor(
+        &mut self,
+        state: &Residence<'g>,
+        argument: NodeId,
+    ) -> Work<Option<Vec<Located<'g>>>> {
+        let Some((owner @ Root::Local(id), component)) =
+            state.alias(Root::Temporary(argument), &[], self.budget)?
+        else {
+            return Ok(None);
+        };
+        if id.kind != DeclarationKind::Binding || !component.is_empty() {
+            return Ok(None);
+        }
+        let values = state.contents(owner, &[], self.budget)?;
+        let [value] = values.as_slice() else {
+            return Ok(None);
+        };
+        let Content::Callable(origin) = value.content else {
+            return Ok(None);
+        };
+        let read_only = self
+            .facts(origin)?
+            .and_then(|f| f.callable.as_ref()?.arrow.as_deref())
+            .is_some_and(|arrow| arrow.mode == Some(InvocationMode::ReadOnly));
+        Ok((value.component.is_empty() && read_only).then_some(values))
     }
 
     pub(super) fn prove_actual(

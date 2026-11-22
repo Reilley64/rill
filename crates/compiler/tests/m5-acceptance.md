@@ -1611,6 +1611,14 @@ Local gate results on macOS/AArch64 with an isolated Cargo target directory. `mi
 
 These runs did not replay either installed load mode, the historical captures or the fixed caps outside the test suite, and no hosted check ran. They show that the merged tree builds and that its own tests pass. They do not close any obligation below. No Rill program ran.
 
+## 2026-11-23: M4 Result use for a borrowed declared callable (ri-785.5)
+
+`function run<F>(job: &F): bool where callable(F, [], bool) { return job(); }` closed by `return run(&f);`, where `f` is a local read-only `() => bool` arrow, now issues an M4 receipt (`declared-shared-actual`, 325,244 work / 47,828 entries / depth 12). The [callable-once test](m4_8_callable_once.rs) covers it in both installed load modes, with exact caps and each limit independently one short. The wrapper's deferred `CallBoundary` at `job()` resolves only when every reference to the private wrapper is such a closed call. Each call reads the referent residence of `&f` in place: the caller keeps the descriptor and every capture occurrence. It never consumes through the borrow.
+
+Unchanged from the parent revision: the uncalled wrapper `declared-shared-only` stays `Incomplete` at 321,706 / 47,419 / 12, `declared-shared-output-discard` keeps `R0103` at `run(&f);` at 325,584 / 47,950 / 12, and `borrowed-once` stays M4 `SourceRejected` at 324,058 / 47,748 / 12. The dead-only, exported and grouped-argument (`run((&f))`) controls keep their parent caps. A formal actual costs one more step (323,599 → 323,600) and an arrow borrowing a caller's `Result` 16 more (325,321 → 325,337); both stay `Incomplete`, and the latter keeps its `R0103` at the caller's exit. The 17-source baseline still checks at exactly 372,246 / 54,059 / 12 in both modes.
+
+This is Result use only. M5 still stops `caller` at `Incomplete` in the target (1,891 / 42 / 3) and the ordinary graph root, with no MIR; the borrowed invocation's ownership proof is ri-785 B3. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
