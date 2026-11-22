@@ -1,6 +1,7 @@
 use super::*;
 use compiler::analysis::{
-    ownership::{DependencyContract, Place, analyze_ownership},
+    Statistics,
+    ownership::{DependencyContract, GraphCompletion, Place, analyze_ownership},
     scalars::BodyOwner,
 };
 
@@ -377,4 +378,197 @@ fn shared_option_postfix_call_does_not_open_other_call_contracts() {
             assert_eq!(pending.site.span.bytes(), b"*slot = Option.Some(view);");
         },
     );
+}
+
+const RELAY_SIBLINGS: &str = r#"
+function relay(input: Option<&string>): Option<&string> {
+    let view = input?;
+    return Option.Some(view);
+}
+function relayExclusive(input: Option<&mut bool>): Option<&mut bool> {
+    let view = input?;
+    return Option.Some(view);
+}
+function choose(left: Option<&string>, right: Option<&string>): Option<&string> {
+    let view = left?;
+    return Option.Some(view);
+}
+function generic<T>(input: Option<T>): Option<T> { return input; }
+"#;
+
+/// One caller per fixture, so the whole-graph caps attribute to that caller.
+/// Checks exact `(work, entries, depth)` for the targeted query and the graph,
+/// and `ResourceLimit` one short on each axis independently.
+fn relay_caller_keeps_caps(
+    test: &str,
+    name: &str,
+    call: &str,
+    expected: Completion,
+    target: (usize, usize, usize),
+    graph: (usize, usize, usize),
+) {
+    let payload = if name == "callerExclusive" {
+        "&mut bool"
+    } else {
+        "&string"
+    };
+    let source = format!(
+        "{RELAY_SIBLINGS}function {name}(input: Option<{payload}>): Option<{payload}> {{\n    \
+         let view = {call}?;\n    return Option.Some(view);\n}}\n"
+    );
+    let site = format!("{call}?");
+    let checked = expected == Completion::Checked;
+    let pinned = |(work, entries, max_depth)| {
+        let exact = AnalysisLimits {
+            max_work: work,
+            max_entries: entries,
+            max_depth,
+        };
+        let short = [
+            AnalysisLimits {
+                max_work: work - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_entries: entries - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_depth: max_depth - 1,
+                ..exact
+            },
+        ];
+        let stats = Statistics {
+            work,
+            entries,
+            max_depth,
+        };
+        (stats, exact, short)
+    };
+    probe(test, &source, |_, module, receipt| {
+        let caller = declaration(module, name);
+        let (stats, exact, short) = pinned(target);
+        let report = lower_body(receipt, module, &caller.id, exact).unwrap();
+        assert_eq!(report.completion(), expected, "{name}");
+        assert_eq!(report.statistics(), stats, "{name}");
+        assert!(report.findings().is_empty());
+        assert_eq!(report.mir().is_some(), checked, "{name}");
+        assert_eq!(
+            report.blocked_at().map(|site| site.span.bytes()),
+            (!checked).then_some(site.as_bytes()),
+            "{name}"
+        );
+        for cap in short {
+            let limited = lower_body(receipt, module, &caller.id, cap).unwrap();
+            assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+            assert!(limited.mir().is_none() && limited.findings().is_empty());
+        }
+
+        let (stats, exact, short) = pinned(graph);
+        let report = analyze_ownership(receipt, exact);
+        assert_eq!(report.completion(), GraphCompletion::Incomplete, "{name}");
+        assert_eq!(report.statistics(), stats, "{name}");
+        let root = report
+            .roots()
+            .iter()
+            .find(|root| {
+                matches!(root.owner(),
+                BodyOwner::Declaration(id) if std::ptr::eq(id, &caller.id))
+            })
+            .unwrap();
+        assert_eq!(root.ordinary_completion(), expected, "{name}");
+        assert_eq!(root.ordinary_mir().is_some(), checked, "{name}");
+        assert_eq!(
+            root.blocked_at().map(|site| site.span.bytes()),
+            (!checked).then_some(site.as_bytes()),
+            "{name}"
+        );
+        if checked {
+            let relay = declaration(module, "relay");
+            let [edge] = root.dependencies() else {
+                panic!("{name}: one ordinary call")
+            };
+            assert_eq!(edge.contract, DependencyContract::OrdinaryCall);
+            assert!(std::ptr::eq(edge.declaration, &relay.id));
+        } else {
+            assert!(root.dependencies().is_empty(), "{name}");
+        }
+        for cap in short {
+            assert_eq!(
+                analyze_ownership(receipt, cap).completion(),
+                GraphCompletion::ResourceLimit,
+                "{name}"
+            );
+        }
+    });
+}
+
+/// Standards review 3651c5b4: unsupported siblings of the shared relay keep the
+/// parent revision's caps (measured at cb94538f, before the relay was admitted).
+#[test]
+fn unsupported_option_relay_siblings_keep_parent_caps() {
+    let test = "propagation::option_caller::unsupported_option_relay_siblings_keep_parent_caps";
+    for (name, call, target, graph) in [
+        (
+            "callerNonmonomorphic",
+            "generic(input)",
+            (3089, 284, 4),
+            (195691, 5792, 4),
+        ),
+        (
+            "callerComputed",
+            "relay(((relay(input))))",
+            (3097, 288, 4),
+            (195939, 5796, 4),
+        ),
+        (
+            "callerPipe",
+            "input |> relay(_)",
+            (3087, 283, 4),
+            (195629, 5791, 4),
+        ),
+        (
+            "callerGroupPipe",
+            "(input |> relay(_))",
+            (3092, 285, 4),
+            (195754, 5793, 4),
+        ),
+        (
+            "callerExclusive",
+            "relayExclusive(input)",
+            (3089, 284, 4),
+            (195691, 5792, 4),
+        ),
+        (
+            "callerMultiple",
+            "choose(input, input)",
+            (3091, 285, 4),
+            (195753, 5793, 4),
+        ),
+    ] {
+        relay_caller_keeps_caps(test, name, call, Completion::Incomplete, target, graph);
+    }
+}
+
+/// The screen admits a grouped whole carrier without walking it: direct and
+/// grouped relays keep the caps the relay was admitted at (68e4fa7).
+#[test]
+fn admitted_option_relay_callers_keep_their_caps() {
+    let test = "propagation::option_caller::admitted_option_relay_callers_keep_their_caps";
+    for (name, call, target, graph) in [
+        (
+            "callerDirect",
+            "relay(input)",
+            (9516, 1677, 4),
+            (198554, 6624, 4),
+        ),
+        (
+            "callerGroup",
+            "((relay(((input)))))",
+            (9536, 1685, 8),
+            (198806, 6628, 8),
+        ),
+    ] {
+        relay_caller_keeps_caps(test, name, call, Completion::Checked, target, graph);
+    }
 }
