@@ -18,8 +18,8 @@ UV_PYTHON_DOWNLOADS = "never"
 UV_PROJECT_ENVIRONMENT = "{{ config_root }}/target/python"
 
 [tasks.setup]
-description = "Verify the mise-selected base tools and install locked Python check dependencies"
-run = ["python tools/doctor.py", "uv sync --project tools/python --locked --python $(mise which python) --no-python-downloads"]
+description = "Verify the mise-selected base tools, install locked Python check dependencies and enable the tracked git hooks"
+run = ["python tools/doctor.py", "uv sync --project tools/python --locked --python $(mise which python) --no-python-downloads", "git config core.hooksPath .githooks"]
 
 [tasks.doctor]
 description = "Check the selected base tool versions and interpreter/toolchain locations"

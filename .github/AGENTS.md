@@ -75,7 +75,7 @@ Completion requires identical values and sequence order.
 Verify every intentional value change separately, including names.
 For structural edits, verify dependencies, output references, event conditions, permissions and execution gates.
 
-Run `mise run check:ci`, `mise run check` and `mise run build:scaffold` for workflow changes.
+Run `mise run check:ci` for workflow changes. Full suites and gates run only in CI; follow step 3 of the [toolchain development guide](../docs/agents/development.md) for local scope.
 Run `git diff --check` before completion.
 Use the pinned Actionlint task instead of installing a separate copy.
 Verify runner-label or action-metadata diagnostics against their definitions before applying narrow filters.
