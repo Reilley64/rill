@@ -15,6 +15,10 @@ import doctor
 from check_docs import anchors, check
 
 
+def git(root, *args):
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
 class DocumentationTests(unittest.TestCase):
     def test_real_destinations_and_code_examples(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -37,6 +41,42 @@ class DocumentationTests(unittest.TestCase):
             self.assertEqual(len(errors), 2)
             self.assertIn("missing path", errors[0])
             self.assertIn("missing anchor", errors[1])
+
+    def test_checkout_scans_the_commit_not_ignored_directories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            root.mkdir()
+            git(root, "init", "-q")
+            git(root, "config", "user.email", "test@example.com")
+            git(root, "config", "user.name", "Test")
+            (root / ".gitignore").write_text("/worktrees/\n")
+            (root / "README.md").write_text("[guide](docs/guide.md#guide)\n[old](old.md)\n")
+            (root / "old.md").write_text("# Old\n")
+            (root / "docs").mkdir()
+            (root / "docs/guide.md").write_text("# Guide\n[home](../README.md)\n")
+            (root / "worktrees/other").mkdir(parents=True)
+            (root / "worktrees/other/README.md").write_text("[bad](absent.md)\n")
+            git(root, "add", ".gitignore", "README.md", "old.md", "docs")
+            git(root, "commit", "-qm", "docs")
+            export = Path(directory) / "export"
+            export.mkdir()
+            archive = subprocess.run(["git", "-C", str(root), "archive", "HEAD"],
+                                     check=True, capture_output=True).stdout
+            subprocess.run(["tar", "-x", "-C", str(export)], input=archive, check=True)
+            self.assertEqual(check(export), (3, []))
+            self.assertEqual(check(root), (3, []))
+
+            (root / "draft.md").write_text("[bad](absent.md)\n")
+            count, errors = check(root)
+            self.assertEqual(count, 4)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("draft.md:1: missing path", errors[0])
+
+            (root / "old.md").unlink()
+            count, errors = check(root)
+            self.assertEqual(count, 4)
+            self.assertEqual(len(errors), 2)
+            self.assertIn("README.md:2: missing path: old.md", errors[0])
 
     def test_headings_in_nested_fences_are_not_anchors(self):
         self.assertEqual(anchors('````md\n```\n# Not an anchor\n```\n````\n# Actual\n'), {"actual"})
@@ -169,6 +209,35 @@ class WorkflowTests(unittest.TestCase):
                                  "${{ github.workspace }}/target/ci/rustup")
 
 
+class NativeAcceptanceTests(unittest.TestCase):
+    STEP = "Test: Verify native runtime acceptance is unavailable"
+
+    def run_step(self, mise_script):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        steps = workflow["jobs"]["native"]["steps"]
+        self.assertEqual([step["name"] for step in steps].count(self.STEP), 1)
+        script = next(step["run"] for step in steps if step["name"] == self.STEP)
+        self.assertEqual([step["name"] for step in steps if "mise run test:runtime" in step.get("run", "")],
+                         [self.STEP])
+        with tempfile.TemporaryDirectory() as directory:
+            mise = Path(directory) / "mise"
+            mise.write_text("#!/bin/sh\n" + mise_script)
+            mise.chmod(0o755)
+            env = {**os.environ, "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}"}
+            return subprocess.run(["bash", "-e", "-c", script], cwd=doctor.ROOT,
+                                  capture_output=True, text=True, env=env)
+
+    def test_the_stub_is_asserted_so_the_job_is_not_red_by_design(self):
+        result = self.run_step(f'[ "$1 $2" = "run test:runtime" ] && exec "{sys.executable}" tools/unavailable.py test:runtime\nexit 64\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_real_runtime_result_or_other_failure_still_fails_the_job(self):
+        for script in ["exit 0\n", "echo 'compile error' >&2\nexit 1\n",
+                       "echo 'unrelated is not implemented in this scaffold' >&2\nexit 2\n"]:
+            with self.subTest(script=script):
+                self.assertNotEqual(self.run_step(script).returncode, 0)
+
+
 class TestTaskTests(unittest.TestCase):
     def test_rust_test_tasks_are_locked_and_llvm_free(self):
         tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
@@ -187,6 +256,58 @@ class TestTaskTests(unittest.TestCase):
             "cargo fmt --all -- --check",
             "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage --all-targets -- -D warnings",
         ])
+
+
+class PrePushHookTests(unittest.TestCase):
+    def test_setup_enables_the_tracked_hook(self):
+        tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
+        self.assertIn("git config core.hooksPath .githooks", tasks["setup"]["run"])
+
+    def test_hook_runs_the_documentation_check_and_is_executable(self):
+        hook = doctor.ROOT / ".githooks/pre-push"
+        self.assertTrue(os.access(hook, os.X_OK))
+        self.assertIn("mise run check:docs", hook.read_text())
+
+    def test_hook_refuses_a_push_with_a_broken_fragment_and_accepts_a_clean_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / "remote").mkdir()
+            git(base / "remote", "init", "-q", "--bare")
+            work = base / "work"
+            work.mkdir()
+            git(work, "init", "-q", "-b", "main")
+            git(work, "config", "user.email", "test@example.com")
+            git(work, "config", "user.name", "Test")
+            git(work, "remote", "add", "origin", str(base / "remote"))
+            (work / ".githooks").mkdir()
+            (work / "tools").mkdir()
+            hook = work / ".githooks/pre-push"
+            hook.write_text((doctor.ROOT / ".githooks/pre-push").read_text())
+            hook.chmod(0o755)
+            (work / "tools/check_docs.py").write_text((doctor.ROOT / "tools/check_docs.py").read_text())
+            # A stand-in for mise: `mise run check:docs` runs the checker as the real task does.
+            bin_dir = base / "bin"
+            bin_dir.mkdir()
+            mise = bin_dir / "mise"
+            mise.write_text(f'#!/bin/sh\n[ "$1 $2" = "run check:docs" ] && exec "{sys.executable}" tools/check_docs.py\nexit 64\n')
+            mise.chmod(0o755)
+            git(work, "config", "core.hooksPath", ".githooks")
+            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+
+            def push():
+                return subprocess.run(["git", "-C", str(work), "push", "origin", "HEAD:main"],
+                                      capture_output=True, text=True, env=env)
+
+            (work / "README.md").write_text("# Title\n[ok](#title)\n")
+            git(work, "add", ".")
+            git(work, "commit", "-qm", "clean")
+            self.assertEqual(push().returncode, 0)
+
+            (work / "README.md").write_text("# Title\n[bad](#absent)\n")
+            git(work, "commit", "-qam", "broken")
+            refused = push()
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("missing anchor", refused.stderr)
 
 
 class ScaffoldStatusTests(unittest.TestCase):
