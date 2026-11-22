@@ -1,6 +1,6 @@
 # Rill language server contract
 
-This is a tooling contract, not a language RFC. [#42](https://github.com/Reilley64/rill/issues/42) tracks work on the server. The [diagnostic contract](diagnostic-contracts.md) defines the reports and source facts the server can use. No protocol or editor support is established yet.
+This is a tooling contract, not a language RFC. ri-bv2 tracks work on the server. The [diagnostic contract](diagnostic-contracts.md) defines the reports and source facts the server can use. No protocol or editor support is established yet.
 
 ## Protocol and scope
 

@@ -1,6 +1,6 @@
 # M4.8 bounded typed analysis
 
-The owner approved U1 through U4 at `f3d65f72062237f87372f1896db5f2a66d9f2a54`. The [approval record](https://github.com/Reilley64/rill/issues/65#issuecomment-6969612205) precedes model and compiler work. [Issue #65](https://github.com/Reilley64/rill/issues/65) stays open under [M4 #56](https://github.com/Reilley64/rill/issues/56) in [draft PR #58](https://github.com/Reilley64/rill/pull/58). The approval does not accept the full stage or authorize a merge.
+The owner approved U1 through U4 at `f3d65f72062237f87372f1896db5f2a66d9f2a54`. The approval record (ri-dm4, comment 6969612205) precedes model and compiler work. Issue ri-dm4 stays open under M4 ri-b83 in [draft PR #58](https://github.com/Reilley64/rill/pull/58). The approval does not accept the full stage or authorize a merge.
 
 ## What the increment checks
 
@@ -58,7 +58,7 @@ The corrected code at `d6e76d91e649d3d834f246a14812bbb87eadd90b` passed the four
 
 ## Installed Option checks
 
-The owner [approved A1 through A3](https://github.com/Reilley64/rill/issues/65#issuecomment-6971033745) at `3c7e9bb0664ecb866630fbc1f349e333aef57ac5` before compiler and core changes. This increment checks the first installed source group. It does not complete the approved authority or provider inventories.
+The owner approved A1 through A3 (ri-dm4, comment 6971033745) at `3c7e9bb0664ecb866630fbc1f349e333aef57ac5` before compiler and core changes. This increment checks the first installed source group. It does not complete the approved authority or provider inventories.
 
 Run `mise exec -- cargo test --locked -p compiler --no-default-features --test m4_8_installed`. The Rust test runs a copy of itself under a temporary `bin/` directory beside the staged `stdlib/core.rill` and `stdlib/option.rill` sources in `lib/rill/std/`. It calls `loader::load_installed` and `analyze_typed` from another working directory. It does not stage a full distribution or exercise a product command.
 

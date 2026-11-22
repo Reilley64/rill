@@ -1,10 +1,10 @@
 # Rill v0 JSON contracts
 
-This is confirmed design input for [#31](https://github.com/Reilley64/rill/issues/31), summarized by [ADR 0018](adr/0018-owned-precision-preserving-json.md). The user explicitly confirmed the consolidated policy after the interview. This is **not** a parser implementation, executed compiler/library test suite, accepted feature RFC, or checker/backend proof. #28 integrates and validates the RFCs; #30 remains a backend gate.
+This is confirmed design input for ri-1zg, summarized by [ADR 0018](adr/0018-owned-precision-preserving-json.md). The user explicitly confirmed the consolidated policy after the interview. This is **not** a parser implementation, executed compiler/library test suite, accepted feature RFC, or checker/backend proof. ri-48g integrates and validates the RFCs; ri-dej remains a backend gate.
 
-The public module is `std::encoding::json`. Reuse the [core library contracts](standard-library-contracts.md), nominal enums/records, explicit borrowing/copying and origin/explicit-cause error model. JSON is transport-independent. Streaming I/O (#32), HTTP (#39), TLS/networking and database mapping are consumers/separate designs, not parsing prerequisites. No reflection, derive system, serialization traits, public dyn facility, schema mapping, JSONPath, streaming events or JSON Lines is introduced.
+The public module is `std::encoding::json`. Reuse the [core library contracts](standard-library-contracts.md), nominal enums/records, explicit borrowing/copying and origin/explicit-cause error model. JSON is transport-independent. Streaming I/O (ri-fnk), HTTP (ri-n5i), TLS/networking and database mapping are consumers/separate designs, not parsing prerequisites. No reflection, derive system, serialization traits, public dyn facility, schema mapping, JSONPath, streaming events or JSON Lines is introduced.
 
-Canonical conversion machinery is separately [confirmed in #41](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), including into/from, tryInto/tryFrom, selected implementation error evidence and explicit implement syntax. This document specifies JSON number semantics. It does not change registration, generic ordering, aliases, endpoint permissions, coherence or protected primitive pairs. #41's later decision controls over older closed-conversion/snake-case examples; its separate working-tree migration is not duplicated here. #28 must integrate both confirmed inputs and the JSON implementations' concrete error metadata; neither design is executed or proven by these fixtures.
+Canonical conversion machinery is separately confirmed in ri-1wl (comment 6886119679), including into/from, tryInto/tryFrom, selected implementation error evidence and explicit implement syntax. This document specifies JSON number semantics. It does not change registration, generic ordering, aliases, endpoint permissions, coherence or protected primitive pairs. ri-1wl's later decision controls over older closed-conversion/snake-case examples; its separate working-tree migration is not duplicated here. ri-48g must integrate both confirmed inputs and the JSON implementations' concrete error metadata; neither design is executed or proven by these fixtures.
 
 ## 1. Owned values and invariants
 
@@ -25,11 +25,11 @@ Number owns a validated JSON number token. Object owns unique names and values w
 
 The copy family supplies `copy(&Number):Number`, `copy(&Object):Object`, and `copy(&Value):Value`, creating independent owned storage while preserving numeric spelling and object order. No general Value/Number/Object implicit-copy or persistent snapshot is added. Normal scalar/unit-variant eligibility remains. Read-only views retain their source dependencies; exclusive views retain normal restrictions through last use.
 
-All standard parse/format/copy/dispose paths, partial-tree/error cleanup and displaced-value destruction use bounded call stacks per #22. Loops/worklists may grow on the heap; allocation failure remains fatal. Parse depth caps do not protect directly constructed trees by themselves. No recursive cleanup fallback, unsafe reference cast, total-memory quota or bounded completion latency is promised.
+All standard parse/format/copy/dispose paths, partial-tree/error cleanup and displaced-value destruction use bounded call stacks per ri-636. Loops/worklists may grow on the heap; allocation failure remains fatal. Parse depth caps do not protect directly constructed trees by themselves. No recursive cleanup fallback, unsafe reference cast, total-memory quota or bounded completion latency is promised.
 
 ## 2. Public API
 
-These are interface signatures, not complete source files or implementations. Opaque type layouts are deliberately unspecified. One body-less declaration owns an ordinary overload family; repeated shapes below list its supplied implementations, not duplicate declarations or return-only overloads. Family bodies use #41's explicit implement syntax.
+These are interface signatures, not complete source files or implementations. Opaque type layouts are deliberately unspecified. One body-less declaration owns an ordinary overload family; repeated shapes below list its supplied implementations, not duplicate declarations or return-only overloads. Family bodies use ri-1wl's explicit implement syntax.
 
 | Area | Required public operations/types |
 | --- | --- |
@@ -105,7 +105,7 @@ String quotes, backslashes and raw U+0000-U+001F need the proper JSON escape. Ot
 
 This is strict JSON grammar with explicit receiver restrictions for unique decoded names, representable scalar strings, BOM and configured limits. RFC 8259's grammar admits duplicate names and lone surrogate escapes; do not falsely claim it prohibits them or that this is unrestricted acceptance of all grammar-admitted texts. It is not the full I-JSON profile.
 
-## 4. Precision and conversion semantics supplied to #41
+## 4. Precision and conversion semantics supplied to ri-1wl
 
 Preserving tokens such as `9007199254740993`, `1e400` and long decimals needs neither f64 storage nor bigint/decimal arithmetic primitives. It does not guarantee an external consumer avoids binary64 rounding.
 
@@ -120,9 +120,9 @@ Conversions from primitive types to Number require the following semantics:
 - Typed integers produce exact ordinary decimal text without width suffixes; result remains fallible/uniform even when that case always succeeds.
 - Finite floats use canonical shortest text that round-trips to the same source width, preserving negative zero. Reject NaN/infinities. Do not promise exact binary-rational decimal expansion or identical cross-width interpretation (e.g. shortest f32 text re-read as f64).
 
-Use the requested canonical tryInto/tryFrom operation, not per-width toI32/toF64 APIs, arbitrary user-return-only ordinary overloads, a locally unrelated same-spelled function or caller-injected error values. Conversion implementers return their E. The confirmed #41 contract owns registration and exact selected-E evidence, with checking/proof still #28 work; distinguish non-integrality, range failure and non-finite source semantically without mandating a universal ConversionError or adding a new global variant here. In particular, ordinary primitive float-to-integer truncation from #18 remains different from exact JSON integer extraction.
+Use the requested canonical tryInto/tryFrom operation, not per-width toI32/toF64 APIs, arbitrary user-return-only ordinary overloads, a locally unrelated same-spelled function or caller-injected error values. Conversion implementers return their E. The confirmed ri-1wl contract owns registration and exact selected-E evidence, with checking/proof still ri-48g work; distinguish non-integrality, range failure and non-finite source semantically without mandating a universal ConversionError or adding a new global variant here. In particular, ordinary primitive float-to-integer truncation from ri-a2c remains different from exact JSON integer extraction.
 
-Application record conversion stays explicit, with user-written field/kind/missing-data handling through #41's confirmed interface. No automatic Value-to-record reflection, schema/derive, string-to-number coercion, injected fields, unchecked cast or lifetime extension is assumed. No active fixture supplies or claims to execute a numeric converter implementation.
+Application record conversion stays explicit, with user-written field/kind/missing-data handling through ri-1wl's confirmed interface. No automatic Value-to-record reflection, schema/derive, string-to-number coercion, injected fields, unchecked cast or lifetime extension is assumed. No active fixture supplies or claims to execute a numeric converter implementation.
 
 ## 5. Limits and count definitions
 
@@ -199,7 +199,7 @@ export enum FormatError {
 }
 ```
 
-All are exported nominal types with canonical borrowed display implementations producing owned text. Their metadata is scalar/enum data: no input/tree views, copied keys, input excerpts or full document snapshots. No reflected formatter, mandatory message field, source-text-based machine protocol or fixed human wording. Callers retaining the source can add context themselves. Underlying Err<E> construction origins/explicit causes follow #29/#23 and are **not** JSON input positions. These error payloads satisfy display/noBorrow/sendable/shareable; retaining a cause still requires those normal checks.
+All are exported nominal types with canonical borrowed display implementations producing owned text. Their metadata is scalar/enum data: no input/tree views, copied keys, input excerpts or full document snapshots. No reflected formatter, mandatory message field, source-text-based machine protocol or fixed human wording. Callers retaining the source can add context themselves. Underlying Err<E> construction origins/explicit causes follow ri-vtw/#23 and are **not** JSON input positions. These error payloads satisfy display/noBorrow/sendable/shareable; retaining a cause still requires those normal checks.
 
 Positions are zero-based byte offsets relative to the supplied view, including leading whitespace, with EOF at length. Do not silently add an underlying file/view base offset, normalize CRLF, count graphemes or use decoded-string offsets. Duplicate positions identify the second and original opening quotes after decoded comparison. A limit/error position need not always be a UTF-8 scalar boundary: an input byte cap can cut a multibyte encoding while the supplied whole string is itself valid.
 
@@ -214,9 +214,9 @@ Other syntax identifies an unexpected byte or EOF; a completed invalid scalar es
 
 ## 8. Evidence, scope and follow-through
 
-`prototypes/17-json.rill` contains intended-valid calls and independent expectations; `docs/prototypes/17-json.md` contains rejection, numeric-conversion and adversarial/resource cases. They are hand-checked design artifacts, not executed tests or a parser implementation. They do not establish that #28/#30 implementation/checker/backend gates are cleared.
+`prototypes/17-json.rill` contains intended-valid calls and independent expectations; `docs/prototypes/17-json.md` contains rejection, numeric-conversion and adversarial/resource cases. They are hand-checked design artifacts, not executed tests or a parser implementation. They do not establish that ri-48g/#30 implementation/checker/backend gates are cleared.
 
-Use #41's confirmed conversion registration/error-evidence/naming reconciliation; #24 owns compiler diagnostics; #28 integrates exact JSON algorithms/invariants, byte positions and scalar spans, float/integer boundary behavior, quota accounting, callee exits/transitive views, deep copy/partial cleanup/cancellation/native lifetime rules and eventual executable suites. #30 still validates backend/proper-tail/Wasm mechanisms. If an accepted operation cannot be specified/checked consistently, return that blocker through the map; do not assert that privacy or iterative intent proves memory safety. #32/#39 and other application foundations must compose these owned values/errors rather than assume a streaming/reflected serializer.
+Use ri-1wl's confirmed conversion registration/error-evidence/naming reconciliation; ri-3t8 owns compiler diagnostics; ri-48g integrates exact JSON algorithms/invariants, byte positions and scalar spans, float/integer boundary behavior, quota accounting, callee exits/transitive views, deep copy/partial cleanup/cancellation/native lifetime rules and eventual executable suites. ri-dej still validates backend/proper-tail/Wasm mechanisms. If an accepted operation cannot be specified/checked consistently, return that blocker through the map; do not assert that privacy or iterative intent proves memory safety. ri-fnk/#39 and other application foundations must compose these owned values/errors rather than assume a streaming/reflected serializer.
 
 ## Primary sources
 

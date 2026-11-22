@@ -2,7 +2,7 @@
 
 ## Scope and authority
 
-[M4.3 slice #60](https://github.com/Reilley64/rill/issues/60) belongs to open [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56). All eight slices stay in existing draft PR #58. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint `e4750b8579ea11aa80f76f86f93014c78854fac0`, before implementation. M4's overall starting main remains `ee12588f2cba912025900e1ac587586fb9cb6235`.
+M4.3 slice ri-3gd belongs to open M4 umbrella ri-b83. All eight slices stay in existing draft PR #58. The owner approved C1 through C4 (ri-3gd, comment 6947086957) at checkpoint `e4750b8579ea11aa80f76f86f93014c78854fac0`, before implementation. M4's overall starting main remains `ee12588f2cba912025900e1ac587586fb9cb6235`.
 
 The approved owners are RFC [0003](../../../docs/rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m43-scalar-and-static-control-procedure), [0004](../../../docs/rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m43-explicit-standalone-calls), [0005](../../../docs/rfcs/0005-types-records-enums-and-inference.md#proposed-m43-never-admission) and [0006](../../../docs/rfcs/0006-numbers-strings-and-primitive-operations.md#proposed-m43-literal-and-primitive-checking). Full RFC statuses and earlier scoped approvals remain unchanged. The checkpoint reviews and executed documentation checks remain historical design evidence, not final implementation review.
 

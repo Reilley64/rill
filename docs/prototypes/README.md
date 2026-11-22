@@ -4,11 +4,11 @@
 
 The [consolidation record](consolidation.md) maps combined examples to their original purposes. Independent rejection snippets intentionally contain invalid code. Do not include them as entry files in the prototype build.
 
-[M6 #77](https://github.com/Reilley64/rill/issues/77) tracks the first [prototype build and test targets](../../tests/README.md#prototype-build-and-test-targets). Add intended-valid entry files as their required features become available. Record why a program is not yet in that set. Do not report it as passing.
+M6 ri-qlh tracks the first [prototype build and test targets](../../tests/README.md#prototype-build-and-test-targets). Add intended-valid entry files as their required features become available. Record why a program is not yet in that set. Do not report it as passing.
 
 ## Core conversion interface migration
 
-The [2026-11-16 interface direction](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) consolidates core conversions under into/tryInto. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) records the current matrix and migration rules. Strict numeric parsing selects ParseError; strict UTF-8 decoding selects Utf8Error.
+The 2026-11-16 interface direction (ri-48g, comment 6913810445) consolidates core conversions under into/tryInto. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) records the current matrix and migration rules. Strict numeric parsing selects ParseError; strict UTF-8 decoding selects Utf8Error.
 
 Some maintained sources still use old `parseNumber`, `decodeUtf8` or other conversion helpers. Migrate them to the canonical interface before executable acceptance. Preserve the examples' intended behavior. Keep obsolete spellings in revision history and recorded reports, not in maintained examples. Changes to the sources do not change earlier verification results.
 

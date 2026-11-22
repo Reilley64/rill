@@ -6,17 +6,17 @@ The owner authorized this plan and a committed documentation baseline on 2026-11
 
 Use the committed baseline containing this plan, not a moving branch, as implementation input. Record its full commit SHA in the implementation ticket before coding. The baseline preserves Draft RFC statuses and their scoped human policy approvals.
 
-[#28](https://github.com/Reilley64/rill/issues/28) retains the RFC collection, coverage/readiness and existing formal/production follow-through. Its writing deliverable does not become compiler implementation. Create and claim a separate implementation ticket when coding is authorized.
+ri-48g retains the RFC collection, coverage/readiness and existing formal/production follow-through. Its writing deliverable does not become compiler implementation. Create and claim a separate implementation ticket when coding is authorized.
 
 ## Inputs
 
 | Input | Applicable scope |
 | --- | --- |
 | [Development guide](development.md), [ADR 0026](adr/0026-toolchain-repository-and-mise.md) | Private crate ownership, pinned mise/Cargo/uv tools, LLVM-free analysis and unavailable product gates. |
-| [Lexical/source approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) | Exact source/lexer policies across RFCs 0002, 0003, 0006 and 0010. |
+| Lexical/source approval (ri-48g, comment 6929923825) | Exact source/lexer policies across RFCs 0002, 0003, 0006 and 0010. |
 | [Source snapshots](rfcs/0002-modules-and-program-loading.md#source-snapshots-and-lexical-input) and [tokens/trivia](rfcs/0003-expressions-bindings-and-control-flow.md#lexical-tokens-and-trivia) | Immutable original bytes, source spans, identifiers, comments and longest token matching. |
 | [Literal scanning](rfcs/0006-numbers-strings-and-primitive-operations.md#literal-scanning-and-token-boundaries) and [coordinate procedure](rfcs/0010-diagnostics-and-reporting.md#original-byte-coordinate-procedure) | Numeric/raw/template modes, controls, decoded provenance and byte/scalar/editor projection. |
-| [Syntax approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690), [annex](grammar/v0-syntax-v1.md), [EBNF](grammar/v0-syntax-v1.ebnf) | M2 parser policy. M1 preserves lexer tokens rather than applying parser commitment rules. |
+| Syntax approval (ri-48g, comment 6931939690), [annex](grammar/v0-syntax-v1.md), [EBNF](grammar/v0-syntax-v1.ebnf) | M2 parser policy. M1 preserves lexer tokens rather than applying parser commitment rules. |
 | [Test ownership](../tests/README.md) and [RFC evidence rules](rfcs/README.md#examples-and-evidence) | Component-local tests, later cross-stage suites and truthful acceptance records. |
 
 The syntax policy review used EBNF SHA-256 `158c9b74bb2f36dbf992e454ebc10d57bfac9bb3859b04a394d61d29e0bd94e7`. Its companion SHA-256 was `0d7eeef8bf1abddebf6c04501eaf2572ea0f94f528ac69b933109afb9a3fdbf6`. Later status comments do not change those production rules or extend approval.
@@ -32,11 +32,11 @@ Full RFC/annex acceptance remains separate. Return conflicting required behavior
 | M3. Resolution and declaration collection | `crates/compiler/` | First complete candidate/cycle, namespace, scope and metadata procedures under RFC 0002. Validate canonical loaded-graph behavior independently of editor indexing. |
 | M4. Typed analysis | `crates/compiler/` | First complete inference, pattern/coverage, overload/evidence and selected-output procedures under the owning RFCs. Produce checked facts rather than inventing successful types for incomplete analysis. |
 | M5. Ownership and cleanup lowering | `crates/compiler/` | First complete dependency transfer, branch/loop, exit, capture and initialized-cleanup judgments. Validate MIR obligations and adversarial accepted/rejected cases. |
-| [M6. Execution and tools](https://github.com/Reilley64/rill/issues/77) | Backend/runtime plus IDE/LSP/CLI owners | Implement only after each semantic/ABI prerequisite is complete. Native, Wasm and provider support retain separate gates. [Language server work #42](https://github.com/Reilley64/rill/issues/42) proceeds where the analysis can support it. It does not gate execution. |
+| M6. Execution and tools (ri-qlh) | Backend/runtime plus IDE/LSP/CLI owners | Implement only after each semantic/ABI prerequisite is complete. Native, Wasm and provider support retain separate gates. Language server work ri-bv2 proceeds where the analysis can support it. It does not gate execution. |
 
 M2 through M6 identify milestone boundaries. The table does not establish implementation readiness or replace the individual tickets. Full standard-library or LSP delivery is not a lexer prerequisite.
 
-[Post-M6 #78](https://github.com/Reilley64/rill/issues/78) tracks explicit copying, `wrapErr` and the [scoped routine API changes](standard-library-contracts.md#post-m6-scoped-routine-names). It requires completed M6 acceptance. Use the verified M6 revision as the implementation input. Do not change the M5 or M6 baseline for this work.
+Post-M6 ri-bgy tracks explicit copying, `wrapErr` and the [scoped routine API changes](standard-library-contracts.md#post-m6-scoped-routine-names). It requires completed M6 acceptance. Use the verified M6 revision as the implementation input. Do not change the M5 or M6 baseline for this work.
 
 ## M1 scope and interface
 
@@ -108,11 +108,11 @@ Keep product build, language/stdlib/runtime/client suites and release verificati
 
 ## M3 design checkpoint
 
-This records Stage 1 of [M3 ticket #54](https://github.com/Reilley64/rill/issues/54). The owner subsequently [approved checkpoint a41e7cc](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619), authorizing Stage 2 within O1 through O7 and the three public seams. The earlier M1 planning statements remain historical. M1 and M2 have since merged through [#51](https://github.com/Reilley64/rill/pull/51) and [#53](https://github.com/Reilley64/rill/pull/53).
+This records Stage 1 of M3 ticket ri-1fk. The owner subsequently approved checkpoint a41e7cc (ri-1fk, comment 6939478619), authorizing Stage 2 within O1 through O7 and the three public seams. The earlier M1 planning statements remain historical. M1 and M2 have since merged through [#51](https://github.com/Reilley64/rill/pull/51) and [#53](https://github.com/Reilley64/rill/pull/53).
 
 The implementation branch is `implementation/m3-loader-resolver`. Its exact starting commit is `04fd25ff9e8b4e02621802a111263947dbeb53b0`, fetched from origin/main after #53 merged. That commit contains M1 `7379a28` and M2 `6ea5fdd`. The original plan baseline is `e1559249c325c3898f506b271e91d76b884be290`. The ticket links the plan at the exact implementation start.
 
-[RFC 0002's proposed procedure](rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns candidate discovery, route reduction, namespace installation, identities, cycles and graph capture. The checkpoint approval covers these scoped additions to a Draft RFC. Its existing identity/order, lexical/source and syntax approvals remain unchanged. This approval authorizes only the identified M3 contract, not the complete RFC set or #28's readiness obligations.
+[RFC 0002's proposed procedure](rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns candidate discovery, route reduction, namespace installation, identities, cycles and graph capture. The checkpoint approval covers these scoped additions to a Draft RFC. Its existing identity/order, lexical/source and syntax approvals remain unchanged. This approval authorizes only the identified M3 contract, not the complete RFC set or ri-48g's readiness obligations.
 
 ### Owner choices before coding
 
@@ -157,11 +157,11 @@ These slices remain one M3 ticket and one M3-only draft PR unless the owner requ
 3. Add complete competing-prefix discovery and fixed-point re-export/cycle resolution. Test route deduplication, anchored cycles and unanchored aliases.
 4. Add observation replay, change detection and canonical result ordering. Complete the acceptance mapping and review all M1/M2 regressions.
 
-Each slice includes its own red-green filesystem cases. Preserve existing M1/M2 source and tests. Any necessary earlier-stage fix needs a separate regression test and explanation in #54 and the PR.
+Each slice includes its own red-green filesystem cases. Preserve existing M1/M2 source and tests. Any necessary earlier-stage fix needs a separate regression test and explanation in ri-1fk and the PR.
 
 ### M3 acceptance checklist, not observed evidence
 
-The names below are planned test behaviors, not existing tests or passing results. Replace them with exact implemented test names and observed outcomes in #54 and the completion record. RFC case numbers here refer to module cases M1 through M15, not compiler milestones.
+The names below are planned test behaviors, not existing tests or passing results. Replace them with exact implemented test names and observed outcomes in ri-1fk and the completion record. RFC case numbers here refer to module cases M1 through M15, not compiler milestones.
 
 | RFC case or requirement | Planned direct test through the proposed interfaces | Explicit later-stage assertion |
 | --- | --- | --- |
@@ -200,13 +200,13 @@ At this checkpoint, M3 implementation and every proposed acceptance test are Not
 
 ### Stage 2 acceptance
 
-The [M3 acceptance record](../crates/compiler/tests/m3-acceptance.md) maps actual Rust tests to RFC 0002 M1 through M15, identity/order policies and the approved scope. Its later-stage column remains unpassed. It also records real filesystem limitations, the additive M2 parser-work statistic and unrun support gates. #54 and the M3-only draft PR retain command results and implementation revisions. A resolved graph is not a successfully checked program.
+The [M3 acceptance record](../crates/compiler/tests/m3-acceptance.md) maps actual Rust tests to RFC 0002 M1 through M15, identity/order policies and the approved scope. Its later-stage column remains unpassed. It also records real filesystem limitations, the additive M2 parser-work statistic and unrun support gates. ri-1fk and the M3-only draft PR retain command results and implementation revisions. A resolved graph is not a successfully checked program.
 
 ## M4 scope and design checkpoint
 
 ### Starting point and authority
 
-[M4 umbrella #56](https://github.com/Reilley64/rill/issues/56) is a separate implementation ticket from #28. It is claimed by Reilley64 and remains open. No partial slice completes M4.
+M4 umbrella ri-b83 is a separate implementation ticket from ri-48g. It is claimed by Reilley64 and remains open. No partial slice completes M4.
 
 PR #55 merged on 2026-11-17 at 07:58:38 UTC. After fetching origin, `origin/main` was `ee12588f2cba912025900e1ac587586fb9cb6235`. The fresh branch `implementation/m4-typed-foundation` starts at that exact commit. It includes M3's reviewed source revision `862704bea6af46e1446b3b7942e690f877b116c1` and completion record `d05a0b559e6ee19f2e48d2e0f8b4719469d65f3e`.
 
@@ -216,7 +216,7 @@ M1 supplies immutable snapshots, spans, lexical facts and decoded provenance. M2
 
 M3 explicitly deferred expression/type/local-use resolution, signature compatibility, public-requirement checking, captures, layout, overloads, conversions, coherence and protected operations. Those deferrals are current M4/M5 prerequisites, not failed M3 acceptance. Older absent-implementation statements in RFC evidence tables remain historical records.
 
-RFC 0001 remains Accepted at its recorded snapshot. RFCs 0002 through 0010 remain Draft with their existing scoped approvals. The owner subsequently [approved O1 through O4](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. This authorizes only M4.1 and its three public TDD seams. The original checkpoint claimed no implementation evidence.
+RFC 0001 remains Accepted at its recorded snapshot. RFCs 0002 through 0010 remain Draft with their existing scoped approvals. The owner subsequently approved O1 through O4 (ri-b83, comment 6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. This authorizes only M4.1 and its three public TDD seams. The original checkpoint claimed no implementation evidence.
 
 ### Proposed dependency-ordered slices
 
@@ -340,7 +340,7 @@ Return these choices to the owner before implementing the affected procedure. Pr
 
 ### Delivery and verification after approval
 
-Create and claim an M4.1 slice ticket under #56 after scope approval. Link the exact approved checkpoint and the starting commit. Only the first approved slice is authorized for implementation.
+Create and claim an M4.1 slice ticket under ri-b83 after scope approval. Link the exact approved checkpoint and the starting commit. Only the first approved slice is authorized for implementation.
 
 Follow the implement and TDD skills. Run focused tests regularly, then test:compiler, test, check and build:scaffold through mise. Run check:ci if workflows change. Record the host, tools, commands, observed results, unsupported cases and unrun gates. Any M1 through M3 fix needs its own regression and explanation.
 
@@ -378,19 +378,19 @@ Both corrections were made locally without another delegated review. The prose p
 
 ### M4.1 Stage 2 acceptance
 
-[Slice #57](https://github.com/Reilley64/rill/issues/57) records the approved M4.1 work. The [M4.1 acceptance record](../crates/compiler/tests/m4-1-acceptance.md) maps real tests to the checkpoint requirements. It preserves unimplemented checks and later-slice boundaries. It does not complete M4 or enable any product command.
+Slice ri-11w records the approved M4.1 work. The [M4.1 acceptance record](../crates/compiler/tests/m4-1-acceptance.md) maps real tests to the checkpoint requirements. It preserves unimplemented checks and later-slice boundaries. It does not complete M4 or enable any product command.
 
 ## M4.2 design checkpoint
 
 ### Delivery and current baseline
 
-The owner requested completion of all M4 slices in existing PR #58. This supersedes separate slice PRs and intermediate merge gates. It does not approve unwritten language policies or unreviewed procedures. PR #58 remains draft and unmerged; #56 remains open.
+The owner requested completion of all M4 slices in existing PR #58. This supersedes separate slice PRs and intermediate merge gates. It does not approve unwritten language policies or unreviewed procedures. PR #58 remains draft and unmerged; ri-b83 remains open.
 
-[M4.2 ticket #59](https://github.com/Reilley64/rill/issues/59) starts design work from branch commit `f405adaa01058849025105b11ed77fe32f6271b7`. M4.1 implementation revision `7602ed55f8b344646218e8cc0af8089bfee18efb` provides its input facts. The overall M4 starting main remains `ee12588f2cba912025900e1ac587586fb9cb6235`.
+M4.2 ticket ri-9y3 starts design work from branch commit `f405adaa01058849025105b11ed77fe32f6271b7`. M4.1 implementation revision `7602ed55f8b344646218e8cc0af8089bfee18efb` provides its input facts. The overall M4 starting main remains `ee12588f2cba912025900e1ac587586fb9cb6235`.
 
 M4.1 has completed scoped implementation review and acceptance evidence, including four hosted scaffold profiles. Its integration remains pending as part of M4. No intermediate merge is needed before M4.2 design or subsequently approved implementation. The later documentation commit records hosted results without claiming it was itself already tested on those hosts.
 
-At checkpoint creation, no M4.2 compiler/model code or tests had been written. The owner subsequently [approved D1 through D4](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) at `c26d737439fd4c426d362655ad15984cc70108dc`. Approval covers both owning procedures, canonical prelude contracts, the three public TDD seams and model-first/compiler-TDD sequence. Full RFC statuses and earlier approvals remain unchanged.
+At checkpoint creation, no M4.2 compiler/model code or tests had been written. The owner subsequently approved D1 through D4 (ri-9y3, comment 6945089123) at `c26d737439fd4c426d362655ad15984cc70108dc`. Approval covers both owning procedures, canonical prelude contracts, the three public TDD seams and model-first/compiler-TDD sequence. Full RFC statuses and earlier approvals remain unchanged.
 
 ### Owning procedures and exact prerequisites
 
@@ -496,9 +496,9 @@ The [M4.2 acceptance record](../crates/compiler/tests/m4-2-acceptance.md) maps a
 
 ### Baseline, scope and authorities
 
-[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) starts from `dcc4b1390fbbf163b54618a5b4c59151d71fdb9a`, the reviewed M4.2 implementation on the existing branch. All eight slices remain in draft PR #58. No intermediate merge or new PR is required. M4 as a whole remains incomplete, and #56 remains open.
+M4.3 ticket ri-3gd starts from `dcc4b1390fbbf163b54618a5b4c59151d71fdb9a`, the reviewed M4.2 implementation on the existing branch. All eight slices remain in draft PR #58. No intermediate merge or new PR is required. M4 as a whole remains incomplete, and ri-b83 remains open.
 
-The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint `e4750b8579ea11aa80f76f86f93014c78854fac0` before M4.3 code. The implementation and [acceptance record](../crates/compiler/tests/m4-3-acceptance.md) now cover this bounded stage. Full RFC statuses, earlier scoped approvals and historical evidence remain unchanged.
+The owner approved C1 through C4 (ri-3gd, comment 6947086957) at checkpoint `e4750b8579ea11aa80f76f86f93014c78854fac0` before M4.3 code. The implementation and [acceptance record](../crates/compiler/tests/m4-3-acceptance.md) now cover this bounded stage. Full RFC statuses, earlier scoped approvals and historical evidence remain unchanged.
 
 [RFC 0003](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m43-scalar-and-static-control-procedure) owns supported scalar contexts, lexical bindings, static places and finite control analysis. [RFC 0006](rfcs/0006-numbers-strings-and-primitive-operations.md#proposed-m43-literal-and-primitive-checking) owns literal/context propagation and primitive operation admission. [RFC 0004](rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m43-explicit-standalone-calls) owns explicit standalone calls. [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m43-never-admission) owns the proposed never precision rule.
 
@@ -594,9 +594,9 @@ Implementation `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd` is pushed in draft PR 
 
 ### Baseline and owning procedures
 
-[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) starts at reviewed M4.3 revision `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd`. All slices remain in existing draft PR #58. No intermediate merge is required or authorized. #56 remains open.
+M4.4 ticket ri-qtl starts at reviewed M4.3 revision `abd1f65d716a8ea3eaac5c47f187458dedd2d2fd`. All slices remain in existing draft PR #58. No intermediate merge is required or authorized. ri-b83 remains open.
 
-The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler code. The bounded implementation and acceptance evidence are recorded below. The owner later [confirmed ordinary simple-binding value typing](https://github.com/Reilley64/rill/issues/61#issuecomment-6959565199), without implicit borrowing or permission for an illegal transfer. Earlier scoped approvals, source examples, evidence and full RFC statuses remain unchanged.
+The owner approved K1 through K4 (ri-qtl, comment 6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler code. The bounded implementation and acceptance evidence are recorded below. The owner later confirmed ordinary simple-binding value typing (ri-qtl, comment 6959565199), without implicit borrowing or permission for an illegal transfer. Earlier scoped approvals, source examples, evidence and full RFC statuses remain unchanged.
 
 [RFC 0005](rfcs/0005-types-records-enums-and-inference.md#proposed-m44-data-and-pattern-procedure) owns constructors, field access, variant admission/joins, categories and finite coverage. [RFC 0003](rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control) owns match/guard scopes and complete expression exit composition. [RFC 0007](rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification) supplies the typing prerequisite for borrowed binders, not ownership execution.
 
@@ -679,17 +679,17 @@ After the local correction, `mise run check:docs` passed 1658 destinations with 
 
 The [M4.4 acceptance record](../crates/compiler/tests/m4-4-acceptance.md) maps direct data entry/body/node assertions and the separate model-first evidence. Both independent final axes reviewed the staged implementation. Standards found one nonblocking duplication heuristic, corrected with a shared budget-charging substitution builder. Spec found two P2 defects in implicit-dereference views and nested match context. Public regressions failed before both local corrections. The record separates the original review scope, later corrections and actual verification; no second delegated review is claimed.
 
-The implemented scope retains explicit missing core and aggregate-classification prerequisites. Positive List/index/Option/Result admission remains an M4.8 integration gate. Neither that boundary nor the simple-binding clarification authorizes an illegal ownership transfer. M4.5 through M4.8 still require separate procedures, review and owner approval. PR #58 remains draft and unmerged; #56 remains open.
+The implemented scope retains explicit missing core and aggregate-classification prerequisites. Positive List/index/Option/Result admission remains an M4.8 integration gate. Neither that boundary nor the simple-binding clarification authorizes an illegal ownership transfer. M4.5 through M4.8 still require separate procedures, review and owner approval. PR #58 remains draft and unmerged; ri-b83 remains open.
 
 ## M4.5 design checkpoint
 
 ### Baseline and scope
 
-[M4.5 #62](https://github.com/Reilley64/rill/issues/62) starts from M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. Its predecessor has 36 public-interface tests and 239 passing compiler tests. The [M4.4 acceptance record](../crates/compiler/tests/m4-4-acceptance.md) preserves its model, review, correction and verification scopes.
+M4.5 ri-8p9 starts from M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. Its predecessor has 36 public-interface tests and 239 passing compiler tests. The [M4.4 acceptance record](../crates/compiler/tests/m4-4-acceptance.md) preserves its model, review, correction and verification scopes.
 
-The owner [approved exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287), including the stated parent-pattern incomparability. The owner then [approved P1 through P4](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) at `3392baaac8f2ee50e86167700349273a76ce61c4`, before model or Rust work. The exact-wildcard decision alone did not approve the checkpoint.
+The owner approved exact wildcard capture (ri-8p9, comment 6962750287), including the stated parent-pattern incomparability. The owner then approved P1 through P4 (ri-8p9, comment 6963439018) at `3392baaac8f2ee50e86167700349273a76ce61c4`, before model or Rust work. The exact-wildcard decision alone did not approve the checkpoint.
 
-All slices stay in existing draft PR #58. #56 remains open. No intermediate merge, new PR, M5 or complete-M4 claim is authorized.
+All slices stay in existing draft PR #58. ri-b83 remains open. No intermediate merge, new PR, M5 or complete-M4 claim is authorized.
 
 ### Owning procedures
 
@@ -787,9 +787,9 @@ After correction, documentation validation passed 1676 destinations with zero er
 
 ### Baseline and scope
 
-[M4.6 #63](https://github.com/Reilley64/rill/issues/63) follows M4.5 at `830a651d88bf1703bbfa877873ebd2289e52adcc`. The [M4.5 acceptance record](../crates/compiler/tests/m4-5-acceptance.md) records 17 scoped public tests and 256 passing compiler tests. Its ordinary facts remain hypothetical without canonical core admission. They do not authorize an ordinary call or stand in for evidence.
+M4.6 ri-w05 follows M4.5 at `830a651d88bf1703bbfa877873ebd2289e52adcc`. The [M4.5 acceptance record](../crates/compiler/tests/m4-5-acceptance.md) records 17 scoped public tests and 256 passing compiler tests. Its ordinary facts remain hypothetical without canonical core admission. They do not authorize an ordinary call or stand in for evidence.
 
-The owner [chose the context agreement rule](https://github.com/Reilley64/rill/issues/63#issuecomment-6964354024). For loose `pair<A,B>` with `(A,B)` and `(T,T)` implementations, `pair(1i32, 2)` needs an independent width. The viable fallback does not supply the same context as the specialized pattern. A declaration `pair<T>(left: T, right: T)` can supply it from the first argument. This precision does not approve the procedure or the public queries below.
+The owner chose the context agreement rule (ri-w05, comment 6964354024). For loose `pair<A,B>` with `(A,B)` and `(T,T)` implementations, `pair(1i32, 2)` needs an independent width. The viable fallback does not supply the same context as the specialized pattern. A declaration `pair<T>(left: T, right: T)` can supply it from the first argument. This precision does not approve the procedure or the public queries below.
 
 ### Owning procedures
 
@@ -803,7 +803,7 @@ Reuse M4.5's actual inventory and shared M4.1/M4.2 facilities. Extend the M4.3/M
 
 This stage checks supported named and implementation bodies symbolically, including their nested arrows and supported calls in startup and expectations. Check written source independently of the set of concrete instantiations. Callee contracts come from declarations and proof records, never an inspection of an eventual callee body. Checking a fresh arrow's own source is not strengthening a callee contract.
 
-M4.7 owns conversion applicability/determinacy/coherence. M4.8 owns actual core admission, canonical List/index/Option/Result/Err and iterator integration, visibility of public and nested declarations, remaining capture/aggregate typing prerequisites and integrated result-use completion. Keep pending typed obligations inside M4. This stage establishes no ownership, loan, storage, transfer, cleanup, runtime or editor facts. Keep #56 and #63 open and PR #58 draft and unmerged.
+M4.7 owns conversion applicability/determinacy/coherence. M4.8 owns actual core admission, canonical List/index/Option/Result/Err and iterator integration, visibility of public and nested declarations, remaining capture/aggregate typing prerequisites and integrated result-use completion. Keep pending typed obligations inside M4. This stage establishes no ownership, loan, storage, transfer, cleanup, runtime or editor facts. Keep ri-b83 and ri-w05 open and PR #58 draft and unmerged.
 
 ### Proposed public interfaces
 
@@ -861,7 +861,7 @@ Run `mise run test:compiler`, `mise run test`, `mise run check` and `mise run bu
 
 ## M4.7 design checkpoint
 
-[M4.7 #64](https://github.com/Reilley64/rill/issues/64) follows the [M4.6 completion record](../crates/compiler/tests/m4-6-acceptance.md#completion-increment) at `392d8428a81109b1dc4ed0ad8e60fd4738054522`. All eight slices remain in [draft PR #58](https://github.com/Reilley64/rill/pull/58). The [three confirmed conversion policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6918885645) do not approve these new procedures or accept RFC 0009.
+M4.7 ri-lqn follows the [M4.6 completion record](../crates/compiler/tests/m4-6-acceptance.md#completion-increment) at `392d8428a81109b1dc4ed0ad8e60fd4738054522`. All eight slices remain in [draft PR #58](https://github.com/Reilley64/rill/pull/58). The three confirmed conversion policies (ri-48g, comment 6918885645) do not approve these new procedures or accept RFC 0009.
 
 ### Owning procedure and scope
 
@@ -932,13 +932,13 @@ The corrected checkpoint was checked locally, not independently re-reviewed. At 
 
 ### M4.7 implementation acceptance
 
-The owner [approved V1 through V4](https://github.com/Reilley64/rill/issues/64#issuecomment-6967953617) at `f0b261a887dec3bf6252c40da928335e29bfc602` before model or compiler work. The approval includes V2's exact source capture for destination-bound variables. It does not approve core admission or authorize a merge.
+The owner approved V1 through V4 (ri-lqn, comment 6967953617) at `f0b261a887dec3bf6252c40da928335e29bfc602` before model or compiler work. The approval includes V2's exact source capture for destination-bound variables. It does not approve core admission or authorize a merge.
 
 [The acceptance record](../crates/compiler/tests/m4-7-acceptance.md) lists the bounded model and public tests, the independent Standards and Spec findings, and the locally verified corrections. M4.7 leaves actual core admission and integrated typed-stage completion to M4.8. PR #58 remains draft.
 
 ## M4.8 design checkpoint
 
-[M4.8 #65](https://github.com/Reilley64/rill/issues/65) starts from the [M4.7 publication](../crates/compiler/tests/m4-7-acceptance.md) at `965e27dee0bc76ee8bdae922b7fea933e7709391`. The slice stays in [draft PR #58](https://github.com/Reilley64/rill/pull/58). RFC 0001 remains Accepted at its recorded snapshot. RFCs 0002 through 0010 remain Draft. This checkpoint does not approve a new standard-library implementation or enable product commands.
+M4.8 ri-dm4 starts from the [M4.7 publication](../crates/compiler/tests/m4-7-acceptance.md) at `965e27dee0bc76ee8bdae922b7fea933e7709391`. The slice stays in [draft PR #58](https://github.com/Reilley64/rill/pull/58). RFC 0001 remains Accepted at its recorded snapshot. RFCs 0002 through 0010 remain Draft. This checkpoint does not approve a new standard-library implementation or enable product commands.
 
 ### Owning procedures and completion
 
@@ -968,7 +968,7 @@ Account for every loaded declaration and all checkable body roots. Check support
 
 Only issue a typed-stage receipt when all required obligations for that capture complete without blocking findings, pending work or conditional premises. Advisory findings do not change acceptance. Use `ResourceLimit` before `Incomplete` before `SourceRejected`, after request validation. Preserve independent findings and known facts on failure. Report only stages actually performed. Typed completion is not ownership, loan, move, transfer, lifetime, disposal, MIR, runtime, codegen, LLVM, editor or product acceptance.
 
-The source tree has no [standard-library implementation](../stdlib/README.md). There is no actual admitted core bundle at this revision. This checkpoint requests approval for the shared gate and testable independent checks. It does not define a trusted bundle format or authenticator. Positive core testing needs actual inputs and a separately reviewed toolchain authority source. The bounded increment can demonstrate failures and independent static facts. It cannot demonstrate admitted List, Result or protected providers with fabricated source or call-site assertions. Leave #65 and #56 open while any required typed gate remains unverified.
+The source tree has no [standard-library implementation](../stdlib/README.md). There is no actual admitted core bundle at this revision. This checkpoint requests approval for the shared gate and testable independent checks. It does not define a trusted bundle format or authenticator. Positive core testing needs actual inputs and a separately reviewed toolchain authority source. The bounded increment can demonstrate failures and independent static facts. It cannot demonstrate admitted List, Result or protected providers with fabricated source or call-site assertions. Leave ri-dm4 and ri-b83 open while any required typed gate remains unverified.
 
 ### Proposed public interfaces
 
@@ -1019,9 +1019,9 @@ The checkpoint corrections were checked locally, not independently re-reviewed. 
 
 ### M4.8 partial implementation
 
-The owner [approved U1 through U4](https://github.com/Reilley64/rill/issues/65#issuecomment-6969612205) at `f3d65f72062237f87372f1896db5f2a66d9f2a54` before model or compiler work. The [M4.8 verification record](../crates/compiler/tests/m4-8-acceptance.md) lists the partial report, finite model, local checks and exact reviewed and verified revisions.
+The owner approved U1 through U4 (ri-dm4, comment 6969612205) at `f3d65f72062237f87372f1896db5f2a66d9f2a54` before model or compiler work. The [M4.8 verification record](../crates/compiler/tests/m4-8-acceptance.md) lists the partial report, finite model, local checks and exact reviewed and verified revisions.
 
-Actual core admission still requires a shipped core implementation and approved authority source. Compiler Result-use checking, the remaining core-dependent checks and a typed-stage receipt are not established. Issues #65 and #56 remain open, and PR #58 remains draft and unmerged.
+Actual core admission still requires a shipped core implementation and approved authority source. Compiler Result-use checking, the remaining core-dependent checks and a typed-stage receipt are not established. Issues ri-dm4 and ri-b83 remain open, and PR #58 remains draft and unmerged.
 
 ### M4.8 completion checkpoint: first-party core authority
 
@@ -1035,9 +1035,9 @@ This proposed checkpoint follows the partial publication at `4f5de4bc15397994928
 
 Standards and Spec independently reviewed `38942a0c5ed522d61e832de66b52e50f92ecd5d2` against `4f5de4bc153979949282953aad66a552fc700993`. The two-file diff has SHA-256 `65a344a7bed1debe302b629bba84139854af0c9c4b8bd08dded9b02e19c93a73`. Standards requested exact dependency links, individual expected outcomes and shorter prose. Spec requested the initial profile and root selection, actual provider ownership and coverage, reproducible installation, declared metadata triggers and separate provider/protection facts. The corrections address those findings; they are not independently re-reviewed.
 
-The owner [approved A1 through A3](https://github.com/Reilley64/rill/issues/65#issuecomment-6971033745) at `3c7e9bb0664ecb866630fbc1f349e333aef57ac5` before implementation. The [installed Option checks](../crates/compiler/tests/m4-8-acceptance.md#installed-option-checks) record the first increment. The [integrated installed checks](../crates/compiler/tests/m4-8-acceptance.md#integrated-installed-core-slices) record the later partial publication. Both load modes reported `Incomplete` at that revision.
+The owner approved A1 through A3 (ri-dm4, comment 6971033745) at `3c7e9bb0664ecb866630fbc1f349e333aef57ac5` before implementation. The [installed Option checks](../crates/compiler/tests/m4-8-acceptance.md#installed-option-checks) record the first increment. The [integrated installed checks](../crates/compiler/tests/m4-8-acceptance.md#integrated-installed-core-slices) record the later partial publication. Both load modes reported `Incomplete` at that revision.
 
-The [verified closeout revision](../crates/compiler/tests/m4-8-acceptance.md#verified-closeout-revision) records the A3 checks of the expanded entry. The staged `aarch64-apple-darwin` profile with empty options issues a receipt in both modes. This is static compiler evidence only. Keep #65 and #56 open and PR #58 draft until the owner decides otherwise.
+The [verified closeout revision](../crates/compiler/tests/m4-8-acceptance.md#verified-closeout-revision) records the A3 checks of the expanded entry. The staged `aarch64-apple-darwin` profile with empty options issues a receipt in both modes. This is static compiler evidence only. Keep ri-dm4 and ri-b83 open and PR #58 draft until the owner decides otherwise.
 
 ## Completion record
 

@@ -5,7 +5,7 @@
 | ID | 0011 |
 | Status | Draft |
 | Owner | Rill project owner |
-| Source inputs | [M6 gate #77](https://github.com/Reilley64/rill/issues/77), [C interop survey](../research/c-interop-language-survey.md) (SHA-256 `ac0739b8233fda8fb36be4e640bb7a0841e8d74fd22575f08ae8933d99984f63`), [ADR 0024](../adr/0024-external-sqlite-native-provider.md), [ADR 0025](../adr/0025-explicit-tls-trust-and-private-provider-boundary.md), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md), [zlib manual](https://zlib.net/manual.html), [SDL2 thread rules](https://wiki.libsdl.org/SDL2/SDL_RenderPresent) |
+| Source inputs | M6 gate ri-qlh, [C interop survey](../research/c-interop-language-survey.md) (SHA-256 `ac0739b8233fda8fb36be4e640bb7a0841e8d74fd22575f08ae8933d99984f63`), [ADR 0024](../adr/0024-external-sqlite-native-provider.md), [ADR 0025](../adr/0025-explicit-tls-trust-and-private-provider-boundary.md), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md), [zlib manual](https://zlib.net/manual.html), [SDL2 thread rules](https://wiki.libsdl.org/SDL2/SDL_RenderPresent) |
 | RFC dependencies | [RFC 0002: canonical identity and metadata](0002-modules-and-program-loading.md#family-collection-and-metadata-boundaries), [RFC 0007: dependencies](0007-ownership-borrowing-mutation-and-cleanup.md#layered-dependency-model) and [native completion](0007-ownership-borrowing-mutation-and-cleanup.md#protected-actions-and-asynchronous-completion), [RFC 0008: error wrappers](0008-errors-propagation-and-caused-by-wrapping.md#wrappers-payloads-and-access). Review the shared rules against final M6 revisions before accepting this RFC. |
 | Replaces / superseded by | None. The SQLite and TLS provider contracts retain their separate authority. |
 | Decision | Not yet decided |
@@ -130,7 +130,7 @@ A C++ host calling exported Rill code is useful for an incremental port. It is n
 
 ## Implementation implications
 
-No implementation exists for this proposal. Wait for [native execution in M6](https://github.com/Reilley64/rill/issues/77). First check build admission and lower the fixed zlib import. Link the real library and test the byte boundary. Then add the owner and main-thread service needed by SDL2. Do not add raw pointer syntax as a shortcut.
+No implementation exists for this proposal. Wait for native execution in M6 (ri-qlh). First check build admission and lower the fixed zlib import. Link the real library and test the byte boundary. Then add the owner and main-thread service needed by SDL2. Do not add raw pointer syntax as a shortcut.
 
 The adapter may use an owned request and a native worker where the library allows it. An SDL2 video operation must use the main thread. The exact execution mechanism can vary if it preserves the access, completion and cleanup rules.
 

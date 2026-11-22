@@ -4,8 +4,8 @@
 | --- | --- |
 | ID | 0009 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [#41 conversion decision](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), [ADR 0017](../adr/0017-user-implementable-conversions.md), [catalogue section 9](../standard-library-contracts.md#9-conversion-numeric-compatibility-parsing-and-formatting) and the later [core interface direction](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445). [Source reconciliation](#source-reconciliation) identifies related inputs. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | ri-1wl conversion decision (comment 6886119679), [ADR 0017](../adr/0017-user-implementable-conversions.md), [catalogue section 9](../standard-library-contracts.md#9-conversion-numeric-compatibility-parsing-and-formatting) and the later core interface direction (ri-48g, comment 6913810445). [Source reconciliation](#source-reconciliation) identifies related inputs. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. |
 | RFC dependencies | Draft RFCs [0002](0002-modules-and-program-loading.md), [0003](0003-expressions-bindings-and-control-flow.md), [0004](0004-functions-overloads-and-generic-requirements.md), [0005](0005-types-records-enums-and-inference.md), [0006](0006-numbers-strings-and-primitive-operations.md), [0007](0007-ownership-borrowing-mutation-and-cleanup.md) and [0008](0008-errors-propagation-and-caused-by-wrapping.md) propose shared rules. Their full texts are not accepted. Required [companions](#required-companion-rules) remain incomplete or missing. The [M4.7 procedure](#proposed-m47-conversion-checking-procedure) pins its scoped dependencies below. |
 | Replaces / superseded by | None. This draft does not amend an Accepted RFC or accept another draft. |
 | Decision | Not yet decided |
@@ -428,7 +428,7 @@ No argument coercion or automatic A-to-B-to-C chain is introduced. A source alre
 | [Draft RFC 0006](0006-numbers-strings-and-primitive-operations.md) | Numeric protection/values, source widths, core pairs, parsers and logical views. | Its confirmed policies remain distinct from broader draft matrix details. Full grammar and ownership integration remain incomplete. |
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Value/source routes, reference access, initialization and cancellation-safe cleanup. | Five policies are confirmed. Complete caller/selected-signature and nested route judgments remain incomplete. |
 | [Draft RFC 0008](0008-errors-propagation-and-caused-by-wrapping.md) | Exact error identity, typed wrappers, causes, display evidence and origins. | Three policies are confirmed. Full sealed evidence, constructor and runtime judgments remain incomplete. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with library/runtime integration incomplete. | Actual core registration graph, trusted admission, ABI and accurate inference/evidence explanations. | Reporting is proposed, not accepted. [#28](https://github.com/Reilley64/rill/issues/28) retains production and target validation. |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with library/runtime integration incomplete. | Actual core registration graph, trusted admission, ABI and accurate inference/evidence explanations. | Reporting is proposed, not accepted. ri-48g retains production and target validation. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -525,7 +525,7 @@ RFC 0006 owns numeric/core pair values and parser/UTF-8 behavior. Its confirmed 
 
 Named SQL helpers can invoke canonical conversions under explicit endpoint/error requirements. JSON/time/path libraries retain their own precision and policy rules. Type registration alone does not enroll an application model into any protocol.
 
-Compiler/test observation must not call conversions to print or inspect values. The accepted [RFC 0001 snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) forbids extra user callbacks or changed ownership during trusted capture. This RFC grants no exception.
+Compiler/test observation must not call conversions to print or inspect values. The accepted RFC 0001 snapshot (ri-48g, comment 6907867211) forbids extra user callbacks or changed ownership during trusted capture. This RFC grants no exception.
 
 Proper-tail eligibility still counts conversion body/caller cleanup and outstanding native sources. A final-looking tryInto followed by adaptation/wrapping may owe further work. No tail lowering or target support follows from this draft.
 
@@ -533,13 +533,13 @@ Proper-tail eligibility still counts conversion body/caller cleanup and outstand
 
 | Input | Disposition |
 | --- | --- |
-| [#41 final decision](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), [ADR 0017](../adr/0017-user-implementable-conversions.md) | Preserve canonical pair keys, aliases, endpoint permission, generic/specific entries and selected E. The later RFC policy decision confirms matching/applicability/output precision, not the full checking procedures. |
+| ri-1wl final decision (comment 6886119679), [ADR 0017](../adr/0017-user-implementable-conversions.md) | Preserve canonical pair keys, aliases, endpoint permission, generic/specific entries and selected E. The later RFC policy decision confirms matching/applicability/output precision, not the full checking procedures. |
 | [Conversion inventory](../prototypes/11-conversions.md), source revision | Preserve target/source independence, variant enum example, duplicate/foreign rejection, exact errors and borrowed dependencies. The confirmed conversion-only applicability policy preserves ordinary-family selection. |
-| [#10/#17 source](0004-functions-overloads-and-generic-requirements.md#source-reconciliation), Draft RFC 0004 | Preserve ordinary parameter keys, broad nested-type permission and winning-body requirement checks. Only conversions receive this pair/permission/selection boundary. |
-| [#18/#23 source](0006-numbers-strings-and-primitive-operations.md#source-reconciliation), later [core interface decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) | Preserve numeric values/protection and confirmed strict parsing/owned UTF-8 decoding through tryInto. Earlier separate parser/decoder names are historical. Broader matrix details remain Draft. |
-| [RFC 0007 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379), [RFC 0008 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6917170418) | Preserve actual dependencies, initialized cleanup, exact error metadata and separate retained-cause evidence. Complete underlying judgments remain incomplete. |
-| #24/#41 and [diagnostic registry](../diagnostic-codes.md) | Preserve distinct conversion codes and source/evidence explanations. Output-related failures cannot masquerade as error-driven overload ranking or a successful incomplete check. |
-| #31/#33/#40 and [SQL contract](../sql-contracts.md) | Keep explicit application endpoints/codecs and named consumer helpers. No implicit schema, temporal precision conversion, serialization or enrollment is added. |
+| [ri-skb/#17 source](0004-functions-overloads-and-generic-requirements.md#source-reconciliation), Draft RFC 0004 | Preserve ordinary parameter keys, broad nested-type permission and winning-body requirement checks. Only conversions receive this pair/permission/selection boundary. |
+| [ri-a2c/#23 source](0006-numbers-strings-and-primitive-operations.md#source-reconciliation), later core interface decision (ri-48g, comment 6913810445) | Preserve numeric values/protection and confirmed strict parsing/owned UTF-8 decoding through tryInto. Earlier separate parser/decoder names are historical. Broader matrix details remain Draft. |
+| RFC 0007 policies (ri-48g, comment 6915849379), RFC 0008 policies (ri-48g, comment 6917170418) | Preserve actual dependencies, initialized cleanup, exact error metadata and separate retained-cause evidence. Complete underlying judgments remain incomplete. |
+| ri-3t8/#41 and [diagnostic registry](../diagnostic-codes.md) | Preserve distinct conversion codes and source/evidence explanations. Output-related failures cannot masquerade as error-driven overload ranking or a successful incomplete check. |
+| ri-1zg/#33/#40 and [SQL contract](../sql-contracts.md) | Keep explicit application endpoints/codecs and named consumer helpers. No implicit schema, temporal precision conversion, serialization or enrollment is added. |
 | [Rust evidence research](../research/0041-q19-rust-conversion-evidence.md), recorded revision | Retain its specialization-output hazard and actual historical Rust-check scope. Stable Rust's overlap rejection is not Rill's approved rule or proof of this checker. No research command is rerun here. |
 | [Historical conversion program](../../prototypes/11-conversions.rill), source revision | Preserve its 14 intended-valid expectations and all artifact bytes. New case descriptions do not turn it into an executed Rill suite. |
 
@@ -597,7 +597,7 @@ The existing Rust scaffold has no conversion parser, pair solver, evidence check
 
 | Artifact / revision | Evidence label | Rule/question exercised | Checker/tool and command/environment | Expected / observed outcome | Limits, negative/unavailable results and gate links |
 | --- | --- | --- | --- | --- | --- |
-| #41 decision, ADR 0017, catalogue section 9 and repository base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Pair/evidence contracts, ordinary-family distinction and later core direction. | Drafting agent, 2026-11-16. Read current #41 decision/handoffs, contracts and example inventory. | Reconciled canonical aliases, error specialization and conversion applicability language. | Source review is not a finite solver, soundness proof or full RFC acceptance. |
+| ri-1wl decision, ADR 0017, catalogue section 9 and repository base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Pair/evidence contracts, ordinary-family distinction and later core direction. | Drafting agent, 2026-11-16. Read current ri-1wl decision/handoffs, contracts and example inventory. | Reconciled canonical aliases, error specialization and conversion applicability language. | Source review is not a finite solver, soundness proof or full RFC acceptance. |
 | C1 through C26, this draft | NotChecked | Context, matching, applicability, output determination and source/error behavior. | No Rill parser, conversion/evidence checker or runtime is available. | Expected outcomes appear above. No program or candidate/evidence trace executed. | Policy approval does not complete formal judgments or companions. |
 | Whole-pair/evidence/determination rules | NotChecked | Correlations, unknown goals, dependent outputs and specialization safety. | No formal model, solver proof or reference checker ran. | No termination/completeness/soundness result is claimed. | Required procedures and native/Wasm integration remain incomplete. |
 | Historical prototypes and Rust research | NotChecked | Current Rill conversion implementation acceptance. | Artifacts retain their own historical labels and results. | No Rust research check is rerun or relabeled as Rill execution. | Existing Rust outcomes and authored expectations do not validate this combination. |
@@ -629,7 +629,7 @@ These require the corresponding checker/runtime and target profiles. Document ch
 
 ### Confirmed policies
 
-The project owner [approved all three policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6918885645) on 2026-11-16. The pre-recording snapshot has SHA-256 `5801d15d4f8d72cbaedb41e60b278d25c5a1a9fbc891c4fc0038a504da2dd007`.
+The project owner approved all three policies (ri-48g, comment 6918885645) on 2026-11-16. The pre-recording snapshot has SHA-256 `5801d15d4f8d72cbaedb41e60b278d25c5a1a9fbc891c4fc0038a504da2dd007`.
 
 1. Match complete pairs with exact requested destinations and permitted source input admission. Preserve shared-variable correlations and whole-enum source examples. Establish target substitutions before binding fresh source variables to actual source structure. Do not guess wider source types. Protected identity requires actual exact endpoint equality.
 2. Establish conversion-only requirement applicability before specificity, distinguishing proved, disproved and unresolved evidence. A disproved specific candidate can leave a general candidate applicable. Unknown potentially winning/tied candidates cannot justify successful fallback. Expected E cannot force applicability or fallback. Ordinary families retain their existing no-fallback rule.
@@ -643,7 +643,7 @@ Review and approve the [proposed M4.7 procedure](#proposed-m47-conversion-checki
 
 Complete implementation-binder/contextual inference, function-value adapters and caller/selected-signature ownership routes. Validate mandatory protected standard actions, actual core metadata dependencies and nested success/error escapes.
 
-These gaps prevent the [canonical readiness review](README.md#canonical-reviewready-checklist). Required inconsistencies return to [map #1](https://github.com/Reilley64/rill/issues/1), not silent ordinary-rule changes or weakened source cases.
+These gaps prevent the [canonical readiness review](README.md#canonical-reviewready-checklist). Required inconsistencies return to map ri-kl0, not silent ordinary-rule changes or weakened source cases.
 
 ### Implementation/validation gates and future scope
 
@@ -663,9 +663,9 @@ These checks cannot supply missing solver/ownership judgments. Formal ASD-STE100
 
 The project owner requested this conversions RFC on 2026-11-16. That request authorized drafting, not precision policies or full RFC acceptance. Existing source decisions and companion policy approvals retain their own scopes.
 
-The project owner later [approved all three precision policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6918885645). This approval identifies the pre-recording snapshot below. It does not accept the full RFC, supply missing judgments or establish readiness. Full Decision and Reviewed revision remain Not yet decided and Not yet reviewed.
+The project owner later approved all three precision policies (ri-48g, comment 6918885645). This approval identifies the pre-recording snapshot below. It does not accept the full RFC, supply missing judgments or establish readiness. Full Decision and Reviewed revision remain Not yet decided and Not yet reviewed.
 
 | Date / actor | Kind and scope of change | Reviewed revision or snapshot | Decision link / rationale |
 | --- | --- | --- | --- |
-| 2026-11-16, drafting agent | Created substantive Draft RFC 0009, register and partial source coverage. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a`, current #41/core direction and linked Draft companions. This is not a reviewed RFC snapshot. | User request to draft user-implementable conversions. No new policy, full RFC or implementation acceptance is inferred. |
-| 2026-11-16, project owner | Approved whole-pair matching, conversion-only requirement applicability and determined error outputs. | Pre-recording draft SHA-256 `5801d15d4f8d72cbaedb41e60b278d25c5a1a9fbc891c4fc0038a504da2dd007`. Local snapshot `/tmp/rill-rfc-0009-before-policy-approval.md`. | [Three-policy decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6918885645). Full acceptance, formal judgments, readiness and implementation/target/client validation remain open. |
+| 2026-11-16, drafting agent | Created substantive Draft RFC 0009, register and partial source coverage. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a`, current ri-1wl/core direction and linked Draft companions. This is not a reviewed RFC snapshot. | User request to draft user-implementable conversions. No new policy, full RFC or implementation acceptance is inferred. |
+| 2026-11-16, project owner | Approved whole-pair matching, conversion-only requirement applicability and determined error outputs. | Pre-recording draft SHA-256 `5801d15d4f8d72cbaedb41e60b278d25c5a1a9fbc891c4fc0038a504da2dd007`. Local snapshot `/tmp/rill-rfc-0009-before-policy-approval.md`. | Three-policy decision (ri-48g, comment 6918885645). Full acceptance, formal judgments, readiness and implementation/target/client validation remain open. |

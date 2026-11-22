@@ -1,8 +1,8 @@
-# #32 streaming I/O: adapters and adversarial evidence
+# ri-fnk streaming I/O: adapters and adversarial evidence
 
 Read the source examples in [`prototypes/12-streaming-io.rill`](../../prototypes/12-streaming-io.rill).
 
-[ADR 0018](../adr/0018-streaming-and-buffered-io.md) records the human-confirmed decision. The [companion source](../../prototypes/12-streaming-io.rill) contains 15 intended-valid expectations. Reviewers checked all examples and traces by hand. These are not compiler/runtime tests, protocol/security validation or a soundness proof. #28 formalizes checking; #30 still gates backends.
+[ADR 0018](../adr/0018-streaming-and-buffered-io.md) records the human-confirmed decision. The [companion source](../../prototypes/12-streaming-io.rill) contains 15 intended-valid expectations. Reviewers checked all examples and traces by hand. These are not compiler/runtime tests, protocol/security validation or a soundness proof. ri-48g formalizes checking; ri-dej still gates backends.
 
 ## Positive source coverage
 
@@ -33,7 +33,7 @@ The scoped requirements address local probe lifetimes and retained exclusive dep
 
 ## Socket-like ordinary-family composition
 
-This example composes types. It is not an OS socket API or proof that real socket directions can split. #34 owns actual directional handles. R and W below may simply be the memory adapters; any real endpoint must meet #34's ownership/native rules.
+This example composes types. It is not an OS socket API or proof that real socket directions can split. ri-vno owns actual directional handles. R and W below may simply be the memory adapters; any real endpoint must meet ri-vno's ownership/native rules.
 
 ```rill
 type SocketLike<R,W> = { receiver: R; sender: W };
@@ -56,10 +56,10 @@ Distinct input patterns determine each family's output E. R/W type parameters do
 
 ## TLS-like composition seam, not a TLS implementation
 
-The following signatures are schematic boundary contracts. `TlsLike<S>` owns S and private protocol state; its read/write implementation bodies require a real engine supplied by #38. Engine types/native calls, cryptography, negotiation and shutdown are intentionally not supplied here.
+The following signatures are schematic boundary contracts. `TlsLike<S>` owns S and private protocol state; its read/write implementation bodies require a real engine supplied by ri-irw. Engine types/native calls, cryptography, negotiation and shutdown are intentionally not supplied here.
 
 ```rill
-// Illustrative possible error composition, not #38's finalized error taxonomy.
+// Illustrative possible error composition, not ri-irw's finalized error taxonomy.
 enum TlsLikeError<RE,WE> {
   Receive(Err<IoFailure<RE>>),
   Send(Err<IoFailure<WE>>),
@@ -75,7 +75,7 @@ enum TlsLikeError<RE,WE> {
 //   where read(S,RE), write(S,WE), display(RE), display(WE) { engine body }
 ```
 
-An engine may need both transport directions for a logical read or write. It must translate progress to plaintext appended or accepted at this layer, not forward ciphertext byte counts. The engine must own pending ciphertext and records, bound them under its explicit #38 policy and apply backpressure. Suspension or cancellation must not abandon a buffer or native borrower. A TLS record boundary is not an application read boundary. EOF versus truncation, handshake/record errors, graceful close notifications, buffer bounds and reuse after interruption are #38 decisions, not invented by this sketch. No fake encryption or security validation is claimed.
+An engine may need both transport directions for a logical read or write. It must translate progress to plaintext appended or accepted at this layer, not forward ciphertext byte counts. The engine must own pending ciphertext and records, bound them under its explicit ri-irw policy and apply backpressure. Suspension or cancellation must not abandon a buffer or native borrower. A TLS record boundary is not an application read boundary. EOF versus truncation, handshake/record errors, graceful close notifications, buffer bounds and reuse after interruption are ri-irw decisions, not invented by this sketch. No fake encryption or security validation is claimed.
 
 ## Independent partial-effect and EOF traces
 
@@ -110,9 +110,9 @@ The following cases require static rejection unless they explicitly describe a f
 
 1. A generic body invokes read/write/flush/close without the corresponding canonical evidence; a same-spelled unrelated family does not satisfy it.
 2. Missing display(E) when constructing/formatting generic errors; no reflected fallback.
-3. Two ordinary read bodies with identical input patterns but different E/constraints are duplicates during collection; #41's conversion-key exception does not apply.
+3. Two ordinary read bodies with identical input patterns but different E/constraints are duplicates during collection; ri-1wl's conversion-key exception does not apply.
 4. A foreign module imports a standard handle type and adds an otherwise orphan-forbidden implementation; import aliases confer no ownership.
-5. Reject two simultaneous &mut operations on the same stream, including concurrent read/write through one value. Real separated direction handles belong to #34.
+5. Reject two simultaneous &mut operations on the same stream, including concurrent read/write through one value. Real separated direction handles belong to ri-vno.
 6. Reject clearing, truncating, reserving, appending or reading into Bytes while a conflicting read-only view is still used. Retaining the owner does not authorize mutation.
 7. Reject overlapping source/destination backing access and assumptions that different arbitrary indices prove disjointness. A read-only slice is not writable.
 8. Reject reading into &Bytes or &mut &Bytes as if it were writable backing. There is no mutable string-byte or uninitialized-capacity escape.
@@ -146,11 +146,11 @@ These traces specify obligations, not a tested native runtime. Track one owner p
 | Wrapper dropped without explicit close | Discard pending plaintext/output; dispose remaining owned resource once. Do not implicitly flush, acknowledge a protocol body, send a TLS close notification or promise remote rollback. |
 | Native completion races abort confirmation | Synchronize one terminal registration transition; late completion cannot double-release buffers/handles/callback state. Abort request alone is not terminal. |
 | Buffered writer full while downstream stalls | Suspend/drain with bounded pending bytes; no detached work or unlimited input queue. |
-| Timer fires while losing work cannot abort | Deadline race cannot return until required cleanup/retention ends; #33 defines semantics, not a hard deadline here. |
-| Wasm memory grows during native use | Keeping owner alive is insufficient evidence of pointer stability; #30 must validate actual pointer/runtime mechanism. |
+| Timer fires while losing work cannot abort | Deadline race cannot return until required cleanup/retention ends; ri-j60 defines semantics, not a hard deadline here. |
+| Wasm memory grows during native use | Keeping owner alive is insufficient evidence of pointer stability; ri-dej must validate actual pointer/runtime mechanism. |
 
 For a wrapper owning handle H, ownership changes at consuming close. Before close, H belongs to the wrapper. While delegated close runs, H belongs to that consuming call. After either recoverable outcome, H is no longer an initialized wrapper field. Remaining-field disposal may release buffers but cannot release H a second time. On cancellation, the frame or native registration that currently owns H retains it until cleanup completes. Fatal panic remains outside the normal cleanup guarantee.
 
 ## Follow-through
 
-#28 must validate the explicitly approved Q36 scoped noBorrow requirements and all other declared generic requirements. Its work also covers ordinary result inference, borrowed-error and field dependencies, bounded helpers, adapter state, progress rebasing, preservation of both errors and exactly-once ownership transitions. #33 owns deadlines, #34 sockets/directional ownership, #35 file handles/seek/durability, #38 real TLS and interruption states, #39 HTTP body abandonment/reuse and #40 driver/transaction lifetimes. Later #45 adds a separate owned admission/advance/wait capability; it does not change these canonical arities or make ordinary I/O automatically resumable. Unworkable checking or native contracts return to map #1, not an unrecorded change of the human-confirmed API.
+ri-48g must validate the explicitly approved Q36 scoped noBorrow requirements and all other declared generic requirements. Its work also covers ordinary result inference, borrowed-error and field dependencies, bounded helpers, adapter state, progress rebasing, preservation of both errors and exactly-once ownership transitions. ri-j60 owns deadlines, ri-vno sockets/directional ownership, ri-dzr file handles/seek/durability, ri-irw real TLS and interruption states, ri-n5i HTTP body abandonment/reuse and ri-dka driver/transaction lifetimes. Later ri-w0c adds a separate owned admission/advance/wait capability; it does not change these canonical arities or make ordinary I/O automatically resumable. Unworkable checking or native contracts return to map ri-kl0, not an unrecorded change of the human-confirmed API.

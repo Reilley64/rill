@@ -4,8 +4,8 @@
 | --- | --- |
 | ID | 0006 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [#18 confirmed decision](https://github.com/Reilley64/rill/issues/18#issuecomment-6869848603), [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) and later refinements under [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The [policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6913372816) confirms literal spelling, decimal parser grammar and UTF-8 spans. The [interface decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) confirms strict conversion entry points and directs the core predictability audit. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | ri-a2c confirmed decision (comment 6869848603), [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) and later refinements under [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The policy approval (ri-48g, comment 6913372816) confirms literal spelling, decimal parser grammar and UTF-8 spans. The interface decision (ri-48g, comment 6913810445) confirms strict conversion entry points and directs the core predictability audit. |
 | RFC dependencies | Draft RFCs [0002](0002-modules-and-program-loading.md), [0003](0003-expressions-bindings-and-control-flow.md), [0004](0004-functions-overloads-and-generic-requirements.md) and [0005](0005-types-records-enums-and-inference.md) propose shared rules. Their full texts are not accepted. Ownership, errors, conversions, complete grammar and runtime [companions](#required-companion-rules) remain incomplete or missing. |
 | Replaces / superseded by | None. This draft does not accept or amend another RFC. |
 | Decision | Not yet decided |
@@ -94,7 +94,7 @@ All results above are expected outcomes, not compiler observations. Standard hel
 
 ## Syntax and reference semantics
 
-The owner [confirmed the three syntax policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
+The owner confirmed the three syntax policy groups (ri-48g, comment 6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
 
 ### Primitive types and width inference
 
@@ -188,7 +188,7 @@ Finite floating arithmetic may produce infinity. That differs from rejecting an 
 
 ### Proposed M4.3 literal and primitive checking
 
-[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this procedure and admission matrix. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Confirmed spelling, explicit widths and trap timing remain unchanged.
+M4.3 ticket ri-3gd records this procedure and admission matrix. The owner approved C1 through C4 (ri-3gd, comment 6947086957) at checkpoint e4750b8. Confirmed spelling, explicit widths and trap timing remain unchanged.
 
 Use M1's retained literal/token facts and original source maps. Do not rescan source grammar or reinterpret parser commitments. A suffix names the actual compiler primitive identity despite source shadowing. A user nominal type with the same spelling is not that primitive.
 
@@ -261,7 +261,7 @@ Use into for a canonical conversion without recoverable failure. Use tryInto for
 
 Keep named operations for explicit policy, extra context, queries, traversal and mutation. Changing a type alone does not make every function a conversion. Record/enum constructors and zero-input factories keep their established construction role.
 
-The owner [confirmed strict number parsing and owned UTF-8 decoding through tryInto](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445). The owner also directed an audit of related core conversions. The following matrix is the concrete draft under that direction.
+The owner confirmed strict number parsing and owned UTF-8 decoding through tryInto (ri-48g, comment 6913810445). The owner also directed an audit of related core conversions. The following matrix is the concrete draft under that direction.
 
 | Source | Destination | Family | Selected error | Required meaning |
 | --- | --- | --- | --- | --- |
@@ -341,13 +341,13 @@ Ordinary quoted strings and chars reject unescaped physical line breaks. Raw str
 
 Retain original source byte offsets despite literal-content normalization. Do not rewrite source files or confuse decoded content offsets with source spans. Unicode normalization and locale transformations are not implicit.
 
-The [confirmed literal-scanning policy](#proposed-literal-scanning-and-token-boundaries) supplies delimiter, control and recovery rules. It preserves UTF-8/scalar validity and the existing CRLF rule. The [lexical decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) also confirms lone-CR admission/normalization.
+The [confirmed literal-scanning policy](#proposed-literal-scanning-and-token-boundaries) supplies delimiter, control and recovery rules. It preserves UTF-8/scalar validity and the existing CRLF rule. The lexical decision (ri-48g, comment 6929923825) also confirms lone-CR admission/normalization.
 
 <a id="proposed-literal-scanning-and-token-boundaries"></a>
 
 ### Literal scanning and token boundaries
 
-The approved spelling grammar above remains unchanged. The owner [confirmed scanner boundaries, literal modes, controls and recovery](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) in the coordinated lexical review. This approves those policies, not the full RFC or a scanner implementation.
+The approved spelling grammar above remains unchanged. The owner confirmed scanner boundaries, literal modes, controls and recovery (ri-48g, comment 6929923825) in the coordinated lexical review. This approves those policies, not the full RFC or a scanner implementation.
 
 #### Numeric candidate scanning
 
@@ -579,7 +579,7 @@ Canonical error display is a separate family. Standard wrapper show can bridge t
 | [Draft RFC 0005](0005-types-records-enums-and-inference.md) | Type identity, generic construction, tuples/Lists and finite representation. | Its three precision policies are confirmed; formal checking remains incomplete. |
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Logical places, backing/descriptor dependencies, copies, cleanup and exclusive restrictions. | Proposed, not accepted. Complete route/projection and cleanup judgments remain incomplete. Text signatures are not a borrow proof. |
 | Draft RFCs [0008](0008-errors-propagation-and-caused-by-wrapping.md) and [0009](0009-user-implementable-conversions.md). | Canonical pair coherence, exact E, Result/Err metadata and construction origins. | Both remain Draft. Complete origins/evidence judgments and conversion coherence remain incomplete. This RFC owns numeric pair values, not general conversion selection. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with lexical/runtime integration incomplete. | Token boundaries, source maps, statuses, LLVM/native/Wasm lowering and precise limits. | Reporting is proposed, not accepted. [#28](https://github.com/Reilley64/rill/issues/28) retains formal and production acceptance. |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with lexical/runtime integration incomplete. | Token boundaries, source maps, statuses, LLVM/native/Wasm lowering and precise limits. | Reporting is proposed, not accepted. ri-48g retains formal and production acceptance. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -691,7 +691,7 @@ The [diagnostic registry](../diagnostic-codes.md) fixes the cited meanings, not 
 
 [RFC 0003](0003-expressions-bindings-and-control-flow.md) owns grouping, short-circuiting and control targets. A skipped well-typed trap remains skipped. Infix error wrapping remains lazy wrap-and-propagate, not numeric fallback or parsing recovery.
 
-[RFC 0001's accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) owns expectation execution and trusted observations. Expectations add no default width, implicit show requirement or user formatting callback to diagnostic capture.
+RFC 0001's accepted snapshot (ri-48g, comment 6907867211) owns expectation execution and trusted observations. Expectations add no default width, implicit show requirement or user formatting callback to diagnostic capture.
 
 ### Ownership, errors and runtime boundaries
 
@@ -707,14 +707,14 @@ LLVM/native/Wasm lowering must preserve checked integer timing, exact conversion
 
 | Input | Disposition |
 | --- | --- |
-| [Core conversion interface decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) | Consolidate strict parsing/owned decoding under tryInto and audit related core helpers for predictability. The matrix and ScalarError are concrete draft details under that direction. |
-| [RFC 0006 policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6913372816) | The owner confirmed literal spelling, strict decimal grammar and UTF-8 spans. The later interface decision resolves strict parsing through tryInto. Broader core pair details follow the owner's predictability direction. |
-| [#18 confirmation](https://github.com/Reilley64/rill/issues/18#issuecomment-6869848603), [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) | Preserve explicit widths, arithmetic, conversions, logical views, text/scalar behavior and sequential interpolation. The later decision confirms literal/parser/decoder precision. Do not import unrelated host extensions. |
-| #19 and [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md) | Remove singleton literal refinements and copy exceptions based on named constant knowledge. Preserve base types and direct-literal materialization without duplicate owners. |
-| #23 and [library catalogue](../standard-library-contracts.md), sections 2/8/9 | Use current borrowed copy, Bytes views, error shapes, parsing, formatting and six explicit integer helpers. Concrete integration and property evidence remain incomplete. |
-| [#41 confirmation](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), [ADR 0017](../adr/0017-user-implementable-conversions.md) | Use into/from and tryInto/tryFrom with selected E. Numeric pairs remain protected. General pair coherence and user conversions still need their own RFC. |
-| #11/#15/#16 and ADRs 0005/0007/0009 | Preserve fatal integer traps, runtime evaluation, retained dependencies and cleanup. Floating division does not use historical integer-only zero-divisor panic wording. |
-| #24 and [diagnostic contracts](../diagnostic-contracts.md) | Separate invalid literals, missing widths, mismatches, dependency errors and trap warnings. Preserve original byte coordinates despite normalized literal content. |
+| Core conversion interface decision (ri-48g, comment 6913810445) | Consolidate strict parsing/owned decoding under tryInto and audit related core helpers for predictability. The matrix and ScalarError are concrete draft details under that direction. |
+| RFC 0006 policy approval (ri-48g, comment 6913372816) | The owner confirmed literal spelling, strict decimal grammar and UTF-8 spans. The later interface decision resolves strict parsing through tryInto. Broader core pair details follow the owner's predictability direction. |
+| ri-a2c confirmation (comment 6869848603), [ADR 0011](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) | Preserve explicit widths, arithmetic, conversions, logical views, text/scalar behavior and sequential interpolation. The later decision confirms literal/parser/decoder precision. Do not import unrelated host extensions. |
+| ri-kty and [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md) | Remove singleton literal refinements and copy exceptions based on named constant knowledge. Preserve base types and direct-literal materialization without duplicate owners. |
+| ri-8n7 and [library catalogue](../standard-library-contracts.md), sections 2/8/9 | Use current borrowed copy, Bytes views, error shapes, parsing, formatting and six explicit integer helpers. Concrete integration and property evidence remain incomplete. |
+| ri-1wl confirmation (comment 6886119679), [ADR 0017](../adr/0017-user-implementable-conversions.md) | Use into/from and tryInto/tryFrom with selected E. Numeric pairs remain protected. General pair coherence and user conversions still need their own RFC. |
+| ri-8hm/#15/#16 and ADRs 0005/0007/0009 | Preserve fatal integer traps, runtime evaluation, retained dependencies and cleanup. Floating division does not use historical integer-only zero-divisor panic wording. |
+| ri-3t8 and [diagnostic contracts](../diagnostic-contracts.md) | Separate invalid literals, missing widths, mismatches, dependency errors and trap warnings. Preserve original byte coordinates despite normalized literal content. |
 | [Numeric/text source](../../prototypes/08-numbers-strings.rill) and [case inventory](../prototypes/08-numbers-strings.md), source revision | Supporting design inputs cover 41 intended-valid expectations and independent negative/runtime cases. They are not compiler-executed tests. No artifact bytes change here. |
 
 ## Compatibility and migration
@@ -727,7 +727,7 @@ Historical `copy(*view)` relied on the old copy-call convenience. Current copy b
 
 The confirmed separator, signed-minimum, parse-sign and UTF-8 grouping rules fix source precision gaps. They still need fixture reconciliation. A source example's existence does not prove prior acceptance of these details.
 
-The [interface decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) supersedes separate public parseNumber/decodeUtf8 entry points. The audited matrix also replaces listed byte/scalar conversion helpers. It does not retain duplicate compatibility aliases.
+The interface decision (ri-48g, comment 6913810445) supersedes separate public parseNumber/decodeUtf8 entry points. The audited matrix also replaces listed byte/scalar conversion helpers. It does not retain duplicate compatibility aliases.
 
 | Former public call | Current draft spelling |
 | --- | --- |
@@ -764,7 +764,7 @@ No parser/decoder model or source inspection proves memory safety, Unicode corre
 
 The confirmed scanning policy rejects a complete malformed numeric candidate rather than salvaging a valid prefix. Explicit modes keep braces/quotes inside comments and literals from changing outer interpolation boundaries. Original-byte provenance prevents CRLF/escape decoding from shifting diagnostic locations.
 
-Implicit default widths would reduce annotations but make arithmetic depend on guessed types. The approved #18 decision instead requires immediate concrete context or suffixes. Checked integers and explicit wrapping helpers also avoid optimization-mode changes.
+Implicit default widths would reduce annotations but make arithmetic depend on guessed types. The approved ri-a2c decision instead requires immediate concrete context or suffixes. Checked integers and explicit wrapping helpers also avoid optimization-mode changes.
 
 Permissive host parsers accept different whitespace, signs and special values. The confirmed strict grammar fixes the accepted default input language. More permissive or radix APIs can be separate proposals, not silent extensions.
 
@@ -796,7 +796,7 @@ Cases S1 through S20 are new independent lexical inputs/scenarios from 2026-11-1
 
 | Artifact / revision | Evidence label | Rule/question exercised | Checker/tool and command/environment | Expected / observed outcome | Limits, negative/unavailable results and gate links |
 | --- | --- | --- | --- | --- | --- |
-| Source decisions and repository base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Current numeric/text rules and later copy/conversion supersession. | Drafting agent, 2026-11-16. Read current #18 decision/body, ADR 0011, catalogue sections 8/9 and the source inventory. | The drafting agent identified later singleton, borrowed-copy and user-conversion refinements as inputs. | This is source reconciliation, not a checker/runtime proof. |
+| Source decisions and repository base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Current numeric/text rules and later copy/conversion supersession. | Drafting agent, 2026-11-16. Read current ri-a2c decision/body, ADR 0011, catalogue sections 8/9 and the source inventory. | The drafting agent identified later singleton, borrowed-copy and user-conversion refinements as inputs. | This is source reconciliation, not a checker/runtime proof. |
 | N1 through N23, this draft | NotChecked | Literals, arithmetic, conversions, parsing, views and interpolation. | No Rill lexer, checker or runtime is available. | Expected outcomes appear above. No Rill result is observed. | No case is RillExecuted. Fatal cases have not run in isolated processes. |
 | Confirmed grammar and UTF-8 policies | NotChecked | Separators, signs, decimal parsing and malformed byte spans. | No parser/decoder/reference model has been run for this draft. | No formal grammar completeness or codec result is claimed. | Policies are confirmed. Positive/negative tests remain missing. |
 | Existing source and research artifacts | NotChecked | Executable acceptance of the relevant Rill toolchain. | Artifacts retain their own historical evidence scopes. | No new reference or Rill execution was performed here. | Host-library behavior or old native experiments do not validate this RFC. |
@@ -827,13 +827,13 @@ Runtime/compiler suites must execute these cases before implementation/support c
 
 ### Confirmed policies
 
-The owner [approved all three precision policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6913372816). Literal spelling, decimal parser grammar and UTF-8 span grouping are no longer open choices. This does not accept the complete RFC. The later interface decision resolves the public parsing entry point.
+The owner approved all three precision policies (ri-48g, comment 6913372816). Literal spelling, decimal parser grammar and UTF-8 span grouping are no longer open choices. This does not accept the complete RFC. The later interface decision resolves the public parsing entry point.
 
 <a id="parsing-and-conversion-api-review"></a>
 
 ### Confirmed interface direction and audit details
 
-The owner [approved strict parsing/owned decoding through tryInto and requested predictable core conversions](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445). That entry-point question is resolved. The [core matrix](#canonical-core-conversion-interface) applies the direction to related text, byte/List and scalar helpers.
+The owner approved strict parsing/owned decoding through tryInto and requested predictable core conversions (ri-48g, comment 6913810445). That entry-point question is resolved. The [core matrix](#canonical-core-conversion-interface) applies the direction to related text, byte/List and scalar helpers.
 
 The broader matrix and ScalarError are draft details under that direction, not a separate full RFC acceptance. Check their ownership/evidence and migration rules before readiness. The approved literal, numeric, parsing and UTF-8 semantics remain unchanged.
 
@@ -861,15 +861,15 @@ No canonical readiness review has occurred. This document remains Draft. The dra
 
 ### Human decisions and amendments
 
-On 2026-11-17, the owner requested the complete syntax grammar. The owner then [confirmed all three syntax groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
+On 2026-11-17, the owner requested the complete syntax grammar. The owner then confirmed all three syntax groups (ri-48g, comment 6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
 
-On 2026-11-17, the owner requested completion of the lexical/source contract. The owner then [confirmed scanner modes, candidate boundaries, controls and lone-CR handling](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825). This is policy approval, not full RFC acceptance or scanner validation.
+On 2026-11-17, the owner requested completion of the lexical/source contract. The owner then confirmed scanner modes, candidate boundaries, controls and lone-CR handling (ri-48g, comment 6929923825). This is policy approval, not full RFC acceptance or scanner validation.
 
-The project owner requested the next foundation RFC on 2026-11-16. This authorizes drafting Numbers, strings and primitive operations. The drafting request did not approve new policies. The owner later [confirmed all three precision policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6913372816). No complete RFC revision has been accepted.
+The project owner requested the next foundation RFC on 2026-11-16. This authorizes drafting Numbers, strings and primitive operations. The drafting request did not approve new policies. The owner later confirmed all three precision policies (ri-48g, comment 6913372816). No complete RFC revision has been accepted.
 
 | Date / actor | Kind and scope of change | Reviewed revision or snapshot | Decision link / rationale |
 | --- | --- | --- | --- |
 | 2026-11-16, drafting agent | Created substantive Draft RFC 0006, register and partial coverage entries. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a` and current source decisions cited above. This is not a reviewed RFC snapshot. | User request to continue to the next foundation RFC. No new policy or full RFC was accepted at creation. |
-| 2026-11-16, project owner | Approved literal spelling, decimal parser grammar and UTF-8 span policy. Opened API review for parsing and other conversions through tryInto. | Three recommendations presented in chat. Pre-recording draft SHA-256: `47d3a1de7b6b48503e790c007916caf7b9db0310e1aef4297a0b8f5a7b338909`. No complete RFC revision was accepted. | [Policy approval and API question](https://github.com/Reilley64/rill/issues/28#issuecomment-6913372816). Status remains Draft. At that point, conversion registration changes remained undecided. |
-| 2026-11-16, project owner | Approved strict number parsing and owned UTF-8 decoding through tryInto. Requested predictable use of into/tryInto for related core conversions. | The preceding recommendation and the owner's follow-up direction. Pre-interface draft SHA-256: `be423fc01f6cfd4d3bd626746e1303b6df7aae99a8caf50778e2d606ecb60936`. | [Interface decision and audit scope](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445). Full RFC remains Draft. Concrete matrix and ScalarError still need specification review and implementation validation. |
-| 2026-11-17, project owner | Approved the coordinated lexical/source groups, including literal scanning and content provenance. | Pre-recording SHA-256: `3c2142924cc6fd7065529ec42f489b4781c8eea77be4c07289ea635af22a3a15`. The shared decision identifies the other owner snapshots. | [Lexical policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825). Full RFC acceptance, parser integration, readiness and actual scanner/target validation remain open. |
+| 2026-11-16, project owner | Approved literal spelling, decimal parser grammar and UTF-8 span policy. Opened API review for parsing and other conversions through tryInto. | Three recommendations presented in chat. Pre-recording draft SHA-256: `47d3a1de7b6b48503e790c007916caf7b9db0310e1aef4297a0b8f5a7b338909`. No complete RFC revision was accepted. | Policy approval and API question (ri-48g, comment 6913372816). Status remains Draft. At that point, conversion registration changes remained undecided. |
+| 2026-11-16, project owner | Approved strict number parsing and owned UTF-8 decoding through tryInto. Requested predictable use of into/tryInto for related core conversions. | The preceding recommendation and the owner's follow-up direction. Pre-interface draft SHA-256: `be423fc01f6cfd4d3bd626746e1303b6df7aae99a8caf50778e2d606ecb60936`. | Interface decision and audit scope (ri-48g, comment 6913810445). Full RFC remains Draft. Concrete matrix and ScalarError still need specification review and implementation validation. |
+| 2026-11-17, project owner | Approved the coordinated lexical/source groups, including literal scanning and content provenance. | Pre-recording SHA-256: `3c2142924cc6fd7065529ec42f489b4781c8eea77be4c07289ea635af22a3a15`. The shared decision identifies the other owner snapshots. | Lexical policy approval (ri-48g, comment 6929923825). Full RFC acceptance, parser integration, readiness and actual scanner/target validation remain open. |

@@ -1,6 +1,6 @@
-# #45 Q33–Q35 standalone OpenSSL progress reference
+# ri-w0c Q33–Q35 standalone OpenSSL progress reference
 
-This directory is a **throwaway native reference experiment**, not production Rill, a provider-delivery proof, an API freeze, an entitlement claim, or approval of the candidate v0 budget. It exercises the supplied OpenSSL 3.5.9 source artifact named for commit `45e844fa2a14ec92d146bd8f5778ac130b6625fb` entirely in memory. It does not use TCP, Rill jobs, cancellation, leases, managed/native wake machinery, or an external network target. #30 and #44 remain open.
+This directory is a **throwaway native reference experiment**, not production Rill, a provider-delivery proof, an API freeze, an entitlement claim, or approval of the candidate v0 budget. It exercises the supplied OpenSSL 3.5.9 source artifact named for commit `45e844fa2a14ec92d146bd8f5778ac130b6625fb` entirely in memory. It does not use TCP, Rill jobs, cancellation, leases, managed/native wake machinery, or an external network target. ri-dej and ri-ei7 remain open.
 
 Run the complete private copy/configure/build/certificate/compile/test sequence with one command:
 
@@ -13,7 +13,7 @@ The runner refuses an archive SHA-256 mismatch, checks `VERSION.dat`, deletes an
 ## Selected settings and fixture trust
 
 - OpenSSL: 3.5.9 supplied source archive, expected SHA-256 in `run_reference.py`; exact build/version output and commands are in `manifest.json`. The extraction has no `.git`, so the commit cannot be independently recomputed from Git metadata; the archive hash and commit-bearing extraction name are reported rather than overstated.
-- Private minimal reference build: `no-shared no-tests no-asm no-dso no-engine no-async -O2`, `make -j4 build_sw`. This is not the #38 final build, namespace, patch set, or bridge.
+- Private minimal reference build: `no-shared no-tests no-asm no-dso no-engine no-async -O2`, `make -j4 build_sw`. This is not the ri-irw final build, namespace, patch set, or bridge.
 - TLS: single serialized owner, one logical read and one logical write at most; TLS startup completes before application I/O. Initial and final handshake ciphertext is explicitly transferred before publication.
 - Modes: partial write on from creation; moving write buffer off; AUTO_RETRY off. Max send fragment 16 KiB; native application attempt at most 16 KiB; one default pipeline; no configured outbound padding.
 - The runner creates a one-day ECDSA P-256 self-signed certificate with `subjectAltName=DNS:localhost`. The client trusts only that fixture certificate, verifies the chain and hostname `localhost`; the server uses it. Client authentication is deliberately out of scope (`SSL_VERIFY_NONE` on the server). Keys are ephemeral `/tmp` fixture material.
@@ -57,7 +57,7 @@ Thus this run tests selected state transitions and candidate fixed-buffer behavi
 
 ## Known objections, gaps, and deliberately untested cases
 
-- Received TLS 1.3 ticket discard is not implemented or proven. Ticket issuance is disabled in the fixture, but stock received-ticket storage/profile enforcement is still a #44/provider gap.
+- Received TLS 1.3 ticket discard is not implemented or proven. Ticket issuance is disabled in the fixture, but stock received-ticket storage/profile enforcement is still a ri-ei7/provider gap.
 - Mandatory key-use limits and profile hooks are not implemented. KeyUpdate fixtures exercise stock requested/non-requested transitions only.
 - The warning-alert stop policy avoids the executed record-desynchronization path; it does not prove alert retirement/delivery, cover every blocked control state, or by itself establish the production callback/private-shim mechanism. The earlier source-derived prediction of immediate `BAD_WRITE_RETRY` was falsified: the local fresh write succeeds before the peer later rejects the record sequence.
 - The callback observes only fixed TLS 1.2 renegotiation message types. It is a candidate observation mechanism, not a frozen public/private API or complete future-provider guarantee.

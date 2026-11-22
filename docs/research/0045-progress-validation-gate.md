@@ -1,6 +1,6 @@
-# #45: unresolved TLS progress-mechanism validation gate
+# ri-w0c: unresolved TLS progress-mechanism validation gate
 
-Status: **PARTIALLY EXECUTED — selected-source reference complete; asynchronous Rill/runtime/provider validation remains open in #47/#44.** Explicitly recorded at the user's request. This is a work/evidence gate, not a new public API or accepted RFC.
+Status: **PARTIALLY EXECUTED — selected-source reference complete; asynchronous Rill/runtime/provider validation remains open in ri-hw5/#44.** Explicitly recorded at the user's request. This is a work/evidence gate, not a new public API or accepted RFC.
 
 ## Engineering gate
 
@@ -59,10 +59,10 @@ Other positive finite evidence includes TLS1.2/1.3 both directions, fragmented f
 
 ## Continue / do not infer
 
-Independent channel try/wake/watch design, TCP progress semantics and HTTP codec/value work may continue. Preserve ordinary canonical families, owned payloads and explicit scoped dependencies; #45 design completion does not discharge this engineering gate. #47 and #44 retain shared runtime/TCP and TLS delivery validation respectively; #39 may resume design without claiming either implementation. Existing backend/ABI/lease and TLS delivery gates remain OPEN.
+Independent channel try/wake/watch design, TCP progress semantics and HTTP codec/value work may continue. Preserve ordinary canonical families, owned payloads and explicit scoped dependencies; ri-w0c design completion does not discharge this engineering gate. ri-hw5 and ri-ei7 retain shared runtime/TCP and TLS delivery validation respectively; ri-n5i may resume design without claiming either implementation. Existing backend/ABI/lease and TLS delivery gates remain OPEN.
 
-Do not silently narrow #39 to write-all/read-later, abandon native retries, raise staging caps, relabel source inspection as execution, or change the selected provider as a workaround. No commits/pushes or production bridge changes are authorized by this gate note.
+Do not silently narrow ri-n5i to write-all/read-later, abandon native retries, raise staging caps, relabel source inspection as execution, or change the selected provider as a workaround. No commits/pushes or production bridge changes are authorized by this gate note.
 
 ## Before closing the remaining engineering gate
 
-The legitimate access route and reproducible selected-source mechanism evidence are now recorded. Remaining work is implementation evidence: complete asynchronous four-budget accounting/copy overlap, maintained provider/shim policy including both renegotiation roles, Rill jobs/leases/wakes/cancellation, real TCP and Linux/macOS target cells, ticket/key-use/profile enforcement and full #47/#44 acceptance. Any contradiction returns to the human/map. Keep the finite native matrix separate from Rill/runtime/provider/security support; its13/13 result does not close those delivery tickets.
+The legitimate access route and reproducible selected-source mechanism evidence are now recorded. Remaining work is implementation evidence: complete asynchronous four-budget accounting/copy overlap, maintained provider/shim policy including both renegotiation roles, Rill jobs/leases/wakes/cancellation, real TCP and Linux/macOS target cells, ticket/key-use/profile enforcement and full ri-hw5/#44 acceptance. Any contradiction returns to the human/map. Keep the finite native matrix separate from Rill/runtime/provider/security support; its13/13 result does not close those delivery tickets.

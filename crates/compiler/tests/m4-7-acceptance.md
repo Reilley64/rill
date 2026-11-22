@@ -1,6 +1,6 @@
 # M4.7 conversion analysis
 
-The owner [approved V1 through V4](https://github.com/Reilley64/rill/issues/64#issuecomment-6967953617) at `f0b261a887dec3bf6252c40da928335e29bfc602`, including exact source capture for a binder fixed by the destination. [RFC 0009](../../../docs/rfcs/0009-user-implementable-conversions.md#proposed-m47-conversion-checking-procedure) owns this procedure. [Issue #64](https://github.com/Reilley64/rill/issues/64) remains part of [M4 #56](https://github.com/Reilley64/rill/issues/56) in [draft PR #58](https://github.com/Reilley64/rill/pull/58). RFC 0009 remains Draft.
+The owner approved V1 through V4 (ri-lqn, comment 6967953617) at `f0b261a887dec3bf6252c40da928335e29bfc602`, including exact source capture for a binder fixed by the destination. [RFC 0009](../../../docs/rfcs/0009-user-implementable-conversions.md#proposed-m47-conversion-checking-procedure) owns this procedure. Issue ri-lqn remains part of M4 ri-b83 in [draft PR #58](https://github.com/Reilley64/rill/pull/58). RFC 0009 remains Draft.
 
 ## Model and public tests
 

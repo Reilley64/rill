@@ -1,4 +1,4 @@
-# Jiff checked arithmetic. Final fact audit for Rill #33
+# Jiff checked arithmetic. Final fact audit for Rill ri-j60
 
 This is primary-source research, not a Rill specification or implementation/backend selection.
 
@@ -106,7 +106,7 @@ Pinned subtraction has a discrepancy. The public `checked_sub` prose says it sub
 - `abs` is not checked; its documented panic boundary is the same entire `i64::MIN`-seconds band. `unsigned_abs` returns Rust's unsigned Duration and can represent every magnitude, including MIN. The checked Rill API cannot simply expose upstream `abs` as universally safe. [SD-NEG]
 - Integer `checked_mul(i32)` preserves an exact nanosecond product if representable. `checked_div(i32)` rejects zero and the `i64::MIN`-seconds / −1 overflow band, but truncates any sub-nanosecond remainder toward zero: 1ns / 2 gives zero. "Checked" division is not an exact-divisibility check. Floats, rounding and explicit saturating methods are separate operations, not implicit parts of integer addition/subtraction. [SD-MULDIV]
 
-The asymmetric minimum is a genuine representation limit; rejecting `MIN − MIN` is an implementation consequence of how subtraction is written. Whether a Rill contract promises exact subtraction whenever the final result fits, or explicitly inherits this extra failure boundary, must be made explicit rather than hidden behind "copy Jiff." This note selects neither. #28 can formalize the chosen arithmetic contract; #30 cannot decide it by choosing a backend.
+The asymmetric minimum is a genuine representation limit; rejecting `MIN − MIN` is an implementation consequence of how subtraction is written. Whether a Rill contract promises exact subtraction whenever the final result fits, or explicitly inherits this extra failure boundary, must be made explicit rather than hidden behind "copy Jiff." This note selects neither. ri-48g can formalize the chosen arithmetic contract; ri-dej cannot decide it by choosing a backend.
 
 ## 5. Basic civil queries really present upstream
 
@@ -131,9 +131,9 @@ The narrow arithmetic choices exposed here:
 
 Not new human API requirements: naming/shape for a minimal subset of the available pure query helpers. Availability does not force broad convenience parity.
 
-#28. Algorithm formalization: once policy is explicit, specify normalized representations, exact checked-success domains, composite application order, invariants and adversarial/property cases (including negative truncation, endpoints, one-sign balancing and intermediate failure). That is algorithm/spec work, not a reason to ask a human to pick algorithms already determined by a semantic contract.
+ri-48g. Algorithm formalization: once policy is explicit, specify normalized representations, exact checked-success domains, composite application order, invariants and adversarial/property cases (including negative truncation, endpoints, one-sign balancing and intermediate failure). That is algorithm/spec work, not a reason to ask a human to pick algorithms already determined by a semantic contract.
 
-#30. Backend: feasibility, representation, linkage, host/zone-data integration and validation remain separate. No dependency, FFI, port, backend or implementation was chosen, and no upstream source fact proves Rill runtime support. This arithmetic audit does not settle the separate monotonic-clock/deadline/wait/cancellation policies in #33.
+ri-dej. Backend: feasibility, representation, linkage, host/zone-data integration and validation remain separate. No dependency, FFI, port, backend or implementation was chosen, and no upstream source fact proves Rill runtime support. This arithmetic audit does not settle the separate monotonic-clock/deadline/wait/cancellation policies in ri-j60.
 
 ## Primary-source references
 

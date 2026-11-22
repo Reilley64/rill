@@ -1,10 +1,10 @@
-# Jiff's date/time API model for Rill #33
+# Jiff's date/time API model for Rill ri-j60
 
 This is research input, not an approved specification or implementation plan.
 
 Checked: 2026-11-15 (UTC).
 
-Ticket: [#33. Clocks, durations, deadlines and cancellable waits](https://github.com/Reilley64/rill/issues/33).
+Ticket: ri-j60. Clocks, durations, deadlines and cancellable waits.
 
 The user's direction, "We should take our time and date api from jiff," establishes Jiff as the date/time API and semantic-model source. It supersedes the assistant's unaccepted recommendation to exclude calendars from a minimal wall-clock API. It does not approve every Jiff operation, Rust syntax/traits/operators, implicit environment access, a Rust dependency or FFI, backend feasibility, or new cancellation/deadline policies. The inclusion boundary still needs a human-confirmed design.
 
@@ -146,7 +146,7 @@ Jiff deliberately behaves as if leap seconds do not exist, uses Unix time, and d
 
 Rill decision still required: mirror that parser accommodation or use a stricter boundary that rejects `:60`. Either way, keep the model's no-leap-timescale limitation explicit; do not infer leap-inclusive elapsed durations, clock-smearing policy or leap-safe hard deadlines from nanosecond representation.
 
-## 10. What Jiff does not provide for #33
+## 10. What Jiff does not provide for ri-j60
 
 The checked public exports/modules and documentation provide datetime values, arithmetic, parsing and time-series iterators. They do not provide a public monotonic-instant/deadline/sleep/timer-registration/cancellation API. Jiff's design rationale explicitly distinguishes its `Timestamp` (like Rust `SystemTime`) from Rust's monotonic `Instant`. Its private `now.rs` does use monotonic readings for cache expiration, and can return no monotonic reading on web Wasm; that is not a public scheduling facility. [S18, S29, S32]
 
@@ -197,7 +197,7 @@ Jiff is dual-licensed Unlicense OR MIT; `COPYING` permits either. The MIT option
 
 At this pin Jiff's only unconditional direct dependency is `jiff-core`; other dependencies/features bring in bundled tzdb data, platform discovery, optional Serde/logging/static macros, Windows bindings, browser bindings, and conditional portable atomics. Defaults are not a dependency-free or environment-free profile. The workspace MSRV is Rust 1.70; manifest requirements are not a resolved lockfile or proof of compatibility with Rill's toolchain/ABI/Wasm target. [S2-S4]
 
-Questions, not selected policies: semantic reimplementation, source port, Rust dependency or wrapper? What notice/provenance obligations apply to copied code/docs/tests and included IANA/CLDR-derived data? Which exact feature graph and target-specific transitive licenses are shipped? Who maintains tzdb/security/compatibility updates? Does a wrapper keep all internal allocations, counted zone handles and Rust errors behind owned, explicit boundaries? How are panics prevented or handled without contradicting Rill's fatal-panic/no-unwinding policy? No reviewed source establishes a Rill/C ABI or validates LLVM/native/Wasm linkage, host pointers, bounded stacks or cancellation-safe native operations. #30's backend gate remains separate. Do not select an FFI/backend from an API research note.
+Questions, not selected policies: semantic reimplementation, source port, Rust dependency or wrapper? What notice/provenance obligations apply to copied code/docs/tests and included IANA/CLDR-derived data? Which exact feature graph and target-specific transitive licenses are shipped? Who maintains tzdb/security/compatibility updates? Does a wrapper keep all internal allocations, counted zone handles and Rust errors behind owned, explicit boundaries? How are panics prevented or handled without contradicting Rill's fatal-panic/no-unwinding policy? No reviewed source establishes a Rill/C ABI or validates LLVM/native/Wasm linkage, host pointers, bounded stacks or cancellation-safe native operations. ri-dej's backend gate remains separate. Do not select an FFI/backend from an API research note.
 
 <a id="12-recommended-next-design-frontier-and-evidence-gaps"></a>
 
@@ -213,7 +213,7 @@ A design interview/prototype should at least cover these adversarial cases:
 - Civil/timestamp endpoints, negative fractional epoch values, nanosecond-only span overflow, signed-duration minimum negation, numeric serialization precision and chosen `:60` handling.
 - Backward/forward wall-clock adjustments without moving elapsed timers; zero/expired deadlines; unrepresentable `u64` millisecond/deadline conversions; cancellation-before/after timer/native commit; unabortable work and cleanup that never returns.
 
-Limits/unanswered facts: examples are read from docs/source or proposed cases, not executed Rill/Jiff tests. Exact refresh latency, host clock accuracy, a resolved shipping dependency/license graph, target ABI feasibility, trusted property evidence, resource/stack bounds, deterministic fake-clock interfaces and cancellation state machines are not established. The timestamp range-prose discrepancy remains an explicit upstream clarification point. This note supplies primary-source API/semantic evidence, not a completed #33 contract, implementation selection, hard-deadline guarantee or RFC acceptance.
+Limits/unanswered facts: examples are read from docs/source or proposed cases, not executed Rill/Jiff tests. Exact refresh latency, host clock accuracy, a resolved shipping dependency/license graph, target ABI feasibility, trusted property evidence, resource/stack bounds, deterministic fake-clock interfaces and cancellation state machines are not established. The timestamp range-prose discrepancy remains an explicit upstream clarification point. This note supplies primary-source API/semantic evidence, not a completed ri-j60 contract, implementation selection, hard-deadline guarantee or RFC acceptance.
 
 ## Primary-source references
 

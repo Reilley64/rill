@@ -1,6 +1,6 @@
 (* Rill v0 syntax annex, version 1, Draft; three policy groups confirmed 2026-11-17.
    v0-syntax-v1.md is an integral part of this same annex.
-   Policy approval: https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690
+   Policy approval: ri-48g (comment 6931939690)
    It defines required commitment rules, token views and context restrictions.
    This EBNF is not a generated or verified Rill parser.
    Lexical terminals refer to the confirmed lexical/source policy snapshots.

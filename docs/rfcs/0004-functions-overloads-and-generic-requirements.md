@@ -4,8 +4,8 @@
 | --- | --- |
 | ID | 0004 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [#10 decisions](https://github.com/Reilley64/rill/issues/10#issuecomment-6308621702), with later refinements in [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The [#41 decision](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679) supplies current implementation syntax and conversion boundaries. The [policy decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6911486381) confirms whole-vector specificity, inference before defaults and declaration-wide requirements. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | ri-skb decisions (comment 6308621702), with later refinements in [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The ri-1wl decision (comment 6886119679) supplies current implementation syntax and conversion boundaries. The policy decision (ri-48g, comment 6911486381) confirms whole-vector specificity, inference before defaults and declaration-wide requirements. |
 | RFC dependencies | [RFC 0002](0002-modules-and-program-loading.md) proposes module identity, visibility and graph collection. [RFC 0003](0003-expressions-bindings-and-control-flow.md) proposes expression contexts, return targets and evaluation order. Their full texts remain Draft. Other [companions](#required-companion-rules) remain missing. |
 | Replaces / superseded by | None. This draft does not accept or amend another RFC. |
 | Decision | Not yet decided |
@@ -31,7 +31,7 @@ A generic function must state the operations it needs. The compiler must check i
 
 Library functions also accept arrows and overloaded names. Those values need argument, result and invocation contracts. An annotation must not invent permission to copy captures, share them or consume borrowed state.
 
-The earlier source decisions leave checking details for #28. This proposal makes ordinary selection steps explicit and separates them from conversion exceptions. It records remaining evidence work instead of claiming a complete checker.
+The earlier source decisions leave checking details for ri-48g. This proposal makes ordinary selection steps explicit and separates them from conversion exceptions. It records remaining evidence work instead of claiming a complete checker.
 
 ## Guide-level explanation
 
@@ -88,7 +88,7 @@ Requirements do not change overload priority. A missing requirement on the winni
 
 ## Syntax and reference semantics
 
-The owner [confirmed the three syntax policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
+The owner confirmed the three syntax policy groups (ri-48g, comment 6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
 
 ### Function and implementation forms
 
@@ -114,7 +114,7 @@ Implementation-owned binders precede the family name, as in `implement<T> label(
 
 Do not export an implementation separately. It inherits its family's visibility. An implementation does not re-export the import binding through which it found the family.
 
-The sketch permits requirements on declarations and bodies. Declaration requirements are caller obligations shared by every implementation. A body may add implementation-specific requirements. Its checked assumptions include both sets after signature substitution. The project owner [confirmed this policy](https://github.com/Reilley64/rill/issues/28#issuecomment-6911486381).
+The sketch permits requirements on declarations and bodies. Declaration requirements are caller obligations shared by every implementation. A body may add implementation-specific requirements. Its checked assumptions include both sets after signature substitution. The project owner confirmed this policy (ri-48g, comment 6911486381).
 
 There are no ordinary optional, default-valued, named or variadic value parameters. A parameter's generic type may be a fixed tuple. That does not create variadic generics or multiple arities.
 
@@ -122,7 +122,7 @@ Arrow expressions may infer parameter and result types from immediate context. C
 
 ### Proposed M4.1 explicit header elaboration
 
-The owner [approved this first-stage procedure](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. [M4.1 slice #57](https://github.com/Reilley64/rill/issues/57) remains part of open M4 umbrella #56. Full RFC status and earlier policy approvals remain unchanged.
+The owner approved this first-stage procedure (ri-b83, comment 6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. M4.1 slice ri-11w remains part of open M4 umbrella ri-b83. Full RFC status and earlier policy approvals remain unchanged.
 
 Use [RFC 0005's canonical declaration-type procedure](0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure) for named-function and body-less family annotations. Preserve parameter order, binder identities and the explicit result term. Preserve the canonical family identity independently of its source alias.
 
@@ -138,7 +138,7 @@ No operation gains compiler privileges through its spelling or standard-root loc
 
 ### Proposed M4.2 header validity and prelude signatures
 
-The owner [approved these M4.2 checks](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) after M4.1 elaboration at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. [Ticket #59](https://github.com/Reilley64/rill/issues/59) records the slice. Full RFC status and previous approvals remain unchanged.
+The owner approved these M4.2 checks (ri-9y3, comment 6945089123) after M4.1 elaboration at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. Ticket ri-9y3 records the slice. Full RFC status and previous approvals remain unchanged.
 
 Check every module-level named-function and family header in the retained receipt. Reject repeated value-parameter names within one header. Exclude `_`, which binds no usable name. Preserve each conflicting declaration identity and source span. Type parameters and value parameters remain separate namespaces.
 
@@ -163,7 +163,7 @@ The [library catalogue](../standard-library-contracts.md#2-callable-and-ownershi
 
 ### Proposed M4.3 explicit standalone calls
 
-[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this bounded call procedure. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Full RFC status and earlier approvals remain unchanged.
+M4.3 ticket ri-3gd records this bounded call procedure. The owner approved C1 through C4 (ri-3gd, comment 6947086957) at checkpoint e4750b8. Full RFC status and earlier approvals remain unchanged.
 
 Resolve a direct standalone callee through the caller's lexical/module context. Preserve its canonical function identity. Qualification uses installed exports, without filesystem probes or child autoload.
 
@@ -179,9 +179,9 @@ These call facts retain actual type arguments, the shared substitution and origi
 
 ### Proposed M4.5 ordinary input procedure
 
-[M4.5 #62](https://github.com/Reilley64/rill/issues/62) follows M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. The owner [approved P1 through P4](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) at checkpoint `3392baaac8f2ee50e86167700349273a76ce61c4`. This approval is for scoped implementation. Full RFC status and earlier approvals remain unchanged.
+M4.5 ri-8p9 follows M4.4 implementation `8abca7a6b933b44c6abc29419b2f324dc51a97a8`. The owner approved P1 through P4 (ri-8p9, comment 6963439018) at checkpoint `3392baaac8f2ee50e86167700349273a76ce61c4`. This approval is for scoped implementation. Full RFC status and earlier approvals remain unchanged.
 
-The owner [confirmed exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287). Repeated implementation variables bind identical established static terms. They do not choose a shared admissible parent to repair unequal occurrences.
+The owner confirmed exact wildcard capture (ri-8p9, comment 6962750287). Repeated implementation variables bind identical established static terms. They do not choose a shared admissible parent to repair unequal occurrences.
 
 Thus `(T,T)` does not match `(E.Left,E.Right)`. Fixed `(E,E)` can admit both variants. Parent-typed `(E,E)` arguments still match `(T,T)`.
 
@@ -339,7 +339,7 @@ Calls may supply an explicit leading sequence of type arguments. Infer omitted t
 
 Trailing type parameters may have defaults. First use explicit arguments and available inference. Then apply a declared default to a still-unresolved trailing parameter. Substitute earlier arguments into that default. Defaults do not override known types or repair conflicts.
 
-The project owner [confirmed this inference/default order](https://github.com/Reilley64/rill/issues/28#issuecomment-6911486381). Numeric types still need independent width context or suffixes. No default numeric width, implicit cast or primitive singleton type follows from generic inference.
+The project owner confirmed this inference/default order (ri-48g, comment 6911486381). Numeric types still need independent width context or suffixes. No default numeric width, implicit cast or primitive singleton type follows from generic inference.
 
 Immediate expected results may complete generic substitution. They must not rank ordinary implementations or distinguish bodies with identical parameter patterns. A selected body's result must agree with the completed declaration signature.
 
@@ -393,7 +393,7 @@ A is more specific than B when every vector matching A also matches B. At least 
 
 This definition preserves the all-parameter rule. A narrower first parameter does not compensate for a wider second parameter. For `(Point, T)` and `(U, Point)`, neither vector dominates the other. A `(Point, Point)` call is ambiguous without another dominating pattern.
 
-The definition also resolves correlated variables. `(T, T)` is more specific than `(A, B)`. It accepts equal pairs only, while the latter accepts unequal pairs. The project owner [confirmed this precision](https://github.com/Reilley64/rill/issues/28#issuecomment-6911486381). Earlier source decisions did not define that case.
+The definition also resolves correlated variables. `(T, T)` is more specific than `(A, B)`. It accepts equal pairs only, while the latter accepts unequal pairs. The project owner confirmed this precision (ri-48g, comment 6911486381). Earlier source decisions did not define that case.
 
 At a concrete call, use each argument's established static type. A known enum variant can match its variant pattern or an allowed parent pattern. A whole-enum argument cannot match variant-only patterns. Use `match` for runtime branching.
 
@@ -447,7 +447,7 @@ A generic body cannot assume a concrete result from an overridable fallback. Pre
 
 Monomorphization instantiates a checked body. It does not infer missing requirements, strengthen capture properties or reinterpret an unchecked operation. Requirement checking must preserve ordinary selection and its no-fallback rule.
 
-List every required operation or intrinsic explicitly. [#20](https://github.com/Reilley64/rill/issues/20#issuecomment-6853754987) excludes named requirement groups and aliases in v0. Repeating `eq(T), hash(T), copy(T), show(T)` is intentional.
+List every required operation or intrinsic explicitly. ri-tb9 (comment 6853754987) excludes named requirement groups and aliases in v0. Repeating `eq(T), hash(T), copy(T), show(T)` is intentional.
 
 Public generic requirements must name exported canonical family declarations. Origin public paths are sufficient. A facade need not re-export every requirement family. Metadata does not import those names into caller source.
 
@@ -491,9 +491,9 @@ Moving or storing a callable preserves its actual borrowed dependencies. An anno
 
 ### Proposed M4.6 inference and evidence procedure
 
-[M4.6 #63](https://github.com/Reilley64/rill/issues/63) follows M4.5 implementation `830a651d88bf1703bbfa877873ebd2289e52adcc`. This procedure and its public interfaces need scoped approval. The full RFC remains Draft.
+M4.6 ri-w05 follows M4.5 implementation `830a651d88bf1703bbfa877873ebd2289e52adcc`. This procedure and its public interfaces need scoped approval. The full RFC remains Draft.
 
-The owner [confirmed the fallback context rule](https://github.com/Reilley64/rill/issues/63#issuecomment-6964354024). An unconstrained viable input pattern does not supply the same receiving context as a constrained one. A specialized pattern alone cannot resolve that disagreement.
+The owner confirmed the fallback context rule (ri-w05, comment 6964354024). An unconstrained viable input pattern does not supply the same receiving context as a constrained one. A specialized pattern alone cannot resolve that disagreement.
 
 #### Captured headers and local equations
 
@@ -851,7 +851,7 @@ The [diagnostic registry](../diagnostic-codes.md) fixes the cited code meanings.
 
 Imported aliases preserve family identity. Public requirements retain exported declaration identities without importing their names into caller source. Test-only-used imports still contribute implementations under the same graph rules.
 
-[RFC 0001](0001-top-level-expectations.md) owns test expectations at its [accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211). Helper functions and nested arrows keep their own return contexts. This proposal does not change accepted expectation boundaries or diagnostic capture.
+[RFC 0001](0001-top-level-expectations.md) owns test expectations at its accepted snapshot (ri-48g, comment 6907867211). Helper functions and nested arrows keep their own return contexts. This proposal does not change accepted expectation boundaries or diagnostic capture.
 
 ### Expressions, ownership and cleanup
 
@@ -875,17 +875,17 @@ Conversions and streaming I/O can determine output errors through selected signa
 
 | Input | Disposition |
 | --- | --- |
-| [RFC 0004 policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6911486381) | The owner confirmed whole-vector specificity, inference before trailing defaults and shared declaration requirements. This is policy approval, not full RFC acceptance or checker validation. |
-| [#10 original decision](https://github.com/Reilley64/rill/issues/10#issuecomment-6308621702), [ADR 0003](../adr/0003-overloads-need-a-declaration.md) | Preserve declarations, static all-parameter selection, explicit signatures, generic requirements and contextual function values. Later decisions replace literal overloads and body spelling. |
-| [#9 core decision](https://github.com/Reilley64/rill/issues/9#issuecomment-6308790321) | Preserve local inference, explicit block returns, expression arrows and trailing generic defaults. Later explicit-width and enum rules replace primitive/singleton sketches. |
-| [#15 final decision](https://github.com/Reilley64/rill/issues/15#issuecomment-6853088155), [ADR 0007](../adr/0007-explicit-mutation-with-conservative-borrow-dependencies.md) | Preserve invocation modes, non-forgeable noBorrow evidence and checks before monomorphization. Complete ownership/evidence transport remains companion work. |
-| [#16 final decision](https://github.com/Reilley64/rill/issues/16#issuecomment-6863910595), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) | Preserve distinct sendable/shareable properties, capture evidence and non-capturing named functions. No public trait can forge these properties. |
-| [#17 final decision](https://github.com/Reilley64/rill/issues/17#issuecomment-6866705217), Draft RFC 0002 | Preserve canonical aliases, declaration visibility, collection-time duplicates and ordinary parameter-occurrence placement. Orphan permission alone does not prove coherence. |
-| [#19 final decision](https://github.com/Reilley64/rill/issues/19#issuecomment-6870013901), [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md) | Use static enum variants and parent fallbacks. Remove primitive literal overloads and implicit runtime dispatch. Preserve mutable-variant restrictions. |
-| [#20 decision](https://github.com/Reilley64/rill/issues/20#issuecomment-6853754987) | Repeat individual requirements. No named constraint groups or aliases in v0. |
-| [#23 final decision](https://github.com/Reilley64/rill/issues/23#issuecomment-6872129850), catalogue sections 2/3/6 | Preserve callable predicates, loose family outputs, fixed tuple arities and protected ownership actions. Formal literal/callback inference and the complete protected registry remain incomplete. |
-| [#24 final decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), [diagnostic contract](../diagnostic-contracts.md) | Preserve separate inference, no-match, missing-evidence, ambiguity and duplicate failures. Navigation must report canonical declarations and honest body candidates. No editor implementation is claimed. |
-| [#41 final decision](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), [ADR 0017](../adr/0017-user-implementable-conversions.md) | Adopt language-wide implement syntax. Keep conversion-only pair keys, endpoint permission and selected-error evidence distinct from ordinary rules. |
+| RFC 0004 policy approval (ri-48g, comment 6911486381) | The owner confirmed whole-vector specificity, inference before trailing defaults and shared declaration requirements. This is policy approval, not full RFC acceptance or checker validation. |
+| ri-skb original decision (comment 6308621702), [ADR 0003](../adr/0003-overloads-need-a-declaration.md) | Preserve declarations, static all-parameter selection, explicit signatures, generic requirements and contextual function values. Later decisions replace literal overloads and body spelling. |
+| ri-457 core decision (comment 6308790321) | Preserve local inference, explicit block returns, expression arrows and trailing generic defaults. Later explicit-width and enum rules replace primitive/singleton sketches. |
+| ri-lql final decision (comment 6853088155), [ADR 0007](../adr/0007-explicit-mutation-with-conservative-borrow-dependencies.md) | Preserve invocation modes, non-forgeable noBorrow evidence and checks before monomorphization. Complete ownership/evidence transport remains companion work. |
+| ri-40y final decision (comment 6863910595), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) | Preserve distinct sendable/shareable properties, capture evidence and non-capturing named functions. No public trait can forge these properties. |
+| ri-owe final decision (comment 6866705217), Draft RFC 0002 | Preserve canonical aliases, declaration visibility, collection-time duplicates and ordinary parameter-occurrence placement. Orphan permission alone does not prove coherence. |
+| ri-kty final decision (comment 6870013901), [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md) | Use static enum variants and parent fallbacks. Remove primitive literal overloads and implicit runtime dispatch. Preserve mutable-variant restrictions. |
+| ri-tb9 decision (comment 6853754987) | Repeat individual requirements. No named constraint groups or aliases in v0. |
+| ri-8n7 final decision (comment 6872129850), catalogue sections 2/3/6 | Preserve callable predicates, loose family outputs, fixed tuple arities and protected ownership actions. Formal literal/callback inference and the complete protected registry remain incomplete. |
+| ri-3t8 final decision (comment 6885970775), [diagnostic contract](../diagnostic-contracts.md) | Preserve separate inference, no-match, missing-evidence, ambiguity and duplicate failures. Navigation must report canonical declarations and honest body candidates. No editor implementation is claimed. |
+| ri-1wl final decision (comment 6886119679), [ADR 0017](../adr/0017-user-implementable-conversions.md) | Adopt language-wide implement syntax. Keep conversion-only pair keys, endpoint permission and selected-error evidence distinct from ordinary rules. |
 | Source revision's [overload inventory](../prototypes/03-overloads.md), [conversion inventory](../prototypes/11-conversions.md) and [mutation cases](../prototypes/06-mutation-safety.md) | Use as authored design inputs and adversarial obligations. They are not executed Rill tests or normative annexes. No artifact bytes change here. |
 
 ## Compatibility and migration
@@ -914,7 +914,7 @@ This draft does not prove memory safety, bounded stack use, rollback or target s
 
 ## Rationale, alternatives and prior art
 
-Undeclared overloads reduce declaration text but hide the common signature and identity. The #10 decision instead requires one explicit family declaration. It also requires generic bodies to state their behavioral requirements.
+Undeclared overloads reduce declaration text but hide the common signature and identity. The ri-skb decision instead requires one explicit family declaration. It also requires generic bodies to state their behavioral requirements.
 
 Runtime type dispatch could handle unknown variants but would change the static overload model. Explicit `match` keeps runtime branching visible. Records of functions remain available for open runtime behavior with fixed checked signatures.
 
@@ -922,7 +922,7 @@ Constraint-based tie-breaking could choose between otherwise equal patterns. It 
 
 The confirmed whole-vector relation preserves parameter correlations and rejects crossed specificity. A per-position comparison that forgets repeated variables cannot distinguish equal-pair patterns from independent-pair patterns. Policy approval does not provide an implemented checker.
 
-Named requirement groups could shorten repeated signatures. [#20](https://github.com/Reilley64/rill/issues/20#issuecomment-6853754987) defers them beyond v0. This draft does not introduce traits through another spelling.
+Named requirement groups could shorten repeated signatures. ri-tb9 (comment 6853754987) defers them beyond v0. This draft does not introduce traits through another spelling.
 
 The [Rust conversion research](../research/0041-q19-rust-conversion-evidence.md) explains selected output evidence and specialization hazards. Its cited primary sources distinguish stable coherence from unstable specialization. Stable Rust rejects overlaps that this Rill design permits. Rust is not proof of this selection or evidence system.
 
@@ -975,7 +975,7 @@ The future parser/checker suite must cover all supported source-analysis profile
 
 ### Review choices and remaining authoring work
 
-The project owner [confirmed all three policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6911486381). Whole-vector specificity, declaration-wide requirements and inference before defaults are no longer open policy choices. This does not accept the complete RFC or finish its checking rules.
+The project owner confirmed all three policies (ri-48g, comment 6911486381). Whole-vector specificity, declaration-wide requirements and inference before defaults are no longer open policy choices. This does not accept the complete RFC or finish its checking rules.
 
 The shared syntax annex records confirmed declaration positions, typed arrows, angle commitments and implementation-binder policies. Complete direct tuple/List inference and evidence procedures separately. No successful Rill parse follows from the declaration sketch or EBNF alone.
 
@@ -1001,11 +1001,11 @@ No canonical readiness review has occurred. This document remains Draft. The dra
 
 ### Human decisions and amendments
 
-On 2026-11-17, the owner requested the complete syntax grammar. The owner then [confirmed all three syntax groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
+On 2026-11-17, the owner requested the complete syntax grammar. The owner then confirmed all three syntax groups (ri-48g, comment 6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
 
-The project owner requested this RFC on 2026-11-16. That request authorizes drafting, not acceptance. Source-ticket decisions remain provenance. The project owner later [confirmed the three precision policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6911486381). No complete RFC revision has been accepted.
+The project owner requested this RFC on 2026-11-16. That request authorizes drafting, not acceptance. Source-ticket decisions remain provenance. The project owner later confirmed the three precision policies (ri-48g, comment 6911486381). No complete RFC revision has been accepted.
 
 | Date / actor | Kind and scope of change | Reviewed revision or snapshot | Decision link / rationale |
 | --- | --- | --- | --- |
 | 2026-11-16, drafting agent | Created substantive Draft RFC 0004 and its register/coverage entries. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a` and current decision comments cited above. This is not a reviewed RFC snapshot. | User request to write Functions, overloads and generic requirements. Full decision remains open. |
-| 2026-11-16, project owner | Approved all three recommendations. Whole-vector specificity, inference before defaults and declaration-wide requirements are confirmed. | Three recommendations presented in chat. Pre-recording draft SHA-256: `53aeec8b419b9e2100e44203b6b97fea4ee34ac63201b75467e0608c5a86d29c`. No complete RFC revision was accepted. | [Policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6911486381). Status remains Draft. Grammar, evidence rules, companions and readiness remain incomplete. |
+| 2026-11-16, project owner | Approved all three recommendations. Whole-vector specificity, inference before defaults and declaration-wide requirements are confirmed. | Three recommendations presented in chat. Pre-recording draft SHA-256: `53aeec8b419b9e2100e44203b6b97fea4ee34ac63201b75467e0608c5a86d29c`. No complete RFC revision was accepted. | Policy approval (ri-48g, comment 6911486381). Status remains Draft. Grammar, evidence rules, companions and readiness remain incomplete. |

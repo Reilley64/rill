@@ -4,8 +4,8 @@
 | --- | --- |
 | ID | 0005 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [#9 core decisions](https://github.com/Reilley64/rill/issues/9#issuecomment-6308790321), [#21 named records](https://github.com/Reilley64/rill/issues/21#issuecomment-6853593704) and [#19 enums](https://github.com/Reilley64/rill/issues/19#issuecomment-6870013901). Later refinements appear under [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The [policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6912492481) confirms generic variant spelling, bracket inference and inline-layout checking. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | ri-457 core decisions (comment 6308790321), ri-azo named records (comment 6853593704) and ri-kty enums (comment 6870013901). Later refinements appear under [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The policy approval (ri-48g, comment 6912492481) confirms generic variant spelling, bracket inference and inline-layout checking. |
 | RFC dependencies | [Draft RFC 0002](0002-modules-and-program-loading.md) proposes canonical modules, namespaces and privacy. [Draft RFC 0003](0003-expressions-bindings-and-control-flow.md) proposes expression contexts, binding scopes and control flow. [Draft RFC 0004](0004-functions-overloads-and-generic-requirements.md) proposes function inference and generic evidence. Their full texts are not accepted. Other [companions](#required-companion-rules) remain missing. |
 | Replaces / superseded by | None. This draft does not amend an Accepted RFC or accept another draft. |
 | Decision | Not yet decided |
@@ -93,7 +93,7 @@ This is a complete proposed module. Apply generic arguments to the parent enum b
 
 ## Syntax and reference semantics
 
-The owner [confirmed the three syntax policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
+The owner confirmed the three syntax policy groups (ri-48g, comment 6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
 
 ### Type forms and identity
 
@@ -128,7 +128,7 @@ This RFC introduces no type-alias declaration feature. Import aliases remain mod
 
 ### Proposed M4.1 canonical declaration-type procedure
 
-The owner [approved this scoped M4.1 procedure](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. [Slice #57](https://github.com/Reilley64/rill/issues/57) implements explicit declaration types under M4 umbrella #56. Approval does not complete inference, signature validity, layout or this Draft RFC.
+The owner approved this scoped M4.1 procedure (ri-b83, comment 6943516603) at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. Slice ri-11w implements explicit declaration types under M4 umbrella ri-b83. Approval does not complete inference, signature validity, layout or this Draft RFC.
 
 The input is one successful M3 Graph and explicit analysis limits. Use that graph's retained M1 snapshots and M2 nodes. Do not read live files. Do not parse again. Do not combine captures.
 
@@ -332,7 +332,7 @@ A finite layout can still exceed a target's representation limits. Such target c
 
 ### Proposed M4.2 declaration validity and inline containment
 
-The owner [approved this M4.2 procedure and D1 through D4](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. [Ticket #59](https://github.com/Reilley64/rill/issues/59) records implementation and acceptance. Earlier approvals remain confirmed. This scoped decision does not accept the full RFC.
+The owner approved this M4.2 procedure and D1 through D4 (ri-9y3, comment 6945089123) at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. Ticket ri-9y3 records implementation and acceptance. Earlier approvals remain confirmed. This scoped decision does not accept the full RFC.
 
 The input is a completed M4.1 receipt, explicit canonical prelude signature contracts and checking limits. Reuse its graph, declaration identities, canonical terms, substitutions and original spans. Do not accept a failed M4.1 attempt as a completed receipt. Do not read live files.
 
@@ -438,7 +438,7 @@ Before compiler implementation, validate a separate finite reference model again
 
 ### Proposed M4.3 never admission
 
-[M4.3 ticket #60](https://github.com/Reilley64/rill/issues/60) records this precision rule. The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint e4750b8. Earlier policies and full RFC status remain unchanged.
+M4.3 ticket ri-3gd records this precision rule. The owner approved C1 through C4 (ri-3gd, comment 6947086957) at checkpoint e4750b8. Earlier policies and full RFC status remain unchanged.
 
 An expression whose canonical static type is primitive never can satisfy an immediate expected value type without conversion. It produces no normal value. Preserve never as its static type rather than inventing a value of the expected type.
 
@@ -452,7 +452,7 @@ This proposal adds no general container variance or implicit width conversion. E
 
 ### Proposed M4.4 data and pattern procedure
 
-[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) owns this bounded procedure. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler code. Earlier approvals and the full RFC status remain unchanged.
+M4.4 ticket ri-qtl owns this bounded procedure. The owner approved K1 through K4 (ri-qtl, comment 6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler code. Earlier approvals and the full RFC status remain unchanged.
 
 #### Inputs, namespaces and nominal construction
 
@@ -506,7 +506,7 @@ Names bind their matched position. Wildcards introduce no name. Reject repeated 
 
 Check literal patterns with the scrutinee's established primitive context. Preserve M1 literal provenance and signed-minimum rules. Primitive literals remain value tests, not singleton types or overload patterns.
 
-A simple name binding keeps its initializer's value type. It does not apply the borrowed-destructuring rule to infer a reference type. The owner [confirmed this distinction](https://github.com/Reilley64/rill/issues/61#issuecomment-6959565199). Thus `let y = r.text` retains string for a string field, even when r borrows its record. This permits no implicit string copy or illegal move. Later ownership checking must reject an invalid transfer. Use `let y = &r.text` to request a borrow.
+A simple name binding keeps its initializer's value type. It does not apply the borrowed-destructuring rule to infer a reference type. The owner confirmed this distinction (ri-qtl, comment 6959565199). Thus `let y = r.text` retains string for a string field, even when r borrows its record. This permits no implicit string copy or illegal move. Later ownership checking must reject an invalid transfer. Use `let y = &r.text` to request a borrow.
 
 Owned payload bindings retain their substituted field types. Borrowed binding types require the [pattern-copy classification seam](0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification). An unresolved classification cannot silently choose copying or borrowing.
 
@@ -580,7 +580,7 @@ Direct compiler tests must cross the agreed data entry/body/node seams using rea
 
 ### Proposed M4.8 List, index and aggregate handoff
 
-[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes these checks for the shared typed checker. They require separate checkpoint approval.
+M4.8 ri-dm4 proposes these checks for the shared typed checker. They require separate checkpoint approval.
 
 Keep the existing bracket category decision. In List context, use the admitted List declaration and its element argument. Without that argument, find an agreed element type from the operands and existing contextual equations. Do not infer a width from List itself.
 
@@ -615,9 +615,9 @@ Retain the substituted member or capture witness. An erased callable interface g
 
 ### Proposed M4.5 static input boundary
 
-The owner [confirmed exact wildcard capture](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) for ordinary input patterns. A repeated wildcard cannot merge different actual static terms at their shared enum parent. Fixed parent patterns retain this RFC's permitted owned/read-only admissions.
+The owner confirmed exact wildcard capture (ri-8p9, comment 6962750287) for ordinary input patterns. A repeated wildcard cannot merge different actual static terms at their shared enum parent. Fixed parent patterns retain this RFC's permitted owned/read-only admissions.
 
-[RFC 0004's proposed finite procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) owns normalization and whole-vector comparison. Its [scoped M4.5 checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) has implementation approval. It does not add covariance through existing tuples, generic arguments or mutable references.
+[RFC 0004's proposed finite procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure) owns normalization and whole-vector comparison. Its scoped M4.5 checkpoint (ri-8p9, comment 6963439018) has implementation approval. It does not add covariance through existing tuples, generic arguments or mutable references.
 
 Canonical never's no-value admission checks an immediate value expectation without retagging its type. The proposed type-vector query does not turn that rule into wildcard inference or an ordinary matching alternative. A bare canonical never result supplies no inferred input shape by itself. Other noncontinuing expressions retain their independently declared static types. Preserve unresolved positions separately from established input contracts.
 
@@ -625,7 +625,7 @@ Source-call context formation remains M4.6 work. An input-only fact cannot inven
 
 ### Proposed M4.6 nominal application inference
 
-[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this extension of the M4.4 construction procedure. Approval remains pending. Use [RFC 0004's substitution frames and default order](0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure).
+M4.6 ri-w05 proposes this extension of the M4.4 construction procedure. Approval remains pending. Use [RFC 0004's substitution frames and default order](0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure).
 
 Resolve the written annotation or constructor path to one canonical declaration. Select the written variant within that declaration. Check visibility and payload form before using fields as constraints. Do not search for another record by its shape. A private or ambiguous target supplies no receiving type.
 
@@ -818,7 +818,7 @@ The [diagnostic registry](../diagnostic-codes.md) fixes the cited code meanings.
 
 [RFC 0003](0003-expressions-bindings-and-control-flow.md#matching-and-patterns) owns match evaluation and control transfer. This RFC proposes the scrutinee and pattern type relationships. Branch joins must preserve the actual dependencies defined by the ownership companion.
 
-Expectations follow [RFC 0001's accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211). Complete examples use helper functions rather than reading startup lets from an expectation. This draft does not amend accepted expectation rules.
+Expectations follow RFC 0001's accepted snapshot (ri-48g, comment 6907867211). Complete examples use helper functions rather than reading startup lets from an expectation. This draft does not amend accepted expectation rules.
 
 ### Ownership, standard types and backend layout
 
@@ -834,16 +834,16 @@ The inline graph needs trusted indirect representation metadata, not arbitrary p
 
 | Input | Disposition |
 | --- | --- |
-| [RFC 0005 policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6912492481) | The owner confirmed generic variant spelling, context-first bracket inference and inline-summary/containment-graph policy. This does not accept the complete RFC or validate its checking mechanisms. |
-| [#9 core decision](https://github.com/Reilley64/rill/issues/9#issuecomment-6308790321), [ADR 0004](../adr/0004-named-types-are-nominal.md) | Preserve nominal identity, local inference, void/never and trailing generic defaults. Later decisions replace contextual record construction, literal types and unions. |
-| [#21 decision](https://github.com/Reilley64/rill/issues/21#issuecomment-6853593704), [ADR 0008](../adr/0008-records-require-named-construction.md) | Preserve named construction/rebuilding and no field-shape search. Do not restore historical separately named union members. |
-| [#19 decision](https://github.com/Reilley64/rill/issues/19#issuecomment-6870013901), [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md) | Preserve closed enums, variant types, parent joins, static selection, visibility and forbidden mutable widening. The later policy decision fixes generic spelling. Complete formal layout/inference remains unfinished. |
-| #17, Draft RFC 0002 and [ADR 0010](../adr/0010-file-modules-explicit-exports-and-privacy.md) | Reuse canonical declaration identity and privacy. Supply finite-layout rules without making imported aliases new types. Complete resolver work remains in RFC 0002. |
-| #15/#16, [mutation decision](../adr/0007-explicit-mutation-with-conservative-borrow-dependencies.md) and [concurrency decision](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) | Preserve references inside values, explicit access and separate property evidence. Full borrowing/capture and cleanup judgments remain missing. |
-| #18, [numeric/text decision](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) | Preserve explicit base types and UTF-8 value categories. Later #19 removes singleton source types. Complete literal and primitive-operation semantics remain companion work. |
-| #23, [library catalogue](../standard-library-contracts.md) sections 2/3/6 | Preserve structural enum copy eligibility, nominal List/Map and fixed callable tuples. Propose contextual bracket rules without variadic generics or return-only selection. Full inference/evidence remains incomplete. |
-| #24, [diagnostic registry](../diagnostic-codes.md) | Preserve nominal mismatch, syntax, missing width/inference and privacy meanings. No compiler diagnostics are claimed as observed. |
-| #41 and Draft RFC 0004 | Keep implement syntax and conversion-only exceptions. Type annotations do not create general return-only dispatch or implicit conversion. |
+| RFC 0005 policy approval (ri-48g, comment 6912492481) | The owner confirmed generic variant spelling, context-first bracket inference and inline-summary/containment-graph policy. This does not accept the complete RFC or validate its checking mechanisms. |
+| ri-457 core decision (comment 6308790321), [ADR 0004](../adr/0004-named-types-are-nominal.md) | Preserve nominal identity, local inference, void/never and trailing generic defaults. Later decisions replace contextual record construction, literal types and unions. |
+| ri-azo decision (comment 6853593704), [ADR 0008](../adr/0008-records-require-named-construction.md) | Preserve named construction/rebuilding and no field-shape search. Do not restore historical separately named union members. |
+| ri-kty decision (comment 6870013901), [ADR 0012](../adr/0012-enums-replace-unions-and-literal-overloads.md) | Preserve closed enums, variant types, parent joins, static selection, visibility and forbidden mutable widening. The later policy decision fixes generic spelling. Complete formal layout/inference remains unfinished. |
+| ri-owe, Draft RFC 0002 and [ADR 0010](../adr/0010-file-modules-explicit-exports-and-privacy.md) | Reuse canonical declaration identity and privacy. Supply finite-layout rules without making imported aliases new types. Complete resolver work remains in RFC 0002. |
+| ri-lql/#16, [mutation decision](../adr/0007-explicit-mutation-with-conservative-borrow-dependencies.md) and [concurrency decision](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) | Preserve references inside values, explicit access and separate property evidence. Full borrowing/capture and cleanup judgments remain missing. |
+| ri-a2c, [numeric/text decision](../adr/0011-explicit-numeric-widths-and-utf8-string-views.md) | Preserve explicit base types and UTF-8 value categories. Later ri-kty removes singleton source types. Complete literal and primitive-operation semantics remain companion work. |
+| ri-8n7, [library catalogue](../standard-library-contracts.md) sections 2/3/6 | Preserve structural enum copy eligibility, nominal List/Map and fixed callable tuples. Propose contextual bracket rules without variadic generics or return-only selection. Full inference/evidence remains incomplete. |
+| ri-3t8, [diagnostic registry](../diagnostic-codes.md) | Preserve nominal mismatch, syntax, missing width/inference and privacy meanings. No compiler diagnostics are claimed as observed. |
+| ri-1wl and Draft RFC 0004 | Keep implement syntax and conversion-only exceptions. Type annotations do not create general return-only dispatch or implicit conversion. |
 | [Record/match source](../../prototypes/05-records-match.rill) and [overload/enum source](../../prototypes/03-overloads.rill), source revision | Preserve their purposes and independent rejection obligations. Sources remain authored design evidence, not executed Rill tests. No prototype bytes change here. |
 
 ## Compatibility and migration
@@ -872,11 +872,11 @@ Nominal identity reduces accidental interchange of resource-bearing records. It 
 
 ## Rationale, alternatives and prior art
 
-Structural records would reduce declarations but make matching fields imply interchangeability. The approved #9/#21 decisions instead give each record a canonical owner and explicit constructor. Tuples retain a structural role without adding anonymous records.
+Structural records would reduce declarations but make matching fields imply interchangeability. The approved ri-457/#21 decisions instead give each record a canonical owner and explicit constructor. Tuples retain a structural role without adding anonymous records.
 
-General unions and primitive singleton types could express more type combinations. The approved #19 decision chooses one closed enum model instead. Runtime match handles value branching without changing overload selection.
+General unions and primitive singleton types could express more type combinations. The approved ri-kty decision chooses one closed enum model instead. Runtime match handles value branching without changing overload selection.
 
-Parent-applied generic variant spelling keeps type arguments on their owning enum. A second variant argument list would duplicate that ownership. The owner [confirmed this spelling](https://github.com/Reilley64/rill/issues/28#issuecomment-6912492481).
+Parent-applied generic variant spelling keeps type arguments on their owning enum. A second variant argument list would duplicate that ownership. The owner confirmed this spelling (ri-48g, comment 6912492481).
 
 Contextual bracket typing preserves existing List and fixed-tuple use cases. It also requires staged inference and explicit ambiguity failures. A return-preference heuristic would make result expectations choose input categories and conflict with approved overload rules.
 
@@ -902,7 +902,7 @@ Runtime representations, capture storage, target limits and bounded cleanup rema
 
 | Artifact / revision | Evidence label | Rule/question exercised | Checker/tool and command/environment | Expected / observed outcome | Limits, negative/unavailable results and gate links |
 | --- | --- | --- | --- | --- | --- |
-| Source decisions and ADRs at source revision | HandChecked | Nominal records, later enum rules and removed historical syntax. | Drafting agent, 2026-11-16. Read current #9/#19/#21 decisions, ADRs and cited catalogue sections. | The drafting agent identified current named-construction and enum rules and used them as source inputs. | This is provenance checking, not formal validation or RFC acceptance. |
+| Source decisions and ADRs at source revision | HandChecked | Nominal records, later enum rules and removed historical syntax. | Drafting agent, 2026-11-16. Read current ri-457/#19/#21 decisions, ADRs and cited catalogue sections. | The drafting agent identified current named-construction and enum rules and used them as source inputs. | This is provenance checking, not formal validation or RFC acceptance. |
 | T1 through T19, this draft | NotChecked | Construction, inference, coverage, layout and interactions. | No Rill parser, type checker or ownership checker is available. | Expected outcomes appear above. No compiler result is observed. | No example is RillExecuted. Missing companions remain explicit. |
 | Confirmed bracket and inline-layout policies | NotChecked | Context uniqueness, finite containment and generic forwarding. | No formal model or solver has been run. | No completeness, termination or soundness result is claimed. | Needs formal rules and adversarial checks before implementation readiness. |
 | Prototype/research inputs at source revision | NotChecked | Executable acceptance of this Rill type system. | Existing artifacts remain supporting inputs with their own evidence scopes. | No new reference or Rill execution was performed for this draft. | Authored expectations and historical experiments do not execute this specification. |
@@ -933,7 +933,7 @@ Native and WebAssembly acceptance need real compiler/runtime implementations and
 
 ### Confirmed policies
 
-The owner [approved all three recommendations](https://github.com/Reilley64/rill/issues/28#issuecomment-6912492481). Generic variant spelling, bracket inference and inline-layout policy are no longer open choices. This approval does not accept the complete RFC or finish its grammar and checking rules.
+The owner approved all three recommendations (ri-48g, comment 6912492481). Generic variant spelling, bracket inference and inline-layout policy are no longer open choices. This approval does not accept the complete RFC or finish its grammar and checking rules.
 
 ### Remaining in-scope authoring work
 
@@ -961,11 +961,11 @@ These checks cannot complete missing grammar, inference or ownership rules. Form
 
 ### Human decisions and amendments
 
-On 2026-11-17, the owner requested the complete syntax grammar. The owner then [confirmed all three syntax groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
+On 2026-11-17, the owner requested the complete syntax grammar. The owner then confirmed all three syntax groups (ri-48g, comment 6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
 
-The project owner authorized working through the foundation RFCs one at a time on 2026-11-16. This draft follows the recommendation to start with types. The drafting request did not approve new policies. The owner later [confirmed the three recommendations](https://github.com/Reilley64/rill/issues/28#issuecomment-6912492481). No complete RFC revision has been accepted.
+The project owner authorized working through the foundation RFCs one at a time on 2026-11-16. This draft follows the recommendation to start with types. The drafting request did not approve new policies. The owner later confirmed the three recommendations (ri-48g, comment 6912492481). No complete RFC revision has been accepted.
 
 | Date / actor | Kind and scope of change | Reviewed revision or snapshot | Decision link / rationale |
 | --- | --- | --- | --- |
 | 2026-11-16, drafting agent | Created substantive Draft RFC 0005, register and partial coverage entries. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a` and current source decisions cited above. This is not a reviewed RFC snapshot. | User request to work through the recommended foundations one at a time. No complete RFC or precision policy was accepted at creation. |
-| 2026-11-16, project owner | Approved generic variant spelling, bracket inference and the inline-layout policy. | Three recommendations presented in chat. Pre-recording draft SHA-256: `5ce735ca83ed54a51677911fad6febb75a16bac2d6053bdc83e535961e75604f`. No complete RFC revision was accepted. | [Policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6912492481). Status remains Draft. Grammar, formal checking, companions and readiness remain incomplete. |
+| 2026-11-16, project owner | Approved generic variant spelling, bracket inference and the inline-layout policy. | Three recommendations presented in chat. Pre-recording draft SHA-256: `5ce735ca83ed54a51677911fad6febb75a16bac2d6053bdc83e535961e75604f`. No complete RFC revision was accepted. | Policy approval (ri-48g, comment 6912492481). Status remains Draft. Grammar, formal checking, companions and readiness remain incomplete. |

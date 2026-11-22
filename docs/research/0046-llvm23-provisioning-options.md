@@ -1,4 +1,4 @@
-# LLVM 23 provisioning options for interview #46
+# LLVM 23 provisioning options for interview ri-x5n
 
 Inspected 2026-11-16 UTC. This is unapproved interview input, not an installation contract. [ADR 0006](../adr/0006-whole-program-monomorphization-on-llvm-23.md) retains LLVM 23 through inkwell, with LLVM statically linked into `rill`. Recorded experiments use **23.1.5**. There is no compiler workspace yet. This report selects neither a binding dependency nor a Rust version.
 

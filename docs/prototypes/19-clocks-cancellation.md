@@ -1,8 +1,8 @@
-# Clock and cancellation design evidence. #33
+# Clock and cancellation design evidence. ri-j60
 
 Read the source examples in [`prototypes/19-clocks-cancellation.rill`](../../prototypes/19-clocks-cancellation.rill).
 
-These examples follow the [clock/cancellation contract](../clock-cancellation-contracts.md), [temporal values contract](../time-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `19-clocks-cancellation.rill` has 26 intended-valid, hand-checked expectations, not executed tests. It uses manual clocks and owned token state. It provides no measured sleeps, browser probes, native clock support or compiler/runtime implementation. #28/#30 remain checking/backend gates.
+These examples follow the [clock/cancellation contract](../clock-cancellation-contracts.md), [temporal values contract](../time-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `19-clocks-cancellation.rill` has 26 intended-valid, hand-checked expectations, not executed tests. It uses manual clocks and owned token state. It provides no measured sleeps, browser probes, native clock support or compiler/runtime implementation. ri-48g/#30 remain checking/backend gates.
 
 ## Active inventory
 
@@ -91,4 +91,4 @@ The expected source rejections are:
 
 These are hand-checked expectations, not compiler diagnostics or compile-fail execution.
 
-#28 must supply callable/callee-exit/transitive-source checks, once-only ownership/commit states, intrinsic-versus-typed outcomes, concurrent DAG publication/helping, factory/subscription races, ID exhaustion, backend-capacity translation and bounded cleanup. #30 separately validates actual native/Wasm/import/tail/pointer/clock mechanisms. Existing topology research does not prove those rules; return an unworkable necessary rule to the map. No benchmark, hard timing bound or runtime safety proof follows from these fixtures.
+ri-48g must supply callable/callee-exit/transitive-source checks, once-only ownership/commit states, intrinsic-versus-typed outcomes, concurrent DAG publication/helping, factory/subscription races, ID exhaustion, backend-capacity translation and bounded cleanup. ri-dej separately validates actual native/Wasm/import/tail/pointer/clock mechanisms. Existing topology research does not prove those rules; return an unworkable necessary rule to the map. No benchmark, hard timing bound or runtime safety proof follows from these fixtures.
