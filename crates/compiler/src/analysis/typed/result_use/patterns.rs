@@ -5,6 +5,11 @@ use crate::analysis::scalars::data::{
 };
 use storage::{Address, BooleanValue};
 
+enum MatchStorage<'a, 'g> {
+    Value,
+    Boolean(Option<&'a Address<'g>>),
+}
+
 impl<'a, 'g> Check<'a, 'g> {
     pub(super) fn commit_pattern(
         &mut self,
@@ -213,11 +218,25 @@ impl<'a, 'g> Check<'a, 'g> {
         if let Some(source) = source {
             self.budget.reserve(1)?;
             self.match_views.push((source, root));
-            let result = self.match_arms(node, matched, remaining, false, unused_bool, depth);
+            let result = self.match_arms(
+                node,
+                matched,
+                remaining,
+                MatchStorage::Value,
+                unused_bool,
+                depth,
+            );
             self.match_views.pop();
             result
         } else {
-            self.match_arms(node, matched, remaining, false, unused_bool, depth)
+            self.match_arms(
+                node,
+                matched,
+                remaining,
+                MatchStorage::Value,
+                unused_bool,
+                depth,
+            )
         }
     }
 
@@ -230,25 +249,31 @@ impl<'a, 'g> Check<'a, 'g> {
         unused: bool,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
-        let wildcard = matches!(matched.arms.as_slice(), [arm] if arm.guard.is_none()
-                && matches!(&*arm.pattern.pattern, Pattern::Wildcard) && arm.pattern.binders.is_empty());
-        let usage = if wildcard {
+        let mut unobserved = false;
+        if let [arm] = matched.arms.as_slice()
+            && arm.guard.is_none()
+        {
+            unobserved = matches!(&*arm.pattern.pattern, Pattern::Wildcard)
+                || self.unused_boolean_binder(arm)?;
+        }
+        let usage = if unobserved {
             ValueUse::Statement
         } else {
             ValueUse::Used
         };
         let mut remaining = self.expression_with_use(matched.scrutinee, state, depth + 1, usage)?;
-        if wildcard {
+        let snapshot = MatchStorage::Boolean(None);
+        if unobserved {
             // The arm does not consume the truth of the scrutinee. Start
             // tracking equality only if a later read copies the source.
             if let Some(source) = source {
                 self.budget.reserve(1)?;
                 self.wildcard_sources.push(source);
-                let result = self.match_arms(node, matched, remaining, true, unused, depth);
+                let result = self.match_arms(node, matched, remaining, snapshot, unused, depth);
                 self.wildcard_sources.pop();
                 return result;
             }
-            return self.match_arms(node, matched, remaining, true, unused, depth);
+            return self.match_arms(node, matched, remaining, snapshot, unused, depth);
         }
         let root = Root::Temporary(matched.scrutinee);
         let Some(source) = source else {
@@ -259,7 +284,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     state.new_boolean_copy(root, &[], self.budget)?;
                 }
             }
-            return self.match_arms(node, matched, remaining, true, unused, depth);
+            return self.match_arms(node, matched, remaining, snapshot, unused, depth);
         };
         if self.boolean_match_preserves_state(matched, depth + 1, unused)? {
             for state in &mut remaining {
@@ -268,11 +293,24 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             return Ok(remaining);
         }
+        // Without guards or binders, no failed test can change the place
+        // before the next test, and an entered arm never needs the snapshot.
+        let mut test_source = true;
+        for arm in &matched.arms {
+            self.budget.step(1)?;
+            if arm.guard.is_some() || !arm.pattern.binders.is_empty() {
+                test_source = false;
+                break;
+            }
+        }
         let mut result = Vec::new();
         for mut state in remaining {
-            // A snapshot and its copies carry the same value identity, not
-            // aliases to the source. Branch only when truth is tested.
-            let fresh = if state.boolean_value(root, &[], self.budget)?.is_none() {
+            let fresh = if test_source {
+                state.take(root, &[], self.budget)?;
+                None
+            } else if state.boolean_value(root, &[], self.budget)?.is_none() {
+                // A snapshot and its copies carry the same value identity,
+                // not aliases to the source. Refine only on observation.
                 let copy = state.new_boolean_copy(source.0, &source.1, self.budget)?;
                 state.store(root, &[], Content::BooleanCopy(copy.clone()), self.budget)?;
                 Some(copy)
@@ -280,7 +318,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 None
             };
             let snapshots = self.singleton(state)?;
-            let mut completed = self.match_arms(node, matched, snapshots, true, unused, depth)?;
+            let storage = MatchStorage::Boolean(test_source.then_some(&source));
+            let mut completed =
+                self.match_arms(node, matched, snapshots, storage, unused, depth)?;
             for state in &mut completed {
                 if unused {
                     let root = Root::Temporary(node);
@@ -304,6 +344,38 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         Ok(result)
+    }
+
+    // A named call without arguments cannot read a local pattern binder.
+    // This only elides snapshot creation; the call still runs through the
+    // normal Result-use checks, including effects and noncontinuation.
+    fn unused_boolean_binder(&mut self, arm: &Arm<'g>) -> Work<bool> {
+        if arm.pattern.binders.is_empty() {
+            return Ok(false);
+        }
+        let nodes = &self.module.syntax.nodes;
+        let body = &nodes[arm.body];
+        let node = if body.kind == NodeKind::Block {
+            let [statement] = body.children.as_slice() else {
+                return Ok(false);
+            };
+            let statement = &nodes[*statement];
+            if statement.kind != NodeKind::ExpressionStatement {
+                return Ok(false);
+            }
+            statement.children[0]
+        } else {
+            arm.body
+        };
+        if nodes[node].kind != NodeKind::Call || nodes[node].children.len() != 1 {
+            return Ok(false);
+        }
+        Ok(self.expression_facts(node)?.is_some_and(|value| {
+            value
+                .call
+                .as_ref()
+                .is_some_and(|call| call.arguments.is_empty())
+        }))
     }
 
     /// An exhaustive match whose arms all fall through without observing or
@@ -374,7 +446,7 @@ impl<'a, 'g> Check<'a, 'g> {
     // A discarded literal or whole-local primitive read has no effect on
     // Result residence. A projection of an effectful temporary is not a read
     // of this form. Groups keep their written depth even on the fast path.
-    fn pure_scalar_value(&mut self, node: NodeId, depth: usize) -> Work<bool> {
+    pub(super) fn pure_scalar_value(&mut self, node: NodeId, depth: usize) -> Work<bool> {
         let (leaf, _) = self.value_root_at(node, depth)?;
         let kind = self.module.syntax.nodes[leaf].kind;
         Ok(matches!(kind, NodeKind::Literal | NodeKind::ValueReference)
@@ -391,11 +463,16 @@ impl<'a, 'g> Check<'a, 'g> {
         node: NodeId,
         matched: &Match<'g>,
         mut remaining: Alternatives<'g>,
-        copy_bool: bool,
+        storage: MatchStorage<'_, 'g>,
         unused_bool: bool,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
         let root = Root::Temporary(matched.scrutinee);
+        let snapshot = (root, Vec::new());
+        let (copy_bool, address) = match storage {
+            MatchStorage::Value => (false, &snapshot),
+            MatchStorage::Boolean(source) => (true, source.unwrap_or(&snapshot)),
+        };
         let mut result = Vec::new();
         for arm in &matched.arms {
             self.budget.step(1)?;
@@ -408,7 +485,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 let Some(mut state) = self.split_pattern(
                     state,
-                    &(root, Vec::new()),
+                    address,
                     &arm.pattern.pattern,
                     &mut failed,
                     depth + 1,
@@ -502,13 +579,11 @@ impl<'a, 'g> Check<'a, 'g> {
         let scope = arm.site.span.start();
         for state in &mut next {
             if !block {
-                self.move_value(
-                    state,
-                    Root::Temporary(arm.body),
-                    &[],
-                    Root::Temporary(node),
-                    &[],
-                )?;
+                let from = Root::Temporary(arm.body);
+                let to = Root::Temporary(node);
+                if !state.transfer_boolean_copy(from, to, false, self.budget)? {
+                    self.move_value(state, from, &[], to, &[])?;
+                }
             }
             let unbound = state.take(root, &[], self.budget)?;
             self.discard(unbound, root, arm.site.node, ResultDiscardKind::ScopeExit)?;

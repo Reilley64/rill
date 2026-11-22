@@ -52,6 +52,38 @@ impl PartialOrd for BooleanCopy {
     }
 }
 
+type ClassPair<'a> = (&'a BooleanCopy, &'a BooleanCopy);
+
+#[derive(Default)]
+struct BooleanClasses<'a> {
+    first: Option<ClassPair<'a>>,
+    rest: Vec<ClassPair<'a>>,
+}
+
+impl<'a> BooleanClasses<'a> {
+    fn agree(
+        &mut self,
+        left: &'a BooleanCopy,
+        right: &'a BooleanCopy,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        let Some(first) = self.first else {
+            self.first = Some((left, right));
+            return Ok(true);
+        };
+        budget.step(1 + self.rest.len())?;
+        if let Some((x, y)) = std::iter::once(first)
+            .chain(self.rest.iter().copied())
+            .find(|&(x, y)| left == x || right == y)
+        {
+            return Ok(left == x && right == y);
+        }
+        budget.reserve(1)?;
+        self.rest.push((left, right));
+        Ok(true)
+    }
+}
+
 pub(super) enum BooleanValue {
     Known(bool),
     Copy(BooleanCopy),
@@ -77,6 +109,13 @@ pub(super) enum Content<'g> {
     ConsumedPair,
     /// Containment is unresolved at this origin, not known empty.
     Unclassified(NodeId),
+}
+
+impl Content<'_> {
+    fn is_boolean_hint(&self) -> bool {
+        matches!(self, Self::BooleanCopy(_))
+            || matches!(self, Self::Test(tag, _) if matches!(tag.as_ref(), Constructor::Boolean(_)))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -260,36 +299,37 @@ impl<'g> Residence<'g> {
         {
             return Ok(false);
         }
-        let mut copies = Vec::new();
+        let mut copies = BooleanClasses::default();
         for (a, b) in self.locations.iter().zip(&other.locations) {
             budget.step(a.1.size() + b.1.size())?;
-            if let (Content::BooleanCopy(left), Content::BooleanCopy(right)) =
-                (&a.1.content, &b.1.content)
-            {
-                if a.0 != b.0 || a.1.component != b.1.component {
-                    return Ok(false);
-                }
-                // Loop iterations can recreate the same equality classes.
-                // Compare classes by a bijection, not allocation identity.
-                budget.step(copies.len())?;
-                if let Some(&(x, y)) = copies.iter().find(|&&(x, y)| left == x || right == y) {
-                    if left != x || right != y {
-                        return Ok(false);
-                    }
-                } else {
-                    budget.reserve(1)?;
-                    copies.push((left, right));
-                }
-            } else if a != b {
+            if !Self::same_location(a, b, &mut copies, budget)? {
                 return Ok(false);
             }
         }
         Ok(true)
     }
 
-    /// Join two fallthrough alternatives only if their ordered residences
-    /// agree apart from complementary truth at the matched source. Different
-    /// ordering can miss a join; no Result, alias or other fact is widened.
+    fn same_location<'a>(
+        a: &'a (Root<'g>, Located<'g>),
+        b: &'a (Root<'g>, Located<'g>),
+        copies: &mut BooleanClasses<'a>,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        if let (Content::BooleanCopy(left), Content::BooleanCopy(right)) =
+            (&a.1.content, &b.1.content)
+        {
+            // Compare the entire partition, including pairs with the same
+            // label; otherwise another pair could split or identify a class.
+            return Ok(a.0 == b.0
+                && a.1.component == b.1.component
+                && copies.agree(left, right, budget)?);
+        }
+        Ok(a == b)
+    }
+
+    /// Join two fallthrough alternatives only when the ordered residences
+    /// have identical facts (up to copy labels), except for complementary
+    /// truth at the matched source. Different ordering can miss a join.
     pub(super) fn join_boolean(
         &mut self,
         other: &Self,
@@ -303,9 +343,10 @@ impl<'g> Residence<'g> {
             return Ok(false);
         }
         let mut remove = None;
+        let mut copies = BooleanClasses::default();
         for (i, (a, b)) in self.locations.iter().zip(&other.locations).enumerate() {
             budget.step(a.1.size() + b.1.size())?;
-            if a == b {
+            if Self::same_location(a, b, &mut copies, budget)? {
                 continue;
             }
             budget.step(1 + source.1.len())?;
@@ -316,9 +357,10 @@ impl<'g> Residence<'g> {
                 || b.1.component != source.1
                 || !matches!(
                     (&a.1.content, &b.1.content),
-                    (Content::Test(a, true), Content::Test(b, true))
+                    (Content::Test(a, positive_a), Content::Test(b, positive_b))
                         if matches!((a.as_ref(), b.as_ref()),
-                            (Constructor::Boolean(a), Constructor::Boolean(b)) if a != b)
+                            (Constructor::Boolean(a), Constructor::Boolean(b))
+                                if (a == positive_a) != (b == positive_b))
                 )
             {
                 return Ok(false);
@@ -459,6 +501,10 @@ impl<'g> Residence<'g> {
         Ok(None)
     }
 
+    pub(super) fn has_boolean_copies(&self) -> bool {
+        self.boolean_copies != 0
+    }
+
     pub(super) fn boolean_copy_at(
         &self,
         root: Root<'g>,
@@ -471,6 +517,56 @@ impl<'g> Residence<'g> {
             return Ok(Some(copy));
         }
         Ok(None)
+    }
+
+    /// Re-root a scalar copy in the existing residence vector. An exact
+    /// replacement can also drop a displaced Boolean hint, but never debt
+    /// or other storage evidence. Leave mixed residences to the caller.
+    pub(super) fn transfer_boolean_copy(
+        &mut self,
+        from: Root<'g>,
+        to: Root<'g>,
+        replace: bool,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        if self.boolean_copies == 0 || from == to {
+            return Ok(false);
+        }
+        let mut incoming = None;
+        let mut displaced = None;
+        for (i, (root, value)) in self.locations.iter().enumerate() {
+            budget.step(1)?;
+            if *root == from {
+                if incoming.is_some()
+                    || !value.component.is_empty()
+                    || !matches!(value.content, Content::BooleanCopy(_))
+                {
+                    return Ok(false);
+                }
+                incoming = Some(i);
+            } else if replace && *root == to {
+                if displaced.is_some()
+                    || !value.component.is_empty()
+                    || !value.content.is_boolean_hint()
+                {
+                    return Ok(false);
+                }
+                displaced = Some(i);
+            }
+        }
+        let Some(index) = incoming else {
+            return Ok(false);
+        };
+        let (_, value) = self.locations.swap_remove(index);
+        if let Some(mut old) = displaced {
+            if old == self.locations.len() {
+                old = index;
+            }
+            let (_, replaced) = self.locations.swap_remove(old);
+            self.boolean_copies -= usize::from(matches!(replaced.content, Content::BooleanCopy(_)));
+        }
+        self.locations.push((to, value));
+        Ok(true)
     }
 
     pub(super) fn move_boolean(

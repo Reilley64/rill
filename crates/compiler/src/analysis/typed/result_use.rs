@@ -740,7 +740,17 @@ impl<'a, 'g> Check<'a, 'g> {
                     if let Some(path) = path {
                         state.access_option_list(path.root, None, self.budget)?;
                     }
-                    let incoming = state.take(Root::Temporary(right), &[], self.budget)?;
+                    let from = Root::Temporary(right);
+                    if checked
+                        && state.has_boolean_copies()
+                        && let Some(path) = path.filter(|path| path.projections.is_empty())
+                        && let Some((root, components)) = self.address(state, Some(path))?
+                        && components.is_empty()
+                        && state.transfer_boolean_copy(from, root, true, self.budget)?
+                    {
+                        continue;
+                    }
+                    let incoming = state.take(from, &[], self.budget)?;
                     let storage = self.place_storage(state, path)?;
                     if let PlaceStorage::Exact(target @ (root, path)) = &storage
                         && checked

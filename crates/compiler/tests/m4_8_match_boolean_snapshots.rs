@@ -161,6 +161,59 @@ fn installed_boolean_matches() {
             checked,
         );
     }
+    for (name, before, scrutinee, body, fixed) in [
+        ("call14", "", "b@", "noop();", (331637, 49402, 12)),
+        ("split14", "", "b@", "if (common) {}", (331989, 49850, 12)),
+        (
+            "known14",
+            "let known = true;",
+            "known",
+            "if (common) {}",
+            (333400, 50513, 12),
+        ),
+    ] {
+        let parameters = (0..14).map(|i| format!(", b{i}: bool")).collect::<String>();
+        let matches = (0..14)
+            .map(|i| {
+                format!(
+                    "match ({}) {{ v => {{ {body} }} }}; ",
+                    scrutinee.replace('@', &i.to_string())
+                )
+            })
+            .collect::<String>();
+        let source = format!(
+            "\nfunction noop(): void {{}}
+            function probe(common: bool{parameters}): bool {{ {before} {matches}return true; }}\n"
+        );
+        installed(&probe, name, &source, Some(fixed), checked);
+    }
+
+    // The two arms create the same equality classes with different labels.
+    let parameters = (0..12).map(|i| format!(", b{i}: bool")).collect::<String>();
+    let matches = (0..12)
+        .map(|i| {
+            format!(
+                "match (b{i}) {{ true => {{ {arm} }}, false => {{ {arm} }} }};\n",
+                arm = "invalidate(&mut current); output = match (current) { _ => current };"
+            )
+        })
+        .collect::<String>();
+    let source = format!(
+        "\nfunction invalidate(flag: &mut bool): void {{}}
+        function probe(flag: bool{parameters}): bool {{
+            let mut current = flag; let mut output = false;
+            {matches}
+            return output;
+        }}\n"
+    );
+    installed(
+        &probe,
+        "equivalent arm-local copy classes",
+        &source,
+        Some((AnalysisLimits::default().max_work, 54002, 12)),
+        checked,
+    );
+
     for (groups, depth) in [(0, 23), (15, 38)] {
         let source = format!(
             "\nfunction probe(flag: bool): bool {{ match (flag) {{ v => {{ {}let _ = {}v{};{} }} }}; return true; }}\n",
@@ -373,6 +426,49 @@ fn installed_boolean_matches() {
         None,
         unpaid,
     );
+    for (name, source) in [
+        (
+            "overlapping labels do not make distinct copy classes equal",
+            "
+            function probe(left: bool, right: bool, gate: bool): void {
+                let debt = Err<bool,i32>(61i32);
+                match (left) { _ => {
+                    let first = left;
+                    match (right) { _ => {
+                        let second = right;
+                        let selected = match (gate) { true => first, false => second };
+                        if (first) { if (selected) { let _ = debt; } }
+                        else { if (!selected) { let _ = debt; } }
+                    } };
+                } };
+            }
+            ",
+        ),
+        (
+            "different alias targets keep separate alternatives",
+            "
+            function probe(left: bool, right: bool, gate: bool): void {
+                let debt = Err<bool,i32>(61i32);
+                let selected = match (gate) { true => &left, false => &right };
+                if (left) { if (*selected) { let _ = debt; } }
+                else { if (!*selected) { let _ = debt; } }
+            }
+            ",
+        ),
+        (
+            "distinct debts at the same residence keep separate alternatives",
+            "
+            function probe(gate: bool): void {
+                let debt: Result<bool,i32> = match (gate) {
+                    true => Err<bool,i32>(60i32), false => Err<bool,i32>(61i32)
+                };
+                if (gate) { let _ = debt; }
+            }
+            ",
+        ),
+    ] {
+        installed(&probe, name, source, None, unpaid);
+    }
     installed(
         &probe,
         "snapshot copy and updated source",
@@ -506,7 +602,9 @@ fn installed(
                 .bodies()
                 .findings()
                 .iter()
-                .any(|f| f.site.module.origin == Origin::Application)
+                .any(|f| f.site.module.origin == Origin::Application),
+            "{name}, test={test_mode}: {:?}",
+            report.bodies().findings()
         );
         eprintln!("{name}, test={test_mode}: {:?}", report.statistics());
         check(&report);
