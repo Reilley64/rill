@@ -13,7 +13,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             unreachable!("call block records a reached call");
         };
         (self.params.len() == 1
-            && self.calls[call].direct_bool_parameter
+            && self.calls[call].forwarding_prefix.is_some()
             && self.calls[call].args.len() == 1
             && callee.kind == DeclarationKind::Function)
             .then_some((block, callee))
@@ -36,6 +36,23 @@ impl<'g> CancellationTrace<'_, 'g> {
             unreachable!("forwarding block records a reached call");
         };
         let call = &self.calls[call];
+        let prefix = call
+            .forwarding_prefix
+            .expect("admitted written forwarding call");
+        // Only an eligible forwarding chain needs to inspect the unlowered
+        // suffix. Dead bindings have no slots and do not guard an earlier call.
+        let suffix = &self.module.syntax.nodes[self.body].children[prefix..];
+        budget.step(suffix.len())?;
+        if !suffix.iter().all(|&statement| {
+            matches!(
+                self.module.syntax.nodes[statement].kind,
+                crate::parser::NodeKind::ExpressionStatement
+                    | crate::parser::NodeKind::Binding { .. }
+                    | crate::parser::NodeKind::Return
+            )
+        }) {
+            return Ok(None);
+        }
         let &[stage] = call.args.as_slice() else {
             unreachable!("forwarding call has one staged argument");
         };
@@ -50,9 +67,7 @@ impl<'g> CancellationTrace<'_, 'g> {
         }
         // Lowering recorded the actual straight-line call, not a call hidden
         // in a pruned branch. Check the formal against the transferred stage.
-        if !call.direct_bool_parameter
-            || self.branch_parameter(self.slots[stage].node, budget)? != Some(self.params[0])
-        {
+        if self.branch_parameter(self.slots[stage].node, budget)? != Some(self.params[0]) {
             return Ok(None);
         }
         let state = self.known.input(block);
@@ -101,6 +116,9 @@ impl<'a, 'g> ForwardingCallee<'a, 'g> {
         body: Mir<'g>,
         trace: CancellationTrace<'a, 'g>,
     ) -> Option<Self> {
+        if trace.params.len() != 1 {
+            return None;
+        }
         let retaining_block = trace.retaining_call_block()?;
         let Operation::CallRetainingWithBool {
             callee: leaf,
@@ -128,7 +146,7 @@ impl<'a, 'g> ForwardingCallee<'a, 'g> {
         budget: &mut Budget,
     ) -> Result<Option<Cancellation<'g>>, (&'g Module, Stop)> {
         let middle_error = |stop| (self.trace.module, stop);
-        if leaf_trace.retaining_parameters().is_none() {
+        if !leaf_trace.forwarding_backedge || leaf_trace.retaining_parameters().is_none() {
             return Ok(None);
         }
         let call = match self.trace.prepare_retaining_call(&self.body, budget) {

@@ -12,13 +12,14 @@ Install mise at a version accepted by `min_version` in `mise.toml`. CI pins its 
 mise trust mise.toml
 mise install --locked
 mise run setup
-mise run check
 mise run build:scaffold
 mise exec -- cargo run --locked -p cli --no-default-features -- --help
 mise exec -- cargo run --locked -p cli --no-default-features -- --version
 ```
 
 `setup` prepares the default developer tools and dependency environment. It does not install LLVM or the optional experiment toolchains. First setup may access the network for tools and Cargo or Python dependencies. Committed locks are not a vendored dependency tree or an air-gap guarantee.
+
+Full test suites and validation gates run in CI, not during setup. For local checks, follow step 3 of the [toolchain development guide](agents/development.md).
 
 mise owns tool installation, version selection and task entry points. Cargo owns the Rust workspace and dependencies; uv owns Python dependencies. Keep tool versions pinned and commit the applicable `mise.lock`, `Cargo.lock`, `uv.lock` and any tool-backend lock sidecars. Use locked installation and dependency resolution rather than refreshing locks as part of ordinary checks. The mise configuration is the Rust version authority; there is no separate `rust-toolchain.toml` or custom bootstrap wrapper.
 

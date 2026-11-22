@@ -1683,6 +1683,17 @@ fn lower<'a, 'g>(
         Some(frame) => build.cleanup(body, &[frame.remainder], end)?,
         None => end,
     };
+    if collect_trace
+        && matches!(frame, Frame::OrdinaryFunction)
+        && let ([destination, _, _], [_, _, gate]) = (params.as_slice(), parameters.as_slice())
+        && matches!(
+            build.retained.get(destination),
+            Some(RetainedContents::OneHop(_))
+        )
+        && matches!(gate.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+    {
+        build.retaining_gate = Some(&gate.declaration.id);
+    }
     let finish = build.cleanup_scope(body, &params, end)?;
     let entry = build.statement(
         body,
@@ -2150,7 +2161,9 @@ enum WrittenDisposal<'g> {
 #[derive(Clone, Copy)]
 enum Action<'g> {
     None,
-    BudgetBackedge,
+    BudgetBackedge {
+        forwarding_possible: bool,
+    },
     Init(Slot),
     CommitListText {
         first: Slot,
@@ -2457,6 +2470,9 @@ struct Build<'a, 'g, 'b> {
     body_scope: Option<usize>,
     /// The sole call in the straight top-level prefix, and its reached length.
     forwarding_statement: Option<(NodeId, usize)>,
+    /// The exact Bool formal of a potential retaining leaf, and its lexical path.
+    retaining_gate: Option<&'g DeclarationId>,
+    retaining_gate_values: [bool; 2],
     /// A top-level empty/continue loop whose only decision reads a Bool formal.
     list_delivery_loop: Option<(NodeId, NodeId)>,
     scalar_copy_read: Option<NodeId>,
@@ -2492,8 +2508,8 @@ struct OriginalTwoHopBool {
 
 struct Call<'a, 'g> {
     callee: &'g DeclarationId,
-    /// Necessary, not sufficient, for a suspended Boolean forwarding frame.
-    direct_bool_parameter: bool,
+    /// Prefix length for a written call forwarding its immutable Bool formal.
+    forwarding_prefix: Option<usize>,
     args: Vec<Slot>,
     into: Option<Slot>,
     result: CallResult<'a, 'g>,

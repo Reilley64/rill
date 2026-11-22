@@ -1,4 +1,6 @@
 //! Fixed M4 caps measured at the published parent, 4ef298b.
+// The installed M4 profile that can issue a receipt is macOS AArch64.
+#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 mod support;
 
 use compiler::analysis::generics::{GoalBlocker, GoalState, OutputAgreement};

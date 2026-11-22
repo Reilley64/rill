@@ -1,5 +1,22 @@
 use super::*;
 
+pub(super) fn has_leaf_checkpoint(
+    work: &[WorkItem<'_, '_>],
+    report: &GraphReport<'_>,
+    leaf: usize,
+) -> bool {
+    // Use the already-metered enabled judgment, not a CFG walk or the
+    // leaf's ordinary (possibly infeasible) backedge.
+    let item = &work[leaf];
+    item.retaining_parameters.is_some()
+        && (matches!(report.bodies[leaf].enabled_frame, Delivery::Rejected { .. })
+            || item.enabled_proof.as_ref().is_some_and(|proof| {
+                proof
+                    .sole_backedge_site(item.ordinary.as_ref().unwrap())
+                    .is_some()
+            }))
+}
+
 pub(super) fn check<'g>(
     work: &mut [WorkItem<'_, 'g>],
     report: &mut GraphReport<'g>,

@@ -352,7 +352,7 @@ struct WorkItem<'a, 'g> {
     retaining_parameters: Option<[Place<'g>; 3]>,
     selected_proof: Option<Box<GraphRetainingCall<'g>>>,
     selected_gate: Option<Place<'g>>,
-    has_retaining_call: bool,
+    retaining_leaf: Option<usize>,
     forwarded_proof: Option<Box<GraphForwardedRetainingCall<'g>>>,
 }
 
@@ -461,7 +461,7 @@ fn push_body<'a, 'g>(
         retaining_parameters: None,
         selected_proof: None,
         selected_gate: None,
-        has_retaining_call: false,
+        retaining_leaf: None,
         forwarded_proof: None,
     });
     Ok(index)
@@ -837,10 +837,18 @@ fn check_enabled_frames<'g>(
         let ordinary_checked = item.ordinary_completion == Completion::Checked;
         let mut known_entry = false;
         let mut unknown_entry = !ordinary_checked;
-        for &target in item.call_targets.values() {
+        let retaining_block = trace.retaining_call_block().filter(|_| ordinary_checked);
+        let mut retaining_leaf = None;
+        for (&block, &target) in &item.call_targets {
             budget.step(1)?;
             known_entry |= work[target].empty_entry.is_some();
             unknown_entry |= work[target].empty_entry.is_none();
+            if retaining_block == Some(block)
+                && matches!(item.ordinary.as_ref().unwrap().blocks[block].operation,
+                    Operation::CallRetainingWithBool { second_input: None, ref arguments, .. } if arguments.len() == 3)
+            {
+                retaining_leaf = Some(target);
+            }
         }
         // Do not use delivery to discharge an ordinary dependency. Even in
         // a checked ordinary closure, nonempty calls have unknown delivery.
@@ -880,9 +888,8 @@ fn check_enabled_frames<'g>(
             }
             Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => {}
         }
-        if ordinary_checked && let Some(block) = trace.retaining_call_block() {
-            work[index].has_retaining_call = matches!(work[index].ordinary.as_ref().unwrap().blocks[block].operation,
-                Operation::CallRetainingWithBool { second_input: None, ref arguments, .. } if arguments.len() == 3);
+        if retaining_block.is_some() {
+            work[index].retaining_leaf = retaining_leaf;
             work[index].trace = Some(trace);
         }
     }
@@ -909,9 +916,10 @@ fn check_selected_calls<'g>(
         let mir = item.ordinary.as_ref().unwrap();
         let Some(parameters) = work[callee_root].retaining_parameters else {
             if callee_root != index
-                && work[callee_root].has_retaining_call
-                && work[callee_root].ordinary_completion == Completion::Checked
                 && let Some((_, callee)) = trace.forwarding_call(mir)
+                && work[callee_root]
+                    .retaining_leaf
+                    .is_some_and(|leaf| forwarding::has_leaf_checkpoint(work, report, leaf))
                 && work[callee_root]
                     .declaration
                     .is_some_and(|declaration| std::ptr::eq(&declaration.id, callee))

@@ -529,6 +529,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             cleanups: Vec::new(),
             body_scope: None,
             forwarding_statement: None,
+            retaining_gate: None,
+            retaining_gate_values: [true; 2],
             list_delivery_loop: None,
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
@@ -2593,14 +2595,22 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             NodeKind::IfStatement => {
                 let cond = children[0];
-                let (can_be_true, can_be_false) = self.outcomes(cond)?;
+                let facts = self.value(cond)?;
+                let (can_be_true, can_be_false) = Self::outcomes(facts);
+                let parent = self.retaining_gate_values;
                 let yes = if can_be_true {
-                    self.statement(children[1], next, exits, depth + 1)?
+                    self.refine_retaining_gate(cond, facts, true);
+                    let yes = self.statement(children[1], next, exits, depth + 1)?;
+                    self.retaining_gate_values = parent;
+                    yes
                 } else {
                     next
                 };
                 let no = if let Some(&alternate) = children.get(2).filter(|_| can_be_false) {
-                    self.statement(alternate, next, exits, depth + 1)?
+                    self.refine_retaining_gate(cond, facts, false);
+                    let no = self.statement(alternate, next, exits, depth + 1)?;
+                    self.retaining_gate_values = parent;
+                    no
                 } else {
                     next
                 };
@@ -2608,9 +2618,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             NodeKind::While => {
                 let cond = children[0];
-                let (can_be_true, _) = self.outcomes(cond)?;
+                let facts = self.value(cond)?;
+                let (can_be_true, _) = Self::outcomes(facts);
                 let yes = if can_be_true {
-                    let backedge = self.emit(node, Action::BudgetBackedge, Edges::End)?;
+                    let parent = self.retaining_gate_values;
+                    self.refine_retaining_gate(cond, facts, true);
+                    let backedge = self.emit(
+                        node,
+                        Action::BudgetBackedge {
+                            forwarding_possible: self.retaining_gate_values != [false; 2],
+                        },
+                        Edges::End,
+                    )?;
                     let looping = Some(Loop {
                         breaks: next,
                         continues: backedge,
@@ -2621,6 +2640,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         Exits { looping, ..exits },
                         depth + 1,
                     )?;
+                    self.retaining_gate_values = parent;
                     let head = self.condition(cond, yes, next, depth + 1)?;
                     self.code[backedge].edges = Edges::Next(head);
                     return Ok(head);
@@ -4794,15 +4814,35 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(node)
     }
 
-    fn outcomes(&self, node: NodeId) -> ResultOf<(bool, bool)> {
-        Ok(self
-            .value(node)?
+    fn outcomes(facts: &ExpressionFacts<'_>) -> (bool, bool) {
+        facts
             .boolean
-            .map_or((true, true), |b| (b.can_be_true(), b.can_be_false())))
+            .map_or((true, true), |b| (b.can_be_true(), b.can_be_false()))
+    }
+
+    fn refine_retaining_gate(&mut self, node: NodeId, facts: &ExpressionFacts<'g>, value: bool) {
+        // Groups preserve the typed place. Only an unprojected, immutable
+        // read of this exact formal can constrain another read. The ordinary
+        // graph still includes either edge; this only screens forwarding.
+        if let Some(gate) = self.retaining_gate
+            && matches!(
+                self.module.syntax.nodes[node].kind,
+                NodeKind::ValueReference | NodeKind::Group
+            )
+            && facts.access == Access::Owned
+            && facts.place == TypedPlace::ReadOnly
+            && facts.refinement.is_none()
+            && facts
+                .path
+                .as_ref()
+                .is_some_and(|path| std::ptr::eq(path.root, gate) && path.projections.is_empty())
+        {
+            self.retaining_gate_values[usize::from(!value)] = false;
+        }
     }
 
     fn condition(&mut self, node: NodeId, yes: Pc, no: Pc, depth: usize) -> ResultOf<Pc> {
-        let edges = match self.outcomes(node)? {
+        let edges = match Self::outcomes(self.value(node)?) {
             (false, true) => Edges::Next(no),
             (true, false) => Edges::Next(yes),
             (true, true) => Edges::Branch { yes, no },
@@ -6373,7 +6413,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let index = self.calls.len();
             self.calls.push(Call {
                 callee: call.callee,
-                direct_bool_parameter: false,
+                forwarding_prefix: None,
                 args: std::mem::take(&mut args),
                 into,
                 result: CallResult::Plain,
@@ -6606,7 +6646,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let index = self.calls.len();
         self.calls.push(Call {
             callee: implementation,
-            direct_bool_parameter: false,
+            forwarding_prefix: None,
             args: vec![stage],
             into,
             result: CallResult::ScalarCopy,
@@ -6793,7 +6833,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let index = self.calls.len();
         self.calls.push(Call {
             callee: &header.declaration.id,
-            direct_bool_parameter: false,
+            forwarding_prefix: None,
             args: vec![stage],
             into: Some(into),
             result: CallResult::TransfersCallable(header),
@@ -6996,7 +7036,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         self.budget.reserve(call.arguments.len() + 1)?;
         let mut args = Vec::with_capacity(call.arguments.len());
-        let mut direct_bool_parameter = false;
+        let mut forwarding_prefix = None;
         let mut destination = None;
         let mut two_hop = None;
         let mut pipe_formal = None;
@@ -7007,9 +7047,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             let value = self.value(arg)?;
             let ty = value.ty.clone();
-            direct_bool_parameter = self
-                .forwarding_statement
-                .is_some_and(|(call, _)| call == node)
+            if let Some((statement, prefix)) = self.forwarding_statement
+                && statement == node
                 && call.arguments.len() == 1
                 && !piped
                 && scalar::scalar(&ty) == Some(Primitive::Bool)
@@ -7018,19 +7057,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 && value.place == TypedPlace::ReadOnly
                 && value.path.as_ref().is_some_and(|p| {
                     p.root.kind == DeclarationKind::Parameter && p.projections.is_empty()
-                });
-            if direct_bool_parameter {
-                // The ordinary slot walk ended at a terminal statement. A dead
-                // binding has no slot and does not make an earlier call guarded.
-                let (_, prefix) = self.forwarding_statement.unwrap();
-                let suffix = &self.module.syntax.nodes[self.body].children[prefix..];
-                self.budget.step(suffix.len())?;
-                direct_bool_parameter = suffix.iter().all(|&s| {
-                    matches!(
-                        self.module.syntax.nodes[s].kind,
-                        NodeKind::ExpressionStatement | NodeKind::Binding { .. } | NodeKind::Return
-                    )
-                });
+                })
+            {
+                forwarding_prefix = Some(prefix);
             }
             if self.reference_option(&ty) {
                 return Err(Stop::Pending(arg));
@@ -7088,7 +7117,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         };
         self.calls.push(Call {
             callee: call.callee,
-            direct_bool_parameter,
+            forwarding_prefix,
             args,
             into,
             result: if borrows_record {
