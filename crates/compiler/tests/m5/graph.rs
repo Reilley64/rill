@@ -1240,9 +1240,11 @@ function dropGuard(held: LockGuard<i32>): void {{}}
                 .provider
                 .as_ref()
                 .unwrap();
+            // ri-px1.8 (D3): the scope-exit release closes the caller's
+            // ordinary edge; the provider's source root below stays open.
             let protected = root(&report, b"function dropGuard(");
-            assert_eq!(protected.completion(), Completion::Incomplete);
-            assert!(protected.mir().is_none());
+            assert_eq!(protected.completion(), Completion::Checked);
+            assert!(protected.mir().is_some());
             let [edge] = protected.dependencies() else {
                 panic!("missing protected provider edge");
             };

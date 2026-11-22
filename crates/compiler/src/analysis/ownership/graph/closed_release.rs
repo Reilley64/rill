@@ -1,4 +1,5 @@
-//! Written release edges over flow-checked MIR, not proofs of the provider source roots.
+//! Written and scope-exit release edges over flow-checked MIR, not proofs of
+//! the provider source roots.
 use super::*;
 use crate::analysis::{
     scalars::{
@@ -12,10 +13,12 @@ use crate::analysis::{
 };
 use crate::parser::NodeKind;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn proved<'g>(
     typed: &TypedReport<'g>,
     module: &'g Module,
     nodes: &NodeIndex<'_, 'g>,
+    header: Option<&DeclarationFacts<'g>>,
     block: &Block<'g>,
     edge: Dependency<'g>,
     family_count: usize,
@@ -29,17 +32,24 @@ pub(super) fn proved<'g>(
             *operand
         }
         (ProtectedRelease { entry }, Operation::Cleanup(actions)) => {
-            // This verifier is for a written call, not implicit cleanup or a
-            // replacement interval. A written guard release is a single action.
-            let [
-                Cleanup::ReleaseGuard {
-                    operand,
-                    implementation,
-                    entry: release_entry,
-                },
-            ] = actions.as_slice()
+            // A written guard release is a single action at its call. Any
+            // other cleanup is scope-exit release, checked from the types of
+            // the released parameters, not from a call.
+            let (
+                [
+                    Cleanup::ReleaseGuard {
+                        operand,
+                        implementation,
+                        entry: release_entry,
+                    },
+                ],
+                NodeKind::Call,
+            ) = (
+                actions.as_slice(),
+                module.syntax.nodes[block.site.node].kind,
+            )
             else {
-                return Ok(false);
+                return scope_exit(typed, module, header, actions, edge, entry, budget);
             };
             if !std::ptr::eq(*implementation, edge.declaration)
                 || !std::ptr::eq(*release_entry, entry)
@@ -195,17 +205,172 @@ fn protected_guard<'g>(
     {
         return Ok(false);
     }
+    protected_scope(
+        typed,
+        declaration,
+        family,
+        implementation,
+        entry,
+        Some(native.artifact),
+        budget,
+    )
+}
+
+/// Scope-exit release of a `LockGuard<i32>` held by an ordinary function's
+/// parameter, whole or as one field of a flat application record. Flow has
+/// already placed each release on initialized, unborrowed storage; this
+/// checks only that every release on this edge is the protected provider of
+/// its operand's declared type.
+fn scope_exit<'g>(
+    typed: &TypedReport<'g>,
+    module: &'g Module,
+    header: Option<&DeclarationFacts<'g>>,
+    actions: &[Cleanup<'g>],
+    edge: Dependency<'g>,
+    entry: &'g DeclarationId,
+    budget: &mut Budget,
+) -> ResultOf<bool> {
+    let releases = || {
+        actions.iter().filter_map(move |action| match *action {
+            Cleanup::ReleaseGuard {
+                operand,
+                implementation,
+                entry: selected,
+            } if std::ptr::eq(implementation, edge.declaration)
+                && std::ptr::eq(selected, entry) =>
+            {
+                Some(operand)
+            }
+            _ => None,
+        })
+    };
+    // Screen from the paid-for MIR and syntax before the first charge.
+    let (
+        Some(DeclarationFacts {
+            shape: DeclarationShape::Function { parameters, .. },
+            ..
+        }),
+        Some(family),
+    ) = (header, typed.dispose_role().map(|role| &role.id))
+    else {
+        return Ok(false);
+    };
+    let mut any = false;
+    for operand in releases() {
+        if !std::ptr::eq(operand.root.module, &module.key)
+            || module.syntax.nodes[operand.root.node].kind != NodeKind::Parameter
+            || !matches!(operand.projection, None | Some(Projection::Field(_)))
+        {
+            return Ok(false);
+        }
+        any = true;
+    }
+    if !any {
+        return Ok(false);
+    }
+    budget.step(actions.len())?;
+    for operand in releases() {
+        budget.step(parameters.len())?;
+        let Some(parameter) = parameters
+            .iter()
+            .find(|parameter| parameter.declaration.node == operand.root.node)
+        else {
+            return Ok(false);
+        };
+        let ty = match operand.projection {
+            Some(Projection::Field(field)) => {
+                let Some(ty) = field_type(typed, &parameter.ty, field, budget)? else {
+                    return Ok(false);
+                };
+                ty
+            }
+            _ => &parameter.ty,
+        };
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = ty.as_ref()
+        else {
+            return Ok(false);
+        };
+        if !matches!(arguments.as_slice(), [argument] if is_i32(argument))
+            || !protected_scope(
+                typed,
+                declaration,
+                family,
+                edge.declaration,
+                entry,
+                None,
+                budget,
+            )?
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The declared type of `field` in the flat, non-generic application record `ty`.
+fn field_type<'a, 'g>(
+    typed: &'a TypedReport<'g>,
+    ty: &Type<'g>,
+    field: &'g Declaration,
+    budget: &mut Budget,
+) -> ResultOf<Option<&'a Type<'g>>> {
+    let TypeTerm::Nominal {
+        declaration,
+        arguments,
+    } = ty.as_ref()
+    else {
+        return Ok(None);
+    };
+    if declaration.module.origin != Origin::Application || !arguments.is_empty() {
+        return Ok(None);
+    }
+    let headers = &typed.inventory().type_facts().declarations;
+    let probes = usize::BITS - headers.len().leading_zeros() + 1;
+    charge_key(&declaration.module, probes as usize, budget)?;
+    let Some(DeclarationFacts {
+        binders,
+        shape: DeclarationShape::Record { fields },
+        ..
+    }) = headers.get(*declaration)
+    else {
+        return Ok(None);
+    };
+    if !binders.is_empty() {
+        return Ok(None);
+    }
+    budget.step(fields.len())?;
+    Ok(fields
+        .iter()
+        .find(|member| std::ptr::eq(member.declaration, field))
+        .map(|member| &member.ty))
+}
+
+/// The clear required guard-release scope of `owner` names this provider,
+/// and the guard's native representation is its payload and source. A
+/// written call also fixes the selected artifact.
+fn protected_scope<'g>(
+    typed: &TypedReport<'g>,
+    owner: &DeclarationId,
+    family: &'g DeclarationId,
+    implementation: &'g DeclarationId,
+    entry: &'g DeclarationId,
+    artifact: Option<&'g std::path::Path>,
+    budget: &mut Budget,
+) -> ResultOf<bool> {
     let scopes = typed.ownership_protection();
     budget.step(scopes.len())?;
-    let Some(scope) = scopes.iter().find(|scope| {
-        std::ptr::eq(&scope.owner.id, *declaration)
-            && scope.rule == OwnershipRule::Required(native.action)
+    let Some((scope, provider)) = scopes.iter().find_map(|scope| {
+        let provider = scope.provider.as_ref()?;
+        (std::ptr::eq(&scope.owner.id, owner)
+            && scope.rule == OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
             && scope.coverage == OwnershipCoverage::Clear
-            && scope.provider.as_ref().is_some_and(|provider| {
-                std::ptr::eq(&provider.implementation.id, implementation)
-                    && std::ptr::eq(&provider.entry.id, entry)
-                    && std::ptr::eq(provider.artifact, native.artifact)
-            })
+            && std::ptr::eq(&provider.implementation.id, implementation)
+            && std::ptr::eq(&provider.entry.id, entry)
+            && artifact.is_none_or(|artifact| std::ptr::eq(provider.artifact, artifact)))
+        .then_some((scope, provider))
     }) else {
         return Ok(false);
     };
@@ -218,7 +383,7 @@ fn protected_guard<'g>(
     Ok(representations.iter().any(|representation| {
         std::ptr::eq(representation.owner, scope.owner)
             && representation.kind == NativeRepresentationKind::GuardPayloadAndSource
-            && std::ptr::eq(representation.artifact, native.artifact)
+            && std::ptr::eq(representation.artifact, provider.artifact)
     }))
 }
 

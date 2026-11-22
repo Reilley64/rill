@@ -199,19 +199,9 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             ]);
             // The grouped return copies once into the group, as deep as its
             // layers: depth 5 against 3, and one short of 5 is a limit.
-            for (name, pinned, body, value) in [
-                (
-                    "mixedWrapper",
-                    stats(2_630, 266, 3),
-                    "{ return view; }",
-                    "view",
-                ),
-                (
-                    "mixedGrouped",
-                    stats(2_636, 266, 5),
-                    "{ return ((view)); }",
-                    "((view))",
-                ),
+            for (name, pinned, value) in [
+                ("mixedWrapper", stats(2_630, 266, 3), "view"),
+                ("mixedGrouped", stats(2_636, 266, 5), "((view))"),
             ] {
                 let target = query(name)(AnalysisLimits::default());
                 assert_eq!(target.completion(), Completion::Checked, "{name}");
@@ -223,13 +213,12 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
                 assert_eq!(sequence(target.mir().unwrap()), expected, "{name}");
                 assert_targeted(query(name), pinned, Completion::Checked);
 
-                // The ordinary graph root reaches the same cleanup, but the
-                // implicit guard release is not a verified graph edge (row
-                // D3), so the root keeps no MIR.
+                // The ordinary graph root verifies the scope-exit release of
+                // the guard field (row D3, ri-px1.8) and keeps the same MIR.
                 let root = graph_root(&graph, module, name);
-                assert_eq!(root.ordinary_completion(), Completion::Incomplete, "{name}");
-                assert!(root.ordinary_mir().is_none());
-                assert_eq!(root.blocked_at().unwrap().span.bytes(), body.as_bytes());
+                assert_eq!(root.ordinary_completion(), Completion::Checked, "{name}");
+                assert!(root.blocked_at().is_none(), "{name}");
+                assert_eq!(sequence(root.ordinary_mir().unwrap()), expected, "{name}");
                 assert!(release(root), "{name}");
             }
 
@@ -263,19 +252,18 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             let target = query("guardBesideView")(AnalysisLimits::default());
             assert_eq!(target.completion(), Completion::Checked);
             assert_eq!(target.statistics(), pinned);
-            assert_eq!(
-                sequence(target.mir().unwrap()),
-                owned_events(&[
-                    ("copy", "view: &Plain -> view"),
-                    ("export", "view"),
-                    ("end", "view: &Plain"),
-                    ("release", "owned: LockGuard<i32>"),
-                ])
-            );
+            let beside = owned_events(&[
+                ("copy", "view: &Plain -> view"),
+                ("export", "view"),
+                ("end", "view: &Plain"),
+                ("release", "owned: LockGuard<i32>"),
+            ]);
+            assert_eq!(sequence(target.mir().unwrap()), beside);
             assert_targeted(query("guardBesideView"), pinned, Completion::Checked);
             let root = graph_root(&graph, module, "guardBesideView");
-            assert_eq!(root.ordinary_completion(), Completion::Incomplete);
-            assert_eq!(root.blocked_at().unwrap().span.bytes(), b"{ return view; }");
+            assert_eq!(root.ordinary_completion(), Completion::Checked);
+            assert!(root.blocked_at().is_none());
+            assert_eq!(sequence(root.ordinary_mir().unwrap()), beside);
             assert!(release(root));
 
             // A custom-disposed wrapper beside a view of its own type.
@@ -299,15 +287,23 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             assert!(matches!(root.dependencies(), [edge]
                 if matches!(edge.contract, DependencyContract::ActiveDisposer)));
 
-            // The whole receipt for this source.
-            let pinned = stats(197_974, 5_550, 5);
+            // The whole receipt for this source. Rule 11 (ri-px1.8, D3): it
+            // was 197,974 / 5,550 / 5 with the three roots above Incomplete.
+            // The scope-exit release verification adds 102 work for each of
+            // mixedWrapper and mixedGrouped and 26 for guardBesideView: +230,
+            // entries unchanged, depth still mixedGrouped's 5.
+            let pinned = stats(198_204, 5_550, 5);
             assert_eq!(graph.statistics(), pinned);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             let (exact, short) = caps(pinned);
             let replay = analyze_ownership(receipt, exact);
             assert_eq!(replay.statistics(), pinned);
             assert_eq!(replay.completion(), GraphCompletion::Incomplete);
-            for short in short {
+            let old = AnalysisLimits {
+                max_work: 197_974,
+                ..exact
+            };
+            for short in std::iter::once(old).chain(short) {
                 assert_eq!(
                     analyze_ownership(receipt, short).completion(),
                     GraphCompletion::ResourceLimit
