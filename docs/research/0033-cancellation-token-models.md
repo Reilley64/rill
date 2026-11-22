@@ -1,10 +1,10 @@
-# Cancellation-token models — C#/.NET and Tokio for Rill #33
+# Cancellation-token models — C#/.NET and Tokio for Rill ri-j60
 
 **Status:** primary-source research input, **not approved token policy or an implementation plan**.
 
 **Checked:** 2026-11-15 (UTC).
 
-**Ticket:** [#33 — clocks, durations, deadlines and cancellable waits](https://github.com/Reilley64/rill/issues/33).
+**Ticket:** ri-j60 — clocks, durations, deadlines and cancellable waits.
 
 **Controlling direction:** the user's instruction, **“we should add cancellation tokens in the style of c# and tokio,”** supersedes the previously accepted no-token Q53. **Tokens are in scope.** This selects sources of design inspiration, not literal .NET/Rust APIs, exceptions, traits, a dependency, FFI or backend. The earlier [Jiff note's](0033-jiff-api-model.md#existing-rill-constraints-that-remain-in-force) statement that its research did not approve tokens is historical, not a reason to exclude them now. Exact integration with goroutine cancellation and typed operation outcomes remains unchosen. [B]
 
@@ -142,7 +142,7 @@ Citation ranges above refer to the following primary sources; line links are to 
 
 ### Rill inputs
 
-- **[B] Current user research brief for #33** (this task): token inclusion supersedes no-token Q53; exact token/goroutine/outcome integration unchosen; accepted deadline-helper shape/semantics and no general GC/public dyn/trait assumptions. This is explicit supplied decision provenance, not an independently fetched issue transcript. [Issue context](https://github.com/Reilley64/rill/issues/33).
+- **[B] Current user research brief for ri-j60** (this task): token inclusion supersedes no-token Q53; exact token/goroutine/outcome integration unchosen; accepted deadline-helper shape/semantics and no general GC/public dyn/trait assumptions. This is explicit supplied decision provenance, not an independently fetched issue transcript. Issue context (ri-j60).
 - **[R1]** [ADR 0009 — concurrency safety and cooperative cancellation](../adr/0009-concurrency-safety-and-cooperative-cancellation.md), especially transfer/evidence, scoped work/stopping, and cancellation/native ownership sections.
 - **[R2]** [Standard-library contracts](../standard-library-contracts.md), §§2 (callable/copy/protected cleanup), 5 (native retention), 6 (scoped helpers/stop), 7 (commits/timers), 10 (I/O versus cancellation/fatal panic). Local working-tree design inputs read without editing.
 - **[R3]** [Glossary](../../GLOSSARY.md), introduction and callable-evidence vocabulary; [ADR 0003](../adr/0003-overloads-need-a-declaration.md), no traits; [ADR 0006](../adr/0006-whole-program-monomorphization-on-llvm-23.md), no GC and pre-monomorphization ownership checks. Source-design boundaries only; no backend claims are adopted here.

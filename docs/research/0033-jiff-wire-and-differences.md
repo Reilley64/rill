@@ -1,4 +1,4 @@
-# Jiff wire text and pure differences — fact audit for Rill #33
+# Jiff wire text and pure differences — fact audit for Rill ri-j60
 
 **Status:** primary-source research, not a Rill specification or a selection of remaining policy.
 

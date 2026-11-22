@@ -1,10 +1,10 @@
-# Clock and zone boundaries — remaining facts for Rill #33
+# Clock and zone boundaries — remaining facts for Rill ri-j60
 
 **Status:** primary-source research, **not approved Rill policy**. Checked 2026-11-15 UTC.
 
 **Scope:** clock/host facts needed to choose elapsed-time semantics, followed by small source-level zone-database gaps. Read alongside [0033-jiff-api-model.md](0033-jiff-api-model.md) and [0033-jiff-wire-and-differences.md](0033-jiff-wire-and-differences.md); this note does not repeat their wire audit or change them. The user's choice is a **Jiff-inspired, Rill-native API**, not a Rust FFI/dependency/backend selection.
 
-**Evidence boundary:** official specifications, vendor documentation and pinned upstream source inspection; **no executable Rill tests, browser suspend experiments, native probes, safety/proper-tail proof or LLVM/Wasm pipeline validation**. In particular, a host API existing does not discharge [#30](https://github.com/Reilley64/rill/issues/30). Implementation examples below are static source observations, not measurements or claims about every installed release. Jiff citations are all **0.2.44**, commit **`95f343d3f137e5596288d862f4a04dc3be52b07b`**. Other source versions are explicitly identified in the references.
+**Evidence boundary:** official specifications, vendor documentation and pinned upstream source inspection; **no executable Rill tests, browser suspend experiments, native probes, safety/proper-tail proof or LLVM/Wasm pipeline validation**. In particular, a host API existing does not discharge ri-dej. Implementation examples below are static source observations, not measurements or claims about every installed release. Jiff citations are all **0.2.44**, commit **`95f343d3f137e5596288d862f4a04dc3be52b07b`**. Other source versions are explicitly identified in the references.
 
 ## 1. Distinctions that the clock contract must keep separate
 
@@ -96,7 +96,7 @@ Independently decide whether frequency slewing is allowed, how anomalies are sur
 - Model wall steps/slews separately from elapsed progression, and model **OS suspend**, **context/process inactivity** and **scheduler delay** separately. Advance a suspend-inclusive versus exclusive fake according to the policy selected later; do not encode the answer in a supposedly neutral fixture. [L1, A2, H4, H5]
 - Explicitly drive registration-before/after-expiry, simultaneous operation/timer readiness, unregister/abort acknowledgments, committed side effects and cleanup completion. Advancing time makes a deadline eligible; it must not magically complete unabortable work or a cleanup join. Winners/fairness need the existing unspecified simultaneous-ready boundary or an explicit future decision. [B1]
 
-**Rill invariant retained:** [#33](https://github.com/Reilley64/rill/issues/33), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) and the standard-library contracts require cooperative cancellation and joined cleanup. Requests/handle drops are **not force kill or confirmed abort**. Native registrations retain sources until completion/confirmed abort; scoped races join losing execution and cleanup before returning. A timer winning can trigger result selection/cancellation, but unabortable work or cleanup can postpone return indefinitely. A better monotonic clock changes none of that. [B1]
+**Rill invariant retained:** ri-j60, [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) and the standard-library contracts require cooperative cancellation and joined cleanup. Requests/handle drops are **not force kill or confirmed abort**. Native registrations retain sources until completion/confirmed abort; scoped races join losing execution and cleanup before returning. A timer winning can trigger result selection/cancellation, but unabortable work or cleanup can postpone return indefinitely. A better monotonic clock changes none of that. [B1]
 
 ## 5. Jiff 0.2.44: remaining database/source qualifications
 
@@ -134,7 +134,7 @@ This qualifies the earlier notes' prose about conservative/same-rules equality w
 
 **Needed database decisions, not selected limits:** authority/source and immutable snapshot provenance; ASCII case/alias policy; equality versus canonical identifier versus rule-content identity; trusted versus untrusted roots/data; maximum input bytes, entries, identifier bytes, transitions, generated expansion and retained snapshot/cache memory; eviction/reset/update semantics; and error boundaries when those limits are exceeded. Resource budgets must include simultaneous retained old/new snapshots and temporary parse buffers, not just one TZif blob. These are proposed design dimensions derived from the cited allocation/cache behavior, not approved numeric quotas or a request to add Rust machinery.
 
-## 6. Decisions to take back to #33
+## 6. Decisions to take back to ri-j60
 
 1. **Suspend and rate:** include or exclude OS suspend; whether monotonic rate slewing is allowed; explicit unsupported hosts versus a separately approved weaker/variable contract.
 2. **Domains and numbers:** clock identity/comparability and persistence boundary; value range/precision; checked conversions/deadline addition; coarsening/rounding/anomaly behavior. Preserve existing zero/expired and no-wrap obligations.
@@ -142,13 +142,13 @@ This qualifies the earlier notes' prose about conservative/same-rules equality w
 4. **Testing seam:** whether/how a manual clock controls reads **and** registrations/wakeups, with separately driven operation and cleanup completion.
 5. **Zones:** capitalization versus alias normalization; explicit snapshot/equality identity rather than CRC proof; authority and aggregate database/cache/parse limits.
 
-None is settled by choosing Jiff's calendar API. This note contributes factual inputs only: no policy acceptance, Rust FFI choice, executable Rill testing, safety/proper-tail proof or #30 backend proof.
+None is settled by choosing Jiff's calendar API. This note contributes factual inputs only: no policy acceptance, Rust FFI choice, executable Rill testing, safety/proper-tail proof or ri-dej backend proof.
 
 ## Primary-source references
 
 ### Existing Rill boundary
 
-- **B1:** [#33](https://github.com/Reilley64/rill/issues/33), [standard-library contracts §§6–7 and native retention](../standard-library-contracts.md), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md). Local live contract inputs, not external implementation evidence.
+- **B1:** ri-j60, [standard-library contracts §§6–7 and native retention](../standard-library-contracts.md), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md). Local live contract inputs, not external implementation evidence.
 
 ### Native clocks and Rust
 
