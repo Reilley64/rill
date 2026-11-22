@@ -1646,6 +1646,24 @@ Ten rows of `base-matrix.tsv` do not reproduce, in both modes. They were measure
 
 Whether these moves are the intended cost of the forwarding proof is the owner's decision under D2. This is LLVM-free host ownership analysis. No Rill program ran.
 
+## Boolean match review counterexamples, 2026-11-23
+
+Ticket ri-785.2 (A4). [`installed_boolean_matches`](m4_8_match_boolean_snapshots.rs) now also runs the reviewers' repros verbatim, including their `import std::routine::join;`, through both installed load modes. Each case uses the same work, entries and depth in both modes. The test pins those exact numbers; one short in any dimension gives `ResourceLimit` with no receipt.
+
+| Case | Review | Outcome | Work / entries / depth |
+| --- | --- | --- | --- |
+| `let copy = match (flag) { _ => flag };` | `35776287`, `f67c0458` | `Checked`, receipt | 426,696 / 48,863 / 12 |
+| Nested wildcards; `let copy = flag;` observed by `true if flag` and `false if !flag` | `35776287` | `Checked`, receipt | 427,764 / 49,046 / 16 |
+| Nested guarded wildcard assigning `copy = flag` in both arms | `f67c0458` | `Checked`, receipt | 428,401 / 49,120 / 12 |
+| `pre`: `let before = flag;` then `match (flag) { _ => before }` | `e519e598` | `SourceRejected`, `R0103` at `Err<bool,i32>(61i32)` | 426,921 / 48,910 / 12 |
+| `computed`: `match (*(if (gate) &flag else &flag))` | `e519e598` | `SourceRejected`, `R0103` at `Err<bool,i32>(61i32)` | 428,253 / 49,198 / 12 |
+
+At `db944e6`, all three wildcard repros are `SourceRejected` with `R0103` in both modes, as both reviews reported. The two `e519e598` rows are false diagnostics, pinned at their current outcome as known limitations; general Boolean identity discovery is not attempted.
+
+The historical caps of review `a3839064` were already pinned by `bd10617`: `call14` 331,637/49,402/12, `split14` 331,989/49,850/12 and `known14` 333,400/50,513/12 check, and twelve equivalent arm-local copy classes check within 54,002 entries. At `5ab195a`, `call14` is `ResourceLimit` at its cap (it needs 331,945 work and 49,472 entries).
+
+No compiler source changed and no cap moved. This is M4 Result use, not an ownership proof, and it does not clear the review state of the Boolean lane recorded above. No Rill program ran.
+
 ## Live parent `Err` before a fresh `Result` join: re-pinned cap, 2026-11-23 (ri-785.4)
 
 This section settles the cap that `003c414` moved, under rule 11 of the [metering standard](../../../docs/agents/compiler-metering.md) and owner decision D3 (b). It is the only cap D3 (b) moves.
