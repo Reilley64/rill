@@ -8,7 +8,7 @@ Write agent instructions with the `writing-for-agents` skill. Write reader-facin
 
 For tickets, dependencies, claims and wayfinding, follow [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 
-### Triage labels
+### Triage states
 
 When assigning a triage role, use [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
 

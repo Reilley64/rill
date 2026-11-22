@@ -21,7 +21,7 @@ Beads migrated from GitHub keep their old number as `external_ref` `gh-<n>`, and
 The map (ri-kl0) owns destination and completion criteria. Its child beads are the work items. [RFC conventions](../rfcs/README.md) define proposal status and evidence; ri-48g integrates the complete RFC set. Drafting can proceed on settled requirements while incomplete designs remain linked blockers.
 
 - Label the map `wayfinder:map` and children `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling` or `wayfinder:task`.
-- Create children with `--parent ri-kl0`, and use native dependencies as the completion gate.
+- Create children with `--parent ri-kl0` and the triage state their type needs (see [triage states](triage-labels.md)), and use native dependencies as the completion gate.
 - Select from `gc bd ready --rig rill --parent ri-kl0 --unassigned --sort oldest`. Follow that order unless the user gives another priority.
 - Claim it with `gc bd update <id> --claim` as the session's first bead write.
 - On resolution, publish the decision/evidence as a comment, close the design task and add a short summary with the bead ID to the map's body. Preserve separate implementation and validation gates.
