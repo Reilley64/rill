@@ -1,6 +1,6 @@
 # O16 List delivery evidence and remaining join checks
 
-The [owner approval](https://github.com/Reilley64/rill/issues/66#issuecomment-7040596504) allows a bounded static check for the canonical two-job operation. This handoff records the earlier List-backed leaf proof and the blockers at `00e9dca`. The [subsequent installed join evidence](m5-acceptance.md#the-installed-two-job-join-for-shared-list-reads) supersedes the import failure and shared/exclusive capture boundary for the cases it names.
+The owner approval (ri-2s0, comment 7040596504) allows a bounded static check for the canonical two-job operation. This handoff records the earlier List-backed leaf proof and the blockers at `00e9dca`. The [subsequent installed join evidence](m5-acceptance.md#the-installed-two-job-join-for-shared-list-reads) supersedes the import failure and shared/exclusive capture boundary for the cases it names.
 
 ## Checked source
 

@@ -4,9 +4,9 @@
 | --- | --- |
 | ID | 0010 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [#24 diagnostic decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), [ADR 0016](../adr/0016-structured-diagnostics.md), [report contract](../diagnostic-contracts.md) and [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The proposed annex snapshots appear [below](#proposed-normative-annexes). |
-| RFC dependencies | [RFC 0001's accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211), SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`, owns expectations. Draft RFCs [0002](0002-modules-and-program-loading.md) through [0009](0009-user-implementable-conversions.md) propose analysis/typing/ownership/error rules. Their full texts are not accepted. Required [companions](#required-companion-rules) remain incomplete or missing. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | ri-3t8 diagnostic decision (comment 6885970775), [ADR 0016](../adr/0016-structured-diagnostics.md), [report contract](../diagnostic-contracts.md) and [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The proposed annex snapshots appear [below](#proposed-normative-annexes). |
+| RFC dependencies | RFC 0001's accepted snapshot (ri-48g, comment 6907867211), SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`, owns expectations. Draft RFCs [0002](0002-modules-and-program-loading.md) through [0009](0009-user-implementable-conversions.md) propose analysis/typing/ownership/error rules. Their full texts are not accepted. Required [companions](#required-companion-rules) remain incomplete or missing. |
 | Replaces / superseded by | None. This draft does not amend RFC 0001 or accept another draft. |
 | Decision | Not yet decided |
 | Reviewed revision | Not yet reviewed |
@@ -19,7 +19,7 @@ The glossary defines [diagnostic, analysis context, error wrapper and expectatio
 
 RFC 0001's accepted snapshot owns expectation execution, capture restrictions and preview limits. This RFC maps those results into reports without adding observation, cleanup or capture rules. Its unfinished bounded-capture procedure remains owned by RFC 0001.
 
-The owner confirmed occurrence grouping/order, summary accounting and safe report-file opening. The [policy record](https://github.com/Reilley64/rill/issues/28#issuecomment-6928487474) identifies their exact approval scope. Full driver state transitions, source mapping and emitter integration still need work. This document remains Draft, not implemented reporting or a safety proof.
+The owner confirmed occurrence grouping/order, summary accounting and safe report-file opening. The policy record (ri-48g, comment 6928487474) identifies their exact approval scope. Full driver state transitions, source mapping and emitter integration still need work. This document remains Draft, not implemented reporting or a safety proof.
 
 Runtime error rendering remains with RFC 0008. Editor protocols are outside this RFC.
 
@@ -137,7 +137,7 @@ Machine locations use canonical encoded URIs. Human display text does not replac
 
 #### Original-byte coordinate procedure
 
-The owner [confirmed this file-level mapping policy](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) with the lexical/source contract. It includes invalid-source positions. It does not change runtime SourceLocation or accepted expectation identity.
+The owner confirmed this file-level mapping policy (ri-48g, comment 6929923825) with the lexical/source contract. It includes invalid-source positions. It does not change runtime SourceLocation or accepted expectation identity.
 
 Build physical lines from the saved raw bytes, not normalized literal content. Recognize CRLF as one ending, then lone CR or LF as one ending. Lone-CR handling is confirmed by the lexical decision; CRLF preservation follows the earlier source decision.
 
@@ -256,7 +256,7 @@ Exact structured-explain payload and option applicability still need a driver de
 
 ### CLI reporting and phase scope
 
-The proposed reporting options preserve #24's spellings:
+The proposed reporting options preserve ri-3t8's spellings:
 
 ```text
 --report-format human|jsonl
@@ -458,12 +458,12 @@ Driver status is separate from application exits, Rill panic and intrinsic cance
 
 | Input | Disposition |
 | --- | --- |
-| [#24 decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), [ADR 0016](../adr/0016-structured-diagnostics.md), report contract | Preserve the rich model, stable codes, coordinates, narrow warnings, flags, statuses and separate report adapters. The owner confirmed occurrence/accounting/sink precision. Detailed procedures remain unfinished. |
-| [RFC 0001 acceptance](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) | Preserve Boolean outcomes, sequence, source identity, no added user effects and 4/8/4096 capture limits. Do not complete missing capture accounting through an implicit amendment. |
+| ri-3t8 decision (comment 6885970775), [ADR 0016](../adr/0016-structured-diagnostics.md), report contract | Preserve the rich model, stable codes, coordinates, narrow warnings, flags, statuses and separate report adapters. The owner confirmed occurrence/accounting/sink precision. Detailed procedures remain unfinished. |
+| RFC 0001 acceptance (ri-48g, comment 6907867211) | Preserve Boolean outcomes, sequence, source identity, no added user effects and 4/8/4096 capture limits. Do not complete missing capture accounting through an implicit amendment. |
 | [Diagnostic schema](../diagnostic-report.schema.json) and [code registry](../diagnostic-codes.md), exact annex digests | Propose their explicit normative adoption with this RFC, not automatic latest-file authority. Cross-record truth and operational procedures still need the body rules and validation. |
-| #9/#15/#16/#17/#19/#21 and Draft RFCs 0002 through 0007 | Preserve nominal/static facts, actual source dependencies, initialized cleanup, private access and noncapturing declarations. No source rule changes through warning text or suggestions. |
-| [RFC 0008 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6917170418), [RFC 0009 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6918885645) | Preserve exact errors, independent cause predicates and conversion-specific selection/equality. Ordinary families keep their distinct no-fallback behavior. |
-| #22/#23/#29 and runtime/backend refinements | Preserve fatal no-unwind limits and normal full runtime cause rendering. A host crash, allocation failure or report failure need not produce a final stream. |
+| ri-457/#15/#16/#17/#19/#21 and Draft RFCs 0002 through 0007 | Preserve nominal/static facts, actual source dependencies, initialized cleanup, private access and noncapturing declarations. No source rule changes through warning text or suggestions. |
+| RFC 0008 policies (ri-48g, comment 6917170418), RFC 0009 policies (ri-48g, comment 6918885645) | Preserve exact errors, independent cause predicates and conversion-specific selection/equality. Ordinary families keep their distinct no-fallback behavior. |
+| ri-636/#23/#29 and runtime/backend refinements | Preserve fatal no-unwind limits and normal full runtime cause rendering. A host crash, allocation failure or report failure need not produce a final stream. |
 | [Diagnostic fixture inventory](../prototypes/21-diagnostics.md), source revision | Preserve illustrative streams, original URI prefix, source bytes/hashes and coordinate calculations. Tool-checked data is not emitted output or Rill execution. |
 
 ## Compatibility and migration
@@ -476,7 +476,7 @@ The pinned schema permits unknown optional fields. New required meanings, incomp
 
 Preserve original byte/snapshot identities when converting human/editor coordinates. Historical fictitious fixture URIs remain historical; real adapters need actual encoded host/client locations. Do not rewrite authored reports to resemble a current tool run.
 
-The owner [confirmed the three precision policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6928487474). The full RFC and its annex adoption remain undecided. No released reporter exists. The Rust CLI scaffold still reports unavailable product commands; these proposed flags/status contracts do not claim current implementation.
+The owner confirmed the three precision policies (ri-48g, comment 6928487474). The full RFC and its annex adoption remain undecided. No released reporter exists. The Rust CLI scaffold still reports unavailable product commands; these proposed flags/status contracts do not claim current implementation.
 
 ## Security/resource implications
 
@@ -518,7 +518,7 @@ The 2026-11-17 lexical completion adds authored coordinate cases Y1 through Y5. 
 
 | Artifact / revision | Evidence label | Rule/question exercised | Checker/tool and command/environment | Expected / observed outcome | Limits, negative/unavailable results and gate links |
 | --- | --- | --- | --- | --- | --- |
-| #24 decision, accepted RFC 0001 and source base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Common reporting model, execution/observation separation and authority. | Drafting agent, 2026-11-16. Read current decision, contracts, schema, registry and accepted expectation rules. | Preserved accepted behavior and separated the proposed precision/annex review. | Provenance review is not an emitter, complete driver contract or capture proof. |
+| ri-3t8 decision, accepted RFC 0001 and source base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Common reporting model, execution/observation separation and authority. | Drafting agent, 2026-11-16. Read current decision, contracts, schema, registry and accepted expectation rules. | Preserved accepted behavior and separated the proposed precision/annex review. | Provenance review is not an emitter, complete driver contract or capture proof. |
 | D1 through D26, this draft | NotChecked | Reporting, source identity, counters, sink safety and adapter semantics. | No Rill checker/reporter/runtime or safe-opening implementation is available. | Intended outcomes appear above. No source program or live report emission executed. | Mechanical validation of authored data remains separate. No case is RillExecuted. |
 | Confirmed grouping/accounting/sink policies | NotChecked | Causal identity, summary truth, filesystem safety and state transitions. | No formal model, operational emitter or native/client acceptance test ran. | No soundness, race-free opening or noninterference result is claimed. | Complete procedures and actual platform/driver/runtime validation remain required. |
 | Frozen annexes and historical diagnostic fixtures | ToolChecked | Schema, source hashes/ranges, counters and illustrative coordinate mappings. | Drafting agent, 2026-11-16. `mise exec -- uv run --project tools/python --locked --no-sync python prototypes/21-diagnostics/check-fixtures.py`. | Schema v1, six negative data cases and five illustrative streams passed. Checks also covered eight positive declarations and nine rejection fixture headers. | Declaration/header checks do not parse/type-check/execute Rill. Golden data and original URI prefixes remain unchanged. |
@@ -549,7 +549,7 @@ These require the relevant producer, checker, runtime and target/client profiles
 
 ### Confirmed policies
 
-The project owner [approved all three policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6928487474) on 2026-11-17. The pre-recording snapshot has SHA-256 `040642dbac4b8c7a7eb9aadd9a3fa69ae6411edf9d2a7c4122d7daf53f40b25f`. This approval does not accept the full RFC or adopt the proposed annexes.
+The project owner approved all three policies (ri-48g, comment 6928487474) on 2026-11-17. The pre-recording snapshot has SHA-256 `040642dbac4b8c7a7eb9aadd9a3fa69ae6411edf9d2a7c4122d7daf53f40b25f`. This approval does not accept the full RFC or adopt the proposed annexes.
 
 Occurrence identity uses the originating failed check and context/snapshot, not message text. Causal grouping preserves independent failures. Deterministic ordering precedes report limits; accepted expectation order remains unchanged.
 
@@ -569,7 +569,7 @@ Complete race-aware sink admission, source-protection discovery and active-execu
 
 RFC 0001 still needs its own bounded capture/work/cycle procedure and amendment review. This document cannot supply it through a reporting annex.
 
-These gaps prevent the [canonical readiness review](README.md#canonical-reviewready-checklist). Required inconsistent contracts return to [map #1](https://github.com/Reilley64/rill/issues/1), not silent source-rule or tooling-scope reduction.
+These gaps prevent the [canonical readiness review](README.md#canonical-reviewready-checklist). Required inconsistent contracts return to map ri-kl0, not silent source-rule or tooling-scope reduction.
 
 ### Implementation/validation gates and future scope
 
@@ -587,12 +587,12 @@ These checks cannot supply missing operational rules or trusted capture. Formal 
 
 ### Human decisions and amendments
 
-On 2026-11-17, the owner requested completion of the lexical/source contract. The owner then [confirmed its three groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825), including the original-byte coordinate procedure. This is separate from the earlier reporting-policy approval. Existing reporting policies and proposed schema/code annex status remain unchanged.
+On 2026-11-17, the owner requested completion of the lexical/source contract. The owner then confirmed its three groups (ri-48g, comment 6929923825), including the original-byte coordinate procedure. This is separate from the earlier reporting-policy approval. Existing reporting policies and proposed schema/code annex status remain unchanged.
 
-The project owner requested this reporting RFC on 2026-11-16. That request authorized drafting, not policy approval, annex adoption or full RFC acceptance. The owner later [confirmed the three precision policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6928487474). Source decisions and earlier RFC approvals retain their own scopes.
+The project owner requested this reporting RFC on 2026-11-16. That request authorized drafting, not policy approval, annex adoption or full RFC acceptance. The owner later confirmed the three precision policies (ri-48g, comment 6928487474). Source decisions and earlier RFC approvals retain their own scopes.
 
 | Date / actor | Kind and scope of change | Reviewed revision or snapshot | Decision link / rationale |
 | --- | --- | --- | --- |
-| 2026-11-16, drafting agent | Created substantive Draft RFC 0010, register and partial source coverage. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a`, current #24 decision and the exact proposed annex digests above. This is not a reviewed RFC snapshot. | User request to draft diagnostics and reporting. No new policy, annex, full RFC or implementation acceptance is inferred. |
-| 2026-11-17, project owner | Approved occurrence grouping, summary accounting and safe report-file opening. The full RFC remains Draft. | The three recommendations presented in chat. Pre-recording SHA-256: `040642dbac4b8c7a7eb9aadd9a3fa69ae6411edf9d2a7c4122d7daf53f40b25f`. No complete RFC revision was accepted. | [Policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6928487474). Annex adoption, complete source/driver/sink procedures, readiness and actual implementation/target/client validation remain open. |
-| 2026-11-17, project owner | Approved the coordinated lexical/source groups, including original-byte coordinate projection. | Pre-recording SHA-256: `f97e1e2e983bb3f7f01f8d9576a8941758fc00a24108b0f4c8759c764878f706`. The shared decision identifies the other owner snapshots. | [Lexical policy approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825). Full RFC/schema/code-annex acceptance, client snapshot/fallback handling, readiness and implementation remain open. |
+| 2026-11-16, drafting agent | Created substantive Draft RFC 0010, register and partial source coverage. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a`, current ri-3t8 decision and the exact proposed annex digests above. This is not a reviewed RFC snapshot. | User request to draft diagnostics and reporting. No new policy, annex, full RFC or implementation acceptance is inferred. |
+| 2026-11-17, project owner | Approved occurrence grouping, summary accounting and safe report-file opening. The full RFC remains Draft. | The three recommendations presented in chat. Pre-recording SHA-256: `040642dbac4b8c7a7eb9aadd9a3fa69ae6411edf9d2a7c4122d7daf53f40b25f`. No complete RFC revision was accepted. | Policy approval (ri-48g, comment 6928487474). Annex adoption, complete source/driver/sink procedures, readiness and actual implementation/target/client validation remain open. |
+| 2026-11-17, project owner | Approved the coordinated lexical/source groups, including original-byte coordinate projection. | Pre-recording SHA-256: `f97e1e2e983bb3f7f01f8d9576a8941758fc00a24108b0f4c8759c764878f706`. The shared decision identifies the other owner snapshots. | Lexical policy approval (ri-48g, comment 6929923825). Full RFC/schema/code-annex acceptance, client snapshot/fallback handling, readiness and implementation remain open. |

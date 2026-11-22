@@ -1,8 +1,8 @@
-# #41 conversion contract: hand-checked cases
+# ri-1wl conversion contract: hand-checked cases
 
 Read the source examples in [`prototypes/11-conversions.rill`](../../prototypes/11-conversions.rill).
 
-[ADR 0017](../adr/0017-user-implementable-conversions.md) records the confirmed decision. The [companion source](../../prototypes/11-conversions.rill) contains 14 intended-valid expectations. Neither these expectations nor the independent cases below have been executed by a Rill compiler. The [diagnostic case notes](21-diagnostics.md) and [ADR 0016](../adr/0016-structured-diagnostics.md) describe #24's diagnostic work. [Rust research](../research/0041-q19-rust-conversion-evidence.md) is comparative evidence, not a Rill implementation proof.
+[ADR 0017](../adr/0017-user-implementable-conversions.md) records the confirmed decision. The [companion source](../../prototypes/11-conversions.rill) contains 14 intended-valid expectations. Neither these expectations nor the independent cases below have been executed by a Rill compiler. The [diagnostic case notes](21-diagnostics.md) and [ADR 0016](../adr/0016-structured-diagnostics.md) describe ri-3t8's diagnostic work. [Rust research](../research/0041-q19-rust-conversion-evidence.md) is comparative evidence, not a Rill implementation proof.
 
 ## Intended-valid coverage
 
@@ -71,10 +71,10 @@ Each case is isolated. Rejection means a static diagnostic unless explicitly des
 | Ordinary return-only duplicate | Two ordinary family bodies with identical parameter patterns still reject despite different return types or explicit family arguments. |
 | Unresolved function value | A bare conversion family without enough endpoint context does not become a dynamic converter. |
 | Numeric compatibility | into<u8>(300u16) rejects; tryInto<u8>(300u16) is valid and fails at runtime, even for a constant. |
-| Distinct numeric semantics | Truncation when converting a numeric float to an integer does not authorize truncating fractional JSON integer extraction. #31 remains separate. |
+| Distinct numeric semantics | Truncation when converting a numeric float to an integer does not authorize truncating fractional JSON integer extraction. ri-1zg remains separate. |
 
 ## RFC/checker follow-through
 
-#28 must formalize pattern subsumption and intersection, constraint applicability without constraint-priority ranking, and selected-error inference and equality. It must specify how evidence passes through generic and specific implementations. In particular, an abstract generic body cannot treat a fallback's error as final when a specialization can change it.
+ri-48g must formalize pattern subsumption and intersection, constraint applicability without constraint-priority ranking, and selected-error inference and equality. It must specify how evidence passes through generic and specific implementations. In particular, an abstract generic body cannot treat a fallback's error as final when a specialization can change it.
 
-The rules must preserve identity/numeric protection, loaded-graph visibility, first-class signature selection, nested owned/borrowed error dependencies and local-source escape checking. These notes do not establish a checker proof. If a necessary mechanism is unworkable, return it to map #1 rather than silently selecting by E or abandoning approved specificity.
+The rules must preserve identity/numeric protection, loaded-graph visibility, first-class signature selection, nested owned/borrowed error dependencies and local-source escape checking. These notes do not establish a checker proof. If a necessary mechanism is unworkable, return it to map ri-kl0 rather than silently selecting by E or abandoning approved specificity.

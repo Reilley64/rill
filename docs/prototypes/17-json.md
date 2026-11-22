@@ -1,8 +1,8 @@
-# JSON design evidence (#31)
+# JSON design evidence (ri-1zg)
 
 Read the source examples in [`prototypes/17-json.rill`](../../prototypes/17-json.rill).
 
-Source: [ADR 0018](../adr/0018-owned-precision-preserving-json.md) and the [JSON contract](../json-contracts.md). `17-json.rill` contains 53 intended-valid expectation declarations, including invalid-input checks. Reviewers checked all outcomes by hand. There is no JSON parser or compiler implementation here, and no Rill body or expectation was executed. #28 retains the checking, inference and cleanup work; #30 retains pinned backend support; #41 retains conversion machinery.
+Source: [ADR 0018](../adr/0018-owned-precision-preserving-json.md) and the [JSON contract](../json-contracts.md). `17-json.rill` contains 53 intended-valid expectation declarations, including invalid-input checks. Reviewers checked all outcomes by hand. There is no JSON parser or compiler implementation here, and no Rill body or expectation was executed. ri-48g retains the checking, inference and cleanup work; ri-dej retains pinned backend support; ri-1wl retains conversion machinery.
 
 ## Active source inventory
 
@@ -20,11 +20,11 @@ Source: [ADR 0018](../adr/0018-owned-precision-preserving-json.md) and the [JSON
 | 51 | Grammar-only Number construction accepts 1,025 digits while a document token cap of 1,024 rejects it. |
 | 52–53 | Typed owned ParseError can be retained under a custom wrapper; all documented defaults match. |
 
-The sameLimit helper compares only test budget enums through explicit patterns. It does not implement semantic equality or hashing for Value/Number. No numeric conversion implementation is embedded in active source; the error display body uses #41's confirmed language-wide implement spelling.
+The sameLimit helper compares only test budget enums through explicit patterns. It does not implement semantic equality or hashing for Value/Number. No numeric conversion implementation is embedded in active source; the error display body uses ri-1wl's confirmed language-wide implement spelling.
 
-## Number conversion matrix: semantic obligations for #41
+## Number conversion matrix: semantic obligations for ri-1wl
 
-These are independent hand-checked cases, not calls to a settled converter implementation. The error labels describe meaning. [#41's confirmed decision](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679) defines selected-E evidence, requirements, registration, aliases and coherence. #28 integrates the JSON implementations' concrete error metadata without caller-injected errors.
+These are independent hand-checked cases, not calls to a settled converter implementation. The error labels describe meaning. ri-1wl's confirmed decision (comment 6886119679) defines selected-E evidence, requirements, registration, aliases and coherence. ri-48g integrates the JSON implementations' concrete error metadata without caller-injected errors.
 
 | Number token / primitive source | Target or operation | Expected semantics |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ These are independent hand-checked cases, not calls to a settled converter imple
 | Finite `0.1f32` / `0.1f64` | Number | Canonical shortest same-source-width roundtrip, not exact binary-rational expansion or identical cross-width interpretation. |
 | Primitive NaN/positive or negative infinity | Number | Non-finite source error, not a valid JSON numeric token. |
 
-JSON integer extraction intentionally differs from ordinary primitive `try_into<u8>(-0.5f64)` under the older #18 contract, which truncates to zero. #41 replaces that draft spelling with tryInto/tryFrom and selected implementation error evidence. JSON defines the conversion semantics. It does not add a compiler exception for conversions or user return-only overload syntax.
+JSON integer extraction intentionally differs from ordinary primitive `try_into<u8>(-0.5f64)` under the older ri-a2c contract, which truncates to zero. ri-1wl replaces that draft spelling with tryInto/tryFrom and selected implementation error evidence. JSON defines the conversion semantics. It does not add a compiler exception for conversions or user return-only overload syntax.
 
 ## Independent grammar and Unicode vectors
 
@@ -97,11 +97,11 @@ Input size is checked first. Other simultaneous failures at one position have no
 6. On syntax, duplicate, depth or output failure and on cancellation, cleanup must dispose each initialized owned node or worklist slot once. It must respect moved and displaced values. Normal cancellation is not a returned ParseError/FormatError; use existing masking/cleanup rules. A worklist failure is fatal, not a recursive cleanup fallback or returned partial string/tree.
 7. Case distinctions are typed error metadata, not reflected field dumps or parsed human messages. Json errors can become retained causes because their owned scalar/enum diagnostics establish the required properties; generic outer error types do not erase unknown borrowed causes.
 8. No standard Value/Number equality, hashing, arithmetic, normalization, implicit stringify/Value show, or string-to-number coercion is inferred. Handle a fallible formatting Result before logging; do not swallow a limit or emit a placeholder.
-9. Do not supply conversion registration/declaration/where/orphan/alias/error-injection rules here. #41's confirmed decision owns them; active JSON examples intentionally do not implement numeric converters. #28 must integrate both decisions before implementation/RFC readiness.
-10. Whole-document JSON is not a stream framing, transport/body limit, HTML embedding, schema/record-mapping or database expression feature. #32/#39/#40 and application adapters compose this boundary explicitly.
+9. Do not supply conversion registration/declaration/where/orphan/alias/error-injection rules here. ri-1wl's confirmed decision owns them; active JSON examples intentionally do not implement numeric converters. ri-48g must integrate both decisions before implementation/RFC readiness.
+10. Whole-document JSON is not a stream framing, transport/body limit, HTML embedding, schema/record-mapping or database expression feature. ri-fnk/#39/#40 and application adapters compose this boundary explicitly.
 
 ## Validation status
 
 The intended outcomes come from inspection and reference facts, not measured parser results. Validation passed for whitespace, local links, Markdown fences, source delimiters, explicit widths and the 53-expectation inventory. Reviewers inspected thirteen positive literal/encoding cases using Python's JSON reference parser with number-token preservation. They also checked independent UTF-8, offset, size and integer-boundary arithmetic. A read-only consistency review found no actionable blockers or obvious intended-valid source mistakes. The external parser is not an oracle for Rill's duplicate/surrogate/BOM/limit policy; none of these checks executes the 53 Rill expectations or validates a Rill implementation.
 
-#28 still owes complete grammar/inference/metadata/privacy/callee-exit/transitive-reference and cancellation/cleanup algorithms plus adversarial accepted/rejected cases; #30 owns backend mechanisms, and #41 owns conversions. If an accepted public operation cannot be specified or checked consistently, return the design blocker to the map rather than declaring these fixtures a safety proof.
+ri-48g still owes complete grammar/inference/metadata/privacy/callee-exit/transitive-reference and cancellation/cleanup algorithms plus adversarial accepted/rejected cases; ri-dej owns backend mechanisms, and ri-1wl owns conversions. If an accepted public operation cannot be specified or checked consistently, return the design blocker to the map rather than declaring these fixtures a safety proof.

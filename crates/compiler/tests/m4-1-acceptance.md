@@ -2,7 +2,7 @@
 
 ## Scope and authority
 
-[M4.1 slice #57](https://github.com/Reilley64/rill/issues/57) belongs to open [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56). The branch starts at fetched main `ee12588f2cba912025900e1ac587586fb9cb6235`, after PR #55 merged. The owner [approved O1 through O4](https://github.com/Reilley64/rill/issues/56#issuecomment-6943516603) and all three public TDD seams at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`.
+M4.1 slice ri-11w belongs to open M4 umbrella ri-b83. The branch starts at fetched main `ee12588f2cba912025900e1ac587586fb9cb6235`, after PR #55 merged. The owner approved O1 through O4 (ri-b83, comment 6943516603) and all three public TDD seams at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`.
 
 RFCs [0005](../../../docs/rfcs/0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure) and [0004](../../../docs/rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m41-explicit-header-elaboration) own this scoped procedure. Full RFC statuses and earlier approvals remain unchanged. Historical absent-implementation evidence is not a current status claim.
 
@@ -63,7 +63,7 @@ Before final review, these commands passed on macOS 27.0.1 AArch64 with mise 202
 
 User-global CMake/Ninja/Go lock warnings did not change repository locks or selected base tools. Workflows did not change, so check:ci was not run. Other-host profiles were not run locally. Product build, language/stdlib/runtime/client suites, release verification, LLVM provisioning/smoke and native experiments were not run locally either. The later hosted evidence appears below. Existing infrastructure tests preserve unavailable product-command behavior. None of these observations establishes Rill execution.
 
-Publication identifies the committed revision in #57 and the scoped draft PR. The independent review results follow below.
+Publication identifies the committed revision in ri-11w and the scoped draft PR. The independent review results follow below.
 
 Unsupported in-scope forms remain generic defaults, where clauses, implementation headers and generic applications missing written arguments. Bodies and their nested declarations, startup and expectations are outside this stage. Incomplete obligations never produce a receipt.
 
@@ -81,7 +81,7 @@ No documented-standard violation was identified. One low-priority Duplicated Cod
 
 No findings were identified. The review checked the approved procedure against actual M3 identities, bindings, collection and retained-source behavior. It confirmed the annotation-only completion boundary and the separation of incomplete/resource outcomes from source rejection.
 
-The correction was verified locally without another delegated review. After the correction, test:compiler, test, check and build:scaffold all passed again through mise. The compiler count remained 158 and the documentation check again found zero errors across 1625 destinations. No earlier-stage fix or policy change was required. #57 and the draft PR identify the publication revision. Formal ASD-STE100 dictionary compliance remains unverified.
+The correction was verified locally without another delegated review. After the correction, test:compiler, test, check and build:scaffold all passed again through mise. The compiler count remained 158 and the documentation check again found zero errors across 1625 destinations. No earlier-stage fix or policy change was required. ri-11w and the draft PR identify the publication revision. Formal ASD-STE100 dictionary compliance remains unverified.
 
 ## Hosted publication evidence
 
@@ -89,7 +89,7 @@ The [completed PR scaffold run](https://github.com/Reilley64/rill/actions/runs/4
 
 The [completed native-acceptance run](https://github.com/Reilley64/rill/actions/runs/44056790855) tested the same implementation revision. All four jobs failed. Each inspected log shows the unchanged unavailable test:runtime gate and process exit 2. These native/runtime gates remain failed, not passed or waived. Release verification did not run after that failure.
 
-The checks used the workflow-pinned mise 2026.11.8. These results establish the named scaffold/compiler tests only. They do not establish runtime, target-backend, library execution, client or release acceptance. They supersede the initial incomplete hosted-check observations in #57 and PR #58, not historical local results.
+The checks used the workflow-pinned mise 2026.11.8. These results establish the named scaffold/compiler tests only. They do not establish runtime, target-backend, library execution, client or release acceptance. They supersede the initial incomplete hosted-check observations in ri-11w and PR #58, not historical local results.
 
 This follow-up changes only the acceptance record. It does not claim that its later documentation commit has already completed hosted checks. PR #58 remains draft pending owner review and explicit merge authorization. M4.2 work has not started.
 

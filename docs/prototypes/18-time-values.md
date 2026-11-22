@@ -1,8 +1,8 @@
-# Temporal values. #33 design evidence
+# Temporal values. ri-j60 design evidence
 
 Read the source examples in [`prototypes/18-time-values.rill`](../../prototypes/18-time-values.rill).
 
-These examples follow the [time contract](../time-contracts.md), [clock/token contract](../clock-cancellation-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `18-time-values.rill` has 39 hand-checked intended-valid expectations, including invalid-data checks. No Rill parser, compiler or library ran. The imports name proposed library operations, not existing implementations. #28 supplies exact algorithms and checker evidence; #30 supplies actual host/backend support.
+These examples follow the [time contract](../time-contracts.md), [clock/token contract](../clock-cancellation-contracts.md) and [ADR 0022](../adr/0022-jiff-time-and-explicit-cancellation.md). `18-time-values.rill` has 39 hand-checked intended-valid expectations, including invalid-data checks. No Rill parser, compiler or library ran. The imports name proposed library operations, not existing implementations. ri-48g supplies exact algorithms and checker evidence; ri-dej supplies actual host/backend support.
 
 ## Active inventory
 
@@ -48,11 +48,11 @@ Zone examples assume a compatible pinned dataset with the documented 2024 New Yo
 1. Reject private Date/Time/Timestamp/Zone raw record construction, writable invariant fields, name mutation, unsafe casts and source aliases treated as privacy privileges.
 2. Reject treating an owned zone as implicitly copied. copy(&zone)/copy(&zoned) explicitly retain immutable rules; a borrowed identifier/zone view remains dependent on its owner. Reset cannot invalidate live zones.
 3. Reject canonical Span eq/hash without explicit fieldwise/context semantics. Zoned eq/hash is instant-only; testing different representations requires an explicit operation.
-4. Reject implicit numeric/float/string conversions, bare return-selected parse overloads, calendar-to-timeout conversion or automatic JSON/SQL mapping. #41 does not authorize them by name alone.
+4. Reject implicit numeric/float/string conversions, bare return-selected parse overloads, calendar-to-timeout conversion or automatic JSON/SQL mapping. ri-1wl does not authorize them by name alone.
 5. Query names select indexed ASCII-case-insensitive names, preserve aliases, and reject path escapes. Bundled/system factories do not authorize arbitrary root/TZif/POSIX input. OS source/symlinks are not sandbox proof.
 6. Exercise each DB cap at below/equal/above values, zero, aliases sharing bytes, concurrent same-name loads, full-cache hits/new-entry failures, no negative-cache growth, partial parsing, invalid counts and recurrence expansion. Budget source bytes are not exact heap usage.
 7. Reset racing old loads cannot publish old results into the new generation. Old snapshots/copies and provenance survive. A named string plus matching current offset does not prove future rules stayed the same.
-8. Under Q92, explicit Inputs controls TZ. A missing value permits host discovery; a malformed, non-UTF8 or unsupported present value produces a safe error. Never call live getenv or assume rill test inherited an environment. Inputs/test rules remain #36's. Actual host-zone calls are not automatically fake or deterministic.
+8. Under Q92, explicit Inputs controls TZ. A missing value permits host discovery; a malformed, non-UTF8 or unsupported present value produces a safe error. Never call live getenv or assume rill test inherited an environment. Inputs/test rules remain ri-7ap's. Actual host-zone calls are not automatically fake or deterministic.
 9. Text cap includes full supplied UTF-8 and emitted bytes; no implicit trim/partial string. Input size check first, UTF-8 errors before JSON/time boundary if callers start from Bytes. Error offsets are bytes, not graphemes/file bases/Err origins.
 10. Resource/native failures require retaining data until actual completion or confirmed abort. Cleanup of partial inputs, data, copies, cache worklists and canceled operations disposes initialized state once with bounded standard call stacks. This also applies with raised limits and live old generations. Fatal allocation is not a typed recovery promise.
 
@@ -60,4 +60,4 @@ Zone examples assume a compatible pinned dataset with the documented 2024 New Yo
 
 Validation passed for local links, Markdown fences, whitespace, source delimiters, explicit widths and counts. Independent integer, calendar, text and 2024-zone reference facts also passed. A read-only consistency review found no blocker. Its missing ZonedParseOptions module-home note was fixed explicitly in std::time::fmt.
 
-These are artifact checks, not execution of 39 expectations. External Python date/zone/decimal helpers, if used, cannot prove Rill's deliberately different range, grammar, error or cleanup contracts. #28 still owes exact public-family inference and evidence, private metadata, transitive views, callee exits and algorithms. #30 retains real provider, ABI and Wasm validation. Do not claim a native date/time library or a successful timezone/security audit.
+These are artifact checks, not execution of 39 expectations. External Python date/zone/decimal helpers, if used, cannot prove Rill's deliberately different range, grammar, error or cleanup contracts. ri-48g still owes exact public-family inference and evidence, private metadata, transitive views, callee exits and algorithms. ri-dej retains real provider, ABI and Wasm validation. Do not claim a native date/time library or a successful timezone/security audit.

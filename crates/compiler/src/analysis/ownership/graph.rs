@@ -148,7 +148,7 @@ impl<'g> RootReport<'g> {
     pub fn enabled_frame(&self) -> &Delivery<'g, Cancellation<'g>> {
         &self.enabled_frame
     }
-    /// The exact #69 retaining call in this root, with its unmasked caller
+    /// The exact ri-33m retaining call in this root, with its unmasked caller
     /// and leaf-callee premises checked. Ordinary parents do not inherit it.
     pub fn selected_call(&self) -> &Delivery<'g, Box<GraphRetainingCall<'g>>> {
         &self.selected_call

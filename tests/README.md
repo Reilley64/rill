@@ -17,7 +17,7 @@ Keep component-local unit tests beside their Rust, standard-library or runtime i
 
 ## Prototype build and test targets
 
-Use the maintained [prototype sources](../docs/prototypes/README.md) directly. [M6 #77](https://github.com/Reilley64/rill/issues/77) tracks the first native targets.
+Use the maintained [prototype sources](../docs/prototypes/README.md) directly. M6 ri-qlh tracks the first native targets.
 
 - `build:prototypes` compiles the selected intended-valid entry files with the real compiler.
 - `test:prototypes` runs those programs and checks their expected output, exit status and applicable expectations.
@@ -34,4 +34,4 @@ After correctness checks pass, collect three separate timings for a fixed set of
 
 Repeat measurements and publish the samples and median. Record the compiler revision, prototype and inputs, target, build options and runner profile. Hello World measures startup, not throughput. Start with reporting only. Set regression thresholds after a stable baseline exists for comparable runs. Timing results do not replace pass or fail results from the correctness checks.
 
-See [development task status](../docs/development.md#task-profiles-and-current-status) for current commands and limits. [#28](https://github.com/Reilley64/rill/issues/28) retains production/formal backend acceptance, and [#42](https://github.com/Reilley64/rill/issues/42) tracks language server work. Infrastructure success does not validate either scope.
+See [development task status](../docs/development.md#task-profiles-and-current-status) for current commands and limits. ri-48g retains production/formal backend acceptance, and ri-bv2 tracks language server work. Infrastructure success does not validate either scope.

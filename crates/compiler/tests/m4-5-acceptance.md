@@ -1,6 +1,6 @@
 # M4.5 ordinary input analysis acceptance
 
-[#62](https://github.com/Reilley64/rill/issues/62) belongs to open M4 umbrella [#56](https://github.com/Reilley64/rill/issues/56) and [draft PR #58](https://github.com/Reilley64/rill/pull/58). The owner [approved P1 through P4](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) at `3392baaac8f2ee50e86167700349273a76ce61c4` before model or Rust work. The [checkpoint](../../../docs/implementation-plan.md#m45-design-checkpoint) records the separate design reviews and decisions. Full RFC statuses remain Draft.
+ri-8p9 belongs to open M4 umbrella ri-b83 and [draft PR #58](https://github.com/Reilley64/rill/pull/58). The owner approved P1 through P4 (ri-8p9, comment 6963439018) at `3392baaac8f2ee50e86167700349273a76ce61c4` before model or Rust work. The [checkpoint](../../../docs/implementation-plan.md#m45-design-checkpoint) records the separate design reviews and decisions. Full RFC statuses remain Draft.
 
 ## Independent model
 

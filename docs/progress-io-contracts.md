@@ -1,6 +1,6 @@
 # Resumable single-owner I/O progress
 
-This document records the explicitly confirmed #45 design. It extends the channel, streaming-I/O, TCP and TLS contracts without changing ordinary `read`, `write`, `flush` or consuming `close`. It is a public design contract, not an implemented compiler, runtime, TCP driver or TLS provider.
+This document records the explicitly confirmed ri-w0c design. It extends the channel, streaming-I/O, TCP and TLS contracts without changing ordinary `read`, `write`, `flush` or consuming `close`. It is a public design contract, not an implemented compiler, runtime, TCP driver or TLS provider.
 
 ## 1. Scope and module boundary
 
@@ -8,7 +8,7 @@ This document records the explicitly confirmed #45 design. It extends the channe
 
 A progress driver is one exclusive application-I/O owner that retains admitted operations across bounded local advances and external waits. It is not a Future/Poll trait, public dynamic object, associated-type interface, raw readiness descriptor or automatic adapter from canonical blocking I/O. Generic code names every canonical family and output type it needs before monomorphization.
 
-Initial standard drivers are whole native TCP and TLS over an eligible lower progress driver. No standard file, stdio, UDP or TCP-half driver is supplied. External frameworks own their connection loops, bounded queues and protocol policies; the [#39 HTTP contract](http-contracts.md) consumes this foundation without moving HTTP into `std::io`.
+Initial standard drivers are whole native TCP and TLS over an eligible lower progress driver. No standard file, stdio, UDP or TCP-half driver is supplied. External frameworks own their connection loops, bounded queues and protocol policies; the [ri-n5i HTTP contract](http-contracts.md) consumes this foundation without moving HTTP into `std::io`.
 
 ## 2. Atomic channel attempts
 
@@ -258,11 +258,11 @@ Construction consumes the whole stream and installs managed ownership state with
 
 Supplied bodies bind RE=WE=FE=CE=DE=`NetError` and G=`TcpProgressWait`. They use `NetOperation.Progress` only when failure is not naturally Read/Write/Flush/Close. `TcpProgressWait` exposes no interests/descriptors.
 
-At most one private native read and one private native write job can run concurrently under the one public owner. Same-direction work is serialized. Jobs retain stable runtime-owned storage, operation/generation identity, immediate native error capture and mandatory joins/release. This is a private amendment to #34, not public overlapping canonical I/O or a split.
+At most one private native read and one private native write job can run concurrently under the one public owner. Same-direction work is serialized. Jobs retain stable runtime-owned storage, operation/generation identity, immediate native error capture and mandatory joins/release. This is a private amendment to ri-vno, not public overlapping canonical I/O or a split.
 
 Standard write admission ceiling is 16384 bytes; larger input returns LimitExceeded unchanged. Read returns at most min(caller maximum,16384) bytes. Graceful drained FIN is End; reset/native failure is Failed with actual prefix. Raw flush is an ordered successful no-op after preceding write acceptance, never a health probe/packet push/ACK. Graceful close requires quiescence. Terminal stop may destructively wake native work but returns only after joined truthful prefixes/errors. No generic half-close is added.
 
-Native Linux/macOS are the initial live scope. Names/types remain typecheck-visible on wasm32-wasip1 consistently with #34, but standard WASI has no live TcpStream construction path and no hidden preview2/import/blocking fallback. User-defined drivers can supply the generic families on other targets.
+Native Linux/macOS are the initial live scope. Names/types remain typecheck-visible on wasm32-wasip1 consistently with ri-vno, but standard WASI has no live TcpStream construction path and no hidden preview2/import/blocking fallback. User-defined drivers can supply the generic families on other targets.
 
 ## 9. Standard TLS progress
 
@@ -298,9 +298,9 @@ Each declaration requires the complete lower family set from section5 with the s
 
 Construction consumes all inputs and selects the progress/provider profile before handshake. Immediate invalid/over-limit prefix or provider-setup failure consumes and terminally stops/joins lower D before returning TlsError; preserve setup plus cleanup causes. Ordinary handshake/verification/negotiation/final-flight errors occur later as Startup driver failures. Application admissions reject NotStarted until a one-time started event.
 
-Started requires #38 authentication, identity/status/policy and actual final-handshake output handoff, not provider handshakeDone alone. No NetControl forms: coordinators own controls. No conversion from TlsStream, extraction, raw lower recovery, independent TLS directions or ordinary-blocking lower adapter.
+Started requires ri-irw authentication, identity/status/policy and actual final-handshake output handoff, not provider handshakeDone alone. No NetControl forms: coordinators own controls. No conversion from TlsStream, extraction, raw lower recovery, independent TLS directions or ordinary-blocking lower adapter.
 
-All TLS progress RE/WE/FE/CE/DE are TlsError. Lower causes remain original under #38. Errors use existing kinds/phases plus `TlsOperation.Progress` for wait/background/stop/release work not owned by Read/Write/Flush/Close/ClientHandshake/ServerHandshake. Pending is scheduling state, never WouldBlock/CancelledYield. No new error kind is added.
+All TLS progress RE/WE/FE/CE/DE are TlsError. Lower causes remain original under ri-irw. Errors use existing kinds/phases plus `TlsOperation.Progress` for wait/background/stop/release work not owned by Read/Write/Flush/Close/ClientHandshake/ServerHandshake. Pending is scheduling state, never WouldBlock/CancelledYield. No new error kind is added.
 
 Standard write admission/owned read completion are capped at 16384 bytes. Public exact write progress remains current-input plaintext accepted into bounded TLS-owned staging. Native `SSL_write_ex` zero/WANT/failure does not reveal a cumulative plaintext prefix; ciphertext size/private counters never replace it. Peer effects stay unknown.
 
@@ -318,7 +318,7 @@ The private OpenSSL3.5.9 progress path sets before I/O:
 
 A WANT retry preserves original native pointer/content/length. Positive partial success completes that native operation; a fresh native operation uses only the suffix. No mode supplies failure-prefix counts or bounds one native call's duration.
 
-Each ring is charged inside the existing #38 65536-byte ciphertext-in/out ceiling, not added to it. Remaining capacity covers copied drains, lower-job payload/tails and real copy overlap; moving a byte does not uncharge it while another representation retains it. Existing 65536-byte plaintext-in/out ceilings remain. Initial prefix shares ingress. These caps do not bound every OpenSSL allocation. Concrete async partitions, leases/pointer validity and copy-overlap proof remain #44/#47 delivery gates; ordinary short/full BIO pressure is Waiting, not allocation failure.
+Each ring is charged inside the existing ri-irw 65536-byte ciphertext-in/out ceiling, not added to it. Remaining capacity covers copied drains, lower-job payload/tails and real copy overlap; moving a byte does not uncharge it while another representation retains it. Existing 65536-byte plaintext-in/out ceilings remain. Initial prefix shares ingress. These caps do not bound every OpenSSL allocation. Concrete async partitions, leases/pointer validity and copy-overlap proof remain ri-ei7/#47 delivery gates; ordinary short/full BIO pressure is Waiting, not allocation failure.
 
 If required authenticated/control/ciphertext state cannot be preserved/progressed within approved bounds/work counters, return typed TlsError LimitExceeded and stop. Never discard authenticated bytes, overwrite outcomes, grow hidden queues or call pressure EOF.
 
@@ -328,15 +328,15 @@ OpenSSL retry rules are stateful. Write-WANT_WRITE permits BIO drain and same-wr
 
 A fixed private passive observer detects TLS1.2 post-handshake `HelloRequest` at clients and renegotiating `ClientHello` at servers. It performs no user callback/reentrant OpenSSL call. After immediate current-call classification, detection selects terminal `TlsErrorKind.ProtocolFailure`, Control phase, owned by the active Read/Write/Flush when natural or driver-wide Progress otherwise. Dependent lanes are Interrupted. Perform no further application SSL I/O or SSL_shutdown; preserve real prefixes/handoffs and stop/release.
 
-This final policy supersedes the provisional continue-after-rejection choice. The pinned reference showed why: warning callback and local fresh-write success can occur while warning ciphertext is not handed off; sender record state advances and the peer then fails record processing. #44 must validate both client HelloRequest and server renegotiating ClientHello. TLS1.3 KeyUpdate remains required valid control traffic and must not match this rule.
+This final policy supersedes the provisional continue-after-rejection choice. The pinned reference showed why: warning callback and local fresh-write success can occur while warning ciphertext is not handed off; sender record state advances and the peer then fails record processing. ri-ei7 must validate both client HelloRequest and server renegotiating ClientHello. TLS1.3 KeyUpdate remains required valid control traffic and must not match this rule.
 
-Fatal SSL/provider/transport results, admitted abandonment and bounded-state exhaustion poison as #38 already requires. Safely retained read state does not alone forbid a source-justified opposite-direction operation. No universal duplex liveness follows.
+Fatal SSL/provider/transport results, admitted abandonment and bounded-state exhaustion poison as ri-irw already requires. Safely retained read state does not alone forbid a source-justified opposite-direction operation. No universal duplex liveness follows.
 
 ### 9.3 Closure and targets
 
-TLS End means authenticated close-notify after prior plaintext. Raw lower EOF/reset/truncation is failure. TLS1.2 peer notify ends both application directions under #38; TLS1.3 can leave local output open until local closure. No generic progress half-close is added; existing TLS shutdownWrite remains outside this foundation.
+TLS End means authenticated close-notify after prior plaintext. Raw lower EOF/reset/truncation is failure. TLS1.2 peer notify ends both application directions under ri-irw; TLS1.3 can leave local output open until local closure. No generic progress half-close is added; existing TLS shutdownWrite remains outside this foundation.
 
-Graceful progress close follows #38 local flush/notify/handoff/lower release without waiting for peer notify. Stop/disposal skips graceful protocol, joins retained work and can wait indefinitely. No recovery/replay/ordinary-stream extraction.
+Graceful progress close follows ri-irw local flush/notify/handoff/lower release without waiting for peer notify. Stop/disposal skips graceful protocol, joins retained work and can wait indefinitely. No recovery/replay/ordinary-stream extraction.
 
 Names/signatures stay typecheck-visible on wasm32-wasip1. Without a live selected provider, otherwise-valid construction returns deterministic typed Unsupported after normal validation and consumes/releases lower D. There is no native capability probe, hidden fallback or claim that an arbitrary lower D supplies Wasm TLS.
 
@@ -359,6 +359,6 @@ Evidence labels follow [RFC conventions](rfcs/README.md#examples-and-evidence):
 - Source/configuration research is supporting evidence, not protocol execution.
 - Channel/runtime/TCP and complete TLS target support are **NotChecked** here.
 
-[#47](https://github.com/Reilley64/rill/issues/47) owns shared compiler/runtime/channel/TCP delivery. [#44](https://github.com/Reilley64/rill/issues/44) owns OpenSSL/private-shim/profile/asynchronous staging and target validation. Passing the finite reference matrix does not approve the candidate complete four-budget ledger, solve ticket discard/key-use enforcement, prove security/conformance or close either ticket. The [#39 HTTP design](http-contracts.md) consumes these interfaces without claiming those implementations exist; #48 retains HTTP delivery.
+ri-hw5 owns shared compiler/runtime/channel/TCP delivery. ri-ei7 owns OpenSSL/private-shim/profile/asynchronous staging and target validation. Passing the finite reference matrix does not approve the candidate complete four-budget ledger, solve ticket discard/key-use enforcement, prove security/conformance or close either ticket. The [ri-n5i HTTP design](http-contracts.md) consumes these interfaces without claiming those implementations exist; ri-19d retains HTTP delivery.
 
 Required delivery evidence includes rendezvous and receive-select races; notifier coalescing/target loss; register/recheck/stale wake/withdrawal quiescence; full queues with independent terminal wake; retained errors and stop/disposal joins; real TCP backpressure/FIN/reset/prefixes; both TLS renegotiation roles; fragmented/control/backpressure/error/copy-overlap matrices; actual Rill metadata/ABI/leases and Linux/macOS target cells. Contradiction returns to the map/design rather than weakening general streaming or silently expanding budgets.

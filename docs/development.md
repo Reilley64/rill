@@ -2,7 +2,7 @@
 
 Rill's first scaffold establishes a private Rust workspace and development tasks. It is not a working language toolchain. `rill --help` and `rill --version` are real CLI behavior. Product commands, including checking, compilation, execution, language tests and the language server, report that they are unavailable and exit nonzero. A successful scaffold build or infrastructure check does not mean a Rill program ran.
 
-The repository and tooling decision is [ADR 0026](adr/0026-toolchain-repository-and-mise.md), approved in [#46](https://github.com/Reilley64/rill/issues/46).
+The repository and tooling decision is [ADR 0026](adr/0026-toolchain-repository-and-mise.md), approved in ri-x5n.
 
 ## Setup
 
@@ -163,4 +163,4 @@ mise exec -- python tools/stage_typed_installation.py "$work/prefix"
 
 The staging script takes the executable, runner and ownership archive from one locked Cargo build. It copies the listed first-party sources and runtime inputs into a new prefix. The runner loads and analyzes the entry in both modes. It exits 0 only when both modes issue a typed receipt. The [M4.8 verification record](../crates/compiler/tests/m4-8-acceptance.md) records the installed outcomes separately from the scaffold checks. Neither check runs Rill or validates an ABI.
 
-For language and library rules, use the [contract index](README.md#contracts) rather than this guide. Production/formal backend acceptance remains [#28](https://github.com/Reilley64/rill/issues/28); standards-based language server support is tracked separately in [#42](https://github.com/Reilley64/rill/issues/42). The scaffold does not establish either result or change existing evidence.
+For language and library rules, use the [contract index](README.md#contracts) rather than this guide. Production/formal backend acceptance remains ri-48g; standards-based language server support is tracked separately in ri-bv2. The scaffold does not establish either result or change existing evidence.

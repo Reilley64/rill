@@ -1,7 +1,7 @@
 use super::*;
 use compiler::analysis::ownership::CancellationSuccessor;
 
-// The positive #69 cases also run alone so resource exhaustion cannot be
+// The positive ri-33m cases also run alone so resource exhaustion cannot be
 // mistaken for withholding MIR because of a known rejection.
 const SAFE: &str = r#"
 function safeBody(slot: &mut &bool, input: &bool, enter: bool): void {

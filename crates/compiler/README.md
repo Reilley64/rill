@@ -2,7 +2,7 @@
 
 This crate implements M1 source snapshots/lexing, the M2 parser, M3 module resolution/declaration collection, M4.1 explicit declaration types and M4.2 declaration/inline-containment checks, and M4.3 scoped scalar/control typing. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
 
-The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. [M2 ticket #52](https://github.com/Reilley64/rill/issues/52) records the baseline, acceptance evidence and limitations.
+The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. M2 ticket ri-lpw records the baseline, acceptance evidence and limitations.
 
 ## Strict parser entry points
 
@@ -81,7 +81,7 @@ Semantic parser checks remain excluded. Examples such as nontrailing generic def
 
 ## M3 loader and resolver
 
-The owner approved O1 through O7 and the three test seams at checkpoint `a41e7cc955e67329d6dc3a8a69de667e0af204ac`. [Ticket #54](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619) records approval. [RFC 0002](../../docs/rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns the scoped contract. Its full status remains Draft. A resolved graph is not a successfully checked program.
+The owner approved O1 through O7 and the three test seams at checkpoint `a41e7cc955e67329d6dc3a8a69de667e0af204ac`. Ticket ri-1fk (comment 6939478619) records approval. [RFC 0002](../../docs/rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns the scoped contract. Its full status remains Draft. A resolved graph is not a successfully checked program.
 
 | Interface | Contract |
 | --- | --- |
@@ -121,7 +121,7 @@ The recorded host is macOS 27.0.1 AArch64. Its filesystem is case-insensitive an
 
 ## M4.1 explicit declaration types
 
-The owner approved O1 through O4 at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. [Slice #57](https://github.com/Reilley64/rill/issues/57) belongs to open [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56). RFCs [0005](../../docs/rfcs/0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure) and [0004](../../docs/rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m41-explicit-header-elaboration) own the scoped procedure. Their full statuses remain Draft.
+The owner approved O1 through O4 at checkpoint `71cbe3707814114b0f504f0458ada41d54c2593d`. Slice ri-11w belongs to open M4 umbrella ri-b83. RFCs [0005](../../docs/rfcs/0005-types-records-enums-and-inference.md#proposed-m41-canonical-declaration-type-procedure) and [0004](../../docs/rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m41-explicit-header-elaboration) own the scoped procedure. Their full statuses remain Draft.
 
 `analysis::analyze_declaration_types(&Graph, AnalysisLimits)` consumes the retained M3 graph without filesystem reads or reparsing. It elaborates every module-level record/enum annotation and named-function/family parameter/result annotation. The result borrows the graph, so all canonical identities and source snapshots remain available.
 
@@ -148,7 +148,7 @@ The [acceptance record](tests/m4-1-acceptance.md) maps the public-seam tests in 
 
 ## M4.2 declaration and source-nominal containment checks
 
-The owner [approved D1 through D4](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. [Slice #59](https://github.com/Reilley64/rill/issues/59) remains in the same draft M4 PR #58. The umbrella stays open. The proposed sections in RFCs 0004/0005 own the scoped rules; full RFC statuses remain unchanged.
+The owner approved D1 through D4 (ri-9y3, comment 6945089123) at checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. Slice ri-9y3 remains in the same draft M4 PR #58. The umbrella stays open. The proposed sections in RFCs 0004/0005 own the scoped rules; full RFC statuses remain unchanged.
 
 `analysis::declarations::check_declarations` requires a completed M4.1 Receipt, explicit PreludeContracts and AnalysisLimits. Both canonical prelude identities and their fixed schemas are mandatory. A foreign identity, unrelated declaration or schema swap returns InvalidRequest before source checking. A wrong actual copy/dispose signature produces a source finding. Signature agreement grants no runtime trust or protected-operation permission.
 
@@ -175,7 +175,7 @@ Limits use the existing AnalysisLimits shape. Work and entry counters charge bef
 
 ## M4.3 scoped scalar and control typing
 
-The owner [approved C1 through C4](https://github.com/Reilley64/rill/issues/60#issuecomment-6947086957) at checkpoint `e4750b8579ea11aa80f76f86f93014c78854fac0`. [Slice #60](https://github.com/Reilley64/rill/issues/60) stays in draft PR #58. RFCs 0003/0004/0005/0006 own the bounded procedure. Full RFC statuses remain unchanged.
+The owner approved C1 through C4 (ri-3gd, comment 6947086957) at checkpoint `e4750b8579ea11aa80f76f86f93014c78854fac0`. Slice ri-3gd stays in draft PR #58. RFCs 0003/0004/0005/0006 own the bounded procedure. Full RFC statuses remain unchanged.
 
 `analysis::scalars::check_scalars` requires a completed M4.2 DeclarationReceipt and AnalysisLimits. It checks supported standalone bodies, loaded startup statements and expectations without executing Rill. It reuses captured M1/M2 facts and canonical M3/M4 types, including body annotation uses. It does not reopen sources or reinterpret syntax.
 
@@ -198,7 +198,7 @@ The [M4.3 acceptance record](tests/m4-3-acceptance.md) maps direct public-interf
 
 ## M4.4 scoped data and pattern typing
 
-The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) before implementation and later [clarified simple binding value types](https://github.com/Reilley64/rill/issues/61#issuecomment-6959565199). The [M4.4 acceptance record](tests/m4-4-acceptance.md) separates the finite reference model, direct compiler assertions and remaining gates.
+The owner approved K1 through K4 (ri-qtl, comment 6957273163) before implementation and later clarified simple binding value types (ri-qtl, comment 6959565199). The [M4.4 acceptance record](tests/m4-4-acceptance.md) separates the finite reference model, direct compiler assertions and remaining gates.
 
 `analysis::data::check_data` takes completed M4.2 input and AnalysisLimits. It extends the existing scalar/control engine. Its DataReceipt has the same body/node query boundaries, not a second parser or a dependency on scalar-only success for data-bearing source.
 
@@ -212,7 +212,7 @@ Tuple-context brackets need no fabricated library definition. List construction,
 
 ## M4.5 ordinary input analysis
 
-The owner [approved P1 through P4](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018) before implementation. The [M4.5 acceptance record](tests/m4-5-acceptance.md) separates model results, compiler assertions and unrun gates.
+The owner approved P1 through P4 (ri-8p9, comment 6963439018) before implementation. The [M4.5 acceptance record](tests/m4-5-acceptance.md) separates model results, compiler assertions and unrun gates.
 
 `analysis::ordinary::analyze_ordinary` takes an M3 graph and AnalysisLimits. It reuses declaration elaboration and M4.2 prerequisites without requiring the bounded M4.1 entry to accept implementation headers. It preserves the original headers and checks each implementation against one complete family substitution. Written defaults and requirements remain separate from input matching.
 
