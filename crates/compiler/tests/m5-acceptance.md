@@ -1666,6 +1666,20 @@ The historical caps of review `a3839064` were already pinned by `bd10617`: `call
 
 No compiler source changed and no cap moved. This is M4 Result use, not an ownership proof, and it does not clear the review state of the Boolean lane recorded above. No Rill program ran.
 
+## Invoking a declared once formal at its actual caller (2026-11-23)
+
+For ri-785.6, the caller in `return invoke(() => [flag, seed]);` now checks when `invoke` is the private wrapper `function invoke<F>(job: F): [&bool, bool] where callableOnce(F, [], [&bool, bool]) { return job(); }`. The [installed capture tests](m5/captures.rs) check that the wrapper's body is exactly one owned once invocation of its unprojected formal under the wrapper's own requirement, and that the written actual is the read-only `&bool`/`bool` pair arrow. MIR forms the pair into one stage, then `InvokeDeclaredOnce` moves that stage into the formal `job: F` and consumes it at `job()`. It ends that one owner and drops nothing. The returned reference keeps the closure's carried backing. The caller's ordinary graph root records a closed `DeclaredOnceInvocation` edge to `invoke`.
+
+| Caller | Targeted lowering and ordinary graph root | Target cap (work / entries / depth) |
+| --- | --- | --- |
+| `flag: &bool` parameter | `Checked`, the frame above | 5,631 / 299 / 6 |
+| `flag = &local` | `R0202` at the `return`, related to `local`. No MIR. | 5,911 / 408 / 6 |
+| `flag = &local`, then `local = seed;` | `R0203` at the write, related to `&local`. No MIR. | 5,886 / 396 / 6 |
+| `dispose(seed);` before the call | `R0200` at the captured `seed`, related to `dispose(seed)`. No MIR. | 5,904 / 356 / 6 |
+| A finished sibling read of `flag` before the call | `Checked`, the same frame | 6,142 / 525 / 6 |
+
+The positive graph checks at 190,668 / 4,266 / 6; the graph of the four contrasts checks at 207,024 / 5,391 / 6. Independently one-short limits give `ResourceLimit` with no finding and no MIR. Both installed load modes agree. The standalone `invoke` root still stops at `job: F` with no MIR. Grouping the actual, the call or the wrapper's receiver, nesting the `return` in a block or a `while`, or binding the result before returning still leaves M4 `Incomplete` at `CallBoundary`, with no receipt and the typed caps measured at `5882113b`. No ownership query reaches the frame for those shapes. The M4 receipt stays at 326,305 / 47,955 / 12. The erased `job: once () => [&bool, bool]` wrapper still has no receipt (324,473 / 47,678 / 12), and the local shared descriptor still checks at 2,838 / 384 / 5. This is one bounded witness, not a proof for every `F`, a public or erased callable contract, or Rill execution. ri-785 remains open.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
