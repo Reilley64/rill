@@ -1,0 +1,149 @@
+
+            import std::{List, Result, Err};
+            import std::channel::{Receiver, Sender};
+            import std::convert::{into, tryInto};
+            import std::error::formatError;
+            import std::iter::iterate;
+            import std::mutex::LockGuard;
+            import std::number::ParseError;
+            import std::option::{Option, map as mapOption};
+            import std::result::{isOk, map as mapResult};
+            import std::shared::Shared;
+    
+
+function nestedGoodWithOwner(enter: bool): void {
+    let outerText = "outer";
+    goodWithOwner(enter);
+    let outerSuffix = "only on normal return";
+}
+function safeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    *slot = input;
+    while ((((((((enter)))))))) { continue; }
+}
+function good(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    safeBody(&mut slot, &input, enter);
+}
+function safeWithOwner(slot: &mut &bool, input: &bool, enter: bool): void {
+    let calleeText = "callee";
+    let flag = true;
+    *slot = &flag;
+    if (enter) { *slot = input; }
+    while (enter) { continue; }
+    *slot = input;
+    let calleeSuffix = "only on normal return";
+}
+function goodWithOwner(enter: bool): bool {
+    let callerText = "caller";
+    let initial = false;
+    let mut slot = &initial;
+    let prior = false;
+    let input = true;
+    slot = &prior;
+    safeWithOwner(&mut slot, &input, enter);
+    let callerSuffix = "only on normal return";
+    return enter;
+}
+
+function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+}
+function bad(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeBody(&mut slot, &input, enter);
+}
+function nestedCaller(enter: bool): void { bad(enter); }
+import std::core::dispose as release;
+type Owner = { enter: bool; text: string; }
+implement release(value: Owner): void { nestedCaller(value.enter); }
+function maskedCaller(value: Owner): void { dispose(value); }
+function constantOuter(enter: bool): void { bad(false); }
+function guardedOuter(enter: bool): void { if (enter) {} else { bad(enter); } }
+function alwaysOuter(enter: bool): void { if (true) { bad(enter); } }
+function skippedOuter(enter: bool): void { if (false) { bad(enter); } }
+function unknownOuter(enter: bool): void { let gate = enter; bad(gate); }
+function recurse(enter: bool): void { recurse(enter); }
+function deeper(enter: bool): void { nestedCaller(enter); }
+function infeasibleLeaf(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    if (enter) {} else { while (enter) { continue; } }
+    *slot = input;
+}
+function infeasibleMiddle(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    infeasibleLeaf(&mut slot, &input, enter);
+}
+function infeasibleOuter(enter: bool): void { infeasibleMiddle(enter); }
+function constantCaller(): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeBody(&mut slot, &input, false);
+}
+function guardedCaller(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    if (enter) {} else { unsafeBody(&mut slot, &input, enter); }
+}
+function guardedMiddleOuter(enter: bool): void { guardedCaller(enter); }
+function leaf(): void {}
+function unsafeWithNested(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+    leaf();
+}
+function callerOfNestedBody(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeWithNested(&mut slot, &input, enter);
+}
+function nonempty(): void { leaf(); }
+function badCall(slot: &mut &bool, input: &bool): bool {
+    let flag = true;
+    *slot = &flag;
+    leaf();
+    *slot = input;
+    nonempty();
+    return flag;
+}
+function badLoop(slot: &mut &bool, input: &bool, takeLoop: bool, enter: bool): bool {
+    let flag = true;
+    *slot = &flag;
+    if (takeLoop) { while (enter) { continue; } }
+    else { nonempty(); }
+    *slot = input;
+    return flag;
+}
+function repairInElse(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    if (enter) {} else { *slot = input; }
+    while (enter) { continue; }
+    *slot = input;
+}
+function breakOnly(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { break; }
+    if (false) { leaf(); }
+    *slot = input;
+}
+
+function computedOuter(enter: bool): void { bad(!enter); }
+function backedgeOuter(enter: bool): void { while (enter) { continue; } bad(enter); }

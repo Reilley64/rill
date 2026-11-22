@@ -1,0 +1,3 @@
+let startup: bool = true;
+export function ready(): bool { return true; }
+expect ready();

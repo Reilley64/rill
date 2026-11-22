@@ -1,0 +1,13 @@
+
+function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+}
+export function bad(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeBody(&mut slot, &input, enter);
+}

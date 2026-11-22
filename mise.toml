@@ -44,6 +44,16 @@ description = "Run compiler unit, integration and documentation tests without LL
 depends = ["doctor"]
 run = "cargo test --locked -p compiler --no-default-features"
 
+[tasks."test:m5"]
+description = "Run the full M5 ownership test binary without LLVM, two test threads"
+depends = ["doctor"]
+run = "cargo test --locked --no-default-features -p compiler --test m5 -- --test-threads=2"
+
+[tasks."test:m5:caps"]
+description = "Replay the published fixed work/entries/depth caps (m5::legacy_caps) without LLVM"
+depends = ["doctor"]
+run = "cargo test --locked --no-default-features -p compiler --test m5 -- legacy_caps --test-threads=2"
+
 [tasks."check:docs"]
 depends = ["doctor"]
 run = ["python tools/check_docs.py", "git diff --check"]
