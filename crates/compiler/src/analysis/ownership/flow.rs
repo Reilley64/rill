@@ -3935,6 +3935,12 @@ pub(super) fn run<'a, 'g>(
                     let held = initialized(&state[owner], node)?;
                     // A transport layout is not a locally checked body.
                     let (origin, mode) = held.pair_origin.ok_or(Stop::Pending(node))?;
+                    // The frame's argument is the written actual's own stage.
+                    if matches!(call, PairCall::DeclaredOnce { .. })
+                        && origin != slots[receiver].node
+                    {
+                        return Err(Stop::Pending(node));
+                    }
                     let (kind, access) = if let PairCall::ReadOnly { typed_origin } = call {
                         if mode != InvocationMode::ReadOnly
                             || typed_origin.is_some_and(|expected| origin != expected)
@@ -3976,19 +3982,38 @@ pub(super) fn run<'a, 'g>(
                         loans,
                         ..Held::default()
                     });
-                    if matches!(call, PairCall::ReadOnly { .. }) {
-                        Operation::InvokeReadOnlyClosurePair {
+                    match call {
+                        PairCall::ReadOnly { .. } => Operation::InvokeReadOnlyClosurePair {
                             receiver: local(owner),
                             origin: site_at(module, origin),
                             into: local(into),
+                        },
+                        PairCall::Once => {
+                            state[receiver] = State::Moved(node);
+                            retire_loans(&slots, &mut state, &[receiver], budget)?;
+                            Operation::InvokeClosurePair {
+                                receiver: local(receiver),
+                                origin: site_at(module, origin),
+                                into: local(into),
+                            }
                         }
-                    } else {
-                        state[receiver] = State::Moved(node);
-                        retire_loans(&slots, &mut state, &[receiver], budget)?;
-                        Operation::InvokeClosurePair {
-                            receiver: local(receiver),
-                            origin: site_at(module, origin),
-                            into: local(into),
+                        // The frame ends exactly the staged actual: the formal
+                        // receives it and its one invocation consumes it.
+                        PairCall::DeclaredOnce {
+                            callee,
+                            formal,
+                            invocation,
+                        } => {
+                            state[receiver] = State::Moved(node);
+                            retire_loans(&slots, &mut state, &[receiver], budget)?;
+                            Operation::InvokeDeclaredOnce {
+                                callee,
+                                formal: site_at(module, formal),
+                                invocation: site_at(module, invocation),
+                                argument: local(receiver),
+                                origin: site_at(module, origin),
+                                into: local(into),
+                            }
                         }
                     }
                 }
