@@ -1625,6 +1625,27 @@ This section answers the three review findings on the fresh `Result` residence l
 
 No fixed cap moved. No Rill program ran.
 
+## Replaying the published fixed caps (ri-px1.1, 2026-11-22)
+
+[`legacy_caps`](m5/legacy_caps.rs) replays [`legacy-caps.tsv`](m5/legacy-caps.tsv) through the installed compiler in both load modes. Each of its 272 cap triples (136 per mode) runs at its exact work, entries and depth cap, which must give the row's outcome and statistics, and again one short on each axis, which must give `ResourceLimit` and publish no receipt or MIR. An axis published as 0 has no one-short cap. Rows also pin the Standard module count and each root's `completion/ordinary completion` in the whole-graph report. The 33 fixtures are in [`legacy-caps/`](m5/legacy-caps/). `mise run test:m5:caps` runs the test and `mise run test:m5` runs the full binary.
+
+The 92 triples of `old-fixed-caps.txt` (24 captures in two modes, 17-source baseline 372,246 / 54,059 / 12 included) and every row of `base-fixed.tsv` and `base-fwcap.tsv` reproduce. Thirteen deliberate one-number or outcome edits to the file each failed, and only the row edited, in one run.
+
+Ten rows of `base-matrix.tsv` do not reproduce, in both modes. They were measured at `68f3788`, before the forwarding proof, and the whole-graph rows now equal the `candidate-matrix.tsv` rows. The file keeps them as comments and does not replay them. Nothing here edits a cap or an expectation.
+
+| Fixture and query | Published | Now |
+| --- | --- | --- |
+| `retaining-rc` whole graph | `SourceRejected` 246,818 / 14,458 / 11 | `SourceRejected` 247,063 / 14,523 / 11 |
+| `retaining-rc` `nestedGoodWithOwner` | `Checked` 12,151 / 3,338 / 6 | `Checked` 12,838 / 3,591 / 6 |
+| `retaining-rc` `nestedCaller` | `Checked` 10,348 / 2,397 / 6, graph root `Checked/Checked` | `SourceRejected` 10,472 / 2,446 / 6, graph root `SourceRejected/Checked` |
+| `retaining-rc` `infeasibleOuter` | `Checked` 10,495 / 2,458 / 6 | `Checked` 10,887 / 2,609 / 6 |
+| `safe-rc` whole graph | `Incomplete` 199,807 / 6,904 / 11 | `Incomplete` 199,964 / 6,945 / 11 |
+| `safe-rc` `nestedGoodWithOwner` | `Checked` 9,679 / 2,102 / 6 | `Checked` 10,366 / 2,355 / 6 |
+| `foreign-rc` whole graph | `SourceRejected` 193,281 / 5,176 / 6 | `SourceRejected` 193,367 / 5,199 / 6 |
+| `foreign-rc` `rejected` | `Checked` 7,463 / 895 / 6, graph root `Checked/Checked` | `SourceRejected` 7,587 / 944 / 6, graph root `SourceRejected/Checked` |
+
+Whether these moves are the intended cost of the forwarding proof is the owner's decision under D2. This is LLVM-free host ownership analysis. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
