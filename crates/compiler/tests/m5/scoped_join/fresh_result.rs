@@ -505,3 +505,88 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
         },
     );
 }
+
+#[test]
+fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
+    installed(
+        "scoped_join::fresh_result::shared_join_rejects_a_live_fresh_error_without_wrapper_selection",
+        |request| {
+            fs::write(request.entry.with_file_name("checks.rill"), CHECKS).unwrap();
+            // Review 0bfd8df4: a live parent Err cannot close the ordinary
+            // scoped exit, so the rejection must not select its wrapper.
+            let source = SHARED
+                .replace(
+                    "import std::routine::join;",
+                    "import std::routine::join;\nimport std::result::Err as fail;",
+                )
+                .replace(
+                    "    let [first, second] = join(",
+                    "    let staged: Result<bool, i32> = fail<bool, i32>(7i32);\n    let [first, second] = join(",
+                )
+                .replace(
+                    "    dispose(numbers);",
+                    "    let _ = staged;\n    dispose(numbers);",
+                );
+            assert_eq!(source.matches("staged").count(), 2);
+            fs::write(&request.entry, format!("{BASE}\n{source}")).unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let module = app(&graph);
+                let caller = &module.declarations[named(module, "joined")];
+                let node = call_node(module, "join([");
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                let receipt = typed.receipt().unwrap();
+                // Equal to the same fixture with the scoped parent's disposer
+                // lookup removed; the pre-preflight route paid 6,299/1,398/10
+                // targeted and 217,320/6,276/10 for the graph.
+                let target_cost = Statistics {
+                    work: 5_825,
+                    entries: 1_301,
+                    max_depth: 10,
+                };
+                let (limit, short) = budget_caps(target_cost);
+                let target = lower_body(&receipt, module, &caller.id, limit).unwrap();
+                assert_eq!(target.statistics(), target_cost);
+                assert_eq!(target.completion(), Completion::Incomplete);
+                assert!(target.mir().is_none() && target.findings().is_empty());
+                assert_eq!(target.blocked_at().unwrap().node, node);
+                for cap in short {
+                    let limited = lower_body(&receipt, module, &caller.id, cap).unwrap();
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{cap:?}");
+                    assert!(limited.mir().is_none());
+                }
+                let graph_cost = Statistics {
+                    work: 216_846,
+                    entries: 6_179,
+                    max_depth: 10,
+                };
+                let (limit, short) = budget_caps(graph_cost);
+                let owned = analyze_ownership(&receipt, limit);
+                assert_eq!(owned.statistics(), graph_cost);
+                assert_eq!(owned.completion(), GraphCompletion::Incomplete);
+                let root = owned
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == caller.node)
+                    .unwrap();
+                assert_eq!(root.completion(), Completion::Incomplete);
+                assert!(root.mir().is_none());
+                assert_eq!(root.blocked_at().unwrap().node, node);
+                assert!(!root.dependencies().iter().any(|edge| matches!(
+                    edge.contract,
+                    DependencyContract::FreshResultErrorDisposal { .. }
+                )));
+                for cap in short {
+                    let limited = analyze_ownership(&receipt, cap);
+                    assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                    assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+                }
+            }
+        },
+    );
+}
