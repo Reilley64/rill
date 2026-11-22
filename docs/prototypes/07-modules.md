@@ -35,7 +35,7 @@ Selecting a nested file as the entry changes the application root. It is not an 
 
 ## Independent rejection cases
 
-These snippets describe separate changes or programs. They are not active compile-fail fixtures. #24 owns diagnostic messages; #28 must turn the cases into formal rules and executable tests.
+These snippets describe separate changes or programs. They are not active compile-fail fixtures. ri-3t8 owns diagnostic messages; ri-48g must turn the cases into formal rules and executable tests.
 
 ### Export syntax and source lookup
 
@@ -76,7 +76,7 @@ Reject `points::show(...)`. Point's private import was not re-exported, although
 
 Reject distinct bodies in one family with identical parameter patterns, including bodies from different authorized modules. Normalize aliases and type-parameter renaming. Different return types do not rescue duplicates. Generic and concrete patterns can compete under the most-specific rule. Repeated imports of the same body are not duplicates. Incomparable applicable candidates fail at the call rather than selecting by import order.
 
-Ordinary overloads cannot replace required guard release, owner-count maintenance or native-borrow retention. Owning a nested Payload does not authorize replacing disposal for a genuine `LockGuard<Payload>`. This is a protected-operation rule, not a blanket outermost-type placement restriction for all copy/dispose implementations. #28 must validate that boundary, not assume private fields prove it or invent an additional user-hook/mandatory-teardown protocol.
+Ordinary overloads cannot replace required guard release, owner-count maintenance or native-borrow retention. Owning a nested Payload does not authorize replacing disposal for a genuine `LockGuard<Payload>`. This is a protected-operation rule, not a blanket outermost-type placement restriction for all copy/dispose implementations. ri-48g must validate that boundary, not assume private fields prove it or invent an additional user-hook/mandatory-teardown protocol.
 
 <a id="public-requirements-and-union-boundaries"></a>
 
@@ -101,4 +101,4 @@ Reject expectations that capture ordinary start/demo runtime bindings, even when
 
 Reject application-root escapes and attempts to acquire trusted std identity. Inside std, unprefixed imports resolve under the toolchain root rather than the application root. A local std file cannot replace that origin or its primitive operations. The toolchain's physical layout does not imply an index/mod fallback.
 
-Allow declaration cycles and anchored re-export cycles whose identities resolve. Reject alias-only cycles without a declaration and impossible recursive value layouts. Check duplicate and ambiguous implementations across the loaded graph, including imports used only by expectations. Later dead-code elimination cannot change dispatch by removing a loaded module. Formal resolution and metadata validation remain #28 work.
+Allow declaration cycles and anchored re-export cycles whose identities resolve. Reject alias-only cycles without a declaration and impossible recursive value layouts. Check duplicate and ambiguous implementations across the loaded graph, including imports used only by expectations. Later dead-code elimination cannot change dispatch by removing a loaded module. Formal resolution and metadata validation remain ri-48g work.

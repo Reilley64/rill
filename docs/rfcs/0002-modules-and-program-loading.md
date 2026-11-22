@@ -4,9 +4,9 @@
 | --- | --- |
 | ID | 0002 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [Confirmed module decision #17](https://github.com/Reilley64/rill/issues/17#issuecomment-6866705217). [Source reconciliation](#source-reconciliation) lists later refinements. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The [confirmed policy decisions](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073) supplement those inputs. |
-| RFC dependencies | [RFC 0001](0001-top-level-expectations.md) owns expectation behavior. Its [accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) has SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. Other required companions appear [below](#required-companion-rules). The [M4.8 review set](../implementation-plan.md#m48-completion-checkpoint-first-party-core-authority) pins the dependencies for the first-party authority proposal. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | Confirmed module decision ri-owe (comment 6866705217). [Source reconciliation](#source-reconciliation) lists later refinements. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. The confirmed policy decisions (ri-48g, comment 6908371073) supplement those inputs. |
+| RFC dependencies | [RFC 0001](0001-top-level-expectations.md) owns expectation behavior. Its accepted snapshot (ri-48g, comment 6907867211) has SHA-256 `ee4980216dd2ed051cb6153600bf8b5f6c039145c083abfeeb37119d027bd954`. Other required companions appear [below](#required-companion-rules). The [M4.8 review set](../implementation-plan.md#m48-completion-checkpoint-first-party-core-authority) pins the dependencies for the first-party authority proposal. |
 | Replaces / superseded by | None. This draft does not replace or amend RFC 0001. |
 | Decision | Not yet decided |
 | Reviewed revision | Not yet reviewed |
@@ -67,7 +67,7 @@ Each declaration is private unless its item has `export`. Record fields are publ
 
 ## Syntax and reference semantics
 
-The owner [confirmed the three syntax policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
+The owner confirmed the three syntax policy groups (ri-48g, comment 6931939690) in [annex version 1](../grammar/v0-syntax-v1.md). Its [EBNF](../grammar/v0-syntax-v1.ebnf) and commitment/context rules form one policy review unit. Full annex/RFC acceptance and static-semantics completion remain separate.
 
 ### Files and origins
 
@@ -79,13 +79,13 @@ Unprefixed application imports start at the application root. Unprefixed imports
 
 Import paths are case-sensitive. This RFC adds no user manifest, package resolver or configurable search path. The process working directory does not select installed standard-library source.
 
-The toolchain explicitly maps the standard root to its facade. Following [#46](../adr/0026-toolchain-repository-and-mise.md), this draft maps `std` to the selected `std.rill` facade. Other standard module paths use that selected source tree. This is one explicit mapping, not a filename fallback search. The current scaffold does not contain the facade or implement this lookup.
+The toolchain explicitly maps the standard root to its facade. Following [ri-x5n](../adr/0026-toolchain-repository-and-mise.md), this draft maps `std` to the selected `std.rill` facade. Other standard module paths use that selected source tree. This is one explicit mapping, not a filename fallback search. The current scaffold does not contain the facade or implement this lookup.
 
 <a id="proposed-filesystem-identity-policy"></a>
 
 ### Filesystem identity policy
 
-The project owner [confirmed this policy](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073) on 2026-11-16. It supplements #17 without accepting the complete RFC.
+The project owner confirmed this policy (ri-48g, comment 6908371073) on 2026-11-16. It supplements ri-owe without accepting the complete RFC.
 
 Establish the application root from the requested entry path's directory. Canonicalize that directory before loading. Resolve the entry file and require it to remain within that root. An entry-file link cannot silently select another root.
 
@@ -107,7 +107,7 @@ Keys belong to their analysis context. Do not compare them across independently 
 
 ### Canonical ordering
 
-This section supplies the exact ordering required by RFC 0001. The project owner [confirmed this policy](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073) on 2026-11-16. This supplements #17. It does not accept the complete RFC.
+This section supplies the exact ordering required by RFC 0001. The project owner confirmed this policy (ri-48g, comment 6908371073) on 2026-11-16. This supplements ri-owe. It does not accept the complete RFC.
 
 Within one analysis context, order application modules before standard modules. Within each origin, compare the root-relative file paths by unsigned UTF-8 byte order. Compare full paths, including `/` and the `.rill` suffix. A shorter byte prefix sorts first.
 
@@ -164,7 +164,7 @@ Ordinary qualification starts from an imported module binding in the type/module
 
 ### Source snapshots and lexical input
 
-The owner [confirmed this file-level lexical input policy](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) with RFCs 0003, 0006 and 0010. The glossary distinguishes [source snapshots/spans](../../GLOSSARY.md#language) from analysis contexts and temporal Span values. This does not complete graph snapshot construction, filesystem transactions or editor freshness. The full RFC remains Draft.
+The owner confirmed this file-level lexical input policy (ri-48g, comment 6929923825) with RFCs 0003, 0006 and 0010. The glossary distinguishes [source snapshots/spans](../../GLOSSARY.md#language) from analysis contexts and temporal Span values. This does not complete graph snapshot construction, filesystem transactions or editor freshness. The full RFC remains Draft.
 
 Capture one immutable raw byte sequence before lexing a source file. Associate it with its canonical source identity and an opaque sourceSnapshotId. Changes to a file/editor buffer cannot mutate that saved sequence.
 
@@ -208,7 +208,7 @@ Missing imports or source bindings have meaning R0400. Inaccessible bindings hav
 
 ### Proposed M3 resolution procedure
 
-The owner [approved the M3 checkpoint](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619) at `a41e7cc955e67329d6dc3a8a69de667e0af204ac`. Approval covers O1 through O7, the test seams and implementation slices. This section supplies that scoped M3 contract. Earlier approvals and full RFC status remain unchanged. The [implementation checkpoint](../implementation-plan.md#m3-design-checkpoint) records the review boundary. The [acceptance record](../../crates/compiler/tests/m3-acceptance.md) distinguishes implemented resolution assertions from later checks.
+The owner approved the M3 checkpoint (ri-1fk, comment 6939478619) at `a41e7cc955e67329d6dc3a8a69de667e0af204ac`. Approval covers O1 through O7, the test seams and implementation slices. This section supplies that scoped M3 contract. Earlier approvals and full RFC status remain unchanged. The [implementation checkpoint](../implementation-plan.md#m3-design-checkpoint) records the review boundary. The [acceptance record](../../crates/compiler/tests/m3-acceptance.md) distinguishes implemented resolution assertions from later checks.
 
 #### Identities and declaration records
 
@@ -347,17 +347,17 @@ Collect canonical bodies once. Reject distinct bodies with identical ordinary fa
 
 Generic and concrete patterns can remain distinct. [Draft RFC 0004](0004-functions-overloads-and-generic-requirements.md#ordinary-call-selection) proposes overload ranking and call ambiguity. This RFC does not rank by return type, requirements, import order or runtime value.
 
-An ordinary implementation belongs in the family-defining module or a module that defines a type occurring in its parameters. Re-exports grant no defining-module ownership. [Draft RFC 0004](0004-functions-overloads-and-generic-requirements.md#collection-and-placement-permission) now proposes the exact ordinary patterns and placement rules. Canonical conversions have the separate endpoint/key rules confirmed in #41. Do not apply those exceptions to every family.
+An ordinary implementation belongs in the family-defining module or a module that defines a type occurring in its parameters. Re-exports grant no defining-module ownership. [Draft RFC 0004](0004-functions-overloads-and-generic-requirements.md#collection-and-placement-permission) now proposes the exact ordinary patterns and placement rules. Canonical conversions have the separate endpoint/key rules confirmed in ri-1wl. Do not apply those exceptions to every family.
 
 Ordinary families named in an exported generic requirement must have publicly nameable exported declarations. Their origin public paths are sufficient. A facade need not re-export them. Importing an operation does not bind its requirement names in the caller. Private body dependencies remain permitted.
 
 Required guard release, owner-count maintenance and native-borrow retention remain protected independently of ordinary placement permission. Collection must reject non-trusted implementations that replace or tie a required action. The diagnostic meaning is R0500. Do not impose a blanket outermost-type rule or seal all standard operations.
 
-Private fields alone do not prevent interception. Later #23 cleanup rules also preserve remaining initialized owned fields after custom disposal. Their full checking and runtime rules need companion RFCs. This document does not claim to prove them.
+Private fields alone do not prevent interception. Later ri-8n7 cleanup rules also preserve remaining initialized owned fields after custom disposal. Their full checking and runtime rules need companion RFCs. This document does not claim to prove them.
 
 ### Proposed M4.5 collection handoff
 
-[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes the next bounded collection handoff. Full RFC status remains unchanged. The owner approved the [exact-wildcard precision](https://github.com/Reilley64/rill/issues/62#issuecomment-6962750287) and then [the scoped P1–P4 checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018).
+M4.5 ri-8p9 proposes the next bounded collection handoff. Full RFC status remains unchanged. The owner approved the exact-wildcard precision (ri-8p9, comment 6962750287) and then the scoped P1–P4 checkpoint (ri-8p9, comment 6963439018).
 
 Pass the actual loaded implementation inventory and installed routes to [RFC 0004's proposed ordinary procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m45-ordinary-input-procedure). Do not discover bodies from imports, filenames or calls again. Preserve canonical defining modules through aliases and repeated routes.
 
@@ -369,7 +369,7 @@ Ordinary input facts do not prove family-role or protected-action admission. Mis
 
 ### Proposed M4.6 requirement metadata boundary
 
-[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this handoff to [the inference and evidence procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure). Scoped approval remains pending.
+M4.6 ri-w05 proposes this handoff to [the inference and evidence procedure](0004-functions-overloads-and-generic-requirements.md#proposed-m46-inference-and-evidence-procedure). Scoped approval remains pending.
 
 Resolve source requirement names in the declaration's captured module. Keep canonical family or compiler-predicate identities, arguments, source sites and actual binding routes. Resolve imported aliases once. Unresolved or inaccessible targets cannot supply assumptions. Apply canonical prelude fallback only in its existing unqualified scope.
 
@@ -379,7 +379,7 @@ A successful source name lookup is not evidence or role admission. Protected ref
 
 ### Proposed M4.8 core admission and interface checks
 
-[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes this procedure. It requires separate checkpoint approval. It does not admit a provider.
+M4.8 ri-dm4 proposes this procedure. It requires separate checkpoint approval. It does not admit a provider.
 
 Start with one resolved graph. Use the original canonical declarations, binding routes, syntax and snapshots. Do not load missing modules during typing. A compiler-required metadata dependency must already be present in the capture. A metadata edge does not install a source binding.
 
@@ -464,7 +464,7 @@ Build and stage the production executable, source files and provider artifacts i
 | [Draft RFC 0005](0005-types-records-enums-and-inference.md) | Nominal declaration identity, public-interface exposure and finite layout checking. | Proposed, not accepted. Concrete type-syntax policies are confirmed. Formal layout checking remains incomplete. |
 | [Draft RFC 0004](0004-functions-overloads-and-generic-requirements.md) | Canonical patterns, family evidence, duplicates, placement and call ranking. | Proposed. Its full text is not accepted. This RFC owns loading and visibility, not ranking. |
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md), with runtime integration still missing. | Protected operations, remaining-field cleanup and opaque-value metadata. | Proposed, not accepted. Complete registry/runtime checking remains incomplete. Private fields do not validate required actions. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with full LSP still missing. | Shared contexts, snapshots, path failures, safe edits and client behavior. | Reporting is proposed, not accepted. Complete source/snapshot and driver rules remain incomplete. Actual LSP delivery remains #42. |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with full LSP still missing. | Shared contexts, snapshots, path failures, safe edits and client behavior. | Reporting is proposed, not accepted. Complete source/snapshot and driver rules remain incomplete. Actual LSP delivery remains ri-bv2. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -515,7 +515,7 @@ Exporting `ready` would repair this visibility error. It would not add a local `
 | M1, guide graph | A facade re-exports a public nominal type and helper. | Load three application modules once. The alias preserves type identity. The local expectation passes. | [Imports](#import-and-export-forms), [loading](#loading-and-cycles), [privacy](#privacy-and-opaque-values). | HandChecked source reasoning. Resolution and execution are NotChecked. |
 | M2 | A type export competes with a child file module. | Reject the ungrouped form with R0402. The grouped alternative selects the type export. | [Resolution](#path-resolution-and-namespaces). | HandChecked candidate identities. No compiler diagnostic exists. |
 | M3 | A local module alias appears as a later import root. | Do not use the alias. Report R0400 if the canonical source path is missing. | [Resolution](#path-resolution-and-namespaces). | HandChecked. Source resolution is NotChecked. |
-| M4 | A public record has a private field. | Reject each external construction, rebuild or field access with R0401. | [Privacy](#privacy-and-opaque-values). | HandChecked against #17. No ownership checker ran. |
+| M4 | A public record has a private field. | Reject each external construction, rebuild or field access with R0401. | [Privacy](#privacy-and-opaque-values). | HandChecked against ri-owe. No ownership checker ran. |
 | M5 | A public generic interface requires a private family. | Reject the inaccessible public requirement with R0401. | [Family metadata](#family-collection-and-metadata-boundaries). | HandChecked. Generic checking is NotChecked. |
 | M6 | Two import routes reach one canonical body. | Collect it once. Do not report a duplicate body. | [Loading](#loading-and-cycles), [collection](#family-collection-and-metadata-boundaries). | HandChecked identity distinction. Actual collection is NotChecked. |
 | M7 | Two distinct bodies have alias-equivalent parameter patterns. | Reject with R0304 even without calls. Return differences do not repair the duplicate. | [Collection](#family-collection-and-metadata-boundaries). | Supporting source rule only. Full pattern normalization remains companion work. |
@@ -551,7 +551,7 @@ The standard facade follows the compatible selected toolchain. This does not cre
 
 An editor uses the selected entry, target and options to identify an analysis context. A workspace folder is not the application root by itself. Search results cannot add implementations to that context's loaded graph. Contexts remain separate even when they share files.
 
-Organize-imports must preserve loaded modules, public bindings, implementations and expectations. Removing a textually unused import can change that graph. Navigation and rename must preserve canonical aliases, namespaces and private access. Actual client behavior remains unvalidated under #42.
+Organize-imports must preserve loaded modules, public bindings, implementations and expectations. Removing a textually unused import can change that graph. Navigation and rename must preserve canonical aliases, namespaces and private access. Actual client behavior remains unvalidated under ri-bv2.
 
 ### Source reconciliation
 
@@ -559,13 +559,13 @@ Repository inputs use [`f33dcf4cf3f815824eeb897135775d7884f65c1a`](https://githu
 
 | Source | Disposition |
 | --- | --- |
-| [Confirmed RFC 0002 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073) | Specify filesystem identity and canonical ordering. The approval covers these policies, not the complete RFC. |
-| [#17 confirmation](https://github.com/Reilley64/rill/issues/17#issuecomment-6866705217), ADR 0010 | Include roots, explicit imports/exports, namespaces, privacy, opaque values and graph collection. The later policy decision confirms the filesystem and ordering details. |
-| [#19 confirmation](https://github.com/Reilley64/rill/issues/19#issuecomment-6870013901), ADR 0012 | Replace historical public-union rules with enum visibility. Do not restore private enum variants or general unions. |
-| [#23 confirmation](https://github.com/Reilley64/rill/issues/23#issuecomment-6872129850), catalogue sections 1 and 2 | Preserve fixed prelude identities, protected actions and remaining-field cleanup. Their complete checking rules remain companion work. |
-| [#41 confirmation](https://github.com/Reilley64/rill/issues/41#issuecomment-6886119679), ADR 0017 | Use `implement` for family bodies. Keep conversion-specific keys and endpoint permission separate from ordinary rules. |
-| [#24 confirmation](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), diagnostic registry and LSP contracts | Use assigned path/privacy code meanings. Preserve context separation and graph-aware edits. No resolver or client behavior is claimed. |
-| [Accepted RFC 0001 snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) | Reuse expectation behavior. Propose its missing module rules without changing its accepted semantics or ID. |
+| Confirmed RFC 0002 policies (ri-48g, comment 6908371073) | Specify filesystem identity and canonical ordering. The approval covers these policies, not the complete RFC. |
+| ri-owe confirmation (comment 6866705217), ADR 0010 | Include roots, explicit imports/exports, namespaces, privacy, opaque values and graph collection. The later policy decision confirms the filesystem and ordering details. |
+| ri-kty confirmation (comment 6870013901), ADR 0012 | Replace historical public-union rules with enum visibility. Do not restore private enum variants or general unions. |
+| ri-8n7 confirmation (comment 6872129850), catalogue sections 1 and 2 | Preserve fixed prelude identities, protected actions and remaining-field cleanup. Their complete checking rules remain companion work. |
+| ri-1wl confirmation (comment 6886119679), ADR 0017 | Use `implement` for family bodies. Keep conversion-specific keys and endpoint permission separate from ordinary rules. |
+| ri-3t8 confirmation (comment 6885970775), diagnostic registry and LSP contracts | Use assigned path/privacy code meanings. Preserve context separation and graph-aware edits. No resolver or client behavior is claimed. |
+| Accepted RFC 0001 snapshot (ri-48g, comment 6907867211) | Reuse expectation behavior. Propose its missing module rules without changing its accepted semantics or ID. |
 | ADR 0026 and standard-library ownership note | Use a toolchain-selected source origin and explicit future `std.rill` facade. Do not invent package lookup or claim the scaffold supplies it. |
 | Module prototype and [consolidation record](../prototypes/consolidation.md) | Use current `07-modules/` paths. Preserve all source and fixture bytes. Historical `10-modules/` references identify earlier paths. |
 
@@ -591,7 +591,7 @@ The selected standard origin must not fall back into application files. Protecte
 
 ## Rationale, alternatives and prior art
 
-File modules make the defining location explicit. Inline modules could organize declarations without extra files, but #17 rejected them for v0. This draft retains that boundary.
+File modules make the defining location explicit. Inline modules could organize declarations without extra files, but ri-owe rejected them for v0. This draft retains that boundary.
 
 Explicit item-site exports show public bindings at their declaration or import. Bottom export lists and wildcard exports can reduce repetition. They also introduce alternate visibility paths that the confirmed design does not adopt.
 
@@ -599,7 +599,7 @@ Separate namespaces let a type and its constructor helper share a spelling. Synt
 
 The confirmed key uses origin and relative path rather than content or inode identity. This preserves nominal ownership across copied files and machine relocation. Resolving symbolic links avoids duplicate modules through filesystem aliases. Rejecting origin escapes preserves bounded lookup, but limits linked external source trees.
 
-The confirmed byte ordering avoids locale and discovery differences. The project owner selected application-first ordering in the [policy decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073). This is a design choice, not a conclusion from a native experiment.
+The confirmed byte ordering avoids locale and discovery differences. The project owner selected application-first ordering in the policy decision (ri-48g, comment 6908371073). This is a design choice, not a conclusion from a native experiment.
 
 ## Implementation implications
 
@@ -646,7 +646,7 @@ The table below preserves pre-M3 evidence at the stated drafting revisions. The 
 
 ### Remaining authoring work
 
-The project owner [approved both policy groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073). Filesystem identity and canonical ordering are no longer open policy questions. The approval does not accept the complete RFC.
+The project owner approved both policy groups (ri-48g, comment 6908371073). Filesystem identity and canonical ordering are no longer open policy questions. The approval does not accept the complete RFC.
 
 The [proposed M3 procedure](#proposed-m3-resolution-procedure) supplies candidate, cycle, graph-capture and host-failure rules for owner review. The owner approved its graph-membership, transaction and freshness choices for M3 at the identified checkpoint. The linked acceptance record reports actual resolution tests and their limits. Full RFC readiness and companion checking remain incomplete. The confirmed file-level snapshot policy does not itself approve these additions. Preserve the stated namespace and origin rules.
 
@@ -658,7 +658,7 @@ Draft RFCs [0004](0004-functions-overloads-and-generic-requirements.md) and [000
 
 ### Implementation/validation gates
 
-M3 supplies scoped resolution and real filesystem tests on the recorded local macOS AArch64 host. The [hosted record](../../crates/compiler/tests/m3-acceptance.md#hosted-publication-evidence) adds passing resolver tests on four Linux/macOS runner profiles. Native/runtime acceptance still fails as unavailable. The typed checker, persistent source cache, runtime and complete client workflows remain unimplemented. Structural text checks cannot replace those gates. #28 retains formalization; #42 retains actual LSP delivery.
+M3 supplies scoped resolution and real filesystem tests on the recorded local macOS AArch64 host. The [hosted record](../../crates/compiler/tests/m3-acceptance.md#hosted-publication-evidence) adds passing resolver tests on four Linux/macOS runner profiles. Native/runtime acceptance still fails as unavailable. The typed checker, persistent source cache, runtime and complete client workflows remain unimplemented. Structural text checks cannot replace those gates. ri-48g retains formalization; ri-bv2 retains actual LSP delivery.
 
 ### Future/out-of-scope work
 
@@ -672,16 +672,16 @@ No canonical readiness review has occurred. Status is Draft. Source comparisons 
 
 ### Human decisions and amendments
 
-The owner approved the M3 procedure through checkpoint `a41e7cc955e67329d6dc3a8a69de667e0af204ac` under #54. The [approval record](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619) identifies O1 through O7 and the test seams. This decision authorizes scoped implementation, not full RFC acceptance or readiness. Existing case evidence and earlier policy approvals retain their original scopes.
+The owner approved the M3 procedure through checkpoint `a41e7cc955e67329d6dc3a8a69de667e0af204ac` under ri-1fk. The approval record (ri-1fk, comment 6939478619) identifies O1 through O7 and the test seams. This decision authorizes scoped implementation, not full RFC acceptance or readiness. Existing case evidence and earlier policy approvals retain their original scopes.
 
-On 2026-11-17, the owner requested the complete syntax grammar. The owner then [confirmed all three syntax groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
+On 2026-11-17, the owner requested the complete syntax grammar. The owner then confirmed all three syntax groups (ri-48g, comment 6931939690) at the two identified annex snapshots. Existing lexical/source and semantic approvals retain their exact scopes. Full annex/RFC acceptance, readiness and implementation remain separate.
 
-On 2026-11-17, the owner requested completion of the lexical/source contract. The owner then [confirmed all three lexical/source groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825), including this file-level snapshot/UTF-8 policy. Earlier canonical identity/order approvals remain unchanged. No full RFC acceptance is inferred.
+On 2026-11-17, the owner requested completion of the lexical/source contract. The owner then confirmed all three lexical/source groups (ri-48g, comment 6929923825), including this file-level snapshot/UTF-8 policy. Earlier canonical identity/order approvals remain unchanged. No full RFC acceptance is inferred.
 
 | Date / actor | Change | Reviewed revision or snapshot | Decision / rationale |
 | --- | --- | --- | --- |
 | 2026-11-16, project owner | Requested the module RFC after RFC 0001. | No RFC 0002 revision was accepted. | The request authorizes drafting, not acceptance or renumbering an existing RFC. |
-| 2026-11-16, drafting agent under #28 | Created and registered this substantive draft as RFC 0002. | Source inputs use `f33dcf4cf3f815824eeb897135775d7884f65c1a`. RFC 0001 uses the accepted snapshot identified in metadata. | New filesystem and ordering details are proposals. No implementation or formal ASD-STE100 compliance is claimed. |
-| 2026-11-16, project owner | Approved the filesystem identity and canonical ordering policies. The full RFC remains Draft. | The two policy recommendations presented in chat. No complete RFC revision was accepted. | [Recorded approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6908371073). Remaining authoring and validation work stays open. |
-| 2026-11-16, drafting agent under #28 | Linked Draft RFC 0003 as a proposed companion. | No policy approval or complete RFC acceptance changed. | Expression and control rules still need their own review. |
-| 2026-11-17, project owner | Approved the coordinated lexical/source groups, including file snapshots and UTF-8 rejection. | Pre-recording SHA-256: `f9283861444fb3004d31b7dd7c563f27228916258013f606eb4059102413de08`. The [shared record](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) identifies the other three snapshots. | Policy approval only. Graph freshness, full RFC acceptance, readiness and implementation remain open. |
+| 2026-11-16, drafting agent under ri-48g | Created and registered this substantive draft as RFC 0002. | Source inputs use `f33dcf4cf3f815824eeb897135775d7884f65c1a`. RFC 0001 uses the accepted snapshot identified in metadata. | New filesystem and ordering details are proposals. No implementation or formal ASD-STE100 compliance is claimed. |
+| 2026-11-16, project owner | Approved the filesystem identity and canonical ordering policies. The full RFC remains Draft. | The two policy recommendations presented in chat. No complete RFC revision was accepted. | Recorded approval (ri-48g, comment 6908371073). Remaining authoring and validation work stays open. |
+| 2026-11-16, drafting agent under ri-48g | Linked Draft RFC 0003 as a proposed companion. | No policy approval or complete RFC acceptance changed. | Expression and control rules still need their own review. |
+| 2026-11-17, project owner | Approved the coordinated lexical/source groups, including file snapshots and UTF-8 rejection. | Pre-recording SHA-256: `f9283861444fb3004d31b7dd7c563f27228916258013f606eb4059102413de08`. The shared record (ri-48g, comment 6929923825) identifies the other three snapshots. | Policy approval only. Graph freshness, full RFC acceptance, readiness and implementation remain open. |

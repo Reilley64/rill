@@ -6,7 +6,7 @@ The [consolidation record](consolidation.md) maps combined examples to their ori
 
 ## Core conversion interface migration
 
-The [2026-11-16 interface direction](https://github.com/Reilley64/rill/issues/28#issuecomment-6913810445) consolidates core conversions under into/tryInto. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) records the current matrix and migration rules. Strict numeric parsing selects ParseError; strict UTF-8 decoding selects Utf8Error.
+The 2026-11-16 interface direction (ri-48g, comment 6913810445) consolidates core conversions under into/tryInto. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) records the current matrix and migration rules. Strict numeric parsing selects ParseError; strict UTF-8 decoding selects Utf8Error.
 
 Sources and authored reports retain old parseNumber/decodeUtf8, byte/List, view and code-point helper spellings as historical evidence. They require interface migration before current compiler acceptance can be claimed. Their recorded purposes and expected value behavior remain intact. No historical source or report is relabeled as executed or silently rewritten.
 

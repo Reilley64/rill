@@ -4,8 +4,8 @@
 | --- | --- |
 | ID | 0008 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [#29 error decision](https://github.com/Reilley64/rill/issues/29), [#23 library decision](https://github.com/Reilley64/rill/issues/23#issuecomment-6872129850) and [#24 diagnostic decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775). [Source reconciliation](#source-reconciliation) identifies related decisions and artifacts. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | ri-vtw error decision, ri-8n7 library decision (comment 6872129850) and ri-3t8 diagnostic decision (comment 6885970775). [Source reconciliation](#source-reconciliation) identifies related decisions and artifacts. Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. |
 | RFC dependencies | Draft RFCs [0002](0002-modules-and-program-loading.md), [0003](0003-expressions-bindings-and-control-flow.md), [0004](0004-functions-overloads-and-generic-requirements.md), [0005](0005-types-records-enums-and-inference.md), [0006](0006-numbers-strings-and-primitive-operations.md) and [0007](0007-ownership-borrowing-mutation-and-cleanup.md) propose shared rules. Their full texts are not accepted. Required [companions](#required-companion-rules) remain incomplete or missing. |
 | Replaces / superseded by | None. This draft does not amend an Accepted RFC or accept another draft. |
 | Decision | Not yet decided |
@@ -339,7 +339,7 @@ False expectations remain ordinary test failures under Accepted RFC 0001. Compil
 
 ### Proposed M4.6 exact error evidence
 
-[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes these equality facts for [RFC 0004's ordinary proof procedure](0004-functions-overloads-and-generic-requirements.md#symbolic-bodies-and-evidence-goals). Approval remains pending. This stage does not implement conversion selection or admit an error wrapper.
+M4.6 ri-w05 proposes these equality facts for [RFC 0004's ordinary proof procedure](0004-functions-overloads-and-generic-requirements.md#symbolic-bodies-and-evidence-goals). Approval remains pending. This stage does not implement conversion selection or admit an error wrapper.
 
 An ordinary requirement can name an exact error argument even when its input is symbolic. Preserve the canonical family, input terms and exact output relation. For example, `read(R,E)` retains both R and E. It is not evidence for any unspecified error type.
 
@@ -351,7 +351,7 @@ This equality can be tested independently of a standard-library wrapper. Operati
 
 ### Proposed M4.8 Option, Result and Err checking
 
-[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes this handoff to the shared typed checker. It requires separate checkpoint approval. These judgments need the admitted roles and applicable contracts from [RFC 0002](0002-modules-and-program-loading.md#proposed-m48-core-admission-and-interface-checks).
+M4.8 ri-dm4 proposes this handoff to the shared typed checker. It requires separate checkpoint approval. These judgments need the admitted roles and applicable contracts from [RFC 0002](0002-modules-and-program-loading.md#proposed-m48-core-admission-and-interface-checks).
 
 Validate the exact Option and Result variant schemas, Result's canonical default, and the distinct Err type and closed constructor roles. Do not infer those roles from representation. Check raw variant construction with the ordinary named data rules. `Result.Err` consumes a supplied wrapper value under the later ownership rules. It does not create an origin.
 
@@ -383,7 +383,7 @@ The report can retain operand, result, origin, branch and evidence facts. It can
 | [Draft RFC 0007](0007-ownership-borrowing-mutation-and-cleanup.md) | Moves, source routes, callable captures, initialized cleanup and deferred cancellation. | Five policies are confirmed. Complete dependency/cleanup judgments remain incomplete. |
 | [Draft RFC 0009](0009-user-implementable-conversions.md) | Endpoint keys, selection, coherence and preserved selected E. | Proposed, not accepted. Complete pair/applicability/determination judgments remain incomplete. This RFC adds no automatic error adapter or universal conversion error. |
 | Runtime, concurrency and trusted admission | Actual sealed storage, source maps, callback dispatch, child/native completion and bounded-stack cleanup. | No complete RFC assigned. An internal typed-node sketch is not validated storage or target support. |
-| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with full LSP still missing. | Dependency explanations, source snapshots, code meanings and inert bounded observations. | Reporting is proposed, not accepted. Complete source/driver and observation procedures remain incomplete. [#42](https://github.com/Reilley64/rill/issues/42) retains complete editor delivery. |
+| [Draft RFC 0010](0010-diagnostics-and-reporting.md), with full LSP still missing. | Dependency explanations, source snapshots, code meanings and inert bounded observations. | Reporting is proposed, not accepted. Complete source/driver and observation procedures remain incomplete. ri-bv2 retains complete editor delivery. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -477,19 +477,19 @@ Structured library errors can contain multiple original Err values as typed fiel
 
 Scoped work must keep valid caller-dependent errors until required child cleanup completes. Background transfer still needs the whole job/result's actual evidence. This RFC adds no global join, forced cancellation or rollback.
 
-The accepted [RFC 0001 snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) owns expectation behavior and trusted observation. Its diagnostic budgets do not bound full runtime cause text. Checking must not invoke runtime rendering through a user display callback.
+The accepted RFC 0001 snapshot (ri-48g, comment 6907867211) owns expectation behavior and trusted observation. Its diagnostic budgets do not bound full runtime cause text. Checking must not invoke runtime rendering through a user display callback.
 
 ### Source reconciliation
 
 | Input | Disposition |
 | --- | --- |
-| [#29 decision](https://github.com/Reilley64/rill/issues/29), [ADR 0013](../adr/0013-caused-by-errors-with-explicit-wrapping.md) | Preserve typed wrappers, construction origins, lazy value wrapping and exact forwarding. Later #23 narrows erasure to independently safe retained causes. |
-| [#23 final decision](https://github.com/Reilley64/rill/issues/23#issuecomment-6872129850), [catalogue section 4](../standard-library-contracts.md#4-option-result-origins-and-causes), [ADR 0015](../adr/0015-language-required-library-contracts.md) | Incorporate opaque wrappers/locations, explicit Error construction, closed Err, callback/query contracts and mapErr preservation. The later RFC policy decision confirms type-argument order and origin/format sequencing, not the full error system. |
-| [#9 core decision](https://github.com/Reilley64/rill/issues/9#issuecomment-6308790321), #11/#12, Draft RFC 0003 | Preserve Result/Option control and explicit unused-Result handling. Later decisions replace recoverable propagation reports and old constructor conveniences. Complete parsing remains with RFC 0003. |
-| #15/#16, [Draft RFC 0007 policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379) | Preserve source dependencies, initialized disposal, remaining-field cleanup and deferred cancellation. Full route and cleanup judgments remain incomplete. |
-| #19/#21/#41 and Draft RFCs 0004/0005 | Use enums, named records, canonical family evidence and implement bodies. No literal types, anonymous records, general union representation or return-only dispatch returns. |
-| #22 and [stack decision](../adr/0014-bounded-stacks-proper-tail-calls-and-backend-gates.md) | Bound standard chain traversal/default release without truncating explicit causes. User callbacks remain ordinary code; target/ABI support still needs validation. |
-| [#24 final decision](https://github.com/Reilley64/rill/issues/24#issuecomment-6885970775), [diagnostic contracts](../diagnostic-contracts.md) | Keep opaque runtime locations distinct from structured compiler ranges. Trusted previews call no user formatters and do not alter sources or causes. |
+| ri-vtw decision, [ADR 0013](../adr/0013-caused-by-errors-with-explicit-wrapping.md) | Preserve typed wrappers, construction origins, lazy value wrapping and exact forwarding. Later ri-8n7 narrows erasure to independently safe retained causes. |
+| ri-8n7 final decision (comment 6872129850), [catalogue section 4](../standard-library-contracts.md#4-option-result-origins-and-causes), [ADR 0015](../adr/0015-language-required-library-contracts.md) | Incorporate opaque wrappers/locations, explicit Error construction, closed Err, callback/query contracts and mapErr preservation. The later RFC policy decision confirms type-argument order and origin/format sequencing, not the full error system. |
+| ri-457 core decision (comment 6308790321), ri-8hm/#12, Draft RFC 0003 | Preserve Result/Option control and explicit unused-Result handling. Later decisions replace recoverable propagation reports and old constructor conveniences. Complete parsing remains with RFC 0003. |
+| ri-lql/#16, Draft RFC 0007 policies (ri-48g, comment 6915849379) | Preserve source dependencies, initialized disposal, remaining-field cleanup and deferred cancellation. Full route and cleanup judgments remain incomplete. |
+| ri-kty/#21/#41 and Draft RFCs 0004/0005 | Use enums, named records, canonical family evidence and implement bodies. No literal types, anonymous records, general union representation or return-only dispatch returns. |
+| ri-636 and [stack decision](../adr/0014-bounded-stacks-proper-tail-calls-and-backend-gates.md) | Bound standard chain traversal/default release without truncating explicit causes. User callbacks remain ordinary code; target/ABI support still needs validation. |
+| ri-3t8 final decision (comment 6885970775), [diagnostic contracts](../diagnostic-contracts.md) | Keep opaque runtime locations distinct from structured compiler ranges. Trusted previews call no user formatters and do not alter sources or causes. |
 | [Panic decision](../adr/0005-panics-end-the-program-without-unwinding.md), later runtime/network refinements | Preserve fatal no-unwind behavior, limited emergency reporting and typed native operation failures. Do not promise recoverable allocator failure or termination of an embedding host. |
 | [Historical error program](../../prototypes/02-caused-by-errors.rill), [case inventory](../prototypes/02-caused-by-errors.md), source revision | Preserve their lazy/cause/forwarding obligations and historical bytes. Their parseNumber spelling needs the recorded tryInto migration; no Rill execution or fixed output-format promise follows. |
 
@@ -545,7 +545,7 @@ Standard traversal/release must not recurse with chain depth. Callback execution
 
 | Artifact / revision | Evidence label | Rule/question exercised | Checker/tool and command/environment | Expected / observed outcome | Limits, negative/unavailable results and gate links |
 | --- | --- | --- | --- | --- | --- |
-| #29/#23/#24 decisions and repository base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Source ownership, origins, retained-cause requirements and diagnostic separation. | Drafting agent, 2026-11-16. Read current decisions, ADRs and catalogue section 4. | Reconciled the later retained-cause boundary and preserved exact forwarding/lazy wrapping. | Source review is not full formal checking or implementation acceptance. |
+| ri-vtw/#23/#24 decisions and repository base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Source ownership, origins, retained-cause requirements and diagnostic separation. | Drafting agent, 2026-11-16. Read current decisions, ADRs and catalogue section 4. | Reconciled the later retained-cause boundary and preserved exact forwarding/lazy wrapping. | Source review is not full formal checking or implementation acceptance. |
 | R1 through R24, this draft | NotChecked | Constructor typing, propagation, causes, callbacks and rendering. | No Rill parser, checker or runtime is available. | Expected outcomes appear above. No program, source-location trace or formatting sequence executed. | Policy approval does not complete formal rules or companions. No case is RillExecuted. |
 | Sealed node sketch and state transitions | NotChecked | Heterogeneous storage, evidence, cancellation and bounded-stack release. | No reference model, formal proof or runtime/provider integration ran. | No representation or soundness result is claimed. | Complete judgments and actual native/Wasm validation remain required. |
 | Historical prototypes and authored case inventory | NotChecked | Execution of the combined current error contract. | Existing artifacts retain their original evidence labels and bytes. | No historical report is relabeled as a current executed Rill test. | Old helper spellings and expected text are provenance, not new API or rendering-format authority. |
@@ -577,7 +577,7 @@ These checks need the relevant checker/runtime and target profiles. Document str
 
 ### Confirmed policies
 
-The project owner [approved all three policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6917170418) on 2026-11-16. The pre-recording snapshot has SHA-256 `73cae5228169bd9f91b846aff420ea7360f66cce21e64a3cc5bdcb2eb11eab59`.
+The project owner approved all three policies (ri-48g, comment 6917170418) on 2026-11-16. The pre-recording snapshot has SHA-256 `73cae5228169bd9f91b846aff420ea7360f66cce21e64a3cc5bdcb2eb11eab59`.
 
 1. Record canonical Err at its written call's source start and infix wrapping at its question-mark token. Real factories/adapters record their own Err expressions. Forwarding preserves the original origin. Aliases, inlining and compiler-generated helpers do not replace those source sites.
 2. Use success T first, error E second and cause C third for explicit closed Err arguments. Only the two-value-argument form admits C. Immediate Result context, typed payloads and explicit arguments establish types under the stated rules. Established E can supply numeric context without a default width or implicit string-to-Error conversion.
@@ -595,7 +595,7 @@ Complete sealed property derivation, witness transport and nested dependency rou
 
 Specify native/generated origin admission and source-map retention without public coordinate fields or invalid source-buffer borrows. Complete bounded-stack storage/release and trusted metadata integration with the runtime companions.
 
-These gaps prevent the [canonical readiness review](README.md#canonical-reviewready-checklist). If required semantics cannot coexist, return the conflict to [map #1](https://github.com/Reilley64/rill/issues/1). A supporting signature or private representation does not resolve it automatically.
+These gaps prevent the [canonical readiness review](README.md#canonical-reviewready-checklist). If required semantics cannot coexist, return the conflict to map ri-kl0. A supporting signature or private representation does not resolve it automatically.
 
 ### Implementation/validation gates and future scope
 
@@ -615,9 +615,9 @@ These checks cannot supply missing judgments or validate sealed ownership. Forma
 
 The project owner requested this errors RFC on 2026-11-16. That request authorized drafting, not precision policies or full RFC acceptance. Source decisions and companion policy approvals retain their own scopes.
 
-The project owner later [approved all three precision policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6917170418). This approval identifies the pre-recording snapshot below. It does not accept the full RFC, supply missing judgments or establish readiness. Full Decision and Reviewed revision remain Not yet decided and Not yet reviewed.
+The project owner later approved all three precision policies (ri-48g, comment 6917170418). This approval identifies the pre-recording snapshot below. It does not accept the full RFC, supply missing judgments or establish readiness. Full Decision and Reviewed revision remain Not yet decided and Not yet reviewed.
 
 | Date / actor | Kind and scope of change | Reviewed revision or snapshot | Decision link / rationale |
 | --- | --- | --- | --- |
 | 2026-11-16, drafting agent | Created substantive Draft RFC 0008, register and partial source coverage. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a`, current decisions cited above and linked Draft companions. This is not a reviewed RFC snapshot. | User request to draft errors, propagation and caused-by wrapping. No new policy, full RFC or implementation acceptance is inferred. |
-| 2026-11-16, project owner | Approved construction origins, closed Err generic/context typing and standard formatter sequencing. | Pre-recording draft SHA-256 `73cae5228169bd9f91b846aff420ea7360f66cce21e64a3cc5bdcb2eb11eab59`. Local snapshot `/tmp/rill-rfc-0008-before-policy-approval.md`. | [Three-policy decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6917170418). Full acceptance, formal judgments, readiness and implementation/target/client validation remain open. |
+| 2026-11-16, project owner | Approved construction origins, closed Err generic/context typing and standard formatter sequencing. | Pre-recording draft SHA-256 `73cae5228169bd9f91b846aff420ea7360f66cce21e64a3cc5bdcb2eb11eab59`. Local snapshot `/tmp/rill-rfc-0008-before-policy-approval.md`. | Three-policy decision (ri-48g, comment 6917170418). Full acceptance, formal judgments, readiness and implementation/target/client validation remain open. |

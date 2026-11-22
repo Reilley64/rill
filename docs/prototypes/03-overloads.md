@@ -19,7 +19,7 @@ Read [the source examples](../../prototypes/03-overloads.rill), which combine th
 
 ## Independent rejection and boundary cases
 
-Each snippet below is an independent design case, not an addition to the valid source. Language and greeting refer to that source's declarations. #24 owns exact diagnostic wording.
+Each snippet below is an independent design case, not an addition to the valid source. Language and greeting refer to that source's declarations. ri-3t8 owns exact diagnostic wording.
 
 ### Removed type forms, not removed expressions
 
@@ -38,7 +38,7 @@ Reject general union syntax:
 type Shape = Circle | Rect;
 ```
 
-`let language = "fr"` remains valid with type string. Primitive value matching such as `match (flag) { true => ..., false => ... }` remains valid. Numeric literals still need a base-width context or suffix. There is no fallback width or refinement-based infallible conversion. Optimizer knowledge does not give a string binding singleton-type copy or overload permissions. The library catalogue distinguishes literal expressions from named string bindings; #28 must validate that distinction.
+`let language = "fr"` remains valid with type string. Primitive value matching such as `match (flag) { true => ..., false => ... }` remains valid. Numeric literals still need a base-width context or suffix. There is no fallback width or refinement-based infallible conversion. Optimizer knowledge does not give a string binding singleton-type copy or overload permissions. The library catalogue distinguishes literal expressions from named string bindings; ri-48g must validate that distinction.
 
 ### No implicit runtime dispatcher
 
@@ -63,7 +63,7 @@ Reject a match on Language with only a French arm. Reject French-with-guard plus
 
 ### Generic inference and joins
 
-Reject `let value = Box.Empty;` without a context that determines T. Later uses cannot repair inference by look-ahead. The explicitly annotated Box<string> example is valid. Distinct enums cannot join into an invented `A | B`; use an explicit enclosing enum. #28 must formalize generic variant notation, inference and joins. Box illustrates those rules; the library catalogue owns the actual Option and Result definitions.
+Reject `let value = Box.Empty;` without a context that determines T. Later uses cannot repair inference by look-ahead. The explicitly annotated Box<string> example is valid. Distinct enums cannot join into an invented `A | B`; use an explicit enclosing enum. ri-48g must formalize generic variant notation, inference and joins. Box illustrates those rules; the library catalogue owns the actual Option and Result definitions.
 
 ### Mutable widening is unsound
 
@@ -83,7 +83,7 @@ An exported enum exposes every variant and payload field. Reject individually pr
 
 ### Generic/indirect and ownership follow-through
 
-#28 must cover direct and indirect calls, expected-type selection of function values, generic requirements, alias identity, duplicate patterns and incomparable matches across all parameters. Selection uses static types, not runtime discriminants or payload values.
+ri-48g must cover direct and indirect calls, expected-type selection of function values, generic requirements, alias identity, duplicate patterns and incomparable matches across all parameters. Selection uses static types, not runtime discriminants or payload values.
 
 Cover owned, read-only and exclusive payload access, borrowed joins and retained result dependencies. Read-only variant widening does not establish mutable-reference or arbitrary-container covariance. Preserve noBorrow, sendable, shareable, copy and protected-disposal checks through payloads and erased interfaces. Enum construction cannot hide an exclusive reference or permit replacement while a protected payload loan remains live.
 

@@ -1,6 +1,6 @@
 # M4.6 generic inference and symbolic evidence
 
-This record covers [#63](https://github.com/Reilley64/rill/issues/63) in [draft PR #58](https://github.com/Reilley64/rill/pull/58), under [M4 #56](https://github.com/Reilley64/rill/issues/56). The owner [approved H1 through H4](https://github.com/Reilley64/rill/issues/63#issuecomment-6964769605) at `92d8454b65b5ee59760583178feaa5ce8bd199ff` before model or compiler implementation. The [design checkpoint](../../../docs/implementation-plan.md#m46-design-checkpoint) links the owning procedures. Their RFC statuses remain Draft.
+This record covers ri-w05 in [draft PR #58](https://github.com/Reilley64/rill/pull/58), under M4 ri-b83. The owner approved H1 through H4 (ri-w05, comment 6964769605) at `92d8454b65b5ee59760583178feaa5ce8bd199ff` before model or compiler implementation. The [design checkpoint](../../../docs/implementation-plan.md#m46-design-checkpoint) links the owning procedures. Their RFC statuses remain Draft.
 
 ## Independent model
 
@@ -52,7 +52,7 @@ Code revision [`f4765b82116fc29d45e392f89a3afbce7d7966e9`](https://github.com/Re
 
 ## Completion increment
 
-The [previous publication](https://github.com/Reilley64/rill/issues/63#issuecomment-6966488734) left three procedures incomplete. The source checker now:
+The previous publication (ri-w05, comment 6966488734) left three procedures incomplete. The source checker now:
 
 - Resumes selected output dependencies after source context or a ready default binds a free slot. A separate `Instantiate` goal records the use, its dependencies and defaults. The input-only `Determine` goal and its winner do not change. A pending output still cannot be bound by the source.
 - Commits bracket category and tests arity before projecting needed callback contexts at nested tuple paths. It uses independent anchors from typed siblings and retains disagreement without selecting a winner.

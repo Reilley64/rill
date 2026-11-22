@@ -2,7 +2,7 @@
 
 ## Scope and authority
 
-[M4.2 slice #59](https://github.com/Reilley64/rill/issues/59) remains part of open [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56), in existing draft PR #58. The owner [approved D1 through D4](https://github.com/Reilley64/rill/issues/59#issuecomment-6945089123) at exact checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. The overall M4 starting main is `ee12588f2cba912025900e1ac587586fb9cb6235`.
+M4.2 slice ri-9y3 remains part of open M4 umbrella ri-b83, in existing draft PR #58. The owner approved D1 through D4 (ri-9y3, comment 6945089123) at exact checkpoint `c26d737439fd4c426d362655ad15984cc70108dc`. The overall M4 starting main is `ee12588f2cba912025900e1ac587586fb9cb6235`.
 
 The approved procedures live in [RFC 0004](../../../docs/rfcs/0004-functions-overloads-and-generic-requirements.md#proposed-m42-header-validity-and-prelude-signatures) and [RFC 0005](../../../docs/rfcs/0005-types-records-enums-and-inference.md#proposed-m42-declaration-validity-and-inline-containment). Approval covers existing type-position admission, parent representation for stored variants, honest unknown storage, exact canonical prelude contracts and the three public TDD seams. Full RFC statuses and earlier approvals remain unchanged.
 
@@ -91,4 +91,4 @@ No documented-standard violation was identified. One low-priority Data Clumps he
 
 No actionable findings were identified. The staged implementation matched canonical contracts, D1 through D3 storage rules, finite evidence, origin-preserving forwarding, ordered iterative cycle witnesses and incomplete/resource boundaries. The later unstaged provenance consolidation was excluded from this independent staged review.
 
-The correction is locally verified without claiming another delegated review. After it, the eight model tests and test:compiler, test, check and build:scaffold passed again through mise. The compiler count remained 175, and documentation checks found zero errors across 1637 destinations. #59 and PR #58 record the publication revision. Formal ASD-STE100 dictionary compliance remains unverified. PR #58 remains draft and unmerged; #56 stays open.
+The correction is locally verified without claiming another delegated review. After it, the eight model tests and test:compiler, test, check and build:scaffold passed again through mise. The compiler count remained 175, and documentation checks found zero errors across 1637 destinations. ri-9y3 and PR #58 record the publication revision. Formal ASD-STE100 dictionary compliance remains unverified. PR #58 remains draft and unmerged; ri-b83 stays open.

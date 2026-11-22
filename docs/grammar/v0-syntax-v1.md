@@ -6,17 +6,17 @@
 | Artifacts | This document and [v0-syntax-v1.ebnf](v0-syntax-v1.ebnf) form one review unit. Both are required. |
 | EBNF snapshot | Current recording SHA-256 `c8510c7d8f4537303ec502a71013d129f77726dad34fdcfdeea578dc5951d3af`. The [policy review](#confirmed-policy-groups) identifies both original artifact digests. |
 | Owner | [RFC 0003](../rfcs/0003-expressions-bindings-and-control-flow.md) coordinates syntax. RFCs 0002, 0004, 0005 and 0006 retain their rule ownership. |
-| Source baseline | Repository `f33dcf4cf3f815824eeb897135775d7884f65c1a`, current owning RFCs and [confirmed lexical/source snapshots](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825). |
-| Human decision | [Three syntax policy groups confirmed](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690), 2026-11-17. Full annex acceptance is not yet decided. |
+| Source baseline | Repository `f33dcf4cf3f815824eeb897135775d7884f65c1a`, current owning RFCs and confirmed lexical/source snapshots (ri-48g, comment 6929923825). |
+| Human decision | Three syntax policy groups confirmed (ri-48g, comment 6931939690), 2026-11-17. Full annex acceptance is not yet decided. |
 | Reviewed revision | Policy review covers the [two exact pre-recording snapshots](#confirmed-policy-groups). Full annex acceptance review has not occurred. |
 
 ## Purpose and authority
 
 This annex records the confirmed concrete syntax policy groups for the current v0 language forms. Its EBNF productions and commitment/context rules operate together. The EBNF alone is not a parser-generator specification or unambiguity proof.
 
-The RFCs explain semantics, rationale and source reconciliation. This annex consolidates syntax rather than adding a competing language reference. The [policy decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) does not accept complete owning RFCs. Full annex acceptance remains separate under the [RFC conventions](../rfcs/README.md#normative-ownership-and-dependencies).
+The RFCs explain semantics, rationale and source reconciliation. This annex consolidates syntax rather than adding a competing language reference. The policy decision (ri-48g, comment 6931939690) does not accept complete owning RFCs. Full annex acceptance remains separate under the [RFC conventions](../rfcs/README.md#normative-ownership-and-dependencies).
 
-The [accepted RFC 0001 snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) still owns expectations. No capture, Boolean, execution-order or return-context amendment is proposed. The later syntax approval has its own exact scope, separate from earlier lexical decisions.
+The accepted RFC 0001 snapshot (ri-48g, comment 6907867211) still owns expectations. No capture, Boolean, execution-order or return-context amendment is proposed. The later syntax approval has its own exact scope, separate from earlier lexical decisions.
 
 The grammar covers module items, declarations, types, expressions, patterns, statements and template holes. It does not complete resolution, typing, ownership, coverage, runtime transitions or parser recovery. A syntactically admitted program can still be rejected by those rules.
 
@@ -257,7 +257,7 @@ The computed expression FIRST set matched the specified 16 token classes/spellin
 
 Before claiming implementation, test every commitment with valid/rejected neighbors and exact source spans. Include comments/newlines, nested generic closers, arrows, conditional branches, templates and pipe suffixes. Resource limits must not turn incomplete parsing into source success.
 
-No new parser-recovery, incremental AST or public compiler API contract is supplied. A later parser can retain partial/error nodes without accepting malformed source. Full LSP recovery/client workflows remain separate under #42.
+No new parser-recovery, incremental AST or public compiler API contract is supplied. A later parser can retain partial/error nodes without accepting malformed source. Full LSP recovery/client workflows remain separate under ri-bv2.
 
 The drafting agent applied unslop after the prose review. Sentence/paragraph and document-structure checks passed. Formal ASD-STE100 dictionary compliance remains unverified.
 
@@ -265,7 +265,7 @@ The drafting agent applied unslop after the prose review. Sentence/paragraph and
 
 ### Confirmed policy groups
 
-The owner [approved all three groups](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690) on 2026-11-17. The policy review covers these exact pre-recording artifacts:
+The owner approved all three groups (ri-48g, comment 6931939690) on 2026-11-17. The policy review covers these exact pre-recording artifacts:
 
 | Artifact | Reviewed SHA-256 |
 | --- | --- |

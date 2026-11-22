@@ -2,7 +2,7 @@
 
 ## Authority and scope
 
-[M4.4 #61](https://github.com/Reilley64/rill/issues/61) belongs to open [M4 umbrella #56](https://github.com/Reilley64/rill/issues/56), in existing draft PR #58. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler implementation. The owner later [confirmed option A for simple bindings](https://github.com/Reilley64/rill/issues/61#issuecomment-6959565199). Full RFC statuses remain unchanged.
+M4.4 ri-qtl belongs to open M4 umbrella ri-b83, in existing draft PR #58. The owner approved K1 through K4 (ri-qtl, comment 6957273163) at checkpoint `391a6aafadfcded9d33d498056b813a9e393db57`, before model/compiler implementation. The owner later confirmed option A for simple bindings (ri-qtl, comment 6959565199). Full RFC statuses remain unchanged.
 
 The owning procedures are RFC [0005](../../../docs/rfcs/0005-types-records-enums-and-inference.md#proposed-m44-data-and-pattern-procedure), [0003](../../../docs/rfcs/0003-expressions-bindings-and-control-flow.md#proposed-m44-match-and-guard-control) and [0007](../../../docs/rfcs/0007-ownership-borrowing-mutation-and-cleanup.md#proposed-m44-pattern-binding-type-classification). This slice extends the existing scalar/control checker. It requires completed M4.2 input, not scalar-only success on data-bearing source.
 

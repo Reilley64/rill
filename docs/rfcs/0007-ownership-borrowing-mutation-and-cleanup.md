@@ -4,8 +4,8 @@
 | --- | --- |
 | ID | 0007 |
 | Status | Draft |
-| Owner | Reilley64. [#28](https://github.com/Reilley64/rill/issues/28) tracks this draft. |
-| Source inputs | [#7 ownership decision](https://github.com/Reilley64/rill/issues/7#issuecomment-6308080484), [#15 mutation decision](https://github.com/Reilley64/rill/issues/15#issuecomment-6853088155) and [#16 concurrency decision](https://github.com/Reilley64/rill/issues/16#issuecomment-6863910595). Later refinements appear under [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. |
+| Owner | Reilley64. ri-48g tracks this draft. |
+| Source inputs | ri-8hu ownership decision (comment 6308080484), ri-lql mutation decision (comment 6853088155) and ri-40y concurrency decision (comment 6863910595). Later refinements appear under [source reconciliation](#source-reconciliation). Repository inputs use commit `f33dcf4cf3f815824eeb897135775d7884f65c1a`. |
 | RFC dependencies | Draft RFCs [0002](0002-modules-and-program-loading.md), [0003](0003-expressions-bindings-and-control-flow.md), [0004](0004-functions-overloads-and-generic-requirements.md), [0005](0005-types-records-enums-and-inference.md) and [0006](0006-numbers-strings-and-primitive-operations.md) propose shared rules. Their full texts are not accepted. Required [concurrency, error and runtime companions](#required-companion-rules) remain incomplete or missing. |
 | Replaces / superseded by | None. This draft does not amend an Accepted RFC or accept another draft. |
 | Decision | Not yet decided |
@@ -122,7 +122,7 @@ Custom copy/dispose overlap and implicit-copy eligibility need complete formal r
 
 ### Proposed M4.4 pattern binding type classification
 
-[M4.4 ticket #61](https://github.com/Reilley64/rill/issues/61) owns this typing prerequisite. The owner [approved K1 through K4](https://github.com/Reilley64/rill/issues/61#issuecomment-6957273163) before model/compiler code. This approval does not authorize ownership checking or complete this RFC.
+M4.4 ticket ri-qtl owns this typing prerequisite. The owner approved K1 through K4 (ri-qtl, comment 6957273163) before model/compiler code. This approval does not authorize ownership checking or complete this RFC.
 
 A borrowed pattern binder needs a static choice between the contained value type and a projected reference type. Use the existing implicit-copy classification, not canonical copy(T) evidence. Explicit copying does not authorize silent copying.
 
@@ -306,7 +306,7 @@ Panic, stack overflow and fatal exhaustion retain no-unwind behavior. Normal top
 
 ### Proposed M4.5 protected-overlap boundary
 
-[M4.5 #62](https://github.com/Reilley64/rill/issues/62) proposes this collection prerequisite. The owner [approved the scoped checkpoint](https://github.com/Reilley64/rill/issues/62#issuecomment-6963439018). This approval admits no provider, ownership operation or runtime mechanism.
+M4.5 ri-8p9 proposes this collection prerequisite. The owner approved the scoped checkpoint (ri-8p9, comment 6963439018). This approval admits no provider, ownership operation or runtime mechanism.
 
 A catalogue belongs to one graph capture and one admitted metadata identity. Each family record retains actual role-admission evidence and its provenance. It states whether required-winner and prohibited-input inventories are complete. Missing evidence is not a validated empty inventory.
 
@@ -332,7 +332,7 @@ Actual canonical admission remains an M4.8 prerequisite when missing. Structural
 
 ### Proposed M4.6 capture and invocation facts
 
-[M4.6 #63](https://github.com/Reilley64/rill/issues/63) proposes this typed boundary for [arrow checking](0004-functions-overloads-and-generic-requirements.md#callable-formation-and-invocation). Approval remains pending. Keep access demands and carried sources. Do not acquire loans, move captures, execute copies or prove lifetime safety in this stage.
+M4.6 ri-w05 proposes this typed boundary for [arrow checking](0004-functions-overloads-and-generic-requirements.md#callable-formation-and-invocation). Approval remains pending. Keep access demands and carried sources. Do not acquire loans, move captures, execute copies or prove lifetime safety in this stage.
 
 Resolve each written arrow use in its actual lexical environment. A reference to a runtime outer binding records a capture candidate. Static declarations do not capture runtime storage. Record which inner callable forms or uses a captured path. A named function's noncapture restriction remains unchanged.
 
@@ -368,7 +368,7 @@ Each rule yields proved, disproved or unresolved evidence. Unsupported or cyclic
 
 ### Proposed M4.8 aggregate classification
 
-[M4.8 #65](https://github.com/Reilley64/rill/issues/65) proposes this typed prerequisite. It requires separate checkpoint approval. The classification chooses a binder type or capture demand. It does not execute an operation.
+M4.8 ri-dm4 proposes this typed prerequisite. It requires separate checkpoint approval. The classification chooses a binder type or capture demand. It does not execute an operation.
 
 For an otherwise eligible nominal value, check canonical disposal and protection facts for its actual static type. Use the admitted inventory and shared input selection, with the original premises. An applicable custom disposer or a protected prohibition makes that type non-implicitly-copyable. Ordinary default field cleanup is not a custom disposer. A custom `copy` body does not make the type implicitly copyable.
 
@@ -392,7 +392,7 @@ Do not substitute a borrow or an expected invocation mode for missing evidence. 
 | [Draft RFC 0005](0005-types-records-enums-and-inference.md) | Nominal layouts, patterns, generic fields and variant relationships. | Its precision policies are confirmed. Full layout/pattern judgments remain incomplete. |
 | [Draft RFC 0006](0006-numbers-strings-and-primitive-operations.md) | Logical text/byte places, static literals and core conversion ownership contracts. | Precision policies and strict entry points are confirmed. Broader matrix and ScalarError remain draft details. |
 | Concurrency and runtime | Scheduling, transfer/sharing derivation, child/native state machines, protected registry and private ABI. | No complete RFC assigned. This document states retention obligations, not an implementation. |
-| Draft RFCs [0008](0008-errors-propagation-and-caused-by-wrapping.md) and [0010](0010-diagnostics-and-reporting.md), with trusted admission incomplete. | Cause ownership, exact errors, dependency traces, incomplete analysis and opaque property admission. | Both remain Draft. Complete cause/evidence, source/driver and trusted metadata judgments remain incomplete. [#28](https://github.com/Reilley64/rill/issues/28) and [#42](https://github.com/Reilley64/rill/issues/42) retain formal/production and editor gates. |
+| Draft RFCs [0008](0008-errors-propagation-and-caused-by-wrapping.md) and [0010](0010-diagnostics-and-reporting.md), with trusted admission incomplete. | Cause ownership, exact errors, dependency traces, incomplete analysis and opaque property admission. | Both remain Draft. Complete cause/evidence, source/driver and trusted metadata judgments remain incomplete. ri-48g and ri-bv2 retain formal/production and editor gates. |
 
 ## Valid/invalid examples and diagnostics
 
@@ -532,7 +532,7 @@ The [diagnostic registry](../diagnostic-codes.md) fixes cited meanings. Initiali
 
 ### Testing, concurrency and runtime admission
 
-[RFC 0001's accepted snapshot](https://github.com/Reilley64/rill/issues/28#issuecomment-6907867211) owns expectations and trusted observations. Diagnostic capture adds no moves, copies, loans, formatters or lifetime extension. It cannot accelerate or delay ordinary cleanup.
+RFC 0001's accepted snapshot (ri-48g, comment 6907867211) owns expectations and trusted observations. Diagnostic capture adds no moves, copies, loans, formatters or lifetime extension. It cannot accelerate or delay ordinary cleanup.
 
 Sendable/shareable remain separate compiler predicates with their own concurrency contract. A readonly callable is not necessarily pure, borrow-free or shareable. A genuine lock guard remains ownership-affine despite worker migration.
 
@@ -544,14 +544,14 @@ The runtime owns actual completion/adoption and source-retention state. Opaque m
 
 | Input | Disposition |
 | --- | --- |
-| [#7 decision](https://github.com/Reilley64/rill/issues/7#issuecomment-6308080484), [ADR 0002](../adr/0002-visible-ownership-without-lifetimes.md) | Preserve visible ownership, scope cleanup, explicit counting and owned rebuilding. Later rules replace return-only dependencies, literal-copy assumptions and old copy-call syntax. |
-| [#15 decision](https://github.com/Reilley64/rill/issues/15#issuecomment-6853088155), [ADR 0007](../adr/0007-explicit-mutation-with-conservative-borrow-dependencies.md) | Preserve mutable access, nested borrows, retained destination sources, callee exits and independent callable properties. The confirmed state policy still needs formal route/transfer judgments. |
-| [#16 decision](https://github.com/Reilley64/rill/issues/16#issuecomment-6863910595), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) | Preserve deferred disposal/replacement cancellation, required joins and actual native release. Do not invent force-kill, rollback or a global exit join. |
-| #17/#23 and [catalogue section 2](../standard-library-contracts.md#2-callable-and-ownership-evidence) | Preserve canonical hooks, broad ordinary placement, protected negative actions and remaining-field cleanup. Full trusted registry and overlap/evidence checking remain incomplete. |
-| #18/#19/#21 and Draft RFCs 0005/0006 | Preserve ordinary base types, static literal views, logical extents, named rebuilding and enum copy classification. No optimizer-dependent ownership or private representation access follows. |
-| #22 and [stack decision](../adr/0014-bounded-stacks-proper-tail-calls-and-backend-gates.md) | Preserve bounded-stack default cleanup and actual execution-storage retention. A worklist is not a tracing collector or a passed target support gate. |
-| #24 and [diagnostic contract](../diagnostic-contracts.md) | Preserve observation without extra callbacks, retained owners or changed cleanup. Keep source/dependency failures distinct from incomplete checking. |
-| #29 and [error decision](../adr/0013-caused-by-errors-with-explicit-wrapping.md) | Preserve unique causes, exact forwarding and retained error evidence. Owned envelopes can still carry typed dependencies; error ownership remains companion scope. |
+| ri-8hu decision (comment 6308080484), [ADR 0002](../adr/0002-visible-ownership-without-lifetimes.md) | Preserve visible ownership, scope cleanup, explicit counting and owned rebuilding. Later rules replace return-only dependencies, literal-copy assumptions and old copy-call syntax. |
+| ri-lql decision (comment 6853088155), [ADR 0007](../adr/0007-explicit-mutation-with-conservative-borrow-dependencies.md) | Preserve mutable access, nested borrows, retained destination sources, callee exits and independent callable properties. The confirmed state policy still needs formal route/transfer judgments. |
+| ri-40y decision (comment 6863910595), [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md) | Preserve deferred disposal/replacement cancellation, required joins and actual native release. Do not invent force-kill, rollback or a global exit join. |
+| ri-owe/#23 and [catalogue section 2](../standard-library-contracts.md#2-callable-and-ownership-evidence) | Preserve canonical hooks, broad ordinary placement, protected negative actions and remaining-field cleanup. Full trusted registry and overlap/evidence checking remain incomplete. |
+| ri-a2c/#19/#21 and Draft RFCs 0005/0006 | Preserve ordinary base types, static literal views, logical extents, named rebuilding and enum copy classification. No optimizer-dependent ownership or private representation access follows. |
+| ri-636 and [stack decision](../adr/0014-bounded-stacks-proper-tail-calls-and-backend-gates.md) | Preserve bounded-stack default cleanup and actual execution-storage retention. A worklist is not a tracing collector or a passed target support gate. |
+| ri-3t8 and [diagnostic contract](../diagnostic-contracts.md) | Preserve observation without extra callbacks, retained owners or changed cleanup. Keep source/dependency failures distinct from incomplete checking. |
+| ri-vtw and [error decision](../adr/0013-caused-by-errors-with-explicit-wrapping.md) | Preserve unique causes, exact forwarding and retained error evidence. Owned envelopes can still carry typed dependencies; error ownership remains companion scope. |
 | [Mutation source](../../prototypes/06-mutation.rill), [independent safety cases](../prototypes/06-mutation-safety.md) and [concurrency source](../../prototypes/04-concurrency-safety.rill), source revision | Preserve their accepted-design obligations, including stored references, copied counters and directly borrowed scoped jobs. They are not executed Rill tests. No artifact bytes change here. |
 
 ## Compatibility and migration
@@ -606,7 +606,7 @@ Trusted operations need canonical admission and non-interception checks. Actual 
 
 | Artifact / revision | Evidence label | Rule/question exercised | Checker/tool and command/environment | Expected / observed outcome | Limits, negative/unavailable results and gate links |
 | --- | --- | --- | --- | --- | --- |
-| Source decisions and repository base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Approved ownership/mutation direction and later cleanup refinements. | Drafting agent, 2026-11-16. Read current #7/#15/#16 decisions, ADRs and catalogue section 2. | The drafting agent reconciled retained-storage and protected-cleanup requirements. | Provenance review is not a proof or a complete checking algorithm. |
+| Source decisions and repository base `f33dcf4cf3f815824eeb897135775d7884f65c1a` | HandChecked | Approved ownership/mutation direction and later cleanup refinements. | Drafting agent, 2026-11-16. Read current ri-8hu/#15/#16 decisions, ADRs and catalogue section 2. | The drafting agent reconciled retained-storage and protected-cleanup requirements. | Provenance review is not a proof or a complete checking algorithm. |
 | O1 through O24, this draft | NotChecked | Moves, borrows, capture/state precision and cleanup. | No Rill ownership checker or runtime is available. | Expected outcomes appear above. No compiler trace or cleanup execution is observed. | No case is RillExecuted. Policy approval does not complete formal rules or companions. |
 | Layered routes, capture precision and cleanup scheduling | NotChecked | Nested calls, aliasing, partial moves and resource ordering. | No reference model or formal proof has been run. | No termination/completeness/soundness result is claimed. | Complete rules and adversarial checking are required before implementation readiness. |
 | Prototype and runtime research artifacts | NotChecked | Executable acceptance of this combined ownership system. | Existing files retain their own historical evidence scopes. | No new reference/native/Rill execution occurred for this draft. | A backend mechanism experiment or authored expected result does not validate this checker. |
@@ -639,7 +639,7 @@ These require a real checker/runtime and separate native/Wasm profile acceptance
 
 ### Confirmed policies
 
-The project owner [approved all five policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379) on 2026-11-16. The pre-recording snapshot has SHA-256 `59d1bca35706045c2f0fda08a1d12847c79f99ceaad8316a17daafe0f7cf4c70`.
+The project owner approved all five policies (ri-48g, comment 6915849379) on 2026-11-16. The pre-recording snapshot has SHA-256 `59d1bca35706045c2f0fda08a1d12847c79f99ceaad8316a17daafe0f7cf4c70`.
 
 1. Separate storage-access loans from carried references. Track definite initialization separately from possible retained sources, including branch merges.
 2. Preserve stable explicit free-place borrows in owned environments. Bare owned captures move or implicitly copy. Preserve scoped borrowed jobs and independent copied counters.
@@ -657,7 +657,7 @@ Complete callable erasure/copy evidence and custom-disposer interaction with imp
 
 Specify cleanup graphs across nested scopes, custom-body exits, temporaries and partial initialization. Resolve self-dependent cleanup failures without introducing unapproved pinning, scope extension or hidden collection.
 
-Define the protected operation registry and trusted metadata admission with runtime/concurrency companions. Verify the combined rules against the source inventories and adversarial examples. Unworkable required cases return to [map #1](https://github.com/Reilley64/rill/issues/1), not silent language weakening.
+Define the protected operation registry and trusted metadata admission with runtime/concurrency companions. Verify the combined rules against the source inventories and adversarial examples. Unworkable required cases return to map ri-kl0, not silent language weakening.
 
 These gaps prevent the [canonical readiness review](README.md#canonical-reviewready-checklist). Missing rules are not supplied by linking a supporting ADR.
 
@@ -679,10 +679,10 @@ These checks cannot complete missing judgments or establish soundness. Formal AS
 
 The project owner requested the next foundation RFC on 2026-11-16. That request authorized drafting ownership, borrowing, mutation and cleanup. It did not accept new policies or the full RFC.
 
-The project owner then [approved all five policies](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379). This approval identifies the pre-recording snapshot below. It does not accept the full RFC, supply missing judgments or establish readiness. Full Decision and Reviewed revision remain Not yet decided and Not yet reviewed.
+The project owner then approved all five policies (ri-48g, comment 6915849379). This approval identifies the pre-recording snapshot below. It does not accept the full RFC, supply missing judgments or establish readiness. Full Decision and Reviewed revision remain Not yet decided and Not yet reviewed.
 
 | Date / actor | Kind and scope of change | Reviewed revision or snapshot | Decision link / rationale |
 | --- | --- | --- | --- |
 | 2026-11-16, drafting agent | Created substantive Draft RFC 0007, register and partial coverage entries. | Source base `f33dcf4cf3f815824eeb897135775d7884f65c1a` and source decisions cited above. This is not a reviewed RFC snapshot. | User request to continue to the next foundation RFC. No new policy or full RFC is accepted. |
-| 2026-11-16, project owner | Approved layered state, capture formation, destructor-safe partial moves, cleanup ordering and explicit-dispose consumption. | Pre-recording draft SHA-256 `59d1bca35706045c2f0fda08a1d12847c79f99ceaad8316a17daafe0f7cf4c70`. Local snapshot `/tmp/rill-rfc-0007-before-policy-approval.md`. | [Five-policy decision](https://github.com/Reilley64/rill/issues/28#issuecomment-6915849379). Full RFC acceptance, complete judgments, readiness and implementation validation remain open. |
+| 2026-11-16, project owner | Approved layered state, capture formation, destructor-safe partial moves, cleanup ordering and explicit-dispose consumption. | Pre-recording draft SHA-256 `59d1bca35706045c2f0fda08a1d12847c79f99ceaad8316a17daafe0f7cf4c70`. Local snapshot `/tmp/rill-rfc-0007-before-policy-approval.md`. | Five-policy decision (ri-48g, comment 6915849379). Full RFC acceptance, complete judgments, readiness and implementation validation remain open. |
 | 2026-11-16, drafting agent | Removed redundant numeric suffixes from record field initializers in O1/O2/O5/O8. | Existing record-field and numeric-context rules in Draft RFCs 0005/0006. The five approved ownership policies remain unchanged. | Owner clarification that declared Point fields supply numeric context. Editorial example changes only; no numeric default or execution evidence. |

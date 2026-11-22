@@ -1,4 +1,4 @@
-//! Parser-only acceptance for M2 (#52); G cases come from both v1 syntax annexes.
+//! Parser-only acceptance for M2 (ri-lpw); G cases come from both v1 syntax annexes.
 //! Syntax success is not source checking or Rill execution.
 use compiler::lexer::{LexStatus, lex};
 use compiler::parser::*;

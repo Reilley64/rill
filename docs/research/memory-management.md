@@ -1,6 +1,6 @@
 # How GC-free functional languages manage memory
 
-Research for [issue #3](https://github.com/Reilley64/rill/issues/3), part of the [v0 spec map](https://github.com/Reilley64/rill/issues/1).
+Research for issue ri-xqw, part of the v0 spec map (ri-kl0).
 
 Rill has immutable data, no tracing GC, and no manual memory management. This note looks at six languages that work under similar constraints. For each one it records:
 
