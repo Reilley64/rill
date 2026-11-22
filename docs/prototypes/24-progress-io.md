@@ -2,7 +2,7 @@
 
 Read [`prototypes/24-progress-io.rill`](../../prototypes/24-progress-io.rill).
 
-The human-confirmed [#45](https://github.com/Reilley64/rill/issues/45) contract, [progress-I/O contract](../progress-io-contracts.md) and [ADR0027](../adr/0027-single-owner-progress-and-coalescing-wakes.md) are authoritative. This source is a compact syntax/ownership model, not a standard implementation. It does not add APIs beyond those contracts.
+The human-confirmed ri-w0c contract, [progress-I/O contract](../progress-io-contracts.md) and [ADR0027](../adr/0027-single-owner-progress-and-coalescing-wakes.md) are authoritative. This source is a compact syntax/ownership model, not a standard implementation. It does not add APIs beyond those contracts.
 
 The file contains **11 intended-valid expectations**. They were counted and hand-reviewed only. No Rill parser, typechecker, compiler, runtime, channel, TCP or TLS implementation executed them. The local `ModelDriver` is application-owned deterministic state used to illustrate canonical family bodies and outcome movement; it is not `TcpProgress`, `TlsProgress`, a scheduler, a native job or a proof that user implementations are safe.
 
@@ -24,7 +24,7 @@ The file contains **11 intended-valid expectations**. They were counted and hand
 
 `waitOnce` separately demonstrates explicit generic evidence for registration and withdrawal with the same `G`/`DE`, postfix forwarding of `DriverFailureSet<DE>`, and consuming guard withdrawal before the caller could regain mutable driver access. It is uncalled because no fake guard/native registration is fabricated.
 
-The model implements every canonical admission/advance/stop family using `implement`, with independently explicit five error outputs on `ProgressStep`. It intentionally does not simulate failures, flush-behind-write ordering, native completion races or cleanup; those are independent cases below and delivery work in #47/#44.
+The model implements every canonical admission/advance/stop family using `implement`, with independently explicit five error outputs on `ProgressStep`. It intentionally does not simulate failures, flush-behind-write ordering, native completion races or cleanup; those are independent cases below and delivery work in ri-hw5/#44.
 
 ## Independent rejection and adversarial inventory. NOT RUN
 
@@ -57,4 +57,4 @@ The model implements every canonical admission/advance/stop family using `implem
 
 The [standalone OpenSSL reference](../research/0045-progress-reference/) is separate **ReferenceExecuted** evidence. Its current pinned macOS-arm64 matrix passes13/13, but it is in-memory C/OpenSSL, not this Rill source, TCP, runtime integration or full provider validation. In particular, its candidate four-direction staging ledger is not physically implemented.
 
-[#47](https://github.com/Reilley64/rill/issues/47) owns actual channel/compiler/runtime/TCP delivery. [#44](https://github.com/Reilley64/rill/issues/44) owns OpenSSL progress, both renegotiation roles, asynchronous BIO/copy accounting, tickets/key-use/profile enforcement and target validation. Until those run, all Rill and live standard-driver claims here are HandChecked or NotChecked as labelled.
+ri-hw5 owns actual channel/compiler/runtime/TCP delivery. ri-ei7 owns OpenSSL progress, both renegotiation roles, asynchronous BIO/copy accounting, tickets/key-use/profile enforcement and target validation. Until those run, all Rill and live standard-driver claims here are HandChecked or NotChecked as labelled.

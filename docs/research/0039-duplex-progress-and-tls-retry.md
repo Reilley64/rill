@@ -1,4 +1,4 @@
-# #39: single-owner duplex progress and TLS retry constraints
+# ri-n5i: single-owner duplex progress and TLS retry constraints
 
 ## Status, authority and scope
 
@@ -8,8 +8,8 @@ The task's confirmed direction is **HTTP/1.1 initially, HTTP/2 and HTTP/3 deferr
 
 Authority examined directly:
 
-- [Exact #38 public snapshot, comment 6903320873][public], especially §§7–10 and §12: eligible generic `S` supplies canonical read/write/flush/close; one exclusive TLS application driver; no TLS split, raw transport extraction or independent application drivers. One operation can pump both directions, but this does not promise general duplex scheduling. Admitted interruption/abandonment poisons the session.
-- [Exact #38 private snapshot, comment 6903320800][private], especially boundary §§2–6: selected OpenSSL **3.5 LTS**, inspected **3.5.9**, commit **`45e844fa2a14ec92d146bd8f5778ac130b6625fb`**. The commit's [VERSION.dat][version] independently confirms 3.5.9. Private memory-BIO feed/drain, stable owned retry storage, serialized engine steps, managed transport I/O outside C, and quiescent release are already design obligations—not newly delivered capabilities.
+- [Exact ri-irw public snapshot, comment 6903320873][public], especially §§7–10 and §12: eligible generic `S` supplies canonical read/write/flush/close; one exclusive TLS application driver; no TLS split, raw transport extraction or independent application drivers. One operation can pump both directions, but this does not promise general duplex scheduling. Admitted interruption/abandonment poisons the session.
+- [Exact ri-irw private snapshot, comment 6903320800][private], especially boundary §§2–6: selected OpenSSL **3.5 LTS**, inspected **3.5.9**, commit **`45e844fa2a14ec92d146bd8f5778ac130b6625fb`**. The commit's [VERSION.dat][version] independently confirms 3.5.9. Private memory-BIO feed/drain, stable owned retry storage, serialized engine steps, managed transport I/O outside C, and quiescent release are already design obligations—not newly delivered capabilities.
 - [Networking contracts](../networking-contracts.md), §§5–6, 8, 10: whole TCP owners are exclusively borrowed during I/O; **explicit TCP split** permits independent lower directional owners. It does not give arbitrary generic `S` a split/readiness capability or make TLS directions independent. Native Linux/macOS support remains unvalidated; live standard WASI preview1 networking is unsupported.
 - [Clock/cancellation contracts](../clock-cancellation-contracts.md), §§3–7: checked domain-tagged elapsed clocks and timers, select-once control, retained registrations and cleanup; no wall/elapsed reinterpretation.
 
@@ -111,7 +111,7 @@ The current generic evidence only says `S` can perform canonical blocking/suspen
 
 The **new transport capability to be designed** would need some justified means to preserve in-flight state while allowing the owner to schedule both directions: for example, genuinely nonblocking attempts plus owned waiting, or an ownership-safe lower duplex execution arrangement. It must specify progress, exclusive access, stable storage, notification, error/control and cleanup semantics. These are capability requirements, **not names for existing standard functions**. A readiness query followed by an arbitrary blocking generic read is not enough: readiness can change and a wrapper may need more data or have its own buffering.
 
-TCP split can be used only where explicitly available and deliberately consumed. It could support owned lower ingress/egress execution around a *single* TLS engine owner, but it is not a generic transformation of any `S`, not a split of `TlsStream`, and not evidence that HTTP can recover the already-owned transport from TLS. Such an arrangement needs a designed ownership boundary before construction and cannot bypass #38 by reaching through the owner.
+TCP split can be used only where explicitly available and deliberately consumed. It could support owned lower ingress/egress execution around a *single* TLS engine owner, but it is not a generic transformation of any `S`, not a split of `TlsStream`, and not evidence that HTTP can recover the already-owned transport from TLS. Such an arrangement needs a designed ownership boundary before construction and cannot bypass ri-irw by reaching through the owner.
 
 ## 5. What a resumable single-owner design would have to retain
 
@@ -136,7 +136,7 @@ A **pause** must mean the same admitted logical operation remains alive with all
 - Keep the original exclusive call/activation alive while it internally coordinates all relevant work, preserving its borrows and pending native buffers.
 - Design an explicit owner-retaining continuation or persistent owner that holds the continuation independently of the initiating call's stack. This requires defined ownership transfer/copying and dependencies; it cannot be achieved by quietly letting a borrowed caller buffer escape.
 
-Neither model can resume after true admitted abandonment as though healthy. Dropping an in-flight continuation, canceling its owner routine, or terminating a controlled call still encounters #38's poison/cleanup rules unless the semantics are separately designed and confirmed. Even when stopping transmission after an early final response is appropriate, pending accepted/native/lower bytes require an explicit disposition; no rollback, immediate physical release or healthy reuse follows.
+Neither model can resume after true admitted abandonment as though healthy. Dropping an in-flight continuation, canceling its owner routine, or terminating a controlled call still encounters ri-irw's poison/cleanup rules unless the semantics are separately designed and confirmed. Even when stopping transmission after an early final response is appropriate, pending accepted/native/lower bytes require an explicit disposition; no rollback, immediate physical release or healthy reuse follows.
 
 ## 6. Application-body scheduling is a second design problem
 
@@ -222,7 +222,7 @@ A and B can be combined, and C can use either internally. Choosing their ownersh
 
 - Native **Linux/macOS × x86-64/AArch64**: actual lower notification/completion mechanism, race-free registration and retry-after-wake, nonblocking configuration, simultaneous lower direction ownership if any, local SIGPIPE policy, target ABI, native worker migration/error capture, safe unregister/join and stable addresses all need delivered compiler/runtime/provider evidence. No epoll/kqueue/poll API is selected or presumed available to source-level Rill.
 - **WASI:** current contracts expose portable values/names but no live standard preview1 TLS/network provider. Neither memory BIOs nor host `poll_oneoff` in isolation establishes live connection creation, a selected TLS build, secure entropy, safe integration or usable generic duplex transport. Preview2/custom host capabilities would require a separate decision, not an automatic target upgrade.
-- #30's executor/activation/lease/wake machinery, #44's complete TLS delivery and provider-profile gaps remain open. Existing queue ceilings and native source inspection are not enforcement, target acceptance, cancellation safety, a full-duplex liveness proof or a security audit.
+- ri-dej's executor/activation/lease/wake machinery, ri-ei7's complete TLS delivery and provider-profile gaps remain open. Existing queue ceilings and native source inspection are not enforcement, target acceptance, cancellation safety, a full-duplex liveness proof or a security audit.
 
 **Bottom line:** OpenSSL can return TLS continuation needs while a single owner retains its engine and retry buffers. That fact is valuable but does not supply a resumably duplex generic transport or schedulable application bodies. The confirmed general HTTP/1.1 goal needs those missing capabilities explicitly designed, with provider retry asymmetry preserved—not concurrent TLS drivers, timed cancellation used as yielding, raw escape, unlimited buffering, or a silently restricted streaming profile.
 
@@ -230,8 +230,8 @@ A and B can be combined, and C can use either internally. Choosing their ownersh
 
 OpenSSL links use the full selected revision; rendered `.pod` files are the first-party manual source shipped with that revision. Comparison sources use fixed first-party release tags, not unpinned `main`/`latest` documentation.
 
-[public]: https://github.com/Reilley64/rill/issues/38#issuecomment-6903320873
-[private]: https://github.com/Reilley64/rill/issues/38#issuecomment-6903320800
+[public]: ri-irw (comment 6903320873)
+[private]: ri-irw (comment 6903320800)
 [version]: https://github.com/openssl/openssl/blob/45e844fa2a14ec92d146bd8f5778ac130b6625fb/VERSION.dat
 [write]: https://github.com/openssl/openssl/blob/45e844fa2a14ec92d146bd8f5778ac130b6625fb/doc/man3/SSL_write.pod
 [read]: https://github.com/openssl/openssl/blob/45e844fa2a14ec92d146bd8f5778ac130b6625fb/doc/man3/SSL_read.pod

@@ -1,8 +1,8 @@
-# #35 path and filesystem evidence
+# ri-dzr path and filesystem evidence
 
 Read the source examples in [`prototypes/13-filesystem.rill`](../../prototypes/13-filesystem.rill).
 
-[ADR 0019](../adr/0019-paths-files-and-filesystem-operations.md) records the human-confirmed Q1-Q44 decision. The [source companion](../../prototypes/13-filesystem.rill) has 16 intended-valid lexical expectations, plus effectful application workflow functions. Reviewers checked all of them by hand. Validation of this fixture did not run a Rill compiler, exercise an OS filesystem or WASI host, or execute a security suite or backend. #28/#30 retain the formal and runtime gates.
+[ADR 0019](../adr/0019-paths-files-and-filesystem-operations.md) records the human-confirmed Q1-Q44 decision. The [source companion](../../prototypes/13-filesystem.rill) has 16 intended-valid lexical expectations, plus effectful application workflow functions. Reviewers checked all of them by hand. Validation of this fixture did not run a Rill compiler, exercise an OS filesystem or WASI host, or execute a security suite or backend. ri-48g/#30 retain the formal and runtime gates.
 
 ## Public API and ownership coverage
 
@@ -14,7 +14,7 @@ The effectful functions show bounded config/certificate byte loading with separa
 
 `loadBounded(path,maximum)` opens ReadFile, uses readToEnd and closes on both success and failure. It returns owned bytes only after a successful read and close. Its LoadError retains both read and close failures when needed. IoError is noBorrow, so failure does not retain the consumed handle or local probe. When a load fails or exceeds its budget, this application deliberately discards its local partial config bytes. The nested standard limit error still preserves its overflow byte and simultaneous probe failure. This application policy is not a change to readToEnd's destination contract.
 
-Text configuration explicitly composes successful bytes with std::string::decodeUtf8; no automatic lossy path/config decoding. Certificate loading passes owned bytes to a separately designed #38 parser/provider; it does not prove certificate validity, trust or secure permissions. Metadata-before-read is not a security or stable-size check; the streaming budget is enforced during reading even if the file grows.
+Text configuration explicitly composes successful bytes with std::string::decodeUtf8; no automatic lossy path/config decoding. Certificate loading passes owned bytes to a separately designed ri-irw parser/provider; it does not prove certificate validity, trust or secure permissions. Metadata-before-read is not a security or stable-size check; the streaming budget is enforced during reading even if the file grows.
 
 ## Bounded copy workflow and partial effects
 
@@ -24,7 +24,7 @@ Text configuration explicitly composes successful bytes with std::string::decode
 4. Call finishCopy for both success and failure. It records flush, optional explicit sync, output-close and input-close outcomes independently rather than using an early `?` that skips the second close. Inspect all report fields as well as the copy result. Consuming close has no retryable handle.
 5. An error or cancellation can leave a newly created partial destination. There is no rollback or atomic publication. NewOnly protects exclusive creation, not the safety of attacker-controlled ancestor paths. Any desired rename/directory-sync protocol is a separate explicit application sequence with backend-specific guarantees.
 
-copyBounded uses concrete trusted standard file implementations, not an arbitrary adapter family. Standard primitives must satisfy #32 count/destination invariants. Generic standard helpers validate impossible reports before arithmetic or slicing. This does not permit unsafe native access based on an unvalidated arbitrary callback count. The copied counter cannot overflow because every successful step is bounded by maximum-copied. Failure progress is bounded by that step's requested extent.
+copyBounded uses concrete trusted standard file implementations, not an arbitrary adapter family. Standard primitives must satisfy ri-fnk count/destination invariants. Generic standard helpers validate impossible reports before arithmetic or slicing. This does not permit unsafe native access based on an unvalidated arbitrary callback count. The copied counter cannot overflow because every successful step is bounded by maximum-copied. Failure progress is bounded by that step's requested extent.
 
 finishCopy's example policy attempts every requested finalization operation even after another reports failure. File flush is not fsync; sync requests file persistence but does not sync the containing directory. Its owned typed error report retains originals; disposal/cancellation cannot promise the application receives this report.
 
@@ -110,7 +110,7 @@ Each rejection case stands alone; do not assume another invalid case was accepte
 - Preopens `/data` and `/data/private`: `/data/private/a` selects the longer match, never falls back to `/data` after denial. `/database/a` does not match `/data` on a partial component.
 - A relative path requires preopen `.`. With only `/data`, do not guess a base; report Unsupported. currentDir remains Unsupported on WASI v0.
 - Once bound to a preopen, `..` remains host-resolved and cannot manufacture authority outside it. Do not lexically cancel it or retry against a broader descriptor.
-- Ambiguous/unusable guest mappings fail explicitly; no enumeration-order choice. Root/mount spelling rules need formal #28 treatment, not a claim of host-tested resolution.
+- Ambiguous/unusable guest mappings fail explicitly; no enumeration-order choice. Root/mount spelling rules need formal ri-48g treatment, not a claim of host-tested resolution.
 - Non-UTF-8 Path remains a lexical value but an incapable preview1 host returns InvalidInput, never replacement decoding. Preopen permissions/rights denial is PermissionDenied.
 - Missing seek/sync/append/exclusive-create/symlink/private-temp support is Unsupported. Never emulate a guarantee using a weaker sequence or silently skip it.
 - In particular, a provider unable to request/enforce the temporary private-creation policy must not pretend ordinary WASI creation meets it. Native permissions remain host-filtered requests, not universal guarantees.
@@ -128,7 +128,7 @@ Each rejection case stands alone; do not assume another invalid case was accepte
 | Sync/rename interrupted | External effects not rolled back; no durability/atomicity proof from cancellation. |
 | Cleanup cannot abort | May suspend indefinitely with cancellation deferred; timer race is not a hard return deadline. |
 | Native close reports interruption | Provider must obey actual platform semantics; blindly retrying a reused numeric descriptor can close a different resource. |
-| Wasm memory growth/native use | Owner retention alone does not prove pointer stability; #30 still gates backend behavior. |
+| Wasm memory growth/native use | Owner retention alone does not prove pointer stability; ri-dej still gates backend behavior. |
 | Fatal panic/program exit | Existing absence of universal cleanup/delivery guarantee remains. |
 
 ## Primary-source inputs and limits
@@ -141,4 +141,4 @@ These sources informed the interview; no source substitutes for Rill checking/pr
 - [Apple APFS FAQ](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/APFS_Guide/FAQ/FAQ.html), [filesystem details](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemDetails/FileSystemDetails.html), [QA1173](https://developer.apple.com/library/archive/qa/qa1173/_index.html): archived/version-qualified naming/normalization distinctions; not facts about every mounted macOS volume.
 - [Pinned WASI preview1 definitions](https://github.com/WebAssembly/WASI/blob/fae981bae14809d91f9bc2d63852d461f331d161/preview1/docs.md): preopens, rights and path/directory operations. [Pinned Wasmtime preview1 source](https://github.com/bytecodealliance/wasmtime/blob/c52bc6d8fc7ebf2ba3f7e39ab3203a3c13c1d272/crates/wasi/src/p1.rs) and [Wiggle UTF-8 reader](https://github.com/bytecodealliance/wasmtime/blob/c52bc6d8fc7ebf2ba3f7e39ab3203a3c13c1d272/crates/wiggle/src/lib.rs): one concrete strict-UTF-8 host, not arbitrary native-byte portability or a tested Rill provider.
 
-#28 owns formal path/component/family inference and error, progress and dependency checks; #30 owns native/Wasm mechanisms. #33 owns time/deadline coordination; these examples invent no timestamp type. #36's environment/argument API does not silently choose temporary parents. #38/#39/#40 must explicitly address certificate reads, static-file traversal/security and migration/driver durability. Return unworkable mechanisms to map #1 rather than silently changing this contract.
+ri-48g owns formal path/component/family inference and error, progress and dependency checks; ri-dej owns native/Wasm mechanisms. ri-j60 owns time/deadline coordination; these examples invent no timestamp type. ri-7ap's environment/argument API does not silently choose temporary parents. ri-irw/#39/#40 must explicitly address certificate reads, static-file traversal/security and migration/driver durability. Return unworkable mechanisms to map ri-kl0 rather than silently changing this contract.

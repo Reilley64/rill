@@ -1,10 +1,10 @@
 # Rill feature RFCs
 
-**Conventions: explicitly human-confirmed in [#26](https://github.com/Reilley64/rill/issues/26), Q1-Q16 and the consolidated recording plan.** This directory is the destination for review-ready v0 language-feature and approved standard-library proposals. [#28](https://github.com/Reilley64/rill/issues/28) writes the substantive set, populates coverage and performs its final consistency review. [Map #1](https://github.com/Reilley64/rill/issues/1) defines the destination; producing or merging that set is not human acceptance, compiler/library delivery or a safety proof.
+**Conventions: explicitly human-confirmed in ri-9o5, Q1-Q16 and the consolidated recording plan.** This directory is the destination for review-ready v0 language-feature and approved standard-library proposals. ri-48g writes the substantive set, populates coverage and performs its final consistency review. Map ri-kl0 defines the destination; producing or merging that set is not human acceptance, compiler/library delivery or a safety proof.
 
 Start from [TEMPLATE.md](TEMPLATE.md). The [primary-source format research](../research/0026-language-rfc-formats.md) compares Rust, Swift, Python, Go and Java. Rill deliberately selects a Rust-inspired guide/reference structure with explicit compatibility/adoption, security/resource and evidence prompts; it does not import those languages' governance or require Swift's runnable prototype when Rill has no compiler.
 
-**Collection state:** no feature RFCs have been created or assigned IDs by #26. The register below is empty and complete source coverage has **not** been established. Confirmed ticket designs, contracts, ADRs, research and prototypes are inputs, not automatically Accepted RFCs.
+**Collection state:** no feature RFCs have been created or assigned IDs by ri-9o5. The register below is empty and complete source coverage has **not** been established. Confirmed ticket designs, contracts, ADRs, research and prototypes are inputs, not automatically Accepted RFCs.
 
 ## Organization and identity
 
@@ -27,7 +27,7 @@ These are navigation/work-planning themes, not six mandatory RFCs, allocations, 
 | Concurrency and structured work | Goroutines, transfer/sharing, channels, joins, cancellation and scoped work. |
 | Standard-library and platform/tooling contracts | Collections/iteration, I/O/files, environment/randomness, JSON/time/network/TLS/HTTP/SQL, runtime/backend and editor contracts. |
 
-#28 chooses the exact split so each proposal can be reviewed as a unit and each rule has one owner. The last theme needs several proposals, not one universal library/platform RFC. Cross-cutting rules live in their owning sections with dependencies elsewhere. Large families can justify linked companions; a companion does not silently become normative merely because it is linked.
+ri-48g chooses the exact split so each proposal can be reviewed as a unit and each rule has one owner. The last theme needs several proposals, not one universal library/platform RFC. Cross-cutting rules live in their owning sections with dependencies elsewhere. Large families can justify linked companions; a companion does not silently become normative merely because it is linked.
 
 ## Document shape and metadata
 
@@ -95,7 +95,7 @@ Distinguish:
 - **Supporting input:** provenance, rationale, prior art or evidence, not automatically current normative text.
 - **Implementation/provider gate:** work or validation required before implementation/support claims. It can remain open without becoming a missing v0 design choice, provided the proposed guarantee and limits are fully stated.
 
-If feasibility exposes an unworkable mechanism or requires changing promised semantics, return the change to design review/map #1. Do not silently substitute a weaker guarantee, assumed provider, new FFI/target policy or an unspecified future answer.
+If feasibility exposes an unworkable mechanism or requires changing promised semantics, return the change to design review/map ri-kl0. Do not silently substitute a weaker guarantee, assumed provider, new FFI/target policy or an unspecified future answer.
 
 ## Examples and evidence
 
@@ -131,7 +131,7 @@ This is the single checklist owner; TEMPLATE links here rather than maintaining 
 - [ ] **Readability and traceability:** all main headings remain; links/anchors, revisions, terminology and index rows are consistent; rationale, alternatives and prior art are substantive rather than popularity claims.
 - [ ] **Decision discipline:** readiness actor/revision/check results are recorded; status does not imply acceptance. Decision/history identifies earlier approvals and the exact revision of any new acceptance or amendment without claiming one has occurred.
 
-The complete #28 set also needs an across-RFC consistency and coverage review. Passing each local checklist does not establish that all v0 features/source tickets were included or all cross-feature interactions agree. Structural checks can assist but cannot replace those reviews.
+The complete ri-48g set also needs an across-RFC consistency and coverage review. Passing each local checklist does not establish that all v0 features/source tickets were included or all cross-feature interactions agree. Structural checks can assist but cannot replace those reviews.
 
 ## Amendments and replacement
 
@@ -148,19 +148,19 @@ Accepted text may be maintained through these explicit approvals, with earlier r
 | ID | Proposal | Status | Normative dependencies / joint review | Implementation/provider gates | Decision / reviewed revision |
 | --- | --- | --- | --- | --- | --- |
 
-#28 registers actual drafts at creation and keeps file/status/dependency/decision links consistent. Link implementation/support work without equating open gates with proposal status.
+ri-48g registers actual drafts at creation and keeps file/status/dependency/decision links consistent. Link implementation/support work without equating open gates with proposal status.
 
 ## Source-to-RFC coverage map
 
-**Not populated; coverage is not complete.** #28 must account for every in-scope feature and relevant input, including closed source decisions and research. Map requirement groups to exact owning sections, not just a ticket to a filename. One row may cite several supporting artifacts; one source may need multiple rows/RFCs.
+**Not populated; coverage is not complete.** ri-48g must account for every in-scope feature and relevant input, including closed source decisions and research. Map requirement groups to exact owning sections, not just a ticket to a filename. One row may cite several supporting artifacts; one source may need multiple rows/RFCs.
 
 | Source / identifiable revision | Requirement or scope | Owning RFC section(s) / revision | Disposition and rationale | Supporting decision/evidence links |
 | --- | --- | --- | --- | --- |
 
 State each disposition in prose. Say whether the requirement is incorporated at the linked sections, pending/missing, or deferred/out of scope with the authorized boundary and rationale. A source link alone is not incorporated coverage; a source ticket's Closed state is not RFC acceptance. Distinguish rule provenance from supporting experiments. Pending in-scope semantics prevents marking the affected proposal/set ReviewReady. Unpassed implementation tests remain separately labeled gates, not completed coverage.
 
-## #26 versus #28 completion
+## ri-9o5 versus ri-48g completion
 
-#26 records these human-confirmed conventions, the template and this honest index structure, links the research, and checks structural consistency. It creates no feature RFC, does not allocate IDs or assert complete coverage, and does not clear backend/provider/tooling gates. No generic Markdown parser or CI framework is introduced just to validate an empty collection.
+ri-9o5 records these human-confirmed conventions, the template and this honest index structure, links the research, and checks structural consistency. It creates no feature RFC, does not allocate IDs or assert complete coverage, and does not clear backend/provider/tooling gates. No generic Markdown parser or CI framework is introduced just to validate an empty collection.
 
-#28 owns substantive drafting, exact grouping/ID assignment, coverage population, source reconciliation and the complete-set consistency review. It must return any missing v0 design decision to map #1 rather than publish an unanswered question as ReviewReady. Producing the review-ready set is the map's writing destination; acceptance, implementation and validation remain separate.
+ri-48g owns substantive drafting, exact grouping/ID assignment, coverage population, source reconciliation and the complete-set consistency review. It must return any missing v0 design decision to map ri-kl0 rather than publish an unanswered question as ReviewReady. Producing the review-ready set is the map's writing destination; acceptance, implementation and validation remain separate.

@@ -2,7 +2,7 @@
 
 The first scaffold tests infrastructure, not the Rill language. Manifest dependency checks and CLI help/version or unavailable-command tests can pass without a compiler, standard library, runtime or server. Successful empty product suites would hide that distinction; product test tasks currently exit nonzero as unavailable.
 
-Keep component-local unit tests beside their Rust, standard-library or runtime implementation. This directory owns future cross-component acceptance inputs and runners. Current tool-infrastructure tests live beside their scripts in `tools/`; CLI process tests live in `crates/cli/tests/`; the #47 channel wake/watch and readiness/TCP mechanism tests live beside `runtime/src/{channel,reactor,tcp}.rs`. Those Rust component/loopback tests are not Rill, cross-component runtime or multi-target acceptance. The task boundaries below reserve ownership, not implemented suites or new fixture formats.
+Keep component-local unit tests beside their Rust, standard-library or runtime implementation. This directory owns future cross-component acceptance inputs and runners. Current tool-infrastructure tests live beside their scripts in `tools/`; CLI process tests live in `crates/cli/tests/`; the ri-hw5 channel wake/watch and readiness/TCP mechanism tests live beside `runtime/src/{channel,reactor,tcp}.rs`. Those Rust component/loopback tests are not Rill, cross-component runtime or multi-target acceptance. The task boundaries below reserve ownership, not implemented suites or new fixture formats.
 
 | Future acceptance scope | Entry point and owner |
 | --- | --- |
@@ -15,4 +15,4 @@ Keep component-local unit tests beside their Rust, standard-library or runtime i
 
 [Rill prototypes](../docs/prototypes/README.md) remain chronological design evidence. [Standalone experiments](../experiments/README.md) retain their own revisions, tools, outputs and limitations. Future conformance cases can reference that evidence without moving it or rewriting expected behavior as executed results. Explicit `experiment:*` reproduction tasks do not replace product acceptance.
 
-See [development task status](../docs/development.md#task-profiles-and-current-status) for current commands and limits. [#28](https://github.com/Reilley64/rill/issues/28) retains production/formal backend acceptance, and [#42](https://github.com/Reilley64/rill/issues/42) retains complete client delivery. Infrastructure success closes neither gate.
+See [development task status](../docs/development.md#task-profiles-and-current-status) for current commands and limits. ri-48g retains production/formal backend acceptance, and ri-bv2 retains complete client delivery. Infrastructure success closes neither gate.

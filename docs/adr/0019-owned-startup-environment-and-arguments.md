@@ -1,6 +1,6 @@
 # Owned startup environment and argument inputs
 
-[Issue #36](https://github.com/Reilley64/rill/issues/36) confirms `std::env`: explicit independently owned `Inputs` values copied from a fixed safe-startup capture, read-only byte access, strict owned-text conveniences and validated synthetic construction. The complete Q1-Q21 interview and consolidated summary were explicitly confirmed. [The public catalogue](../standard-library-contracts.md#12-environment-and-argument-inputs) is the API/behavior contract; [prototype 14](../../prototypes/14-environment-inputs.rill) and its [case inventory](../prototypes/14-environment-inputs.md) are hand-checked design evidence, not an implemented library, executed tests or accepted feature RFC.
+Issue ri-7ap confirms `std::env`: explicit independently owned `Inputs` values copied from a fixed safe-startup capture, read-only byte access, strict owned-text conveniences and validated synthetic construction. The complete Q1-Q21 interview and consolidated summary were explicitly confirmed. [The public catalogue](../standard-library-contracts.md#12-environment-and-argument-inputs) is the API/behavior contract; [prototype 14](../../prototypes/14-environment-inputs.rill) and its [case inventory](../prototypes/14-environment-inputs.md) are hand-checked design evidence, not an implemented library, executed tests or accepted feature RFC.
 
 ## Why capture rather than live lookup
 
@@ -20,7 +20,7 @@ Byte queries borrow stored data; text conveniences validate only the data reques
 
 Rejected live process lookup/mutation; implicit borrowed process-global storage; UTF-8 panic/lossy conversion or silent entry dropping; duplicate first/last-wins normalization; treating missing and empty as the same; trusting argv[0] as a path; and ambient host inputs in ordinary tests. A failed acquisition is a typed result, not an empty fallback. General flag parsing, dotenv/layered configuration, process spawning and an executable-location API remain separate scope.
 
-#23's core ownership/errors/Bytes contract is extended, not reopened. #35 owns filesystem/path behavior; #24's confirmed diagnostics policy remains applicable. #28 must formalize transitive raw-view and lookup-key dependencies, source exits, safe runtime/host capture, checked sizing, immutable outcome publication and repeatable independently owned acquisitions, validation priority, sanitized diagnostics and bounded capture/sort/copy/decode/cleanup. Preserve #23's cause-retention boundary and #30's backend/Wasm gates. An inconsistent necessary contract returns to the map; hand-checked examples are not a checker or platform proof.
+ri-8n7's core ownership/errors/Bytes contract is extended, not reopened. ri-dzr owns filesystem/path behavior; ri-3t8's confirmed diagnostics policy remains applicable. ri-48g must formalize transitive raw-view and lookup-key dependencies, source exits, safe runtime/host capture, checked sizing, immutable outcome publication and repeatable independently owned acquisitions, validation priority, sanitized diagnostics and bounded capture/sort/copy/decode/cleanup. Preserve ri-8n7's cause-retention boundary and ri-dej's backend/Wasm gates. An inconsistent necessary contract returns to the map; hand-checked examples are not a checker or platform proof.
 
 ## Platform evidence
 

@@ -1,6 +1,6 @@
 # SQLite provider binding/wire specification v1. Design only
 
-This specifies the closed native boundary selected in [#43's contract](sqlite-provider-contracts.md). **No compiler artifact consumer, generated product bindings, C shim, runtime hooks or Rill driver implement this specification.** The C declarations and Python codec/state model are design/reference artifacts, not a supported ABI binary or proof. Revisions require explicit contract/profile review and version agreement; no permanent binary compatibility is promised.
+This specifies the closed native boundary selected in [ri-3id's contract](sqlite-provider-contracts.md). **No compiler artifact consumer, generated product bindings, C shim, runtime hooks or Rill driver implement this specification.** The C declarations and Python codec/state model are design/reference artifacts, not a supported ABI binary or proof. Revisions require explicit contract/profile review and version agreement; no permanent binary compatibility is promised.
 
 The ordinary Rill-facing external driver implements std::sql; its internal provider functions/tokens are module-private. This document is not a public native-call facility. Binding records may provide only the approved internal implementations in the canonical defining module. Imported aliases never create another identity/authority. Public bodyless family declarations remain declarations, not native implementations by themselves.
 

@@ -1,19 +1,19 @@
-# Rill #34 research: TCP, addresses, DNS, platform limits and cancellation
+# Rill ri-vno research: TCP, addresses, DNS, platform limits and cancellation
 
 This is factual primary-source research only. It does not establish accepted Rill contracts, API approval, a safety proof, implementation evidence or runtime test results.
 
 ## Evidence boundary and Rill context
 
-This investigation read specifications, official platform documentation and first-party source. It did not build/run downloaded code, install tools, perform socket/network experiments, implement a Rill runtime/compiler, or validate backend support. Documentation retrieval is not a networking experiment. Only this research note is added; existing #22/#24 work and separate #19/#23/#31/#41 artifacts are not modified.
+This investigation read specifications, official platform documentation and first-party source. It did not build/run downloaded code, install tools, perform socket/network experiments, implement a Rill runtime/compiler, or validate backend support. Documentation retrieval is not a networking experiment. Only this research note is added; existing ri-636/#24 work and separate ri-kty/#23/#31/#41 artifacts are not modified.
 
-Inputs are the supplied `/tmp/rill-34-input-{23,32,33,34,38,39,40,41}.json` and #32/#33 Markdown snapshots, plus the current confirmed #16/#22 decisions. #32 streaming I/O and #33 clocks/deadlines remain OPEN and unsettled. Their descriptive goals are not approved signatures or policies. #23 is a closed baseline, not reopened by #34. Separate #41 conversion work does not authorize implicit address conversions or parsing through a new family here. [R16][R22][R23][R32][R33][R34][R41]
+Inputs are the supplied `/tmp/rill-34-input-{23,32,33,34,38,39,40,41}.json` and ri-fnk/#33 Markdown snapshots, plus the current confirmed ri-40y/#22 decisions. ri-fnk streaming I/O and ri-j60 clocks/deadlines remain OPEN and unsettled. Their descriptive goals are not approved signatures or policies. ri-8n7 is a closed baseline, not reopened by ri-vno. Separate ri-1wl conversion work does not authorize implicit address conversions or parsing through a new family here. [R16][R22][R23][R32][R33][R34][R41]
 
 The following constraints remain in force; this note does not decide them:
 
 - Native scheduling is parallel M:N; routines can migrate between OS workers. Wasm's chosen execution model is single-threaded. No public thread-pinning/OS-thread-affine-resource interface is assumed.
 - Cooperative cancellation requests and joins are distinct. Required cleanup and native borrowers must actually complete or confirm abort/release before their buffers, source storage, callback state, handles or stack storage are invalidated. Handle drop, timer victory, or an abort request is not confirmation. Cleanup may delay return indefinitely; there is no force-kill or hard latency guarantee.
-- Preserve explicit ownership/copying, static callable/property/dependency evidence, protected native retention, exactly-once cleanup, typed errors and #23's retained-cause constraints. Standard input-dependent traversal/default cleanup must have bounded call-stack use under #22.
-- No Rill compiler/runtime exists to test these obligations here. #30's backend/ABI gates remain unvalidated; this note neither chooses a replacement architecture nor clears a target. [R16][R22][R23][R30]
+- Preserve explicit ownership/copying, static callable/property/dependency evidence, protected native retention, exactly-once cleanup, typed errors and ri-8n7's retained-cause constraints. Standard input-dependent traversal/default cleanup must have bounded call-stack use under ri-636.
+- No Rill compiler/runtime exists to test these obligations here. ri-dej's backend/ABI gates remain unvalidated; this note neither chooses a replacement architecture nor clears a target. [R16][R22][R23][R30]
 
 ### Source versions and limits
 
@@ -32,7 +32,7 @@ The following constraints remain in force; this note does not decide them:
 3. Sending returns a byte count on success. A nonblocking send may make only partial progress or encounter `EAGAIN`/`EWOULDBLOCK`; successful `send` has no implicit guarantee of delivery. Linux documents `EINTR` for interruption before any data was transmitted by that call. A wrapper that loops over sends can nevertheless fail/cancel after earlier calls committed a prefix. Replaying the whole buffer then risks duplication. Read loops similarly consume prefixes irreversibly. [Lsend, DESCRIPTION, ERRORS]
 4. Backpressure is observable through finite send/receive capacity and would-block results. Writable readiness does not mean an arbitrary-sized write will complete. Reads/writes may encounter reset or other terminal errors rather than graceful EOF. Neither successful send nor a transient lack of errors is a connection-health proof. [Lsend][Lrecv][Lsocket, I/O events]
 
-This creates a Rill dependency, not a contract. #32 must settle how positive progress, zero requests, EOF, partial failure and retained buffers are represented. TCP cannot independently invent a competing reader/writer or byte-container contract. [R32][R23]
+This creates a Rill dependency, not a contract. ri-fnk must settle how positive progress, zero requests, EOF, partial failure and retained buffers are represented. TCP cannot independently invent a competing reader/writer or byte-container contract. [R32][R23]
 
 ### 1.2 Half-close, descriptor close and abort are different
 
@@ -62,7 +62,7 @@ Existing Rill lifetime rules therefore require the implementation to synchronize
 
 ### 1.5 SIGPIPE and readiness portability
 
-- Linux `send(..., MSG_NOSIGNAL)` suppresses `SIGPIPE` for that call while still returning `EPIPE`; ignoring `SIGPIPE` with `sigaction` instead changes process-wide behavior. Apple documents the socket option `SO_NOSIGPIPE`, returning `EPIPE` instead of raising the signal. A portable implementation must account for all sending paths and provider adapters; Linux's per-call spelling is not the macOS implementation plan. Process-global signal changes are not automatically authorized by #34. [Lsend, `MSG_NOSIGNAL`][Aopts, `SO_NOSIGPIPE`]
+- Linux `send(..., MSG_NOSIGNAL)` suppresses `SIGPIPE` for that call while still returning `EPIPE`; ignoring `SIGPIPE` with `sigaction` instead changes process-wide behavior. Apple documents the socket option `SO_NOSIGPIPE`, returning `EPIPE` instead of raising the signal. A portable implementation must account for all sending paths and provider adapters; Linux's per-call spelling is not the macOS implementation plan. Process-global signal changes are not automatically authorized by ri-vno. [Lsend, `MSG_NOSIGNAL`][Aopts, `SO_NOSIGPIPE`]
 - Linux epoll supports level/edge triggering and one-shot registration. Edge-triggered use requires nonblocking I/O and appropriate draining/rearming; sleeping before exhaustion can lose progress. Its interest identity involves both descriptor number and open file description; duplicate descriptors affect removal. Its event-cache example explicitly discusses an event for a descriptor closed while processing an earlier event. [Lepoll, Level-triggered and edge-triggered, Q&A, Possible pitfalls]
 - Darwin kqueue's `EVFILT_READ`/`EVFILT_WRITE`, `EV_CLEAR`, `EV_ONESHOT` and `udata` are documented mechanisms, not epoll-compatible flags. `EV_EOF` can accompany unread buffered socket data. Events attached to descriptors are removed on last close, but that does not make already-returned userspace event records safe to dereference after freeing their state. [Akqueue]
 - Native `EINTR`, would-block, readiness, hangup and actual completed I/O are different observations. Retrying must respect progress and cancellation arbitration; seeing hangup must not automatically discard remaining bytes. This follows from the documented receive and kqueue semantics, not from an executed runtime test. [Lrecv][Akqueue]
@@ -102,13 +102,13 @@ The following details need an explicit resolution policy rather than a single un
 
 ### 3.2 Realistic cancellation and deadline limits
 
-Running synchronous resolution on native workers is an option, not an architecture selection. It can avoid blocking a scheduler worker but cannot by itself make an already-running lookup abortable. Under #16, a cancellation request must still wait for actual job completion/confirmed release before destroying borrowed inputs/job state. Copying input into independently owned job storage changes whose storage is retained; it does not automatically authorize detaching the work from structured joins, ignoring cleanup, or promising bounded return latency. A bounded worker queue can limit concurrency, but cannot create a hard latency bound for a stuck resolver. [Pgai][R16][R33]
+Running synchronous resolution on native workers is an option, not an architecture selection. It can avoid blocking a scheduler worker but cannot by itself make an already-running lookup abortable. Under ri-40y, a cancellation request must still wait for actual job completion/confirmed release before destroying borrowed inputs/job state. Copying input into independently owned job storage changes whose storage is retained; it does not automatically authorize detaching the work from structured joins, ignoring cleanup, or promising bounded return latency. A bounded worker queue can limit concurrency, but cannot create a hard latency bound for a stuck resolver. [Pgai][R16][R33]
 
 The GNU extension `getaddrinfo_a(GAI_NOWAIT)` provides asynchronous submission and `gai_cancel`; its manual explicitly says requests currently being processed cannot be canceled. `EAI_NOTCANCELED` and `EAI_ALLDONE` are different from `EAI_CANCELED`. Request structures/strings/results and notifications still need their real completion lifetime. A GNU-specific async API is not a portable Linux/macOS cancellation contract. [LgaiA]
 
 As a Darwin mechanism example, Apple's pinned `dns_sd.h` exposes `DNSServiceGetAddrInfo`, callback results, `DNSServiceRefSockFD`/`DNSServiceProcessResult` for event-loop integration and `DNSServiceRefDeallocate` for terminating operations. The descriptor must not be directly read/written; `ProcessResult` can block without readiness. The header warns against deallocation concurrent with processing, requires removing event monitoring before deallocation, and requires same-queue deallocation after dispatch-queue registration. This is evidence of a possible internal platform mechanism, not proof of equivalence to all `getaddrinfo` sources/policies or authorization of public raw descriptors/dispatch queues. No callback-quiescence or latency guarantee is inferred beyond the documented synchronization requirements. [Adns, named declarations and comments]
 
-A timer may record that time expired while resolution/connect/cleanup still completes later. Whether timeout wins a completion race, whether any result is reported, and when the calling routine can finish belong to #33/#32 and existing joined cleanup. A timer race cannot manufacture a successful abort acknowledgment. [R16][R32][R33]
+A timer may record that time expired while resolution/connect/cleanup still completes later. Whether timeout wins a completion race, whether any result is reported, and when the calling routine can finish belong to ri-j60/#32 and existing joined cleanup. A timer race cannot manufacture a successful abort acknowledgment. [R16][R32][R33]
 
 ### 3.3 Multiple addresses and RFC 8305 without selecting policy
 
@@ -151,7 +151,7 @@ The wasi-sockets `v0.2.0` WIT defines more operations and capabilities: [W3-W7]
 - `tcp-create-socket.create-tcp-socket(address-family)` creates a resource. Binding/connecting use a borrowed network capability. TCP has `start-bind`/`finish-bind`, `start-listen`/`finish-listen`, `start-connect`/`finish-connect`, accept, local/remote address observation, options, subscribe and directional shutdown. Successful connect/accept provides wasi:io input/output stream resources; pending completion can report `would-block` and use a pollable.
 - `ip-name-lookup.resolve-addresses(network, name)` immediately returns an asynchronous `resolve-address-stream` or error. `resolve-next-address` returns ordered candidates, `none` at exhaustion, or errors/`would-block`; `subscribe` exposes readiness. This version promises automatic Unicode IDNA-to-ASCII conversion and no IPv4-mapped results. Those are that interface's contracts, not portable native `getaddrinfo` behavior or a selected Rill Unicode policy.
 - Its IPv6 socket-address record has `port`, `flow-info`, `address`, `scope-id`. Its TCP bind/connect explicitly reject IPv4-mapped IPv6 endpoints. Thus even an eventual adapter would need to reconcile representable address values versus endpoints accepted by that target; it cannot blindly copy native dual-stack behavior.
-- Dropping resources, input/output stream semantics, pollables and capability denial are part of the component interfaces. They do not supply a universal hard cancellation latency or remove #16's guest/native lifetime obligations. Preview2 WIT is not the preview1 fd/import ABI.
+- Dropping resources, input/output stream semantics, pollables and capability denial are part of the component interfaces. They do not supply a universal hard cancellation latency or remove ri-40y's guest/native lifetime obligations. Preview2 WIT is not the preview1 fd/import ABI.
 
 The research shows that standard wasm32-wasip1 does not provide native-style create/connect/listen/resolve operations. It cannot decide whether Rill should make networking native-only, expose only explicitly supplied socket capabilities, or approve a different target/host extension. Inherited-socket support itself needs a defined capability handoff and validated host; it is not already implementation-ready.
 
@@ -163,38 +163,38 @@ Linux epoll and Darwin kqueue can drive nonblocking socket readiness. Blocking r
 
 Linux io_uring is a separate completion-based candidate, not assumed necessary or selected. Its liburing cancellation documentation distinguishes successful cancellation, `-ENOENT` (possibly already complete) and `-EALREADY` (too far progressed); the latter requires waiting for the target request's completion event. Flags have kernel-version requirements. This is another concrete example of why submitting cancellation is not equivalent to releasing all buffers, and no basis to promise that macOS has an equivalent mechanism. [U1]
 
-### 5.2 TLS (#38), HTTP (#39) and database consumers (#40)
+### 5.2 TLS (ri-irw), HTTP (ri-n5i) and database consumers (ri-dka)
 
 | Consumer fact | Need to carry into later design, not an API/provider approval |
 | --- | --- |
 | TLS 1.3 uses `close_notify` to signal write closure. Transport EOF without it cannot establish absence of truncation. OpenSSL 3.5.0 separately classifies received `close_notify` and unexpected EOF. [S3, §6.1][Oerr] | Preserve transport EOF/error information; do not normalize all TCP closure into clean TLS message completion. TLS shutdown is not interchangeable with socket shutdown. |
 | OpenSSL 3.5.0 nonblocking reads can need writes, and writes can need reads. A retrying write requires the same arguments/data; moving-buffer mode relaxes pointer identity, not data/length. [Oread][Owrite] | Per-direction TCP readiness alone does not prove independent concurrent operations on a TLS connection. Adapters need retained pending-operation data, progress/backpressure handling and explicit serialization/concurrency rules. |
-| OpenSSL `SSL_get_error` reads the current thread's error queue, must run on the same thread as the I/O call with no intervening OpenSSL calls, and needs an initially empty queue. BIO pairs usually need both halves handled by the same application thread because they do not lock their internal structures. [Oerr][Obio] | Native bridge calls/error extraction cannot be separated by an unconstrained migrating suspension. This calls for a justified internal integration mechanism, not public pinning or an assertion that OpenSSL objects are inherently safe under arbitrary parallel access. #38 must select/validate its actual provider boundary. |
+| OpenSSL `SSL_get_error` reads the current thread's error queue, must run on the same thread as the I/O call with no intervening OpenSSL calls, and needs an initially empty queue. BIO pairs usually need both halves handled by the same application thread because they do not lock their internal structures. [Oerr][Obio] | Native bridge calls/error extraction cannot be separated by an unconstrained migrating suspension. This calls for a justified internal integration mechanism, not public pinning or an assertion that OpenSSL objects are inherently safe under arbitrary parallel access. ri-irw must select/validate its actual provider boundary. |
 | BIO pairs allow TLS I/O under application control without their directly accessing a network socket; buffered output must be drained or a wait-for-read can deadlock. [Obio] | A provider-backed transport can in principle compose through byte pumping; raw socket extraction/public FFI is not logically required. This proves neither a workable Rill bridge nor a selected architecture. Bounded buffers, readiness and progress still matter. |
 | HTTP/1.1 distinguishes message framing and incomplete messages; some responses are close-delimited, and premature closure of length/chunk-framed messages is incomplete. RFC 9110 restricts automatic retry of non-idempotent requests. [H2, §§6, 8][H1, §9.2.2] | Consumers need short-I/O handling, bounded framing/buffering, trustworthy EOF distinctions and control of connection reuse after abandoned bodies. A canceled TCP write is not permission to replay the HTTP request. |
 | PostgreSQL 18 cancellation opens another connection and sends a keyed `CancelRequest`. No direct success reply is sent; the client must still await the original query response. Disconnect during an implicit-transaction command may be recognized only after commit. [DB1, §§54.2.8–54.2.9] | Transport cancellation/close cannot certify database rollback, nonexecution or reusable protocol state. A driver may need another connection and protocol resynchronization. Unknown external outcomes remain a consumer-level issue. |
 | PostgreSQL 18's optional SSLRequest upgrade consumes a specific one-byte response and warns about extra buffered bytes; immediate TLS is another explicitly described mode with ALPN requirements. [DB1, §54.2.10] | A realistic adapter may wrap an already connected stream after plaintext negotiation. Ownership of buffered/unconsumed bytes must be explicit; this is evidence for composability, not a mandate to expose handles or adopt PostgreSQL-specific std operations. |
 
-The #38/#39/#40 snapshots explicitly require these provider/protocol questions to remain separate. #34 research does not select TLS, route HTTP, put a DB interface in std, add UDP/QUIC/Unix sockets, or authorize general FFI. [R38][R39][R40]
+The ri-irw/#39/#40 snapshots explicitly require these provider/protocol questions to remain separate. ri-vno research does not select TLS, route HTTP, put a DB interface in std, add UDP/QUIC/Unix sockets, or authorize general FFI. [R38][R39][R40]
 
 ## 6. Design questions and decision readiness. No answers accepted here
 
-### Can be recommended for human consideration before #32/#33 settle
+### Can be recommended for human consideration before ri-fnk/#33 settle
 
 These are scope/factual separations, not final public declarations:
 
 1. Keep numeric IP value parsing/rendering separate from name/service resolution, and retain the caller's intended hostname separately from the selected numeric endpoint. IPv6 zone metadata must not silently disappear. Candidate text policy can cite RFC 4291/5952/4007/9844 rather than treating OS resolver acceptance as the grammar.
 2. Require an explicit native-versus-preview1 capability decision; do not advertise create/connect/listen/DNS as standard preview1. It is reasonable to decide TCP/DNS scope and whether UDP/Unix sockets are deferred now, without claiming that any backend is validated.
-3. Rule out descriptions of resolver deadlines/cancellation/close as immediate or rollback-guaranteed. That is incompatible with the evidence and existing #16, regardless of the eventual spelling of #33.
+3. Rule out descriptions of resolver deadlines/cancellation/close as immediate or rollback-guaranteed. That is incompatible with the evidence and existing ri-40y, regardless of the eventual spelling of ri-j60.
 4. Gather required client/server options and supported native OS versions as inputs, keeping policy explicit. Examples to evaluate are numeric local/peer address observation, port-zero binding, dual-stack/`IPV6_V6ONLY`, `TCP_NODELAY`, keepalive, address reuse, queue limits and SIGPIPE suppression. Linux documents port-zero ephemeral assignment (which can fail on exhaustion) and `getsockname` observation; option existence does not establish defaults, identical macOS behavior or a needed public option set. [Lbind][Lname][Lsocket][Ltcp][I4][Aopts]
 
 ### Cannot responsibly recommend as final contracts yet
 
-- Exact module paths, types, signatures, family evidence, read/write result/EOF/progress/error representation, stream splitting/ownership and allowed parallel operations depend on #32 and #23 reconciliation.
-- Exact timeout/deadline arithmetic, clock interface, cancellation-versus-completion precedence, already-expired behavior, result delivery and shutdown/join return boundary depend on #33 and #16. The evidence does not support a hard return-latency promise.
+- Exact module paths, types, signatures, family evidence, read/write result/EOF/progress/error representation, stream splitting/ownership and allowed parallel operations depend on ri-fnk and ri-8n7 reconciliation.
+- Exact timeout/deadline arithmetic, clock interface, cancellation-versus-completion precedence, already-expired behavior, result delivery and shutdown/join return boundary depend on ri-j60 and ri-40y. The evidence does not support a hard return-latency promise.
 - Rill must decide whether hostname connect implements serial fallback, a named Happy Eyeballs policy, or caller/library address selection. It must also decide defaults, total budget, per-attempt budget and loser cleanup. RFC 8305 supplies facts but does not make that policy decision.
-- Rill still needs a resolver job/poller/provider architecture, an accepted-socket ownership state machine, close-error handling across supported OS releases, and evidence of migration-safe native resources. Native implementation and #30 backend validation do not exist here.
-- TLS provider/FFI boundary, HTTP retry/reuse rules, or DB cancellation/transaction guarantees. These remain #38-#40 decisions; no raw handle, public dyn, trait, implicit registry or general FFI is introduced.
+- Rill still needs a resolver job/poller/provider architecture, an accepted-socket ownership state machine, close-error handling across supported OS releases, and evidence of migration-safe native resources. Native implementation and ri-dej backend validation do not exist here.
+- TLS provider/FFI boundary, HTTP retry/reuse rules, or DB cancellation/transaction guarantees. These remain ri-irw-ri-dka decisions; no raw handle, public dyn, trait, implicit registry or general FFI is introduced.
 - This note cannot approve a new Wasm target or host-import ABI implicitly. Even a decision to support inherited preview1 sockets needs a specified host/capability delivery contract and compatibility tests.
 
 Text/equality/IDNA questions can be interviewed independently, but the facts do not uniquely select strict IPv4 grammar, zone-name preservation versus numeric normalization, mapped-address equality, Unicode mapping version, resolver caching, public error categories, or defaults. A stable value model and supported-target commitments still require human confirmation.
@@ -203,14 +203,14 @@ Text/equality/IDNA questions can be interviewed independently, but the facts do 
 
 The following is a future evidence checklist. There are no passed runtime tests or proofs in this note.
 
-1. Pin supported environments: OS/kernel/libc/SDK revisions, resolver configuration, poller/provider versions, WASI import/adapter/host revisions and permissions. Separate standalone mechanism-test evidence from eventual Rill/compiler lifetime checking; preserve #30 gates.
+1. Pin supported environments: OS/kernel/libc/SDK revisions, resolver configuration, poller/provider versions, WASI import/adapter/host revisions and permissions. Separate standalone mechanism-test evidence from eventual Rill/compiler lifetime checking; preserve ri-dej gates.
 2. Test deterministic I/O cases: one-byte and short progress, zero request versus EOF, buffered bytes plus FIN/hangup, reset after a prefix, repeated EOF, simultaneous half-closes, writes after send-shutdown, slow-reader backpressure, cancellation after committed writes, and close with/without linger. Verify no prefix duplication, discarded buffered input or accidental process termination by SIGPIPE.
 3. Test connect/accept races: immediate success/failure versus registration; readiness followed by would-block/error; failure surfaced through `SO_ERROR`; late success after cancellation; accepted-descriptor flag normalization; simultaneous acceptors; aborted pending connections; descriptor/ephemeral-port exhaustion; listener stop versus pending accepts and active handlers. Verify exactly one owner for every produced descriptor.
 4. Test descriptor-reuse/teardown adversaries: fast close/reopen on other workers, duplicate descriptors if used internally, cached stale events, callback versus cancellation, close errors/interruption, and native work completing after close. Instrument completion of borrower/callback access before reclaiming source/operation state. Do not treat integer identity or cancel submission as proof of completion.
 5. Test resolver completion/retention: queued versus executing lookup cancellation; GNU cannot-cancel/already-done cases if chosen; late success/error; output allocation release exactly once; job-state lifetime; worker saturation; platform callback teardown. Exercise local/system resolver sources, resolver delays/failures, family filters and error capture across migration. Demonstrate that no hard latency guarantee is inferred from a timer firing.
 6. Test the text/value cases: valid/noncanonical IPv6, malformed multiple `::`, IPv4 legacy and leading-zero forms, bracket/port ambiguity, numeric range/trailing-data errors, scopes by name/index/unknown interface, same address in different zones, mapped versus IPv4 values, IDNA-valid/invalid inputs, and strict separation of parsing from DNS. Verify chosen canonical round trips and equality/hash policy without treating a zone as globally portable identity.
 7. If a multi-address policy is selected, test A/AAAA positive/negative/delayed ordering, single-family/IPv6-only networks, candidate arrival mid-dial, interleaving, attempt limits and delay bounds, multiple simultaneous successes, cancel-versus-completion, all-failed error ordering and total deadlines. Assert joined release of losers; measure conformance only against an explicitly selected policy.
-8. Test consumer composition with bounded raw echo, memory and TLS-like stream adapters after #32. Cover provider retry/read-needs-write, thread-local errors, retained write data and TLS EOF/truncation. Test HTTP incomplete framing/abandonment and DB upgrade buffering, cancellation on another connection and unknown commit outcomes. Neither a bounded echo nor a successful handshake proves secure protocol conformance.
+8. Test consumer composition with bounded raw echo, memory and TLS-like stream adapters after ri-fnk. Cover provider retry/read-needs-write, thread-local errors, retained write data and TLS EOF/truncation. Test HTTP incomplete framing/abandonment and DB upgrade buffering, cancellation on another connection and unknown commit outcomes. Neither a bounded echo nor a successful handshake proves secure protocol conformance.
 9. Test Wasm capability failures: missing preview1 `sock_accept`, supplied fd with insufficient rights, no supplied socket, denial, absent create/connect/DNS imports and host-specific configuration. If preview2/extension is approved separately, test its actual resource/drop/poll/capability semantics rather than borrowing native guarantees. Retained guest owners alone do not prove host-pointer validity across `memory.grow`; validate the chosen copying/growth coordination/lifetime mechanism. [R22]
 10. For static checking/lowering, reject conflicting mutable operations/use-after-dispose and escaped local buffers; preserve noBorrow/sendable/shareable and callable evidence before monomorphization, retained error-cause evidence, cancellation masking and joins through wrappers/custom disposal. Bound standard traversal/cleanup stack growth. Rill examples are hand-checked until a compiler/runtime exists; issue closure cannot substitute for executable tests or a soundness argument. [R16][R22][R23]
 
@@ -218,17 +218,17 @@ The following is a future evidence checklist. There are no passed runtime tests 
 
 ### Rill inputs
 
-- [R16] [#16 final confirmed concurrency-safety decision](https://github.com/Reilley64/rill/issues/16#issuecomment-6863910595).
-- [R22] [#22 confirmed stack/lifetime/backend-gate decision](https://github.com/Reilley64/rill/issues/22#issuecomment-6871432855).
-- [R23] [#23 confirmed standard-library decision](https://github.com/Reilley64/rill/issues/23#issuecomment-6872129850); supplied JSON includes subsequent handoffs; current #41 refines conversion history separately.
-- [R30] [#30 backend validation gate](https://github.com/Reilley64/rill/issues/30), as retained by #22/#23; not investigated or cleared here.
-- [R32] [#32 streaming I/O](https://github.com/Reilley64/rill/issues/32), supplied OPEN snapshot.
-- [R33] [#33 clocks/deadlines](https://github.com/Reilley64/rill/issues/33), supplied OPEN snapshot.
-- [R34] [#34 networking](https://github.com/Reilley64/rill/issues/34), supplied JSON.
-- [R38] [#38 TLS](https://github.com/Reilley64/rill/issues/38), supplied JSON.
-- [R39] [#39 HTTP](https://github.com/Reilley64/rill/issues/39), supplied JSON.
-- [R40] [#40 database boundary](https://github.com/Reilley64/rill/issues/40), supplied JSON.
-- [R41] [#41 conversions](https://github.com/Reilley64/rill/issues/41), supplied confirmed snapshot; separate artifacts untouched.
+- [R16] ri-40y final confirmed concurrency-safety decision (comment 6863910595).
+- [R22] ri-636 confirmed stack/lifetime/backend-gate decision (comment 6871432855).
+- [R23] ri-8n7 confirmed standard-library decision (comment 6872129850); supplied JSON includes subsequent handoffs; current ri-1wl refines conversion history separately.
+- [R30] ri-dej backend validation gate, as retained by ri-636/#23; not investigated or cleared here.
+- [R32] ri-fnk streaming I/O, supplied OPEN snapshot.
+- [R33] ri-j60 clocks/deadlines, supplied OPEN snapshot.
+- [R34] ri-vno networking, supplied JSON.
+- [R38] ri-irw TLS, supplied JSON.
+- [R39] ri-n5i HTTP, supplied JSON.
+- [R40] ri-dka database boundary, supplied JSON.
+- [R41] ri-1wl conversions, supplied confirmed snapshot; separate artifacts untouched.
 
 ### Protocols, address representation and identity
 
@@ -300,7 +300,7 @@ The following is a future evidence checklist. There are no passed runtime tests 
 
 ## Primary-source supplement: ASCII host input and native resolution boundaries
 
-This factual supplement adds no Rill policy/API selection or implementation evidence. Earlier text remains historical research. #32 is now CLOSED with a human-confirmed streaming contract and approved Q36 refinement [HN1]; its earlier OPEN/unsettled descriptions above are stale. #33 remains open, with no approved deadline contract.
+This factual supplement adds no Rill policy/API selection or implementation evidence. Earlier text remains historical research. ri-fnk is now CLOSED with a human-confirmed streaming contract and approved Q36 refinement [HN1]; its earlier OPEN/unsettled descriptions above are stale. ri-j60 remains open, with no approved deadline contract.
 
 The user confirmed ASCII-only hostname input, explicit external IDNA conversion and no implicit Unicode/locale mapping. Resolution follows system host-resolution policy, not a bespoke DNS client/cache. Numeric IP parsers are pure and strict. IPv4 and mapped IPv6 remain distinct, and IPv6 socket metadata carries a `u32` scope ID, with `0` unspecified. These inputs do not settle the remaining hostname-acceptance questions.
 
@@ -339,11 +339,11 @@ The user confirmed ASCII-only hostname input, explicit external IDNA conversion 
 
 The supplement used only primary-document/source retrieval and local document-integrity checks. It included no installs, downloaded-code execution, resolver/socket experiments, specification work, API finalization or issue edits.
 
-If authorized after policy selection, check 63/64-byte labels and 253/254-byte textual boundaries with/without a root dot. Check empty, single-label, root and interior-empty cases, and case/search preservation across DNS and configured non-DNS sources. Test strict and legacy numeric-looking IPv4, IPv6/mapped inputs, and ASCII `xn--` lookalikes versus externally IDNA-validated A-labels. Test interface-name NUL/encoded-length errors, removal and reuse. Pin libc/OS/configuration before claiming native behavior. None of this approves deadlines or resolves #33.
+If authorized after policy selection, check 63/64-byte labels and 253/254-byte textual boundaries with/without a root dot. Check empty, single-label, root and interior-empty cases, and case/search preservation across DNS and configured non-DNS sources. Test strict and legacy numeric-looking IPv4, IPv6/mapped inputs, and ASCII `xn--` lookalikes versus externally IDNA-validated A-labels. Test interface-name NUL/encoded-length errors, removal and reuse. Pin libc/OS/configuration before claiming native behavior. None of this approves deadlines or resolves ri-j60.
 
 ### Supplement primary-source index (HN labels only)
 
-- [HN1] Rill #32 [final confirmed contract](https://github.com/Reilley64/rill/issues/32#issuecomment-6886715215) and [approved Q36 refinement](https://github.com/Reilley64/rill/issues/32#issuecomment-6886862143); read through GitHub's API. Design approval, not executable validation.
+- [HN1] Rill ri-fnk final confirmed contract (ri-fnk, comment 6886715215) and approved Q36 refinement (ri-fnk, comment 6886862143); read through GitHub's API. Design approval, not executable validation.
 - [HN2] IETF, [RFC 1034](https://www.rfc-editor.org/rfc/rfc1034.html), November 1987, §§3.1, 3.5: name/root/relative syntax and preferred hostname grammar.
 - [HN3] IETF, [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035.html), November 1987, §§2.3.1, 2.3.3-2.3.4, 3.1, 4.1.4: syntax, octet limits, encoding/compression.
 - [HN4] IETF, [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123.html), October 1989, §2.1: digit-initial names and address/name disambiguation.
@@ -366,7 +366,7 @@ If authorized after policy selection, check 63/64-byte labels and 253/254-byte t
 
 ## Primary-source supplement: native TCP options and listener decision boundaries
 
-This factual supplement selects no defaults, API, ABI or runtime architecture. The task supplied the following current context. #32 is CLOSED; its canonical `std::io` contract and approved Q36 apply. #33 is OPEN with no deadline approval. Confirmed #34 inputs remain raw/unbuffered `TcpStream` with no-op flush, immutable numeric values/scopes, owned noncopyable split halves, and `shutdownWrite` as the only public directional operation. Write-half close/disposal attempts local send-direction release, not user-buffer flushing or TLS shutdown; cleanup retains actual native borrowers. Listener/address policy is still being interviewed.
+This factual supplement selects no defaults, API, ABI or runtime architecture. The task supplied the following current context. ri-fnk is CLOSED; its canonical `std::io` contract and approved Q36 apply. ri-j60 is OPEN with no deadline approval. Confirmed ri-vno inputs remain raw/unbuffered `TcpStream` with no-op flush, immutable numeric values/scopes, owned noncopyable split halves, and `shutdownWrite` as the only public directional operation. Write-half close/disposal attempts local send-direction release, not user-buffer flushing or TLS shutdown; cleanup retains actual native borrowers. Listener/address policy is still being interviewed.
 
 Evidence scope: Linux man-pages 6.19 and Linux v6.16 source; Apple source pinned throughout to XNU `xnu-12377.1.9`. Apple archived manpages are explicitly historical, not evidence of every current macOS release. Pinned source establishes behavior of that revision, not a tested shipping OS/SDK matrix.
 
@@ -399,7 +399,7 @@ Evidence scope: Linux man-pages 6.19 and Linux v6.16 source; Apple source pinned
 
 - Linux `send(..., MSG_NOSIGNAL)` suppresses SIGPIPE for that call while retaining `EPIPE`; `sigaction(SIGPIPE, SIG_IGN)` instead affects the entire process/all threads. Pinned XNU implements socket-level `SO_NOSIGPIPE` via `SOF_NOSIGPIPE`, checked before raising SIGPIPE on an `EPIPE` send failure; the archived option manual describes the same intent. Every actual sending path/provider still needs coverage verification; suppression is not successful transmission or a replacement for error handling. [OPT14]
 - `SO_LINGER` is not harmless cleanup tuning. Positive enabled linger can wait during close; disabled linger can leave native transmission/teardown in the background. Enabled zero linger takes an abortive TCP disconnect/drop path in both inspected kernels, risking reset and loss of unsent data rather than graceful FIN/draining. A native send/close success never certifies remote application receipt. Also beware Darwin header mode: pinned `sys/socket.h` maps ordinary Darwin `SO_LINGER` to the legacy ticks option, exposes `SO_LINGER_SEC` for seconds, and maps strict POSIX `SO_LINGER` to the seconds option; Linux's structure uses seconds. Copying a name/value without the target headers is not portable. [OPT1][OPT10][OPT11][OPT9]
-- Pinned XNU's linger sleep is interruptible and its close path can return teardown errors. Timeout expiry there is explicitly not reported as an error. Linux warns that a close error can follow descriptor release and retry can close a recycled descriptor; earlier §1.4 records Darwin release ordering too. Neither a linger interval, nonblocking mode, successful close nor suppressed SIGPIPE supplies a hard Rill return deadline, remote-delivery proof, or confirmation that every native borrower has released. Preserve real completion/retention obligations; no #33 policy is inferred. [OPT9][OPT15]
+- Pinned XNU's linger sleep is interruptible and its close path can return teardown errors. Timeout expiry there is explicitly not reported as an error. Linux warns that a close error can follow descriptor release and retry can close a recycled descriptor; earlier §1.4 records Darwin release ordering too. Neither a linger interval, nonblocking mode, successful close nor suppressed SIGPIPE supplies a hard Rill return deadline, remote-delivery proof, or confirmation that every native borrower has released. Preserve real completion/retention obligations; no ri-j60 policy is inferred. [OPT9][OPT15]
 
 ### Evidence and guarantee limits
 

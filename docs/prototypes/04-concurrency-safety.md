@@ -1,6 +1,6 @@
 # Concurrency and cancellation safety cases
 
-Read [the source examples](../../prototypes/04-concurrency-safety.rill). They combine the earlier channel/worker demonstration with the guard and cancellation cases from [#16](https://github.com/Reilley64/rill/issues/16) and [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md).
+Read [the source examples](../../prototypes/04-concurrency-safety.rill). They combine the earlier channel/worker demonstration with the guard and cancellation cases from ri-40y and [ADR 0009](../adr/0009-concurrency-safety-and-cooperative-cancellation.md).
 
 The source contains 11 intended-valid expectations. They have been inspected, not executed by a Rill compiler or runtime. Library names and call shapes follow the [published catalogue](../standard-library-contracts.md). These cases do not prove scheduling, synchronization or cancellation safety.
 
@@ -98,6 +98,6 @@ These are obligations for later executable tests, not results from this source. 
 | Cleanup or native work never completes, or a wait cycle exists. | No bounded stop/helper latency or force-kill guarantee applies. |
 | Top-level execution ends normally or panics. | Do not join background work implicitly. Panic has no cleanup guarantee and is distinct from cooperative stop. |
 
-Cancellation cleanup needs compiler/runtime paths distinct from fatal panic, including initialization tracking, dependency-sensitive disposal and protected guard release. The no-panic-unwinding rule does not remove cooperative cleanup. The catalogue defines public signatures and protected operations; #28 still owes formal checking and implementation validation. Return a blocking inconsistency to the language map rather than treating these examples as proof.
+Cancellation cleanup needs compiler/runtime paths distinct from fatal panic, including initialization tracking, dependency-sensitive disposal and protected guard release. The no-panic-unwinding rule does not remove cooperative cleanup. The catalogue defines public signatures and protected operations; ri-48g still owes formal checking and implementation validation. Return a blocking inconsistency to the language map rather than treating these examples as proof.
 
 The guard API replaces the old callback-only withLock proposal. No callback-result noBorrow rule or callback-scoped mutex compiler contract remains.

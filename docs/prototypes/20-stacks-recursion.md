@@ -2,9 +2,9 @@
 
 Read the source examples in [`prototypes/20-stacks-recursion.rill`](../../prototypes/20-stacks-recursion.rill).
 
-These are approved design inputs for [#22](https://github.com/Reilley64/rill/issues/22) and [ADR 0014](../adr/0014-bounded-stacks-proper-tail-calls-and-backend-gates.md). The companion has 14 intended-valid expectations, checked by inspection only. Validation of this companion did not run a Rill compiler/runtime, measure stacks, run native probes or execute a Wasm pipeline. Small successful calculations cannot establish constant-space behavior or safe overflow containment.
+These are approved design inputs for ri-636 and [ADR 0014](../adr/0014-bounded-stacks-proper-tail-calls-and-backend-gates.md). The companion has 14 intended-valid expectations, checked by inspection only. Validation of this companion did not run a Rill compiler/runtime, measure stacks, run native probes or execute a Wasm pipeline. Small successful calculations cannot establish constant-space behavior or safe overflow containment.
 
-The examples follow confirmed [#19 enums](https://github.com/Reilley64/rill/issues/19) and [#29 error metadata](https://github.com/Reilley64/rill/issues/29), rather than the earlier singleton/union/automatic-propagation-trace sketches. The new sized-spawn path and signature illustrate #23's interface. They must preserve ordinary spawn's requirements for owned captures, invocation mode, noBorrow and sendable.
+The examples follow confirmed ri-kty enums and ri-vtw error metadata, rather than the earlier singleton/union/automatic-propagation-trace sketches. The new sized-spawn path and signature illustrate ri-8n7's interface. They must preserve ordinary spawn's requirements for owned captures, invocation mode, noBorrow and sendable.
 
 ## Intended-valid source cases
 
@@ -52,7 +52,7 @@ Exhausting either Wasm managed budget uses bounded best-effort fatal reporting. 
 
 A proper-tail transfer cannot need eliminated caller storage or post-call disposal/joins. Retaining these obligations makes a final-looking call ordinary; it is not generally a source type error. Do not introduce a new tail keyword or require every ordinary recursive program to be rejected.
 
-Schematic guard case (library spellings remain #23):
+Schematic guard case (library spellings remain ri-8n7):
 
 ```ts
 function guarded(counter: &Mutex<u64>, n: u64): u64 {
@@ -65,7 +65,7 @@ A callee that reacquires the same mutex can observe that the guard is still held
 
 Likewise, do not eliminate a caller-local slot that a callee, native job or closure needs. Incoming borrowed sources that belong to an earlier frame differ from newly borrowed local storage. ABI restrictions cannot become undocumented semantic ineligibility. If the compiler cannot lower a genuinely eligible call, it must diagnose the unsupported call or target rather than silently accumulate frames. Development and optimized builds have the same guarantee.
 
-#29 adds no automatic propagation history. Direct unchanged failure forwarding has no such trace obligation, but all actual control/storage/cleanup work still counts. Explicit infix caused-by wrapping or Err construction can require work after a call; early error return is not by itself proof of a proper-tail call. Complete explicit causes are error data. Normal panic traces may omit eliminated calls; no unbounded diagnostic shadow stack is required.
+ri-vtw adds no automatic propagation history. Direct unchanged failure forwarding has no such trace obligation, but all actual control/storage/cleanup work still counts. Explicit infix caused-by wrapping or Err construction can require work after a call; early error return is not by itself proof of a proper-tail call. Complete explicit causes are error data. Normal panic traces may omit eliminated calls; no unbounded diagnostic shadow stack is required.
 
 ## Bounded cleanup is not constant total memory
 
@@ -77,7 +77,7 @@ Preserve observable disposal order, ownership/initialization state, borrowed-sou
 
 ## Required isolated backend cases
 
-These belong to [#30](https://github.com/Reilley64/rill/issues/30), not this expectation file. Fatal cases need separate processes/instances; do not add catchable overflow or claim outcomes from ordinary source inspection.
+These belong to ri-dej, not this expectation file. Fatal cases need separate processes/instances; do not add catchable overflow or claim outcomes from ordinary source inspection.
 
 1. Long self-, mutual- and indirect tail chains in each target/build mode; measure all activation storage, not only native SP. Include by-value aggregates, return storage, callable environments and ABI transitions. Never execute undefined LLVM as evidence of language behavior.
 2. Test ineligible transfers with local borrows, live guards, pending children/native jobs and explicit error wrapping. Confirm source lifetimes, no early unlock and actual ordinary-call/report behavior.
@@ -88,4 +88,4 @@ These belong to [#30](https://github.com/Reilley64/rill/issues/30), not this exp
 7. Test stop, cancellation, termination and migration races against native completion or confirmed abort. Do not reuse stack storage merely because the handle disappeared, cancellation was requested or a native abort was requested. Include host borrowers outliving normal/fatal Rill termination in a surviving embedding host. Retaining their storage does not guarantee user cleanup or a global join. Migration must not duplicate concurrent execution, and these cases add no global exit join.
 8. Invalid build versus dynamic settings, alignment overflow, target min/max boundaries and explicit inapplicable flags. Minimal fatal reporting must not depend on a full formatter, heap allocation, unwind or a healthy exhausted stack.
 
-The inspected Binaryen Asyncify rejection of tail-call instructions is negative evidence, not proof of a viable pipeline. Pin revisions and commands, and mark each case as passed, failed or untested. #30 remains an explicit gate unless a map decision transfers an unresolved gate. These cases do not assume an alternative architecture or a target drop. #23 owns full source interfaces/evidence, #24 actionable diagnostics, and #28 exact checking/ABI/lowering/cleanup rules. Hand-checked source examples are not implementation readiness or a soundness proof.
+The inspected Binaryen Asyncify rejection of tail-call instructions is negative evidence, not proof of a viable pipeline. Pin revisions and commands, and mark each case as passed, failed or untested. ri-dej remains an explicit gate unless a map decision transfers an unresolved gate. These cases do not assume an alternative architecture or a target drop. ri-8n7 owns full source interfaces/evidence, ri-3t8 actionable diagnostics, and ri-48g exact checking/ABI/lowering/cleanup rules. Hand-checked source examples are not implementation readiness or a soundness proof.

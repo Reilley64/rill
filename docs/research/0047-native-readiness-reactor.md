@@ -1,6 +1,6 @@
-# #47 native readiness reactor selection and first TCP mechanism evidence
+# ri-hw5 native readiness reactor selection and first TCP mechanism evidence
 
-Status: implementation research and current-host component evidence, **not** a Rill ABI, Linux/macOS support matrix, TCP conformance result or #47 completion.
+Status: implementation research and current-host component evidence, **not** a Rill ABI, Linux/macOS support matrix, TCP conformance result or ri-hw5 completion.
 
 ## Selected private mechanism
 
@@ -31,4 +31,4 @@ On the current macOS27.0.1 AArch64 host:
 
 This is Rust component execution using loopback TCP, not Rill/generated code or the future Rill scheduler. GitHub Actions [run43841069174](https://github.com/Reilley64/rill/actions/runs/43841069174) passed `mise run check` at commit9952484 on `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15` and `macos-15-intel`; all four jobs executed the30 runtime tests through the shared check task. Hosted labels/configuration are evidence for those runner cells, not a kernel/SDK minimum or physical-hardware attestation beyond GitHub's service. Resource-allocation and actual OS poll failure remain untested (the driver path has deterministic injected-failure coverage), as do guaranteed native partial-write distinct from WouldBlock and true token wrap; the current multi-connection case is a finite32-loopback fixture, not load/stress acceptance. The use of std::net::shutdown during release is a current implementation boundary, not peer acknowledgement or graceful application protocol completion.
 
-`mise run test:runtime` deliberately remains unavailable/exit2. #47 stays open for compiler intrinsics/metadata, generated ABI, scheduler/cancellation integration, complete progress outcomes, real native target matrix and cross-component Rill acceptance. #44/#48 remain separate TLS/HTTP gates.
+`mise run test:runtime` deliberately remains unavailable/exit2. ri-hw5 stays open for compiler intrinsics/metadata, generated ABI, scheduler/cancellation integration, complete progress outcomes, real native target matrix and cross-component Rill acceptance. ri-ei7/#48 remain separate TLS/HTTP gates.

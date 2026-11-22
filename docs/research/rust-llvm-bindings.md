@@ -1,6 +1,6 @@
 # How should a Rust compiler drive LLVM?
 
-Research for [issue #6](https://github.com/Reilley64/rill/issues/6). Facts were checked on 2026-10-21 against official docs, source code, and first-party repositories. Version numbers will go stale, so each one links to its source.
+Research for issue ri-opc. Facts were checked on 2026-10-21 against official docs, source code, and first-party repositories. Version numbers will go stale, so each one links to its source.
 
 ## LLVM release context
 
