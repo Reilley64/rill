@@ -106,6 +106,11 @@ fn check_sources(entry: &Path) {
         "function run<F>(job: F): bool where callable(F, [], bool) { return job(); }\n";
     let output = "function invoke<F>(job: F): Result<bool, i32> where callableOnce(F, [], Result<bool, i32>) { return job(); }\nfunction caller(seed: bool): void { invoke(() => Result.Ok(seed)); }\n";
     // The read-only twin: `run(&f)` lends the actual descriptor; it never moves it.
+    // The `declared-shared-only`, `-output-discard`, `shared-dead-only`,
+    // `-public`, `-grouped`, `-scoped` and `-loop` caps are those measured at
+    // 9b93a660, before the lent route. Its screens reject them without charge.
+    // A formal actual (+1 work) and a borrowed Result capture (+16 work, +3
+    // entries) are rejected after the lent residence is read.
     let shared = SHARED_WRAPPER;
     let shared_actual = format!("{shared}{SHARED_CALLER}");
     let shared_second = SHARED_CALLER
@@ -247,6 +252,22 @@ fn check_sources(entry: &Path) {
             format!("{shared}{}", SHARED_CALLER.replace("run(&f)", "run((&f))")),
             Incomplete,
             Some((324200, 47680, 12)),
+        ),
+        (
+            "shared-scoped",
+            format!(
+                "{shared}function caller(flag: bool): bool {{ let f: () => bool = () => flag; {{ return run(&f); }} }}\n"
+            ),
+            Incomplete,
+            Some((323978, 47656, 12)),
+        ),
+        (
+            "shared-loop",
+            format!(
+                "{shared}function caller(flag: bool): bool {{ let f: () => bool = () => flag; while (flag) {{ return run(&f); }} return false; }}\n"
+            ),
+            Incomplete,
+            Some((324162, 47720, 12)),
         ),
         (
             "shared-result-capture",
@@ -429,7 +450,9 @@ fn check_sources(entry: &Path) {
                 "declared-shared-only"
                 | "shared-unclosed"
                 | "shared-dead-only"
-                | "shared-grouped" => {
+                | "shared-grouped"
+                | "shared-scoped"
+                | "shared-loop" => {
                     assert_eq!(
                         pending.as_slice(),
                         [(424, b"job()".as_slice(), CallBoundary)]
