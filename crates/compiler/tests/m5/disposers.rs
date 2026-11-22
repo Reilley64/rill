@@ -1294,3 +1294,6 @@ fn active_disposer_cleans_only_remaining_fields() {
         },
     );
 }
+
+#[path = "disposers/owning_text.rs"]
+mod owning_text;
