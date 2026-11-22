@@ -1569,6 +1569,48 @@ Known `None` skips a previously moved suffix. Known `Some` that reaches it and a
 
 This completes the interrupted-initializer contrast for ordinary irrefutable `let`, not guard fallthrough, iteration, general propagation, protected cleanup, cancellation or native execution. The wider graph still includes unresolved standard roots.
 
+## Integration merge of 2026-11-22
+
+On 2026-11-22 the draft branch stopped being a set of isolated, reviewed increments. Starting from the published `982319d`, these heads were merged with `git merge --no-ff`, in this order:
+
+| Merge commit | Head merged | Conflicts |
+| --- | --- | --- |
+| `20d407e` | `integration/m5-unpublished-b41b99d` at `f24c5ad` | None. The merged tree differs from `f24c5ad` only by the two docs commits `6d2fbe1` and `982319d`. |
+| `fdf43d9` | `origin/main` at `98c5aa0` | Docs only. `docs/agents/issue-tracker.md` took main's deletion, `docs/research/0026-language-rfc-formats.md` took main's paragraph, and `docs/implementation-plan.md` kept this branch's M5 row. |
+| `be18fec` | `fix/stale-doc-anchors` at `82c52e4` | None. Four link fragments now name the headings renamed to `(ri-dej)` and `(ri-fnk)`. At `98c5aa0` main has the same four broken fragments. |
+| `beb7820` | `fix/scoped-result-cleanup-admission` at `003c414` | None. |
+| `24b83c7` | `fix/m4-boolean-merge-equivalence` at `bd10617` | None. |
+| `11b27f7` | `feat/m4-private-callable-once` at `e60aef3` | None. |
+
+**Merged unreviewed.** Paired Standards and Spec review had not cleared the following lanes when they were merged. Their sections above and their tests are not acceptance evidence until a review of this branch clears them:
+
+| Lane | Commits | Review state on 2026-11-21 |
+| --- | --- | --- |
+| ri-785 M4 Boolean match snapshots | `de9f841`, `7f95249`, `db944e6`, `5ab195a`, `bd10617` | Both rechecks blocked `db944e6`. Standards blocked `5ab195a` on historical budgets. `bd10617` answers that finding and has no review. |
+| ri-vgz M4 `List<Option<string>>` Result use | `78df2be`, `0540880`, `105869a`, `7b76ded`, `2ae33f1` | Cleared alone, but depends on `de9f841` from the blocked Boolean lane. `7b76ded` adds a comparison that has no review. |
+| ri-vgz M5 yielded `Option<string>` cursor | `e8d3423`, `437c266`, `a2d8e05` | Spec blocked `437c266`. `a2d8e05` answers it and has no review. |
+| ri-785 fresh `Result` residences | `d95ae9e`, `76ba5be`, `b33e056` | Standards and Spec raised cost blockers. `b33e056` answers them and has no review. |
+| ri-2s0 nested forwarding delivery | `97a6694`, `2bb6c4f`, `f57b96d` | Both rechecks blocked `f57b96d`, and an isolated replay found a fixed-cap regression. |
+| ri-785 O16 fresh `Result` through a scoped join | `332454a`, `72f3d81`, `115f680`, `ac1db04`, `003c414` | Standards found one metering gap and incomplete fixed-cap coverage. `115f680`, `ac1db04` and `003c414` have no review. `003c414` rewrites expectations in `m5/scoped_join.rs` and `m5/scoped_join/fresh_result.rs`. |
+| ri-785 O15 checked `i32` arithmetic | `2f0e9d4`, `d8ce3b8` | Standards blocked `d8ce3b8` on uncharged `BTreeMap` lookups. |
+| ri-vgz shared `Option<&string>` caller relay | `6d474ef`, `f24c5ad` | Standards blocked it: the route charges work before it rejects an unsupported shape. |
+| ri-785 M4 private `callableOnce` | `e60aef3` | No review. It adds M4 Result-use only, with no ownership proof. |
+
+The M4 scoped Result call-retention lane (`0ce1bda` to `f5f20f9`) had paired clearance at `f5f20f9` and is merged with the rest. The parked `i32` equality root and rigid generic root remain reverted, with no net change.
+
+Local gate results on macOS/AArch64 with an isolated Cargo target directory. `mise run check` covers formatting, Clippy, documentation links, fixtures, tool tests and the LLVM-free Rust tests:
+
+| Commit | Command | Result |
+| --- | --- | --- |
+| `fdf43d9` | `mise run check` | Failed in `check:docs` only, on the four stale fragments. Run separately: `check:rust`, `check:fixtures` and `check:tools` passed; `mise run test` 781 passed, 0 failed. |
+| `fdf43d9` | Full M5 binary, `mise run build:scaffold`, `mise run check:ci`, `git diff --check` | 333 passed, 0 failed in 331 s. The other three passed. |
+| `be18fec` | `mise run check` | Passed in 344 s: 781 passed, 0 failed; M5 binary 333 passed, 0 failed; 2,022 documentation destinations, 0 errors. |
+| `beb7820` | `mise run check` | Passed in 358 s: 781 passed, 0 failed; M5 binary 333 passed, 0 failed. |
+| `24b83c7` | `mise run check` | Passed in 393 s: 781 passed, 0 failed; M5 binary 333 passed, 0 failed. |
+| `11b27f7` | `mise run check` | Passed in 401 s: 782 passed, 0 failed; M5 binary 333 passed, 0 failed. The added test is `private_once_checks_the_actual_shared_pair`. |
+
+These runs did not replay either installed load mode, the historical captures or the fixed caps outside the test suite, and no hosted check ran. They show that the merged tree builds and that its own tests pass. They do not close any obligation below. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
