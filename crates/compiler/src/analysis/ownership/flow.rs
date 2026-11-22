@@ -189,7 +189,7 @@ fn liveness(
         let use_one = |used, killed| ([used, None], killed);
         let (used, killed) = match instruction.action {
             Action::None
-            | Action::BudgetBackedge
+            | Action::BudgetBackedge { .. }
             | Action::Cleanup(_)
             | Action::EndScope(_)
             | Action::CheckRetained => use_one(None, None),
@@ -1213,7 +1213,7 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
         | Action::ReadListI32 { .. }
         | Action::EqualI32Literal { .. }
         | Action::None
-        | Action::BudgetBackedge
+        | Action::BudgetBackedge { .. }
         | Action::Init(_)
         | Action::Read { .. }
         | Action::Move { .. }
@@ -1319,6 +1319,7 @@ pub(super) struct CancellationTrace<'a, 'g> {
     live: Vec<BTreeSet<Slot>>,
     flat: bool,
     loop_delivery: bool,
+    forwarding_backedge: bool,
     list_backing: bool,
     branching: bool,
     calls_reached: usize,
@@ -1699,7 +1700,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             } else {
                 None
             };
-            if (callee.is_some() || matches!(action, Action::BudgetBackedge))
+            if (callee.is_some() || matches!(action, Action::BudgetBackedge { .. }))
                 && !deliveries.contains_key(&block)
             {
                 // Even after losing the receipt, a feasible independent path
@@ -1709,7 +1710,7 @@ impl<'g> CancellationTrace<'_, 'g> {
                 complete &= admitted;
                 if complete {
                     budget.reserve(1)?;
-                    feasible_backedge |= matches!(action, Action::BudgetBackedge);
+                    feasible_backedge |= matches!(action, Action::BudgetBackedge { .. });
                     deliveries.insert(block, callee);
                 }
             }
@@ -2260,6 +2261,7 @@ pub(super) fn run<'a, 'g>(
     let mut list_backing = false;
     let mut fresh_result = false;
     let mut loop_delivery = false;
+    let mut forwarding_backedge = false;
     let mut branching = false;
     let mut calls_reached = 0;
     let mut call_block = None;
@@ -2475,7 +2477,7 @@ pub(super) fn run<'a, 'g>(
         let local = |slot: Slot| slots[slot].place(module);
         // Budget backedges have no ordinary MIR operation. Don't mistake
         // one with a fresh successor state for a straight-line disposer.
-        if active.is_some() && matches!(action, Action::BudgetBackedge) {
+        if active.is_some() && matches!(action, Action::BudgetBackedge { .. }) {
             single_active_call = false;
         }
         if list_backing
@@ -2486,7 +2488,7 @@ pub(super) fn run<'a, 'g>(
             // leaf proof. In particular, do not pay for a speculative path
             // walk that will veto a local condition or a live nested scope.
             candidate = !matches!(action, Action::Call(_))
-                && (!matches!(action, Action::BudgetBackedge) || node == loop_node)
+                && (!matches!(action, Action::BudgetBackedge { .. }) || node == loop_node)
                 && (!matches!(edges, Edges::Branch { .. }) || node == test);
         }
         if matches!(
@@ -2510,7 +2512,13 @@ pub(super) fn run<'a, 'g>(
                     ..
                 }
             );
-            loop_delivery |= matches!(action, Action::BudgetBackedge);
+            if let Action::BudgetBackedge {
+                forwarding_possible,
+            } = action
+            {
+                loop_delivery = true;
+                forwarding_backedge |= forwarding_possible;
+            }
             branching |= matches!(edges, Edges::Branch { .. });
             if let Action::Call(index) = action {
                 calls_reached += 1;
@@ -2553,7 +2561,7 @@ pub(super) fn run<'a, 'g>(
                 }
             }
             Ok(match action {
-                Action::None | Action::BudgetBackedge => Operation::None,
+                Action::None | Action::BudgetBackedge { .. } => Operation::None,
                 Action::Init(slot) => {
                     for field in slots[slot].storage(slot).skip(1) {
                         budget.step(1)?;
@@ -4558,6 +4566,7 @@ pub(super) fn run<'a, 'g>(
                 live,
                 flat,
                 loop_delivery,
+                forwarding_backedge,
                 list_backing,
                 branching,
                 calls_reached,
