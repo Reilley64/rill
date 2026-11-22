@@ -1,22 +1,24 @@
 # M5 rules, gates and traps inherited from the t3 session
 
-Recorded 2026-11-22 from `/Users/reilley/Repositories/city/notes/m5-ownership-cleanup/session-record.md` §2, §4, §6 (pointers into the t3 transcript are there). These were the t3 coordinator's rules as of 2026-11-21; a later dated entry here or in the [resume log](m5-resume-log.md) supersedes them. Related: [stock-take](m5-stocktake-2026-11-22.md).
+Recorded 2026-11-22 from `/Users/reilley/Repositories/city/notes/m5-ownership-cleanup/session-record.md` §2, §4, §6 (pointers into the t3 transcript are there). These were the t3 coordinator's rules as of 2026-11-21; a later dated entry here or in the [resume log](m5-resume-log.md) supersedes them. Related: [stock-take](m5-stocktake-2026-11-22.md), [tickets](m5-tickets.md), [owner preferences](owner-preferences.md).
 
 ## Owner instructions (bead ri-bf3, 2026-11-22)
 
 - Preserve found work: commit or carry forward, never discard.
 - Merges only on the draft branch: no rebases, no force pushes. PR #73 stays a draft.
-- Finish M5 with `implement-spec` against ri-785, ri-px1, ri-vgz on `implementation/m5-ownership-cleanup`.
+- Finish M5 with `implement-spec` against ri-785, ri-px1, ri-vgz on `implementation/m5-ownership-cleanup`. **Superseded in part 2026-11-22 (22:10 AEDT): `implement-spec` moved to the planner, which runs the build ([owner preferences](owner-preferences.md)).**
 - From ri-2s0: do not begin M6; distinguish compiler/MIR evidence from execution; keep ri-2s0 open if any M5 obligation is incomplete.
 
 ## Rules the t3 coordinator worked under (as of 2026-11-21)
 
 - Fixed work/entry/depth caps are never raised to make a change fit. Two real proofs (i32 equality root, rigid generic root) were parked for this reason. How legacy whole-graph caps should be re-pinned was never decided: an open policy question for the owner.
 - Evidence standard: both installed load modes; targeted and graph-root results; exact and one-short limits; `Incomplete`, `ResourceLimit` and `SourceRejected` are distinct; MIR tests are not Rill execution; native CI jobs stop at the runtime stub and are neither pass nor failure.
-- Publish only coherent reviewed batches; keep `## Merge Danger` in the PR body; PR body guard at 64,000 characters.
+- Publish only coherent reviewed batches (**superseded 2026-11-22 (21:35 AEDT) by the chief's decision to merge unreviewed lanes and review once at the end, confirmed by the owner as D10: [resume log](m5-resume-log.md)**); keep `## Merge Danger` in the PR body; PR body guard at 64,000 characters.
 - A worker's summary is not evidence: verify source and logs.
 
 ## Publication gates the t3 coordinator ran per push
+
+**Superseded in part 2026-11-22 (22:50 AEDT, corrected 22:57): the owner ruled that full suites and full gates run only in CI, so the local full runs in gates 2 and 4 no longer applied ([owner preferences](owner-preferences.md)).**
 
 1. Paired independent Standards and Spec clearance of the exact commit range.
 2. Release isolation: reviewed commits only, on the published head; full M5 passes; both installed modes replayed; historical captures and fixed caps unchanged.
@@ -42,4 +44,4 @@ Process:
 - Usage limits kill the lead and all workers at once; workers die with uncommitted files.
 - Each worker needs its own `CARGO_TARGET_DIR`; disk filled on 2026-11-20 (ENOSPC).
 - Bespoke replay scripts lived in `/tmp`, not in the repository, as of 2026-11-21.
-- Merging I into D re-raises the conflicts of merge-back `fbaad71` semantically (`91ce9cd` on D is a squash of I's `b29693f`, `08c8cf9`), even though `git merge-tree` reported I into D textually clean on 2026-11-22.
+- Merging I into D re-raises the conflicts of merge-back `fbaad71` semantically (`91ce9cd` on D is a squash of I's `b29693f`, `08c8cf9`), even though `git merge-tree` reported I into D textually clean on 2026-11-22. **Superseded 2026-11-22 (21:55 AEDT): I was merged into D with no conflict and the trap did not materialise (`ri-tjo` notes, [resume log](m5-resume-log.md)).**

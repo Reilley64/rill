@@ -1,6 +1,6 @@
 # M5 stock-take, 2026-11-22
 
-Taken on 2026-11-22 for bead `ri-bf3` (resume M5 from the t3 session). Related: [rules and traps](m5-rules-and-traps.md), [resume log](m5-resume-log.md).
+Taken on 2026-11-22 for bead `ri-bf3` (resume M5 from the t3 session). Related: [rules and traps](m5-rules-and-traps.md), [resume log](m5-resume-log.md), [tickets](m5-tickets.md) (what followed).
 
 ## Sources (read these, not this summary, for detail)
 
