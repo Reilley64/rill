@@ -40,6 +40,8 @@ mod propagation;
 mod records;
 #[path = "m5/retained.rs"]
 mod retained;
+#[path = "m5/rfc_cases.rs"]
+mod rfc_cases;
 #[path = "m5/roots.rs"]
 mod roots;
 #[path = "m5/scoped_jobs.rs"]
